@@ -37,7 +37,7 @@ static Tensor get_device_pointers(const Tensor& input) {
 }
 
 template <typename scalar_t>
-void apply_geqrf_batched(const Tensor& input, const Tensor& tau, int64_t m64, int64_t n64) {
+void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
 // AMD ROCm backend is implemented via rewriting all CUDA calls to HIP
 // rocBLAS does not implement BLAS-like extensions of cuBLAS, they're in rocSOLVER
 // rocSOLVER is currently not used in ATen, therefore we raise an error in this case
@@ -45,8 +45,8 @@ void apply_geqrf_batched(const Tensor& input, const Tensor& tau, int64_t m64, in
   TORCH_CHECK(false, "geqrf: Batched version is supported only with cuBLAS backend.")
 #else
   auto batch_size = cuda_int_cast(batchCount(input), "batch_size");
-  auto m = cuda_int_cast(m64, "m");
-  auto n = cuda_int_cast(n64, "n");
+  auto m = cuda_int_cast(input.size(-2), "m");
+  auto n = cuda_int_cast(input.size(-1), "n");
   auto lda = std::max<int>(1, m);
 
   // cuBLAS batched geqrf requires input to be the device array of pointers to device single matrices
@@ -64,9 +64,9 @@ void apply_geqrf_batched(const Tensor& input, const Tensor& tau, int64_t m64, in
 #endif
 }
 
-void geqrf_batched_cublas(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_batched_cuda", [&]{
-    apply_geqrf_batched<scalar_t>(input, tau, m, n);
+    apply_geqrf_batched<scalar_t>(input, tau);
   });
 }
 
@@ -656,7 +656,9 @@ Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, boo
   For further details, please see the cuSOLVER documentation for GEQRF.
 */
 template <typename scalar_t>
-static void apply_geqrf(const Tensor& A, const Tensor& tau, int64_t m, int64_t n) {
+static void apply_geqrf(const Tensor& A, const Tensor& tau) {
+  int64_t m = A.size(-2);
+  int64_t n = A.size(-1);
   int64_t lda = std::max<int64_t>(1, m);
   int64_t batch_size = batchCount(A);
 
@@ -740,9 +742,9 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau, int64_t m, int64_t n
 }
 
 // This is a type dispatching helper function for 'apply_geqrf'
-void geqrf_cusolver(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+void geqrf_cusolver(const Tensor& input, const Tensor& tau) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_cuda", [&]{
-    apply_geqrf<scalar_t>(input, tau, m, n);
+    apply_geqrf<scalar_t>(input, tau);
   });
 }
 
@@ -754,19 +756,18 @@ void geqrf_cusolver(const Tensor& input, const Tensor& tau, int64_t m, int64_t n
   * `self` - Tensor with the directions of the elementary reflectors below the diagonal,
               it will be overwritten with the result
   * `tau` - Tensor containing the magnitudes of the elementary reflectors
-  * `n_columns` - The number of columns of Q to be computed
 
   For further details, please see the cuSOLVER documentation for ORGQR and UNGQR.
 */
 template <typename scalar_t>
-inline static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns) {
+inline static void apply_orgqr(Tensor& self, const Tensor& tau) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
   auto batchsize = cuda_int_cast(batchCount(self), "batch size");
   auto m = cuda_int_cast(self.size(-2), "m");
-  auto n = cuda_int_cast(n_columns, "n");
+  auto n = cuda_int_cast(self.size(-1), "n");
   auto k = cuda_int_cast(tau.size(-1), "k");
   auto tau_stride = std::max<int>(1, k);
   auto lda = std::max<int>(1, m);
@@ -817,9 +818,9 @@ inline static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_column
 }
 
 // This is a type dispatching helper function for 'apply_orgqr'
-Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau, int64_t n_columns) {
+Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "orgqr_cuda", [&]{
-    apply_orgqr<scalar_t>(result, tau, n_columns);
+    apply_orgqr<scalar_t>(result, tau);
   });
   return result;
 }

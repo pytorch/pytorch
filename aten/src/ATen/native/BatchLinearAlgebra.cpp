@@ -1636,7 +1636,7 @@ static void geqrf_out_helper(const Tensor& input, const Tensor& QR, const Tensor
 
   // geqrf_stub (apply_geqrf) performs calculations in-place and 'QR' must be a copy of input
   QR.copy_(input);
-  geqrf_stub(input.device().type(), QR, tau, input.size(-2), input.size(-1));
+  geqrf_stub(input.device().type(), QR, tau);
 }
 
 std::tuple<Tensor&, Tensor&> geqrf_out(const Tensor& input, Tensor& QR, Tensor& tau) {
@@ -1758,7 +1758,7 @@ void linalg_qr_out_helper(const Tensor& input, const Tensor& Q, const Tensor& R,
 
   // geqrf_stub (apply_geqrf) performs calculations in-place and 'QR' must be a copy of input
   QR.copy_(input);
-  geqrf_stub(input.device().type(), QR, tau, QR.size(-2), QR.size(-1));
+  geqrf_stub(input.device().type(), QR, tau);
 
   // this is for mode='r'
   if (!compute_q) {
@@ -1776,7 +1776,7 @@ void linalg_qr_out_helper(const Tensor& input, const Tensor& Q, const Tensor& R,
   R.triu_();
 
   // Next perform ORGQR for Q using the result from GEQRF
-  orgqr_stub(input.device().type(), const_cast<Tensor&>(Q), tau, Q.size(-1));
+  orgqr_stub(input.device().type(), const_cast<Tensor&>(Q), tau);
 }
 
 std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& input, std::string mode) {
@@ -1888,8 +1888,7 @@ Tensor& householder_product_out_helper(const Tensor& input, const Tensor& tau, T
   // orgqr_stub (apply_orgqr) performs calculations in-place and result must be a copy of input
   result.copy_(input);
 
-  auto n = input.size(-1);
-  result = orgqr_stub(result.device().type(), result, tau_, n);
+  result = orgqr_stub(result.device().type(), result, tau_);
   return result;
 }
 

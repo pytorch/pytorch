@@ -345,13 +345,11 @@ void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos
               it will be overwritten with the result
   * `tau` - [out] Tensor which will contain the magnitudes of the reflectors
             implicitly defining Q.
-  * `m` - The number of rows of `input` to consider
-  * `n` - The number of columns of `input` to consider (actual sizes of `input` could be larger)
 
   For further details, please see the LAPACK documentation for GEQRF.
 */
 template <typename scalar_t>
-static void apply_geqrf(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+static void apply_geqrf(const Tensor& input, const Tensor& tau) {
 #ifndef USE_LAPACK
   AT_ERROR("geqrf: LAPACK library not found in compilation");
 #else
@@ -361,6 +359,8 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau, int64_t m, int64
   auto input_matrix_stride = matrixStride(input);
   auto tau_stride = tau.size(-1);
   auto batch_size = batchCount(input);
+  auto m = input.size(-2);
+  auto n = input.size(-1);
   auto lda = std::max<int>(1, m);
 
   int info;
@@ -393,9 +393,9 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau, int64_t m, int64
 }
 
 // This is a type dispatching helper function for 'apply_geqrf'
-void geqrf_kernel(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+void geqrf_kernel(const Tensor& input, const Tensor& tau) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_cpu", [&]{
-    apply_geqrf<scalar_t>(input, tau, m, n);
+    apply_geqrf<scalar_t>(input, tau);
   });
 }
 
@@ -407,12 +407,11 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) 
   * `self` - Tensor with the directions of the elementary reflectors below the diagonal,
               it will be overwritten with the result
   * `tau` - Tensor containing the magnitudes of the elementary reflectors
-  * `n_columns` - The number of columns of Q to be computed
 
   For further details, please see the LAPACK documentation for ORGQR and UNGQR.
 */
 template <typename scalar_t>
-inline void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns) {
+inline void apply_orgqr(Tensor& self, const Tensor& tau) {
 #ifndef USE_LAPACK
   TORCH_CHECK(false, "Calling torch.orgqr on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
@@ -431,13 +430,14 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns) {
   auto tau_stride = tau.size(-1);
   auto batch_size = batchCount(self);
   auto m = self.size(-2);
+  auto n = self.size(-1);
   auto k = tau.size(-1);
   auto lda = std::max<int64_t>(1, m);
   int info;
 
   // LAPACK's requirement
-  TORCH_INTERNAL_ASSERT(m >= n_columns);
-  TORCH_INTERNAL_ASSERT(n_columns >= k);
+  TORCH_INTERNAL_ASSERT(m >= n);
+  TORCH_INTERNAL_ASSERT(n >= k);
 
   // Run once, first to get the optimum work size.
   // Since we deal with batches of matrices with the same dimensions, doing this outside
@@ -445,7 +445,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns) {
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
-  lapackOrgqr<scalar_t>(m, n_columns, k, self_data, lda, tau_data, &wkopt, lwork, &info);
+  lapackOrgqr<scalar_t>(m, n, k, self_data, lda, tau_data, &wkopt, lwork, &info);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
   lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
@@ -455,7 +455,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns) {
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
     // now compute the actual Q
-    lapackOrgqr<scalar_t>(m, n_columns, k, self_working_ptr, lda, tau_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
+    lapackOrgqr<scalar_t>(m, n, k, self_working_ptr, lda, tau_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
 
     // info from lapackOrgqr only reports if the i-th parameter is wrong
     // so we don't need to check it all the time
@@ -465,9 +465,9 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns) {
 }
 
 // This is a type dispatching helper function for 'apply_orgqr'
-Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, int64_t n_columns) {
+Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "orgqr_cpu", [&]{
-    apply_orgqr<scalar_t>(result, tau, n_columns);
+    apply_orgqr<scalar_t>(result, tau);
   });
   return result;
 }
