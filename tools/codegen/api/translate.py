@@ -1,7 +1,10 @@
 from typing import Dict, Sequence, List, NoReturn, Union
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType, CType,
                                      Expr, MutRefCType, OptionalCType,
-                                     SpecialArgName)
+                                     SpecialArgName, tensorT,
+                                     memoryFormatT, tensorOptionsT, scalarTypeT,
+                                     boolT, deviceT, layoutT)
+
 
 # This file implements a small program synthesis engine that implements
 # conversions between one API to another.
@@ -31,7 +34,7 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType, CType,
 #     from both "memory_format" and "options", so you had better make sure
 #     they are consistent.  (Join)
 
-options_ctype = ConstRefCType(BaseCType("TensorOptions", "options"))
+options_ctype = ConstRefCType(BaseCType(tensorOptionsT, "options"))
 
 class UnsatError(RuntimeError):
     pass
@@ -88,16 +91,16 @@ def translate(
         # TODO: This could get us in recomputation trouble if b.expr is nontrivial
         t = b.type
         if isinstance(t, ConstRefCType) and isinstance(t.elem, OptionalCType) and \
-                isinstance(t.elem.elem, BaseCType) and t.elem.elem.type == 'Tensor':
-            ctx[ConstRefCType(BaseCType("Tensor", t.elem.elem.name))] = \
+                isinstance(t.elem.elem, BaseCType) and str(t.elem.elem.type) == 'at::Tensor':
+            ctx[ConstRefCType(BaseCType(tensorT, t.elem.elem.name))] = \
                 f'({b.expr}.has_value() ? *{b.expr} : at::Tensor())'
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
-        ctx[MutRefCType(BaseCType("Tensor", "self"))] = "const_cast<Tensor&>(*this)"
-        ctx[ConstRefCType(BaseCType("Tensor", "self"))] = "const_cast<Tensor&>(*this)"
+        ctx[MutRefCType(BaseCType(tensorT, "self"))] = "const_cast<Tensor&>(*this)"
+        ctx[ConstRefCType(BaseCType(tensorT, "self"))] = "const_cast<Tensor&>(*this)"
         # This is better!  Byte-for-byte compat
-        # ctx[ConstRefCType(BaseCType("Tensor", "self"))] = "*this"
+        # ctx[ConstRefCType(BaseCType(tensorT, "self"))] = "*this"
 
     def unsat(goal: CType) -> NoReturn:
         ctx_desc = '\n'.join(f"  {t.cpp_type()} {t.name}; // {e}" for t, e in ctx.items())
@@ -146,9 +149,9 @@ Check this module for more information.
             unsat(goal)
 
         # For now, all of these rules are mutually exclusive.
-        if goal == OptionalCType(BaseCType("MemoryFormat", "memory_format")):
+        if goal == OptionalCType(BaseCType(memoryFormatT, "memory_format")):
             memory_format = direct_solve(
-                OptionalCType(BaseCType("MemoryFormat", SpecialArgName.possibly_redundant_memory_format))
+                OptionalCType(BaseCType(memoryFormatT, SpecialArgName.possibly_redundant_memory_format))
             )
             # No need to join "memory_format" and "options" if the target API takes "options" directly.
             # Otherwise it will cause the redundant memory_format error.
@@ -160,26 +163,26 @@ Check this module for more information.
             except UnsatError:
                 return memory_format
 
-        elif goal == BaseCType("TensorOptions", "options"):
-            dtype = direct_solve(OptionalCType(BaseCType("ScalarType", "dtype")))
-            pin_memory = direct_solve(OptionalCType(BaseCType("bool", "pin_memory")))
-            device = direct_solve(OptionalCType(BaseCType("Device", "device")))
-            layout = direct_solve(OptionalCType(BaseCType("Layout", "layout")))
+        elif goal == BaseCType(tensorOptionsT, "options"):
+            dtype = direct_solve(OptionalCType(BaseCType(scalarTypeT, "dtype")))
+            pin_memory = direct_solve(OptionalCType(BaseCType(boolT, "pin_memory")))
+            device = direct_solve(OptionalCType(BaseCType(deviceT, "device")))
+            layout = direct_solve(OptionalCType(BaseCType(layoutT, "layout")))
             return f'TensorOptions().dtype({dtype}).layout({layout}).device({device}).pinned_memory({pin_memory})'
 
-        elif goal == OptionalCType(BaseCType("ScalarType", "dtype")):
+        elif goal == OptionalCType(BaseCType(scalarTypeT, "dtype")):
             options = direct_solve(options_ctype)
             return f'optTypeMetaToScalarType({options}.dtype_opt())'
 
-        elif goal == OptionalCType(BaseCType("Layout", "layout")):
+        elif goal == OptionalCType(BaseCType(layoutT, "layout")):
             options = direct_solve(options_ctype)
             return f'{options}.layout_opt()'
 
-        elif goal == OptionalCType(BaseCType("Device", "device")):
+        elif goal == OptionalCType(BaseCType(deviceT, "device")):
             options = direct_solve(options_ctype)
             return f'{options}.device_opt()'
 
-        elif goal == OptionalCType(BaseCType("bool", "pin_memory")):
+        elif goal == OptionalCType(BaseCType(boolT, "pin_memory")):
             options = direct_solve(options_ctype)
             return f'{options}.pinned_memory_opt()'
 
