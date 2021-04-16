@@ -3368,24 +3368,35 @@ geqrf(input, *, out=None) -> (Tensor, Tensor)
 This is a low-level function for calling LAPACK directly. This function
 returns a namedtuple (a, tau) as defined in `LAPACK documentation for geqrf`_ .
 
-You'll generally want to use :func:`torch.qr` instead.
+Computes a QR decomposition of :attr:`input`.
+Both `Q` and `R` matrices are stored in the same tensor `a`.
+The elements of `R` are stored on and above the diagonal.
+Elementary reflectors (or Householder vectors) implicitly defining matrix `Q`
+are stored below the diagonal.
+Result of this function can be used together with :func:`torch.linalg.householder_product`
+to obtain the `Q` matrix or
+with :func:`torch.ormqr` that uses implicit representation of matrix `Q` for efficient matrix-matrix multiplication.
 
-Computes a QR decomposition of :attr:`input`, but without constructing
-:math:`Q` and :math:`R` as explicit separate matrices.
-
-Rather, this directly calls the underlying LAPACK function `?geqrf`
+This function directly calls the underlying LAPACK function `geqrf`
 which produces a sequence of 'elementary reflectors'.
 
 See `LAPACK documentation for geqrf`_ for further details.
+
+.. note::
+    To obtain explicit Q and R matrices it is recommended to use :func:`torch.linalg.qr`.
+
+.. note::
+    Solving matrix equations using QR decomposition is available with ``driver="gels"`` option
+    of :func:`torch.linalg.lstsq`.
 
 Args:
     input (Tensor): the input matrix
 
 Keyword args:
-    out (tuple, optional): the output tuple of (Tensor, Tensor)
+    out (tuple, optional): the output tuple of (Tensor, Tensor). Ignored if `None`. Default: `None`.
 
 .. _LAPACK documentation for geqrf:
-    https://software.intel.com/en-us/node/521004
+    http://www.netlib.org/lapack/explore-html/df/dc5/group__variants_g_ecomputational_ga3766ea903391b5cf9008132f7440ec7b.html
 
 """)
 

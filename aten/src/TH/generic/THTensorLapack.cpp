@@ -192,64 +192,6 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 }
 
 /*
-  The geqrf function does the main work of QR-decomposing a matrix.
-  However, rather than producing a Q matrix directly, it produces a sequence of
-  elementary reflectors which may later be composed to construct Q - for example
-  with the orgqr function, below.
-
-  Args:
-  * `ra_`   - Result matrix which will contain:
-              i)  The elements of R, on and above the diagonal.
-              ii) Directions of the reflectors implicitly defining Q.
-  * `rtau_` - Result tensor which will contain the magnitudes of the reflectors
-              implicitly defining Q.
-  * `a`     - Input matrix, to decompose. If NULL, `ra_` is used as input.
-
-  For further details, please see the LAPACK documentation.
-
-*/
-void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
-{
-  if (a == NULL) ra_ = a;
-  THArgCheck(a->dim() == 2, 1, "A should be 2 dimensional");
-  THArgCheck(!a->is_empty(), 1, "A should not be empty");
-
-  THTensor *ra__ = NULL;
-
-  /* Prepare the input for LAPACK, making a copy if necessary. */
-  ra__ = THTensor_(cloneColumnMajor)(ra_, a);
-
-  int m = ra__->size(0);
-  int n = ra__->size(1);
-  int k = (m < n ? m : n);
-  int lda = m;
-  THTensor_(resize1d)(rtau_, k);
-
-  /* Dry-run to query the suggested size of the workspace. */
-  int info = 0;
-  scalar_t wkopt = 0;
-  THLapack_(geqrf)(m, n, ra__->data<scalar_t>(), lda,
-                   rtau_->data<scalar_t>(),
-                   &wkopt, -1, &info);
-
-  /* Allocate the workspace and call LAPACK to do the real work. */
-  int lwork = (int)wkopt;
-  THTensor *work = THTensor_(newWithSize1d)(lwork);
-  THLapack_(geqrf)(m, n, ra__->data<scalar_t>(), lda,
-                   rtau_->data<scalar_t>(),
-                   work->data<scalar_t>(), lwork, &info);
-
-  THLapackCheckWithCleanup("Lapack Error %s : unknown Lapack error. info = %i",
-                           THCleanup(
-                               c10::raw::intrusive_ptr::decref(ra__);
-                               c10::raw::intrusive_ptr::decref(work);),
-                           "geqrf", info,"");
-
-  THTensor_(freeCopyTo)(ra__, ra_);
-  c10::raw::intrusive_ptr::decref(work);
-}
-
-/*
   The ormqr function multiplies Q with another matrix from a sequence of
   elementary reflectors, such as is produced by the geqrf function.
 

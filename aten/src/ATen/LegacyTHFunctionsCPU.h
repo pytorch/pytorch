@@ -31,8 +31,6 @@ Tensor & _th_histc_out(const Tensor & self, int64_t bins, const Scalar& min, con
 Tensor _th_histc(const Tensor & self, int64_t bins, const Scalar& min, const Scalar& max);
 std::tuple<Tensor &,Tensor &> _th_gels_out(const Tensor & self, const Tensor & A, Tensor & res1, Tensor & res2);
 std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A);
-std::tuple<Tensor &,Tensor &> _th_geqrf_out(const Tensor & self, Tensor & res1, Tensor & res2);
-std::tuple<Tensor,Tensor> _th_geqrf(const Tensor & self);
 Tensor & _th_ormqr_out(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose, Tensor & result);
 Tensor _th_ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose);
 
