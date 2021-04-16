@@ -953,6 +953,27 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 should_log_inputs=should_log_inputs)
 
     @skipIfNoFBGEMM
+    def test_op_with_either_fp32_or_int8_input(self):
+        """
+        Verify that shadowing works with ops which accept either fp32 or
+        int8 inputs.
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(x)
+                x = F.relu(x)
+                return x
+
+        m = M()
+        res = self._test_match_shadow_activations(
+            m, (torch.randn(4, 4),),
+            results_len=2)
+
+    @skipIfNoFBGEMM
     def test_user_module(self):
         """
         For user defined modules,
