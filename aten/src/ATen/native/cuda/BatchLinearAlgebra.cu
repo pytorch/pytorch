@@ -2038,10 +2038,18 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau, int64_t m64, int
 }
 
 // This is a type dispatching helper function for 'apply_geqrf'
-void geqrf_kernel(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_cuda", [&]{
+void geqrf_magma(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_magma", [&]{
     apply_geqrf<scalar_t>(input, tau, m, n);
   });
+}
+
+void geqrf_kernel(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+#if defined(USE_CUSOLVER)
+  return geqrf_cusolver(input, tau, m, n);
+#else
+  return geqrf_magma(input, tau, m, n);
+#endif
 }
 
 REGISTER_DISPATCH(geqrf_stub, &geqrf_kernel);
