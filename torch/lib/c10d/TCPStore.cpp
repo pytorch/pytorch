@@ -122,6 +122,7 @@ void TCPStoreWorkerDaemon::callbackHandler(int socket) {
   auto watchResponse = tcputil::recvValue<WatchResponseType>(socket);
   if (watchResponse == WatchResponseType::KEY_CALLBACK_REGISTERED) {
     // Notify the waiting "watchKey" operation to return
+    callbackRegistered = true;
     cv.notify_one();
     return;
   }
@@ -485,8 +486,10 @@ void TCPStoreMasterDaemon::waitHandler(int socket) {
 void TCPStoreMasterDaemon::watchHandler(int socket) {
   std::string key = tcputil::recvString(socket);
 
-  // record the socket to respond to when the key is updated
+  // Record the socket to respond to when the key is updated
   watchedSockets_[key].push_back(socket);
+
+  // Send update to TCPStoreWorkerDaemon on client
   tcputil::sendValue<WatchResponseType>(
       socket, WatchResponseType::KEY_CALLBACK_REGISTERED);
 }
@@ -730,14 +733,19 @@ void TCPStore::watchKey(
         callback) {
   std::string regKey = regularPrefix_ + key;
 
-  // Register callback with TCPStoreWorkerDaemon
+  // Register callback with TCPStoreMasterDaemon to call TCPStoreWorkerDaemon on
+  // key change
   tcpStoreWorkerDaemon_->addCallback(regKey, callback);
   tcputil::sendValue<QueryType>(listenSocket_, QueryType::WATCH_KEY);
   tcputil::sendString(listenSocket_, regKey);
 
   // Block until callback has been registered successfully
   std::unique_lock<std::mutex> lock(tcpStoreWorkerDaemon_->mtx);
-  tcpStoreWorkerDaemon_->cv.wait(lock);
+  tcpStoreWorkerDaemon_->cv.wait(
+      lock, [&] { return tcpStoreWorkerDaemon_->callbackRegistered; });
+
+  // Reset payload for next callback
+  tcpStoreWorkerDaemon_->callbackRegistered = false;
 }
 
 int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {
