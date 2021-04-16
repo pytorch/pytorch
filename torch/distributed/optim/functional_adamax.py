@@ -95,8 +95,8 @@ class _FunctionalAdamax(object):
                      exp_avgs,
                      exp_infs,
                      state_steps,
-                     self.defaults['eps'],
-                     self.defaults['beta1'],
-                     self.defaults['beta2'],
-                     self.defaults['lr'],
-                     self.defaults['weight_decay'])
+                     eps=self.defaults['eps'],
+                     beta1=self.defaults['beta1'],
+                     beta2=self.defaults['beta2'],
+                     lr=self.defaults['lr'],
+                     weight_decay=self.defaults['weight_decay'])
