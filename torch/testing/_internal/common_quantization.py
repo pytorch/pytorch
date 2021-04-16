@@ -43,7 +43,7 @@ import os
 import unittest
 import numpy as np
 from torch.testing import FileCheck
-from typing import Callable, Tuple, Dict, Any
+from typing import Callable, Tuple, Dict, Any, Union
 
 class NodeSpec:
     ''' Used for checking GraphModule Node
@@ -629,12 +629,14 @@ class QuantizationTestCase(TestCase):
             instance checks.
             """
 
-            def _get_underlying_op_type(node: Node, gm: GraphModule) -> Callable:
+            def _get_underlying_op_type(
+                node: Node, gm: GraphModule
+            ) -> Union[Callable, str]:
                 if node.op == 'call_module':
                     mod = getattr(gm, node.target)
                     return type(mod)
                 else:
-                    assert node.op == 'call_function'
+                    assert node.op in ('call_function', 'call_method')
                     return node.target
 
             self.assertTrue(
