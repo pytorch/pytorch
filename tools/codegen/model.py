@@ -938,9 +938,6 @@ class Argument:
         assert str(r) == arg, f'{str(r)} != {arg}'
         return r
 
-    def with_name(self, *, name: str) -> 'Argument':
-        return Argument(name=name, type=self.type, default=self.default, annotation=self.annotation)
-
     @property
     def is_write(self) -> bool:
         return self.annotation is not None and self.annotation.is_write
@@ -1012,9 +1009,6 @@ class Return:
 class SelfArgument:
     argument: Argument
 
-    def with_name(self, *, name: str) -> 'SelfArgument':
-        return SelfArgument(self.argument.with_name(name=name))
-
 # Bundle of arguments that represent a TensorOptions.  This is mostly
 # relevant for the public C++ API but we bake it into the core data
 # model because other APIs often have to interact with it
@@ -1027,13 +1021,6 @@ class TensorOptionsArguments:
 
     def all(self) -> Sequence[Argument]:
         return [self.dtype, self.layout, self.device, self.pin_memory]
-
-    def with_name(self, *, name: str) -> 'TensorOptionsArguments':
-        # "Renaming" a TensorOptions argument isn't a piece of functionality currently exercised anywhere,
-        # and probably doesn't represent behavior we'd really want
-        # (this functionality is currently only applied to tensor-like args).
-        # TODO: Maybe make this pattern less accessible?
-        raise TypeError(f'Trying to rename a TensorOptionsArgument to {name}.')
 
 @dataclass(frozen=True)
 class Arguments:
@@ -1392,7 +1379,7 @@ class ExternalBackendFunctionsGroup:
     @property
     def primary(self) -> ExternalBackendFunction:
         # TODO: hardcoding that XLA will only implement functional variants of structured kernel.
-        # This will eventually by toggleable per backend.
+        # This will eventually be toggleable per backend.
         return self.functional
 
     @property
@@ -1400,12 +1387,9 @@ class ExternalBackendFunctionsGroup:
         return self.primary.metadata is not None and self.primary.metadata.is_autograd
 
     def __post_init__(self) -> None:
-        # TODO: the purpose of `from_function_group` is to make it so that you don't have to call the ctr directly.
-        # `from_function_group` takes in a NativeFunctionsGroup object,
-        # which has already passed any NativeFunctionsGroup validations.
-        # Because of that, I'm not bothering to duplicate the validations here.
-        # But BAD things can happen if you create your own ExternalBackendFunctionsGroup object
-        # with arbitrary ExternalBackendFunction objects!
+        # Note: I didn't want to copy-paste the post_init checks that NativeFunctionsGroup performs.
+        # ExternalBackendFunctionsGroup objects should be created using `from_function_group` (below),
+        # which guarantees that the relevant checks have already been performed.
         if self.structured:
             for f in self.functions():
                 if f == self.primary:
@@ -1416,10 +1400,6 @@ class ExternalBackendFunctionsGroup:
                     f"{str(self.primary.native_function.func.name)} is marked as structured. " \
                     f"variant, {str(f.native_function.func.name)} will be generated for you " \
                     "and doesn't need to live in the yaml."
-
-    # TODO: do we need this?
-    def signature(self) -> 'FunctionSchema':
-        return self.primary.native_function.func.signature()
 
     def functions(self) -> Iterator[ExternalBackendFunction]:
         yield self.out
