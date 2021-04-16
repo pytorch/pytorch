@@ -97,6 +97,24 @@
 # like 'grad_output', and (2) the gradient to multiply with is always
 # called 'grad' (even though it really is a grad-grad).
 #
+# You can also add forward derivative definition by defining a formula for
+# a returned value (in general "result" if the name is not specified). This
+# formula works the same way as the backward one and advanced implementations
+# should also be placed in the FunctionsManual file.
+# This formula should compute a single Jacobian vector product using the (primal)
+# value of the argument "foo_p", its forward grad "foo_t" and the result of the
+# function as "result".
+# Note that the forward derivative can be automatically generated in two cases:
+#     - if your function is linear (NOT affine or multi-linear), then you can
+#       specify so by just using the string "auto_linear" for the formula.
+#     - if your function is applied element wise (and has a single input), you
+#       can specify so by just using the string "auto_element_wise" for the formula.
+#
+# Note that to avoid unpacking overhead, functions taking TensorList as inputs
+# will always have their forward grad formula called. This function is responsible
+# to check if any computation is needed and should return an undefined Tensor when
+# there is nothing to do. You can check "cat_forward" for a full example.
+#
 # NB: There are a number of gradient definitions in here which are bogus
 # (implemented using zeros_like).  These gradients are (hopefully) not
 # used by our frontend.  You MUST check the frontend code; search for
@@ -160,6 +178,7 @@
 # in Decalarations.yaml
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sgn()
+  result: auto_element_wise
 
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt()).conj()
@@ -167,6 +186,12 @@
 - name: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
   other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
+  result: self_t + maybe_multiply(other_t, alpha)
+
+- name: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+  self: handle_r_to_c(self.scalar_type(), grad)
+  other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
+  result: self_t.add_(maybe_multiply(other_t, alpha))
 
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
@@ -316,6 +341,7 @@
 
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
+  result: auto_linear
 
 - name: _coalesce(Tensor self) -> Tensor
   self: grad
@@ -350,8 +376,8 @@
   output_differentiability: [False]
 
 - name: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
-  self: other.cross(grad, dim)
-  other: grad.cross(self, dim)
+  self: other.conj().cross(grad, dim)
+  other: grad.cross(self.conj(), dim)
 
 - name: logcumsumexp(Tensor self, int dim) -> Tensor
   self: logcumsumexp_backward(grad, self, result, dim)
@@ -790,6 +816,12 @@
 - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
   self: mul_tensor_backward(grad, other, self.scalar_type())
   other: mul_tensor_backward(grad, self, other.scalar_type())
+  result: other_t * self_p.conj() + self_t * other_p.conj()
+
+- name: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  self: mul_tensor_backward(grad, other, self.scalar_type())
+  other: mul_tensor_backward(grad, self, other.scalar_type())
+  result: self_t.mul_(other_p.conj()).add_(other_t * (self_p / other_p).conj())
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
   self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
@@ -978,6 +1010,7 @@
 
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
   self: select_backward(grad, self.sizes(), dim, index)
+  result: auto_linear
 
 - name: sigmoid(Tensor self) -> Tensor
   self: sigmoid_backward(grad, result)
@@ -1002,6 +1035,7 @@
 
 - name: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
   self: slice_backward_wrapper(grad, self.sizes(), dim, start, end, step)
+  result: auto_linear
 
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   self: slogdet_backward(grad, self, sign, logabsdet)
@@ -1288,7 +1322,6 @@
 
 - name: _embedding_bag_dense_backward(Tensor grad, Tensor indices, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights, int padding_idx=-1) -> Tensor
   indices: non_differentiable
-  offsets: non_differentiable
   offset2bag: non_differentiable
   bag_size: non_differentiable
   maximum_indices: non_differentiable

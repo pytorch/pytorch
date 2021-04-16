@@ -671,29 +671,26 @@ static variable_list call_function(
   const auto has_post_hooks = !fn.post_hooks().empty();
   variable_list outputs;
 
-  {
-    at::ThreadLocalStateGuard guard(graph_task->thread_locals_);
-    if (has_post_hooks) {
-      // In functions/accumulate_grad.cpp, there is some logic to check the
-      // conditions under which the incoming gradient can be stolen directly
-      // (which elides a deep copy) instead of cloned. One of these conditions
-      // is that the incoming gradient's refcount must be 1 (nothing else is
-      // referencing the same data).  Stashing inputs_copy here bumps the
-      // refcount, so if post hooks are employed, it's actually still ok for
-      // accumulate_grad.cpp to steal the gradient if the refcount is 2.
-      //
-      // "new_grad.use_count() <= 1 + !post_hooks().empty()" in
-      // accumulate_grad.cpp accounts for this, but also creates a silent
-      // dependency between engine.cpp (ie, this particular engine
-      // implementation) and accumulate_grad.cpp.
-      //
-      // If you change the logic here, make sure it's compatible with
-      // accumulate_grad.cpp.
-      auto inputs_copy = inputs;
-      outputs = fn(std::move(inputs_copy));
-    } else {
-      outputs = fn(std::move(inputs));
-    }
+  if (has_post_hooks) {
+    // In functions/accumulate_grad.cpp, there is some logic to check the
+    // conditions under which the incoming gradient can be stolen directly
+    // (which elides a deep copy) instead of cloned. One of these conditions
+    // is that the incoming gradient's refcount must be 1 (nothing else is
+    // referencing the same data).  Stashing inputs_copy here bumps the
+    // refcount, so if post hooks are employed, it's actually still ok for
+    // accumulate_grad.cpp to steal the gradient if the refcount is 2.
+    //
+    // "new_grad.use_count() <= 1 + !post_hooks().empty()" in
+    // accumulate_grad.cpp accounts for this, but also creates a silent
+    // dependency between engine.cpp (ie, this particular engine
+    // implementation) and accumulate_grad.cpp.
+    //
+    // If you change the logic here, make sure it's compatible with
+    // accumulate_grad.cpp.
+    auto inputs_copy = inputs;
+    outputs = fn(std::move(inputs_copy));
+  } else {
+    outputs = fn(std::move(inputs));
   }
 
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
@@ -734,6 +731,11 @@ void Engine::evaluate_function(
       return;
     }
   }
+
+  // Set the ThreadLocalState before calling the function.
+  // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+  // always saves ThreadLocalState without grad_mode.
+  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
 
   // Switches to a function's CUDA stream (if applicable) before calling it
   const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
