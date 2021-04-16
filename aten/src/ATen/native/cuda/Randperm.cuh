@@ -26,9 +26,9 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
 
   // do random permutation inside each island.
   data += tid;
-  // auto seeds = at::cuda::philox::unpack(philox_args);
-  // curandStatePhilox4_32_10_t state;
-  // curand_init(std::get<0>(seeds), tid, std::get<1>(seeds), &state);
+  auto seeds = at::cuda::philox::unpack(philox_args);
+  curandStatePhilox4_32_10_t state;
+  curand_init(0, tid, 0, &state);
   for (int i = island_size - 1; i > 0; i--) {
     unsigned int r = 0;
     if (i != r) {
