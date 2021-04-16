@@ -73,7 +73,69 @@ class OptionalCType:
     def name(self) -> ArgName:
         return self.elem.name
 
-CType = Union[BaseCType, OptionalCType, ConstRefCType, MutRefCType]
+@dataclass(frozen=True)
+class ListCType:
+    elem: 'CType'
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'c10::List<{self.elem.cpp_type()}>'
+
+    @property
+    def name(self) -> ArgName:
+        return self.elem.name
+
+@dataclass(frozen=True)
+class ArrayRefCType:
+    elem: 'CType'
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'ArrayRef<{self.elem.cpp_type()}>'
+
+    @property
+    def name(self) -> ArgName:
+        return self.elem.name
+
+@dataclass(frozen=True)
+class VectorCType:
+    elem: 'CType'
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'std::vector<{self.elem.cpp_type()}>'
+
+    @property
+    def name(self) -> ArgName:
+        return self.elem.name
+
+@dataclass(frozen=True)
+class ArrayCType:
+    elem: 'CType'
+    size: int
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'std::array<{self.elem.cpp_type()},{self.size}>'
+
+    @property
+    def name(self) -> ArgName:
+        return self.elem.name
+
+@dataclass(frozen=True)
+class TupleCType:
+    elems: List['CType']
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'std::tuple<{",".join([e.cpp_type() for e in self.elems])}>'
+
+    @property
+    def name(self) -> ArgName:
+        # N.B. this isn't currently used anywhere: std::tuple is only used as a return type, which doesn't use names.
+        raise AssertionError("std::tuple isn't currently used as an argument anywhere, and doesn't require a name.")
+
+CType = Union[BaseCType, OptionalCType, ConstRefCType, MutRefCType, ListCType, ArrayRefCType, ArrayCType, VectorCType, TupleCType]
 
 # A binding represents any C++ binding site for a formal parameter.
 # We don't distinguish between binding sites for different APIs;
@@ -159,7 +221,7 @@ class CppSignature:
 
     # Render the C++ declaration for this signature
     def decl(self, *, prefix: str = "", is_redispatching_fn: bool = False) -> str:
-        returns_type = cpp.returns_type(self.func.returns)
+        returns_type = cpp.returns_type(self.func.returns).cpp_type()
         cpp_args = [a.decl() for a in self.arguments()]
         if is_redispatching_fn:
             cpp_args = ['c10::DispatchKeySet dispatchKeySet'] + cpp_args
@@ -170,7 +232,7 @@ class CppSignature:
     # Render the C++ definition for this signature, not including
     # the body (with curly braces)
     def defn(self, *, prefix: str = "", is_redispatching_fn: bool = False) -> str:
-        returns_type = cpp.returns_type(self.func.returns)
+        returns_type = cpp.returns_type(self.func.returns).cpp_type()
         cpp_args = [a.defn() for a in self.arguments()]
         if is_redispatching_fn:
             cpp_args = ['c10::DispatchKeySet dispatchKeySet'] + cpp_args
@@ -237,18 +299,18 @@ class DispatcherSignature:
         args_str = ', '.join(a.defn() for a in self.arguments())
         if name is None:
             name = self.name()
-        return f"{self.returns_type()} {name}({args_str})"
+        return f"{self.returns_type().cpp_type()} {name}({args_str})"
 
     def exprs(self) -> List[Expr]:
         return [Expr(a.name, a.ctype) for a in self.arguments()]
 
-    def returns_type(self) -> str:
+    def returns_type(self) -> CType:
         return dispatcher.returns_type(self.func.returns)
 
     # Return the C++ function type, e.g., something like int(bool)
     def type(self) -> str:
         dispatcher_args_types_str = ', '.join(a.type for a in self.arguments())
-        return f'{self.returns_type()} ({dispatcher_args_types_str})'
+        return f'{self.returns_type().cpp_type()} ({dispatcher_args_types_str})'
 
     @staticmethod
     def from_schema(func: FunctionSchema) -> 'DispatcherSignature':
@@ -268,17 +330,17 @@ class NativeSignature:
         args_str = ', '.join(a.defn() for a in self.arguments())
         if name is None:
             name = self.name()
-        return f"{native.returns_type(self.func.returns)} {name}({args_str})"
+        return f"{native.returns_type(self.func.returns).cpp_type()} {name}({args_str})"
 
     def ptr_type(self) -> str:
         # don't include defaults in type signature!
         args_str = ', '.join(a.defn() for a in self.arguments())
-        return f'{native.returns_type(self.func.returns)} (*)({args_str})'
+        return f'{native.returns_type(self.func.returns).cpp_type()} (*)({args_str})'
 
     def arguments(self) -> List[Binding]:
         return native.arguments(self.func)
 
-    def returns_type(self) -> str:
+    def returns_type(self) -> CType:
         return native.returns_type(self.func.returns)
 
     def dispatcher_exprs(self) -> List[Expr]:

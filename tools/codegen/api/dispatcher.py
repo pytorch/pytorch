@@ -36,7 +36,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
 def argument_type(a: Argument, *, binds: ArgName) -> CType:
     return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
-def returns_type(rs: Sequence[Return]) -> str:
+def returns_type(rs: Sequence[Return]) -> CType:
     # At present, there is no difference. But there could be!
     return cpp.returns_type(rs)
 
