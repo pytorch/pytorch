@@ -721,13 +721,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand(const Tensor& self, IntArrayRef size, bool implicit) {
-  // [expand implicit]
-  // The implicit flag is set to true for any expand calls inserted by broadcast
-  // operators in ExpandUtils.h This flag is recorded by the tracer to
-  // distinguish between expands inserted by broadcasts and those explicitly
-  // requested by the user, because it is legal to remove implicit expands
-  // from the graph, but not legal to remove the explicit ones.
+Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",
