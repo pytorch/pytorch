@@ -30,7 +30,7 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds), tid, std::get<1>(seeds), &state);
   for (int i = island_size - 1; i > 0; i--) {
-    unsigned int r = curand(&state) % (i + 1);
+    unsigned int r = 0;
     if (i != r) {
       scalar_t tmp = data[i];
       data[i] = data[r];
