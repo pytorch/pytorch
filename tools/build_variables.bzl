@@ -702,7 +702,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/dispatch/Dispatcher.cpp",
     "aten/src/ATen/core/dispatch/ObservedOperators.cpp",
     "aten/src/ATen/core/dispatch/OperatorEntry.cpp",
-    "aten/src/ATen/core/grad_mode.cpp",
     "aten/src/ATen/core/interned_strings.cpp",
     "aten/src/ATen/core/ivalue.cpp",
     "aten/src/ATen/core/library.cpp",
