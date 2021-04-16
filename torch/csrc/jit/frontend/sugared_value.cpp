@@ -101,6 +101,10 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       std::unordered_map<std::string, std::string>,
       EnumClassHash>;
   static const PropertiesLookup builtin_properties = {
+      {TypeKind::OptionalType,
+       {
+           {"unchecked_unwrap_optional", "prim"},
+       }},
       {TypeKind::TensorType,
        {
            {"dtype", "prim"},         {"device", "prim"},
