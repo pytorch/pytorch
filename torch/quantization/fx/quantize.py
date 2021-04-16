@@ -587,7 +587,11 @@ def handle_cat_nodes(
     # input in the list, for example, if we have:
     # x = torch.cat([x1, x2, x3], ...)
     # we'll set the activation_post_process for x1, x2, x3 and x to be the
-    # activation_post_proceess of x1
+    # activation_post_proceess of x1:
+    # x1 -> obs1 -> cat -> obs1 -> ...
+    #               /
+    #       x2 -> obs1
+    #
     # note that activation_post_process here needs to work for different
     # Tensor dimensions, e.g. MinMaxObserver, HistogramObserver, per tensor FakeQuantize
     for node in observed_graph.nodes:
@@ -608,7 +612,7 @@ def handle_cat_nodes(
                     # input 0 for cat node is a list
                     assert isinstance(node.args[0], list) or \
                         isinstance(node.args[0], tuple), \
-                    "Expecting first input of cat to be a list or tuple"
+                        "Expecting first input of cat to be a list or tuple"
                     first_act_post_process = modules[node.args[0][0].target]
                     for arg in node.args[0]:
                         assert arg.op == "call_module" and is_activation_post_process(modules[arg.target])
@@ -824,7 +828,9 @@ class Quantizer:
         standalone_module_classes = [config[0] for config in standalone_module_class_configs]
         custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
-        matches, quants = self._match(model, model.graph, standalone_module_names, standalone_module_classes, custom_module_classes)
+        matches, quants = self._match(
+            model, model.graph, standalone_module_names, standalone_module_classes,
+            custom_module_classes)
         self.activation_post_process_map = defaultdict(list)
         observed_graph = Graph()
         observed_node_names_set: Set[str] = set()
@@ -840,14 +846,20 @@ class Quantizer:
             observed_graph, prepare_custom_config_dict, input_quantized_idxs, output_quantized_idxs)
 
         self.modules = dict(model.named_modules())
-        matches, quants = self._match(model, observed_graph, standalone_module_names, standalone_module_classes, custom_module_classes)
+        matches, quants = self._match(
+            model, observed_graph, standalone_module_names, standalone_module_classes,
+            custom_module_classes)
         observed_graph = handle_copy_nodes(
             observed_graph, matches, quants, self.qconfig_map,
             self.activation_post_process_map, self.modules)
 
         self.modules = dict(model.named_modules())
-        matches, quants = self._match(model, observed_graph, standalone_module_names, standalone_module_classes, custom_module_classes)
-        observed_graph = handle_cat_nodes(model, observed_graph, matches, quants, self.activation_post_process_map, self.modules)
+        matches, quants = self._match(
+            model, observed_graph, standalone_module_names, standalone_module_classes,
+            custom_module_classes)
+        observed_graph = handle_cat_nodes(
+            model, observed_graph, matches, quants, self.activation_post_process_map,
+            self.modules)
 
         self.save_state(model)
         model = ObservedGraphModule(model, observed_graph)
