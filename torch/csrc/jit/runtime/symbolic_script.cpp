@@ -418,7 +418,11 @@ const std::vector<std::string> functions = {
                 weight_size = weight.size()
                 grad_input = torch.matmul(grad_output, weight)
                 grad_weight = torch.matmul(grad_output.reshape(-1, weight_size[0]).t(), input.reshape(-1, weight_size[1]))
-                return grad_input, grad_weight, grad_bias
+                # Note: calling unchecked_unwrap_optional is only safe, when we
+                #       directly return grad_bias directly back to bias.
+                #       Because in the case where `bias is None`, unwrapped
+                #       grad_bias would just be pruned away.
+                return grad_input, grad_weight, grad_bias.unchecked_unwrap_optional
             return result, backward
     )",
     R"(

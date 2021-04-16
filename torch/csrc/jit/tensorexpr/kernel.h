@@ -21,6 +21,8 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
 
 // Returns true if the TE fuser supports this conv2d.
 bool conv2dIsSupported(const Node* node);
+// Returns true if the TE fuser supports this matmul.
+bool matmulIsSupported(const Node* node);
 
 class TORCH_API TensorExprKernel {
  public:
@@ -151,6 +153,8 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeConv2d(const torch::jit::Value* v);
 
+  Tensor* computeMatmul(const torch::jit::Value* v);
+
   Tensor* computeValue(const torch::jit::Value* v);
 
   Stmt* transformLoops(BackendType backendType, Stmt* st);
@@ -214,7 +218,6 @@ class TORCH_API TensorExprKernel {
   bool use_fallback_{false};
   bool hasRandom_{false};
   bool hasBroadcast_{false};
-  bool hasHalf_{false};
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
       known_sizes_;
 };
