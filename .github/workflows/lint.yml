@@ -61,11 +61,11 @@ jobs:
       - name: Ensure no unqualified noqa
         run: |
           # shellcheck disable=SC2016
-          (! git grep -In 'noqa$' -- '**.py' || (echo 'The above lines have unqualified `noqa`; please convert them to `noqa XXXX`'; false))
+          (! git grep -InP 'noqa(?!:)' -- '**.py' || (echo 'The above lines have unqualified `noqa`; please convert them to `noqa: XXXX`'; false))
       - name: Ensure no unqualified type ignore
         run: |
           # shellcheck disable=SC2016
-          (! git grep -In 'type: ignore$' -- '**.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
+          (! git grep -InP 'type: ignore(?!\[)' -- '**.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
       # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
