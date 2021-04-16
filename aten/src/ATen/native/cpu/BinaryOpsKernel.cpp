@@ -645,7 +645,9 @@ void fmin_kernel(TensorIterator& iter) {
           [](scalar_t a, scalar_t b) -> scalar_t {
             return std::fmin(a, b);
           },
-          [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::fmin(a, b); });
+          [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+            return at::vec256::fmin(a, b);
+          });
       });
     }
   } else {
