@@ -2485,52 +2485,46 @@ def sample_inputs_msort(op_info, device, dtype, requires_grad):
     return sample
 
 def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
-    def _make_tensor_helper(shape, low=None, high=None):
-        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
-
-    for_inplace_variant = kwargs.get('for_inplace_variant', False)
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     samples = (
         # no broadcast
-        SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)), 0.4)),
+        SampleInput(make_arg((S, S)), args=(make_arg((S, S)), 0.4)),
         # broadcast rhs
-        SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)), 0.4)),
+        SampleInput(make_arg((S, S)), args=(make_arg((S,)), 0.4)),
         # scalar tensor
-        SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper(()), 0.4)),
+        SampleInput(make_arg(()), args=(make_arg(()), 0.4)),
         # broadcast rhs scalar-tensor
-        SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper(()), 0.4)),
+        SampleInput(make_arg((S, S)), args=(make_arg(()), 0.4)),
         # broadcast rhs with weight tensor
-        SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)), _make_tensor_helper((S, S)))),
+        SampleInput(make_arg((S, S)), args=(make_arg((S,)), make_arg((S, S)))),
         # broadcast rhs and weight tensor
-        SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, 1)), _make_tensor_helper((S,)))),
+        SampleInput(make_arg((S, S)), args=(make_arg((S, 1)), make_arg((S,)))),
+        # broadcast_lhs
+        SampleInput(make_arg((S,)), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
+        # scalar broadcast_lhs
+        SampleInput(make_arg(()), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
+        # broadcast all
+        SampleInput(make_arg((S, 1)), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
+        # tensor broadcast all
+        SampleInput(make_arg((S, 1)), args=(make_arg((S, S)), make_arg((S, 1))),
+                    broadcasts_input=True),
     )  # type: ignore
 
     if dtype.is_complex:
         samples = samples + (  # type: ignore
             # no broadcast
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)), 0.4j)),
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)), 1.2 + 0.1j)),
+            SampleInput(make_arg((S, S)), args=(make_arg((S, S)), 0.4j)),
+            SampleInput(make_arg((S, S)), args=(make_arg((S, S)), 1.2 + 0.1j)),
             # broadcast rhs
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)), 0.4j)),
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)), 5.4 + 9j)),
+            SampleInput(make_arg((S, S)), args=(make_arg((S,)), 0.4j)),
+            SampleInput(make_arg((S, S)), args=(make_arg((S, S)), 5.4 + 9j)),
             # scalar tensor
-            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper(()), 0.4j)),
-            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper(()), 6.1 + 0.004j)),
+            SampleInput(make_arg(()), args=(make_arg(()), 0.4j)),
+            SampleInput(make_arg(()), args=(make_arg(()), 6.1 + 0.004j)),
             # broadcast rhs scalar-tensor
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper(()), 0.4j)),
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper(()), 1 + 2j)),
-        )
-
-    if not for_inplace_variant:
-        samples = samples + (  # type: ignore
-            # broadcast_lhs
-            SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper((S, S)), 0.4)),
-            # scalar broadcast_lhs
-            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper((S, S)), 0.4)),
-            # broadcast all
-            SampleInput(_make_tensor_helper((S, 1)), args=(_make_tensor_helper((S, S)), 0.4)),
-            # tensor broadcast all
-            SampleInput(_make_tensor_helper((S, 1)), args=(_make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
+            SampleInput(make_arg((S, S)), args=(make_arg(()), 0.4j)),
+            SampleInput(make_arg((S, S)), args=(make_arg(()), 1 + 2j)),
         )
 
     return samples
