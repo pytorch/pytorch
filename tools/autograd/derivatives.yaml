@@ -693,6 +693,10 @@
 - name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   self: not_implemented("lu_solve")
 
+- name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor, Tensor, Tensor)
+  LU_data: lu_unpack_backward(grads, LU_data, unpack_data)
+  LU_pivots: non_differentiable
+
 - name: masked_fill_.Scalar(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
   self: grad.clone().masked_fill_(mask, 0)
   mask: non_differentiable

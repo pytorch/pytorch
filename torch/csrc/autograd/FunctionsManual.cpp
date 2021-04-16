@@ -3258,6 +3258,36 @@ std::tuple<Tensor, Tensor> polar_backward(
   return std::make_tuple(grad_abs, grad_angle);
 }
 
+Tensor lu_unpack_backward(
+  const std::vector<torch::autograd::Variable>& grads,
+  const Tensor& LU_data,
+  bool unpack_data
+) {
+  auto L_grad = grads[1];
+  auto U_grad = grads[2];
+
+  TORCH_CHECK(unpack_data, "lu_unpack_backward: cannot compute gradients unless unpack_data=True");
+
+  Tensor L_grad_contrib;
+  if (L_grad.defined()) {
+    L_grad_contrib = L_grad.tril();
+    L_grad_contrib.diagonal(0, -2, -1).fill_(0);
+  }
+  else {
+    L_grad_contrib = at::zeros_like(LU_data, at::MemoryFormat::Contiguous);
+  }
+
+  Tensor U_grad_contrib;
+  if (U_grad.defined()) {
+    U_grad_contrib = U_grad.triu();
+  }
+  else {
+    U_grad_contrib = at::zeros_like(LU_data, at::MemoryFormat::Contiguous);
+  }
+
+  return L_grad_contrib + U_grad_contrib;
+}
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
