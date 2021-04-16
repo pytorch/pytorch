@@ -639,6 +639,8 @@ inline Vec256<T> fmax(const Vec256<T> &a, const Vec256<T> &b) {
     c[i] = a[i] > b[i] ? a[i] : b[i];
     if (_isnan(b[i])) {
       // If either input is NaN, the result is the other input.
+      // NOTE: The case where b[i] was NaN is handled correctly by the naive
+      // ternary operator above.
       c[i] = a[i];
     }
   }
@@ -654,6 +656,8 @@ inline Vec256<T> fmin(const Vec256<T> &a, const Vec256<T> &b) {
     c[i] = a[i] < b[i] ? a[i] : b[i];
     if (_isnan(b[i])) {
       // If either input is NaN, the result is the other input.
+      // NOTE: The case where b[i] was NaN is handled correctly by the naive
+      // ternary operator above.
       c[i] = a[i];
     }
   }
