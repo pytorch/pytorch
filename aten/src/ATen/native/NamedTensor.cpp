@@ -10,7 +10,8 @@
 namespace at { namespace native {
 
 Tensor& rename_(Tensor& self, optional<DimnameList> names) {
-  return at::internal_set_names_inplace(self, names);
+  at::internal_set_names_inplace(self, names);
+  return self;
 }
 
 Tensor rename(const Tensor& self, optional<DimnameList> names) {

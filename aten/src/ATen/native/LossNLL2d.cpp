@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/cpu/utils.h>
 
 namespace at {
 namespace native {
@@ -78,6 +79,7 @@ inline void check_gradout_shape_nll_loss2d(
       target.sizes());
 }
 
+
 template <typename scalar_t>
 static void nll_loss2d_forward_out_frame(
     Tensor& output,
@@ -147,14 +149,22 @@ static void nll_loss2d_forward_out_frame(
   const int64_t batch_size = input.size(0);
   const int64_t map_size = input.size(2) * input.size(3);
   const int64_t sample_size = map_size * n_classes;
+  const int64_t numiter = batch_size * map_size;
 
-  scalar_t total_weight_val = 0;
-  scalar_t output_val = 0;
+  constexpr int64_t cascade_sum_num_levels = 8;
+  scalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
+  scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
+  const int64_t level_power =
+      std::max(int64_t(4), utils::CeilLog2(numiter) / cascade_sum_num_levels);
+  const int64_t level_step = (1 << level_power);
+  const int64_t level_mask = level_step - 1;
+
+  int64_t num_ignored = 0;
   for (int64_t b = 0; b < batch_size; b++) {
     for (int64_t elem = 0; elem < map_size; elem++) {
       const int64_t cur_target = target_data[b * map_size + elem];
-
       if (cur_target == ignore_index) {
+        ++num_ignored;
         continue;
       }
 
@@ -164,13 +174,41 @@ static void nll_loss2d_forward_out_frame(
           cur_target,
           " is out of bounds.");
 
-      const scalar_t weight_val =
-          weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
-      total_weight_val += weight_val;
-      output_val -= input_data[b * sample_size + cur_target * map_size + elem] *
-          weight_val;
+      const auto data = input_data[b * sample_size + cur_target * map_size + elem];
+      if (weight_data) {
+        const scalar_t weight_val = weight_data[cur_target];
+        loss_partial_sums[0] -= data * weight_val;
+        weight_partial_sums[0] += weight_val;
+      } else {
+        loss_partial_sums[0] -= data;
+      }
+
+      const int64_t linear_idx = b * map_size + elem;
+      for (int64_t j = 0; j + 1 < cascade_sum_num_levels; ++j) {
+        const auto mask = (level_mask << (j * level_power));
+        if (C10_LIKELY((linear_idx & mask) != 0)) {
+          break;
+        }
+
+        weight_partial_sums[j + 1] += weight_partial_sums[j];
+        loss_partial_sums[j + 1] += loss_partial_sums[j];
+
+        weight_partial_sums[j] = 0;
+        loss_partial_sums[j] = 0;
+      }
     }
   }
+
+
+  const scalar_t total_weight_val = !weight_data ?
+    static_cast<scalar_t>(numiter - num_ignored) :
+    std::accumulate(std::begin(weight_partial_sums),
+                    std::end(weight_partial_sums),
+                    scalar_t{0});
+
+  scalar_t output_val = std::accumulate(std::begin(loss_partial_sums),
+                                        std::end(loss_partial_sums),
+                                        scalar_t{0});
 
   if (reduction == Reduction::Mean &&
       (total_weight_val != 0 || input.numel() == 0)) {
