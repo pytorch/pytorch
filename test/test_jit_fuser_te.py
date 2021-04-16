@@ -1314,7 +1314,8 @@ class TestTEFuser(JitTestCase):
         dtypes = [
             torch.bool,
             torch.int,
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
         ]
@@ -1383,7 +1384,8 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,
@@ -1661,6 +1663,36 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
 
+    def test_ternary_norm_ops(self):
+        def apply(fn):
+            return lambda x, y, z: fn(x, y, z)
+
+        ternary_ops = [
+            F.batch_norm,
+        ]
+        devices = self.devices
+        for dtype, op, device in product(self.dtypes, ternary_ops, devices):
+            try:
+                x = self.data_for(dtype, device, size=[5, 3, 128, 128])
+                y = self.data_for(dtype, device, size=[3])
+                z = self.data_for(dtype, device, size=[3])
+                fn = apply(op)
+                ref = fn(x, y, z)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y, z))
+                self.assertEqual(ref, t(x, y, z))
+                self.assertAllFused(t.graph_for(x, y, z))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+
     @unittest.skip("FIXME: fuser doesn't include ListConstruct nodes to the group causing a failure")
     def test_list_ops(self):
         def apply(fn):
@@ -1836,6 +1868,28 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(script.graph_for(a, s))
         script = self.checkScript(eager_st, (s, b))
         self.assertAllFused(script.graph_for(s, b))
+
+    def test_conv2d_depthwise(self):
+        def eager(input, weight, bias):
+            return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=72)
+
+        input = torch.rand((1, 72, 56, 56), dtype=torch.float)
+        weight = torch.rand((72, 1, 3, 3), dtype=torch.float)
+        bias = torch.rand((72), dtype=torch.float)
+
+        script = self.checkScript(eager, (input, weight, bias))
+        self.assertAllFused(script.graph_for(input, weight, bias))
+
+    def test_conv2d(self):
+        def eager(input, weight, bias):
+            return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=1)
+
+        input = torch.rand((1, 64, 56, 56), dtype=torch.float)
+        weight = torch.rand((64, 64, 3, 3), dtype=torch.float)
+        bias = torch.rand((64), dtype=torch.float)
+
+        script = self.checkScript(eager, (input, weight, bias))
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
 
 if __name__ == '__main__':
     run_tests()

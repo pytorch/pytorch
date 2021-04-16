@@ -4,7 +4,7 @@
 torch.nn
 ===================================
 
-These are the basic building block for graphs
+These are the basic building blocks for graphs:
 
 .. contents:: torch.nn
     :depth: 2
@@ -400,6 +400,11 @@ Utility functions in other modules
     nn.utils.rnn.pad_packed_sequence
     nn.utils.rnn.pad_sequence
     nn.utils.rnn.pack_sequence
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
     nn.Flatten
     nn.Unflatten

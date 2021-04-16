@@ -152,7 +152,11 @@ class TORCH_CUDA_CPP_API FilterDescriptor : public Descriptor<
                                                &cudnnCreateFilterDescriptor,
                                                &cudnnDestroyFilterDescriptor> {
  public:
-  void set(const at::Tensor &t, int64_t pad = 0, bool force_nhwc = false);
+  void set(const at::Tensor &t, int64_t pad = 0) {
+    set(t, at::MemoryFormat::Contiguous, pad);
+  }
+
+  void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
   void print();
 private:
@@ -299,6 +303,23 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
         cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
   }
 #endif
+};
+
+struct TORCH_CUDA_CPP_API ActivationDescriptor
+    : public Descriptor<
+          cudnnActivationStruct,
+          &cudnnCreateActivationDescriptor,
+          &cudnnDestroyActivationDescriptor> {
+  void set(cudnnActivationMode_t mode) {
+    AT_ASSERT(
+        mode == CUDNN_ACTIVATION_RELU,
+        "TODO: support more cuDNN activation modes");
+    AT_CUDNN_CHECK(cudnnSetActivationDescriptor(
+        mut_desc(),
+        mode,
+        cudnnNanPropagation_t::CUDNN_NOT_PROPAGATE_NAN,
+        std::numeric_limits<double>::max()));
+  }
 };
 
 union Constant

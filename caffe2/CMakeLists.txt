@@ -176,7 +176,7 @@ endif()
 if(BUILD_SPLIT_CUDA)
   # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
   foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*(CUDASolver|Register.*CUDA|Legacy|THC|CUDAHooks|detail/|TensorShapeCUDA).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
+    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|CUDAHooks|detail/|TensorShapeCUDA).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
       # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
       list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
     else()
@@ -534,6 +534,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
+    # Force -Werror on several files
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/mkldnn/Pooling.cpp PROPERTIES COMPILE_FLAGS "-Werror")
   endif()
   # Disable certain warnings for GCC-9.X
   if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
@@ -912,6 +914,23 @@ if(NOT INTERN_BUILD_MOBILE)
   add_dependencies(torch_cpu Caffe2_PROTO)
 endif()
 
+# Codegen selected_mobile_ops.h for template selective build
+if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
+  add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+    COMMAND
+    "${PYTHON_EXECUTABLE}"
+    ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
+    --yaml_file_path "${SELECTED_OP_LIST}"
+    --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+    WORKING_DIRECTORY "${TORCH_ROOT}")
+
+  add_custom_target(
+    __selected_mobile_ops_header_gen
+    DEPENDS ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h)
+  add_dependencies(torch_cpu __selected_mobile_ops_header_gen)
+endif()
+
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT NO_API)
     target_include_directories(torch_cpu PRIVATE
@@ -1119,6 +1138,10 @@ endif()
 
 if(BUILD_LITE_INTERPRETER)
   target_compile_definitions(torch_cpu PRIVATE BUILD_LITE_INTERPRETER)
+  # Enable template selective build only when SELECTED_OP_LIST is provided.
+  if(SELECTED_OP_LIST)
+    target_compile_definitions(torch_cpu PRIVATE TEMPLATE_SELECTIVE_BUILD)
+  endif()
 endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
@@ -1475,7 +1498,8 @@ if(USE_ROCM)
     # correct dependency from generated files.)
     target_link_libraries(torch_hip PRIVATE ATEN_CUDA_FILES_GEN_LIB)
   endif()
-  target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_HIP_DEPENDENCY_LIBS})
+  target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
+  target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
@@ -1692,7 +1716,9 @@ if(BUILD_PYTHON)
   # ---[ Python.
   if(BUILD_CAFFE2)
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
-  target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
+  if(USE_NUMPY)
+    target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
+  endif()
   if(NOT MSVC)
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
   endif()
@@ -1723,7 +1749,9 @@ if(BUILD_PYTHON)
 
   if(USE_CUDA)
     add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
-    target_compile_options(caffe2_pybind11_state_gpu PRIVATE "-DUSE_NUMPY")
+    if(USE_NUMPY)
+      target_compile_options(caffe2_pybind11_state_gpu PRIVATE "-DUSE_NUMPY")
+    endif()
     if(NOT MSVC)
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
     endif()
@@ -1752,7 +1780,9 @@ if(BUILD_PYTHON)
 
   if(USE_ROCM)
     add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
-    target_compile_options(caffe2_pybind11_state_hip PRIVATE "-DUSE_NUMPY")
+    if(USE_NUMPY)
+      target_compile_options(caffe2_pybind11_state_hip PRIVATE "-DUSE_NUMPY")
+    endif()
     if(NOT MSVC)
       target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
     endif()

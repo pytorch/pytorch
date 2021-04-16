@@ -9,12 +9,6 @@ namespace at {
 namespace native {
 namespace metal {
 
-enum class TextureType {
-  TextureNone,
-  TextureType2D,
-  TextureType2DArray,
-};
-
 class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
  public:
   MPSImageWrapper(IntArrayRef sizes);
@@ -30,7 +24,6 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
   void copyFromTexture(MPSImage* image);
   void setCommandBuffer(MetalCommandBuffer* buffer);
   MetalCommandBuffer* commandBuffer() const;
-  TextureType textureType() const;
   IntArrayRef textureSizes() const;
   MPSImage* image() const;
   void recycleImage();

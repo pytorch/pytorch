@@ -22,7 +22,7 @@ class Parameter(torch.Tensor):
     """
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
-            data = torch.Tensor()
+            data = torch.tensor([])
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
     def __deepcopy__(self, memo):
@@ -146,7 +146,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
     cls_to_become = Parameter
 
     def __new__(cls, requires_grad=True):
-        data = torch.Tensor()
+        data = torch.tensor([])
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
 
@@ -166,5 +166,5 @@ class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     cls_to_become = torch.Tensor
 
     def __new__(cls, requires_grad=False):
-        data = torch.Tensor()
+        data = torch.tensor([])
         return torch.Tensor._make_subclass(cls, data, requires_grad)

@@ -88,12 +88,6 @@ enum class DispatchKey : uint8_t {
   QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
   QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
-  ComplexCPU, // lives out of tree at
-  // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
-  ComplexCUDA, // and
-  // https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
-  // tested at test/cpp_extensions/complex_registration_extension.cpp
-  // TODO: Remove Complex dispatch keys when Complex is moved in tree
 
   // This backend is to support custom RNGs; it lets you go
   // to a different kernel if you pass in a generator that is not a
@@ -117,6 +111,9 @@ enum class DispatchKey : uint8_t {
   SparseHIP, // TODO: I think this is not actually used, due to Note
   // [Masquerading as CUDA]
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
+
+  SparseCsrCPU,
+  SparseCsrCUDA,
 
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are reserved backends for user-defined backends, see Note [Private use
@@ -276,19 +273,20 @@ enum class DispatchKey : uint8_t {
 
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
-  Math, // registered at build/aten/src/ATen/RegisterMath.cpp
-  DefaultBackend, // registered at
-                  // build/aten/src/ATen/RegisterDefaultBackend.cpp
+  CompositeImplicitAutograd, // registered at build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
+  CompositeExplicitAutograd, // registered at
+                  // build/aten/src/ATen/RegisterCompositeExplicitAutograd.cpp
 
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.
-  EndOfAliasKeys = DefaultBackend, //
+  EndOfAliasKeys = CompositeExplicitAutograd, //
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // The aliases exist for backwards compatibility reasons, they shouldn't
   // be used
   CPUTensorId = CPU,
   CUDATensorId = CUDA,
+  DefaultBackend = CompositeExplicitAutograd,
   PrivateUse1_PreAutograd = AutogradPrivateUse1,
   PrivateUse2_PreAutograd = AutogradPrivateUse2,
   PrivateUse3_PreAutograd = AutogradPrivateUse3,

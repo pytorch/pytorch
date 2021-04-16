@@ -4,6 +4,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/ScalarOps.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 
@@ -19,7 +21,7 @@ Tensor _test_optional_intlist(
   Tensor output = at::empty_like(values);
   auto inp = values.accessor<int,1>();
   auto out = output.accessor<int,1>();
-  for(int i = 0; i < values.size(0); ++i) {
+  for (const auto i : c10::irange(values.size(0))) {
     out[i] = inp[i] + addends->at(i);
   }
   return output;
@@ -37,7 +39,7 @@ Tensor _test_optional_floatlist(
   Tensor output = at::empty_like(values);
   auto inp = values.accessor<float,1>();
   auto out = output.accessor<float,1>();
-  for(int i = 0; i < values.size(0); ++i) {
+  for (const auto i : c10::irange(values.size(0))) {
     out[i] = inp[i] + addends->at(i);
   }
   return output;

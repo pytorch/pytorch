@@ -7,6 +7,7 @@ import warnings
 import time
 from torch._six import string_classes
 from datetime import timedelta
+from os import getenv
 from typing import Dict, Optional, Tuple, Union
 
 # This module is wildcard imported from torch.distributed.
@@ -51,6 +52,10 @@ try:
     from torch._C._distributed_c10d import ProcessGroupGloo
 except ImportError:
     _GLOO_AVAILABLE = False
+
+
+logger = logging.getLogger(__name__)
+
 
 # Some reduce ops are not supported by complex numbers and will result in an error.
 # We currently provide complex support to the distributed API by viewing
@@ -187,7 +192,7 @@ def _store_based_barrier(rank, store, timeout):
     """
     store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _group_count)
     store.add(store_key, 1)
-    logging.info('Added key: {} to store for rank: {}'.format(store_key, rank))
+    logger.info('Added key: {} to store for rank: {}'.format(store_key, rank))
 
     # Now wait for all workers to check in with the store.
     world_size = get_world_size()
@@ -205,7 +210,7 @@ def _store_based_barrier(rank, store, timeout):
 
         # Print status periodically to keep track.
         if timedelta(seconds=(time.time() - log_time)) > timedelta(seconds=10):
-            logging.info(
+            logger.info(
                 "Waiting in store based barrier to initialize process group for "
                 "rank: {}, key: {} (world_size={}, worker_count={}, timeout={})".format(
                     rank, store_key, world_size, worker_count, timeout))
@@ -397,7 +402,8 @@ def init_process_group(backend,
                        world_size=-1,
                        rank=-1,
                        store=None,
-                       group_name=''):
+                       group_name='',
+                       pg_options=None):
     """
     Initializes the default distributed process group, and this will also
     initialize the distributed package.
@@ -451,9 +457,17 @@ def init_process_group(backend,
             might result in subsequent CUDA operations running on corrupted
             data. Only one of these two environment variables should be set.
         group_name (str, optional, deprecated): Group name.
+        pg_options (ProcessGroupOptions, optional): process group options
+            specifying what additional options need to be passed in during
+            the construction of specific process groups. i.e. for the ``nccl``
+            backend, ``is_high_priority_stream`` can be specified so that
+            process group can pick up high priority cuda streams.
 
-    To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
-    on a system that supports MPI.
+    .. note:: Note that if passing in pg_options and set the ``pg_options.timeout``,
+        it will override the default timeout of the ``timeout`` argument.
+
+    .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
+        on a system that supports MPI.
 
     """
     global _pg_group_ranks
@@ -509,6 +523,7 @@ def init_process_group(backend,
             [],
             backend,
             store,
+            pg_options=pg_options,
             group_name=group_name,
             timeout=timeout))
 
@@ -532,6 +547,7 @@ def _new_process_group_helper(world_size,
                               group_ranks,
                               backend,
                               store,
+                              pg_options=None,
                               group_name=None,
                               timeout=default_pg_timeout):
     """
@@ -558,6 +574,11 @@ def _new_process_group_helper(world_size,
     if not isinstance(timeout, timedelta):
         raise RuntimeError("Expected timeout argument to be of type"
                            "datetime.timedelta")
+
+    if pg_options is not None and timeout != default_pg_timeout and pg_options.timeout != timeout:
+        raise RuntimeError("The timeout argument and timeout value defined in pg_options"
+                           " are conflicting, they have to be the same when manually"
+                           " passing in both arguments.")
 
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = (len(group_ranks) == 0)
@@ -588,22 +609,52 @@ def _new_process_group_helper(world_size,
         prefix_store = PrefixStore(group_name, store)
 
         if backend == Backend.GLOO:
+            if pg_options is not None:
+                assert isinstance(pg_options, ProcessGroupGloo.Options), \
+                    "Expected pg_options argument to be of type ProcessGroupGloo.Options"
+            else:
+                pg_options = ProcessGroupGloo.Options()
+                pg_options.timeout = timeout
+
+            # If user forget to set devices, we should do it by default
+            if not pg_options._devices:
+                ifname_env = getenv("GLOO_SOCKET_IFNAME")
+                if ifname_env is not None:
+                    pg_options._devices = [ProcessGroupGloo.create_device(interface=iface) for iface in ifname_env.split(",")]
+                else:
+                    pg_options._devices = [ProcessGroupGloo.create_default_device()]
+
+                # user pass in threads but not devices, error that both are required
+                if pg_options._threads != 2:
+                    raise RuntimeError("ProcessGroupGloo.Options threads and devices must be passed in together")
+                else:
+                    pg_options._threads = len(pg_options._devices) * 2
+
             pg = ProcessGroupGloo(
                 prefix_store,
                 rank,
                 world_size,
-                timeout=timeout)
+                pg_options)
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif backend == Backend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL "
                                    "built in")
+            if pg_options is not None:
+                assert isinstance(pg_options, ProcessGroupNCCL.Options), \
+                    "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
+            else:
+                # default pg_options for NCCL
+                pg_options = ProcessGroupNCCL.Options()
+                pg_options.is_high_priority_stream = False
+                pg_options.timeout = timeout
+
             pg = ProcessGroupNCCL(
                 prefix_store,
                 rank,
                 world_size,
-                timeout)
+                pg_options)
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
@@ -1070,7 +1121,7 @@ def all_reduce_multigpu(tensor_list,
     tensors should only be GPU tensors
 
     Args:
-        tensor list (List[Tensor]): List of input and output tensors of
+        tensor_list (List[Tensor]): List of input and output tensors of
             the collective. The function operates in-place and requires that
             each tensor to be a GPU tensor on different GPUs.
             You also need to make sure that ``len(tensor_list)`` is the same for
@@ -2429,8 +2480,73 @@ def barrier(group=GroupMember.WORLD,
     else:
         work.wait()
 
+def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=False):
+    """
+    Synchronizes all processes similar to torch.distributed.barrier, but takes
+    a configurable timeout and is able to report ranks that did not pass this
+    barrier within that timeout. Specifically, for non-zero ranks, will block
+    until a send/recv is processed from rank 0. Rank 0 will block until all send
+    /recv from other ranks are processed, and will report failures for ranks
+    that failed to respond in time. Note that if one rank does not reach the
+    monitored_barrier (for example due to a hang), all other ranks would fail
+    in monitored_barrier.
 
-def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
+    This collective will block all processes/ranks in the group, until the
+    whole group exits the function successfully, making it useful for debugging
+    and synchronizing. However, it can have a performance impact and should only
+    be used for debugging or scenarios that require full synhcronization points
+    on the host-side. For debugging purposees, this barrier can be inserted
+    before the application's collective calls to check if any ranks are
+    desynchronized.
+
+    .. note:: Note that this collective is only supported with the GLOO backend.
+
+    Args:
+        group (ProcessGroup, optional): The process group to work on. If
+            ``None``, the default process group will be used.
+        timeout (datetime.timedelta, optional): Timeout for monitored_barrier.
+            If ``None``, the default process group timeout will be used.
+        wait_all_ranks (bool, optional): Whether to collect all failed ranks or
+            not. By default, this is ``False`` and ``monitored_barrier`` on rank 0
+            will throw on the first failed rank it encounters in order to fail
+            fast. By setting ``wait_all_ranks=True`` ``monitored_barrier`` will
+            collect all failed ranks and throw an error containing information
+            about all failed ranks.
+
+    Returns:
+        ``None``.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> if dist.get_rank() != 1:
+        >>>     dist.monitored_barrier() # Raises exception indicating that
+        >>> # rank 1 did not call into monitored_barrier.
+        >>> # Example with wait_all_ranks=True
+        >>> if dist.get_rank() == 0:
+        >>>     dist.monitored_barrier(wait_all_ranks=True) # Raises exception
+        >>> # indicating that ranks 1, 2, ... world_size - 1 did not call into
+        >>> # monitored_barrier.
+    """
+
+    # Need to call rank not in group before using the group, otherwise
+    # "Invalid process group" error is raised.
+    if _rank_not_in_group(group):
+        return
+
+    if get_backend(group) != Backend.GLOO:
+        raise RuntimeError(
+            "monitored_barrier is only implemented for GLOO backend."
+        )
+
+    if timeout is None:
+        timeout = default_pg_timeout
+
+    group_to_use = _get_default_group() if group is None else group
+    return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
+
+
+def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
     """
     Creates a new distributed group.
 
@@ -2455,13 +2571,35 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
             set to all ranks. Default is ``None``.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
-            This is only applicable for the ``gloo`` backend.
+            This is applicable for the ``gloo`` backend. For ``nccl``, this is
+            applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
+            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1. When
+            ``NCCL_BLOCKING_WAIT`` is set, this is the duration for which the
+            process will block and wait for collectives to complete before
+            throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
+            this is the duration after which collectives will be aborted
+            asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
+            will provide errors to the user which can be caught and handled,
+            but due to its blocking nature, it has a performance overhead. On
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has very little
+            performance overhead, but crashes the process on errors. This is
+            done since CUDA execution is async and it is no longer safe to
+            continue executing user code since failed async NCCL operations
+            might result in subsequent CUDA operations running on corrupted
+            data. Only one of these two environment variables should be set.
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values are ``gloo`` and ``nccl``.
             By default uses the same backend as the global group. This field
             should be given as a lowercase string (e.g., ``"gloo"``), which can
             also be accessed via :class:`Backend` attributes (e.g.,
-            ``Backend.GLOO``).
+            ``Backend.GLOO``). If ``None`` is passed in, the backend
+            corresponding to the default process group will be used. Default is
+            ``None``.
+        pg_options (ProcessGroupOptions, optional): process group options
+            specifying what additional options need to be passed in during
+            the construction of specific process groups. i.e. for the ``nccl``
+            backend, is_high_priority_stream can be specified so that process
+            group can pick up high priority cuda streams.
 
     Returns:
         A handle of distributed group that can be given to collective calls.
@@ -2508,6 +2646,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
                                    ranks,
                                    backend,
                                    default_store,
+                                   pg_options=pg_options,
                                    timeout=timeout)
 
     # Create the global rank to group rank mapping

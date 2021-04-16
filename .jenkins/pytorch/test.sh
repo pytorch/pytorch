@@ -7,6 +7,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
@@ -20,6 +21,15 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  # Used so that only cuda specific versions of tests are generated
+  # mainly used so that we're not spending extra cycles testing cpu
+  # devices on expensive gpu machines
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
+elif [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="xla"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
@@ -174,7 +184,7 @@ test_without_numpy() {
 # which transitively includes tbb.h which is not available!
 if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
   sudo mkdir -p /usr/include/tbb
-  sudo cp -r $PWD/third_party/tbb/include/tbb/* /usr/include/tbb
+  sudo cp -r "$PWD"/third_party/tbb/include/tbb/* /usr/include/tbb
 fi
 
 test_libtorch() {
@@ -333,6 +343,7 @@ test_backward_compatibility() {
   set -x
   pushd test/backward_compatibility
   python -m venv venv
+  # shellcheck disable=SC1091
   . venv/bin/activate
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch
@@ -385,7 +396,7 @@ test_vec256() {
     vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
     for vec256_exec in $vec256_tests
     do
-      $vec256_exec --gtest_output=xml:test/test-reports/vec256/$vec256_exec.xml
+      $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
     done
     popd
     assert_git_not_dirty
@@ -433,12 +444,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
-elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
-  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure
-  # cpp extension can be built correctly under this old env
-  test_cpp_extensions
 else
   install_torchvision
+  install_monkeytype
   test_python
   test_aten
   test_vec256
