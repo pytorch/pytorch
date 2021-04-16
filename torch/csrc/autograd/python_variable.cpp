@@ -159,17 +159,14 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
 static int THPVariable_clear(THPVariable *self)
 {
   Py_CLEAR(self->backward_hooks);
-  const auto& tensor = THPVariable_Unpack(self);
-  if (tensor.defined()) {
-    if (auto grad_acc = torch::autograd::impl::try_get_grad_accumulator(tensor)) {
-      grad_acc->pre_hooks().clear();
+  if (!self->cdata.unsafeIsBorrowed()) {
+    const auto& tensor = THPVariable_Unpack(self);
+    if (tensor.defined()) {
+      TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->owns_pyobj());
+      if (auto grad_acc = torch::autograd::impl::try_get_grad_accumulator(tensor)) {
+        grad_acc->pre_hooks().clear();
+      }
     }
-
-    // Before we deallocate the C++ variable proper, manually clear out the pyobj.
-    // Technically, this should not be necessary, as tensor is not supposed to
-    // own the pyobj, but stranger things could happen.
-    tensor.unsafeGetTensorImpl()->set_owns_pyobj(false);
-    set_pyobj(tensor, nullptr);
   }
   self->cdata = MaybeOwned<Variable>();
   return 0;
