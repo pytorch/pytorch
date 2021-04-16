@@ -895,7 +895,8 @@ Examples::
 multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
 linalg.multi_dot(tensors, *, out=None)
 
-Efficiently multiplies two or more matrices by reordering the multiplications so that the fewest arithmetic operations are performed.
+Efficiently multiplies two or more matrices by reordering the multiplications so that 
+the fewest arithmetic operations are performed.
 
 Every tensor in :attr:`tensors` must be 2D, except for the first and last which
 may be 1D. If the first tensor is a 1D vector of size `n` it is treated as a row vector
@@ -955,7 +956,7 @@ Examples::
     >>> multi_dot((a.to(torch.float), torch.empty(3, 0), torch.empty(0, 2)))
     tensor([[0., 0.],
             [0., 0.]])
-""")  # no qa
+""")
 
 norm = _add_docstr(_linalg.linalg_norm, r"""
 linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
