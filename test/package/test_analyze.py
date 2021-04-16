@@ -23,5 +23,17 @@ class TestAnalyze(PackageTestCase):
         self.assertNotIn("yaml", used_modules)
         self.assertIn("test_trace_dep", used_modules)
 
+    def test_dependency_explorer(self):
+        de = analyze.DependencyExplorer("test_dependency_explorer")
+
+        self.assertFalse(de.can_package())
+        de.extern(["numpy.**.**", "scipy.**.**", "_sentencepiece", "mkl_random.mklrand"])
+        self.assertFalse(de.can_package())
+        unresolved_dependencies = [mod.name for mod in de.get_unresolved_dependencies()]
+        self.assertIn("_io", unresolved_dependencies)
+        self.assertIn("sys", unresolved_dependencies)
+        de.extern(["_io", "sys"])
+        self.assertTrue(de.can_package())
+
 if __name__ == "__main__":
     run_tests()
