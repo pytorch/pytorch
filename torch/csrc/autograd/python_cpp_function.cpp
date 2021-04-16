@@ -43,7 +43,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
     if (!THPVariable_Check(arg)) {
       return PyErr_Format(PyExc_TypeError, "argument %d is not a Variable", i);
     }
-    vars[i] = ((THPVariable*)arg)->cdata;
+    vars[i] = THPVariable_Unpack(arg);
   }
 
   variable_list output;
@@ -143,7 +143,7 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
   auto var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
   std::unique_ptr<FunctionPreHook> hook(
-      new PyFunctionPreHook(var->backward_hooks, var->cdata.output_nr()));
+      new PyFunctionPreHook(var->backward_hooks, THPVariable_Unpack(var).output_nr()));
   fn.add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
 }
