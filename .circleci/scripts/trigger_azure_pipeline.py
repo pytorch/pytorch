@@ -107,7 +107,8 @@ if __name__ == '__main__':
     else:
         SOURCE_BRANCH = f'refs/heads/{TARGET_BRANCH}'
 
-    retry = 2
+    MAX_RETRY = 3
+    retry = MAX_RETRY
 
     while retry > 0:
         build_id = submit_build(PIPELINE_ID, PROJECT_ID, SOURCE_BRANCH)
@@ -118,7 +119,7 @@ if __name__ == '__main__':
             if retry > 0:
                 print("Retrying... remaining attempt: " + str(retry))
                 # Wait a bit before retrying
-                time.sleep(120)
+                time.sleep((MAX_RETRY - retry) * 120)
                 continue
             else:
                 print("No more chance to retry. Giving up.")
