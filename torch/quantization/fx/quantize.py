@@ -504,7 +504,7 @@ def handle_copy_nodes(
                         # we delete `obs`, because user_node_unmatched is not quantizeable,
                         # and the input to copy_node_matched does not need observation.
                         if in_nodes(prev_prev_node, unmatched_nodes):
-                            app_to_remove.add(prev_node)
+                            actpp_to_remove.add(prev_node)
                             observed_nodes.remove(prev_node)
                         else:
                             observed_nodes.add(node)
