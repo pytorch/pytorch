@@ -575,6 +575,17 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
+TEST(LiteInterpreterTest, BackPortByteCodeModel) {
+  // Load check in model: sequence.ptl
+  std::string filePath(__FILE__);
+  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  testModelFile.append("test_backport_v4.ptl");
+  Module m = load(testModelFile);
+  m._backport_for_mobile("output.ptl");
+//  _backport_for_mobile(testModelFile, "output_backport.ptl");
+//  mobile::Module bc = _load_for_mobile(testModelFile);
+}
+
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
   a.define(R"JIT(

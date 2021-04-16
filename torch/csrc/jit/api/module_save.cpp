@@ -37,5 +37,17 @@ void Module::_save_for_mobile(
       save_mobile_debug_info);
 }
 
+void Module::_backport_for_mobile(
+    const std::string& filename,
+    const ExtraFilesMap& extra_files,
+    bool save_mobile_debug_info) const {
+  BackPortByteCode(
+      *this,
+      filename,
+      extra_files,
+      true /* bytecode_format */,
+      save_mobile_debug_info);
+}
+
 } // namespace jit
 } // namespace torch

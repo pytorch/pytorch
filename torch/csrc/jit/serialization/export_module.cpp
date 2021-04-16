@@ -654,6 +654,30 @@ void ExportModule(
       module, extra_files, bytecode_format, save_mobile_debug_info);
 }
 
+void BackPortByteCode(
+    const Module& module,
+    const std::string& filename,
+    const ExtraFilesMap& extra_files,
+    bool bytecode_format,
+    bool save_mobile_debug_info) {
+
+  ScriptModuleSerializer serializer(filename);
+  serializer.serialize(
+      module, extra_files, bytecode_format, save_mobile_debug_info);
+}
+
+void BackPortByteCodeToVersion(
+    const Module& module,
+    const std::string& filename,
+    const uint64_t to_version,
+    const ExtraFilesMap& extra_files,
+    bool bytecode_format,
+    bool save_mobile_debug_info) {
+  ScriptModuleSerializer serializer(filename);
+  serializer.serialize(
+      module, extra_files, bytecode_format, save_mobile_debug_info);
+}
+
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
