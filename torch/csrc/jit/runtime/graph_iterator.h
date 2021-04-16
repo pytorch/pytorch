@@ -115,6 +115,5 @@ class DepthFirstGraphNodeIterator {
   }
 };
 
-
 } // namespace jit
 } // namespace torch
