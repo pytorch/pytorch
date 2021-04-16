@@ -3,7 +3,7 @@ from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
                                  SelfArgument, TensorOptionsArguments, Type,
                                  assert_never)
 
-from tools.codegen.api.types import (ArgName, BaseCType, Binding,
+from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      ConstRefCType, CType, OptionalCType)
 from tools.codegen.api import cpp
 
@@ -56,7 +56,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
         elif str(t.elem) == 'Dimname':
             return BaseCType("DimnameList", binds)
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
-        return BaseCType(f"ArrayRef<{elem.cpp_type()}>", binds)
+        return ArrayRefCType(BaseCType(elem.cpp_type(), binds))
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
