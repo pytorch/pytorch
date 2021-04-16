@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/passes/metal_rewrite.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
-#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
@@ -176,11 +175,6 @@ void metalInsertCopyOps(script::Module& module) {
   rewriter.runOnGraph(graph);
 }
 
-void removeMutation(script::Module& module) {
-  auto graph = module.get_method("forward").graph();
-  RemoveTensorMutation(graph);
-}
-
 void runCanonicalOptimizations(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   runOptimization(graph, false /* no loop unrolling */);
@@ -198,7 +192,6 @@ script::Module metalOptimizeForMobile(
   metalFoldPrePackingOps(cloned_module);
   metalInsertCopyOps(cloned_module);
   removeDropout(cloned_module);
-  removeMutation(cloned_module);
   // remove duplicated constants
   runCanonicalOptimizations(cloned_module);
   cloned_module.register_attribute(
