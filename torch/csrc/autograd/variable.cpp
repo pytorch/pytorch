@@ -645,14 +645,13 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     } else {
       if (creation_meta == CreationMeta::NO_GRAD_MODE) {
         TORCH_INTERNAL_ASSERT(!grad_fn);
-        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is deprecated and will be forbidden"
-                       "  starting 1.6 (see https://github.com/pytorch/pytorch/pull/32839 for more details about this). You"
-                       " can clarify your code and remove this warning by moving both the view and the inplace either both"
+        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is forbidden."
+                       " You can clarify your code and remove this warning by moving both the view and the inplace either both"
                        " inside the no_grad block (if you don't want the inplace to be tracked) or both outside (if you want"
                        " the inplace to be tracked).");
       } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
         TORCH_INTERNAL_ASSERT(!grad_fn);
-        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is forbidden. "
+        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is forbidden."
                        " You can clarify your code by moving both the view and the inplace either both"
                        " inside the inference_mode block (if you don't want the inplace to be tracked) or both outside (if you want"
                        " the inplace to be tracked).");
@@ -660,27 +659,18 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
       } else if (creation_meta == CreationMeta::IN_CUSTOM_FUNCTION) {
         msg = c10::str(msg, " This view was created inside a custom Function (or because an input was returned as-is) and the"
                        " autograd logic to handle view+inplace would override the custom backward associated with the custom"
-                       " Function, leading to incorrect gradients. This behavior is deprecated and will be forbidden starting"
-                       " version 1.6. You can remove this warning by cloning the output of the custom Function.");
+                       " Function, leading to incorrect gradients. This behavior is forbidden. You can remove this warning by"
+                       " cloning the output of the custom Function.");
       } else if (creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
         msg = c10::str(msg, " This view is an output of a function that "
                        "returns multiple views. Inplace operators on such "
-                       "views are being deprecated and will be forbidden "
-                       "starting from version 1.8. Consider using `unsafe_` "
-                       "version of the function that produced this view or "
-                       "don't modify this view inplace.");
+                       "views is forbidden. You should replace the inplace "
+                       "operation by an out-of-place one.");
       } else {
         TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
       }
 
-      if (!indirect && !grad_fn && diff_view_meta->requires_grad()) {
-        // This view is (wrongly) detected as a leaf that requires grad and would raise the surprising: "a leaf Variable that
-        // requires grad is being used in an in-place operation." after the warning from the `check_inplace` function in
-        // VariabbleTypeUtils.h. So we make the warning an error directly.
-        TORCH_CHECK(false, msg);
-      } else {
-        TORCH_WARN(msg);
-      }
+      TORCH_CHECK(false, msg);
     }
 
     // We warn only once per view
