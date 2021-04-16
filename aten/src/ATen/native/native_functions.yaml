@@ -297,15 +297,15 @@
 
 - func: acos(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: acos
+  structured_delegate: acos.out
 
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: acos_
+  structured_delegate: acos.out
 
 - func: acos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: acos_out
 
@@ -378,24 +378,18 @@
     CompositeExplicitAutograd: add_
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  structured_delegate: addmv.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: addmv
 
 - func: addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  structured_delegate: addmv.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: addmv_
 
 - func: addmv.out(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU, CUDA: addmv_out
-
-
-- func: _addmv_impl_(Tensor(a!) self, Tensor self2, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  dispatch:
-    CPU: addmv_impl_cpu
-    CUDA: addmv_impl_cuda
+    CPU: addmv_out_cpu
+    CUDA: addmv_out_cuda
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -515,15 +509,15 @@
 
 - func: asinh(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: asinh
+  structured_delegate: asinh.out
 
 - func: asinh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: asinh_
+  structured_delegate: asinh.out
 
 - func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: asinh_out
 
@@ -537,16 +531,16 @@
 - func: arcsinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: atanh(Tensor self) -> Tensor
+  structured_delegate: atanh.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: atanh
 
 - func: atanh_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: atanh.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: atanh_
 
 - func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: atanh_out
 
@@ -574,17 +568,19 @@
 
 - func: asin(Tensor self) -> Tensor
   variants: function, method
+  structured_delegate: asin.out
   dispatch:
-    CPU, CUDA: asin
     SparseCPU, SparseCUDA: asin_sparse
 
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+  structured_delegate: asin.out
   dispatch:
-    CPU, CUDA: asin_
     SparseCPU, SparseCUDA: asin_sparse_
 
 - func: asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: asin_out
     SparseCPU, SparseCUDA: asin_out_sparse
@@ -599,16 +595,16 @@
 - func: arcsin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: atan(Tensor self) -> Tensor
+  structured_delegate: atan.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: atan
 
 - func: atan_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: atan.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: atan_
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: atan_out
 
@@ -1560,72 +1556,72 @@
     Meta: empty_strided_meta
 
 - func: erf(Tensor self) -> Tensor
+  structured_delegate: erf.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: erf
 
 - func: erf_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: erf.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: erf_
 
 - func: erf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: erf_out
 
 - func: erfc(Tensor self) -> Tensor
+  structured_delegate: erfc.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: erfc
 
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: erfc.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: erfc_
 
 - func: erfc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: erfc_out
 
 - func: exp(Tensor self) -> Tensor
+  structured_delegate: exp.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: exp
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: exp.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: exp_
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: exp_out
 
 - func: exp2(Tensor self) -> Tensor
+  structured_delegate: exp2.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: exp2
 
 - func: exp2_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: exp2.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: exp2_
 
 - func: exp2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: exp2_out
 
 - func: expm1(Tensor self) -> Tensor
+  structured_delegate: expm1.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: expm1
 
 - func: expm1_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: expm1.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: expm1_
 
 - func: expm1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: expm1_out
 
@@ -2097,61 +2093,63 @@
     CUDA: linspace_cuda_out
 
 - func: log(Tensor self) -> Tensor
+  structured_delegate: log.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: log
 
 - func: log_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: log.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: log_
 
 - func: log.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: log_out
 
 - func: log10(Tensor self) -> Tensor
+  structured_delegate: log10.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: log10
 
 - func: log10_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: log10.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: log10_
 
 - func: log10.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: log10_out
 
 - func: log1p(Tensor self) -> Tensor
+  structured_delegate: log1p.out
   variants: function, method
   dispatch:
-    CPU, CUDA: log1p
     SparseCPU, SparseCUDA: log1p_sparse
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: log1p.out
   variants: function, method
   dispatch:
-    CPU, CUDA: log1p_
     SparseCPU, SparseCUDA: log1p_sparse_
 
 - func: log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: log1p_out
     SparseCPU, SparseCUDA: log1p_out_sparse
 
 - func: log2(Tensor self) -> Tensor
+  structured_delegate: log2.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: log2
 
 - func: log2_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: log2.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: log2_
 
 - func: log2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: log2_out
 
@@ -2945,16 +2943,16 @@
   variants: function, method
 
 - func: reciprocal(Tensor self) -> Tensor
+  structured_delegate: reciprocal.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: reciprocal
 
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: reciprocal.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: reciprocal_
 
 - func: reciprocal.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: reciprocal_out
 
@@ -3153,19 +3151,21 @@
     CompositeImplicitAutograd: math_silu_backward
 
 - func: sigmoid(Tensor self) -> Tensor
+  structured_delegate: sigmoid.out
   variants: function, method
   dispatch:
-    CPU, CUDA: sigmoid
     QuantizedCPU: sigmoid_quantized_cpu
     MkldnnCPU: mkldnn_sigmoid
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: sigmoid.out
   variants: function, method
   dispatch:
-    CPU, CUDA: sigmoid_
     MkldnnCPU: mkldnn_sigmoid_
 
 - func: sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sigmoid_out
 
@@ -3447,17 +3447,18 @@
   device_guard: False
 
 - func: sqrt(Tensor self) -> Tensor
+  structured_delegate: sqrt.out
   variants: function, method
   dispatch:
-    CPU, CUDA: sqrt
     SparseCPU, SparseCUDA: sqrt_sparse
 
 - func: sqrt_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: sqrt.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: sqrt_
 
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sqrt_out
     SparseCPU, SparseCUDA: sqrt_out_sparse
@@ -3536,33 +3537,34 @@
     CompositeExplicitAutograd: t_
 
 - func: tan(Tensor self) -> Tensor
+  structured_delegate: tan.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: tan
 
 - func: tan_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: tan.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: tan_
 
 - func: tan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: tan_out
 
 - func: tanh(Tensor self) -> Tensor
+  structured_delegate: tanh.out
   variants: function, method
   dispatch:
-    CPU, CUDA: tanh
     QuantizedCPU: tanh_quantized_cpu
     MkldnnCPU: mkldnn_tanh
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: tanh.out
   variants: function, method
   dispatch:
     MkldnnCPU: mkldnn_tanh_
-    CompositeExplicitAutograd: tanh_
-
 - func: tanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: tanh_out
 
@@ -5029,9 +5031,8 @@
     CUDA: triu_cuda_
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: digamma.out
   variants: method
-  dispatch:
-    CPU, CUDA: digamma_
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   variants: method
@@ -5771,27 +5772,28 @@
     CPU, CUDA: multinomial
 
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: lgamma_out
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: lgamma.out
   variants: method
-  dispatch:
-    CPU, CUDA: lgamma_
 
 - func: lgamma(Tensor self) -> Tensor
+  structured_delegate: lgamma.out
   variants: method, function
-  dispatch:
-    CPU, CUDA: lgamma
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: digamma_out
 
 - func: digamma(Tensor self) -> Tensor
+  structured_delegate: digamma.out
   variants: method, function
-  dispatch:
-    CPU, CUDA: digamma
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5803,16 +5805,16 @@
     CompositeExplicitAutograd: polygamma
 
 - func: erfinv(Tensor self) -> Tensor
+  structured_delegate: erfinv.out
   variants: method, function
-  dispatch:
-    CPU, CUDA: erfinv
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: erfinv.out
   variants: method
-  dispatch:
-    CPU, CUDA: erfinv_
 
 - func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: erfinv_out
 
@@ -8361,12 +8363,13 @@
 #   The "special_" names should be hidden from the user and not documented.
 
 - func: special_entr(Tensor self) -> Tensor
+  structured_delegate: special_entr.out
   python_module: special
   variants: function
-  dispatch:
-    CPU, CUDA: special_entr
 
 - func: special_entr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   python_module: special
   variants: function
   dispatch:
@@ -8417,6 +8420,18 @@
 
 - func: special_erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
+
+- func: special_i0e(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_i0e.out
+
+- func: special_i0e.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_i0e_out
 
 - func: special_logit(Tensor self, float? eps=None) -> Tensor
   python_module: special
