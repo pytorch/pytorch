@@ -211,18 +211,6 @@ bool matmulIsSupported(const torch::jit::Node* node) {
 } // namespace jit
 } // namespace torch
 
-static bool isHalfTensor(const torch::jit::Value* v) {
-  auto const& tt = v->type()->cast<TensorType>();
-  if (!tt) {
-    return false;
-  }
-  auto const& st = tt->scalarType();
-  if (!st) {
-    return false;
-  }
-  return *st == c10::ScalarType::Half;
-}
-
 size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   if (idx < 0) {
     // Handle negative indexing
@@ -1825,7 +1813,7 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
 
   l.prepareForCodegen();
 
-  if (backendType == kLLVMCodeGen && !hasReduction && !hasHalf_) {
+  if (backendType == kLLVMCodeGen && !hasReduction) {
     l.vectorizeInnerLoops();
   }
 
@@ -2101,6 +2089,10 @@ Tensor* TensorExprKernel::computeMatmul(const torch::jit::Value* v) {
   const IntImm* total_size = dynamic_cast<const IntImm*>(
       IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
 
+  // For small sizes, where N*M*K < 1000, lower matmul to a naive 3-level
+  // loopnest. The number is not tuned very carefully, and in future we should
+  // fine-tune it as well as we should add more advanced native TE lowerings for
+  // matmuls.
   if (total_size && total_size->value() < 1000) {
     return Reduce(
         "nnc_matmul",
@@ -2532,7 +2524,6 @@ void TensorExprKernel::compile() {
   nInputs_ = graph_->inputs().size();
   genInputDebugNames();
   for (auto const& input : graph_->inputs()) {
-    hasHalf_ |= isHalfTensor(input);
     bindInput(input);
     inputTypes_.push_back(input->type());
     if (input->type()->kind() == TypeKind::TensorType) {
@@ -2546,7 +2537,6 @@ void TensorExprKernel::compile() {
       continue;
     } else {
       for (auto const& output : n->outputs()) {
-        hasHalf_ |= isHalfTensor(output);
         if (output->hasUses()) {
           tensors_.emplace(output, computeValue(output));
           block->append_stmt(tensors_.at(output)->stmt());
