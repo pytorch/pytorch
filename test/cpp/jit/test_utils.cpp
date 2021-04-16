@@ -94,6 +94,17 @@ std::shared_ptr<Graph> build_lstm() {
 }
 
 std::shared_ptr<Graph> build_mobile_export_analysis_graph() {
+  // We use following two schemas for this graph:
+  //   1. slice.Tensor(Tensor(a) self, int dim=0, int? start=0,
+  //                   int? end=9223372036854775807, int step=1) -> Tensor(a)
+  //   2. slice.str(str string, int? start=0, int? end=9223372036854775807,
+  //                  int step=1) -> str
+  // %3 and %4 use slice.Tensor while %5 use slice.str.
+  // Since we can see %3 and %4 have the same last argument that is never used
+  // (same as default value of schema), we know we can ignore that last arg. For
+  // %5, we see that last three args are same as schema default, hence
+  // unnecessary.
+
   const auto graph_string = R"IR(
     graph(%0 : Tensor):
       %1 : int = prim::Constant[value=1]()
@@ -105,6 +116,50 @@ std::shared_ptr<Graph> build_mobile_export_analysis_graph() {
       %4 : Tensor = aten::slice(%0, %2, %20, %21, %1)
       %5 : str = aten::slice(%22, %20, %21, %1)
       return (%3, %4, %5))IR";
+
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->lint();
+  return g;
+}
+
+std::shared_ptr<Graph> build_mobile_export_analysis_graph_nested() {
+  // this is pretty much same test as build_mobile_export_analysis_graph(),
+  // but some aten::slice operators are hidden under block statement to check
+  // if we are correctly recursing all the nodes in graph.
+  const auto graph_string = R"IR(
+    graph(%0 : Tensor):
+      %1 : int = prim::Constant[value=1]()
+      %2 : int = prim::Constant[value=2]()
+      %20 : int = prim::Constant[value=0]()
+      %21 : int = prim::Constant[value=9223372036854775807]()
+      %22 : str = prim::Constant[value="value"]()
+      %3 : Tensor  = aten::slice(%0, %1, %20, %2, %1)
+      %23 : bool = aten::Bool(%3)
+      %c : Tensor = prim::If(%23)
+        block0():
+          %4 : Tensor = aten::slice(%0, %2, %20, %21, %1)
+          %5 : str = aten::slice(%22, %20, %21, %1)
+          %c.1 : Tensor = aten::slice(%0, %1, %20, %2, %1)
+          -> (%c.1)
+        block1():
+          -> (%3)
+      return (%3, %3))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->lint();
+  return g;
+}
+
+std::shared_ptr<Graph> build_mobile_export_analysis_graph_with_vararg() {
+  const auto graph_string = R"IR(
+    graph(%0 : Tensor):
+      %1 : int = prim::Constant[value=1]()
+      %2 : int = prim::Constant[value=2]()
+      %3 : int = prim::Constant[value=3]()
+      %4 : int[]  = prim::tolist(%1, %2)
+      %5 : int[] = prim::tolist(%1, %2, %3)
+      return (%4, %5))IR";
 
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());

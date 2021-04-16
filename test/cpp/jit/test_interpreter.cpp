@@ -144,19 +144,22 @@ TEST(InterpreterTest, Basic_CUDA) {
   ASSERT_TRUE(exactlyEqual(outputs[1], cx));
 }
 
-TEST(InterpreterTest, IgnoreTrailArgs) {
-  constexpr int batch_size = 4;
-  constexpr int input_size = 256;
-  constexpr int seq_len = 32;
-
-  int hidden_size = 2 * input_size;
-
-  auto input1 = at::randn({seq_len, batch_size, input_size}, at::kCPU);
-  auto input2 = at::randn({batch_size, hidden_size}, at::kCPU);
-
+TEST(InterpreterTest, IgnorableArgsInSchema) {
   auto graph = build_mobile_export_analysis_graph();
   Code function(graph, "", true);
   auto op_to_unnecessary_args = function.op_to_unnecessary_args();
+  ASSERT_TRUE(op_to_unnecessary_args["aten::slice.Tensor"] == 1);
+  ASSERT_TRUE(op_to_unnecessary_args["aten::slice.str"] == 3);
+
+  auto graph_vararg = build_mobile_export_analysis_graph_with_vararg();
+  Code function_vararg(graph_vararg, "", true);
+  auto op_to_unnecessary_args_vararg = function_vararg.op_to_unnecessary_args();
+  // should always be 0 for schemas with varargs (ie ...)
+  ASSERT_TRUE(op_to_unnecessary_args_vararg["prim::tolist"] == 0);
+
+  auto graph_nested = build_mobile_export_analysis_graph_nested();
+  Code function_nested(graph_nested, "", true);
+  auto op_to_unnecessary_args_nested = function_nested.op_to_unnecessary_args();
   ASSERT_TRUE(op_to_unnecessary_args["aten::slice.Tensor"] == 1);
   ASSERT_TRUE(op_to_unnecessary_args["aten::slice.str"] == 3);
 }

@@ -480,6 +480,15 @@ struct CodeImpl {
   std::unordered_map<Value*, int> value_to_reg_;
 
   // map from operator name to trailing unnecessary inputs
+  // Example: for a schema of aten::foo.str
+  // aten::foo.str(arg0: str="default", arg1: int=0,
+  //               arg2: bool=False, arg3: float=0.0)
+  // If the usages in a graph is:
+  //    aten::foo("somestr", arg1=0, arg2=False, arg3=0.0)
+  //    aten::foo("somestr", arg1=1, arg2=False, arg3=0.0)
+  // op_to_unnecessary_args_["aten::foo.str"] = 2
+  // This is because for all usages, last two args are not used. (e.g. same
+  // value as default schema value)
   std::unordered_map<std::string, int> op_to_unnecessary_args_;
 
   // running count of uses as we emit. When we reach use_count_[v] =
@@ -540,7 +549,9 @@ struct CodeImpl {
         auto op_schema = node->getOperator().schema();
         auto numIgnore = calculate_trailing_unnecessary_args(
             op_schema.arguments(), node->inputs(), op_schema.is_vararg());
-        auto unique_name = op_schema.name() + "." + op_schema.overload_name();
+        auto unique_name = op_schema.overload_name() != ""
+            ? op_schema.name() + "." + op_schema.overload_name()
+            : op_schema.name();
         auto it = op_to_trailing_ignore.insert(
             std::pair<std::string, std::vector<int>>(
                 unique_name, std::vector<int>()));
@@ -729,8 +740,9 @@ struct CodeImpl {
 
   void emitOperator(Node* node) {
     const Operator& op = node->getOperator();
-    auto unique_op_name =
-        op.schema().name() + "." + op.schema().overload_name();
+    auto unique_op_name = op.schema().overload_name() != ""
+        ? op.schema().name() + "." + op.schema().overload_name()
+        : op.schema().name();
     auto min_ignore = 0;
     // make sure we only do this for mobile code
     if (from_mobile_ &&

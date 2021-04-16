@@ -37,6 +37,8 @@ std::pair<tensor_list, tensor_list> runGradient(
 
 std::shared_ptr<Graph> build_lstm();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph();
+std::shared_ptr<Graph> build_mobile_export_analysis_graph_with_vararg();
+std::shared_ptr<Graph> build_mobile_export_analysis_graph_nested();
 
 at::Tensor t_use(at::Tensor x);
 at::Tensor t_def(at::Tensor x);
