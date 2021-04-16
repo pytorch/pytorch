@@ -528,7 +528,7 @@ public:
 };
 
 template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] + b[i];
   }
@@ -536,7 +536,7 @@ template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T
 }
 
 template <class T> Vec256<T> inline operator-(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] - b[i];
   }
@@ -544,7 +544,7 @@ template <class T> Vec256<T> inline operator-(const Vec256<T> &a, const Vec256<T
 }
 
 template <class T> Vec256<T> inline operator*(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] * b[i];
   }
@@ -552,7 +552,7 @@ template <class T> Vec256<T> inline operator*(const Vec256<T> &a, const Vec256<T
 }
 
 template <class T> Vec256<T> inline operator/(const Vec256<T> &a, const Vec256<T> &b) __ubsan_ignore_float_divide_by_zero__ {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] / b[i];
   }
@@ -561,7 +561,7 @@ template <class T> Vec256<T> inline operator/(const Vec256<T> &a, const Vec256<T
 
 template <class T> Vec256<T> inline operator||(
     const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] || b[i];
   }
@@ -573,7 +573,7 @@ template <class T> Vec256<T> inline operator||(
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = (a[i] > b[i]) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -589,7 +589,7 @@ Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
 template <class T,
           typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = (std::abs(a[i]) > std::abs(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -607,7 +607,7 @@ Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = (a[i] < b[i]) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -623,7 +623,7 @@ Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
 template <class T,
           typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = (std::abs(a[i]) < std::abs(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -639,7 +639,7 @@ Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = std::min(std::max(a[i], min_vec[i]), max_vec[i]);
   }
@@ -649,7 +649,7 @@ Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec25
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] > max_vec[i] ? max_vec[i] : a[i];
   }
@@ -659,7 +659,7 @@ Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
   }
