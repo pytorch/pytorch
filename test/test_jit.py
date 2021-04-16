@@ -14590,6 +14590,16 @@ dedent """
         self.checkScript(fn, ("h",))
         self.checkScript(fn, ("hello",))
 
+    def test_multiline_optional_future_refinement(self):
+        @torch.jit.script
+        def fun() -> int:
+            future: Optional[
+                torch.jit.Future[Tuple[torch.Tensor]]
+            ] = None
+
+            return 1
+        self.assertEqual(fun(), 1)
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_attribute_unpickling(self):
         tensor = torch.randn(2, 2)

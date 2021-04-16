@@ -59,12 +59,19 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
+if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
+  export BUILD_CAFFE2=OFF
+fi
+
+if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+  export ATEN_THREADING=TBB
+  export USE_TBB=1
+elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+  export ATEN_THREADING=NATIVE
+fi
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
-
-# Enable LLVM dependency for TensorExpr testing
-export USE_LLVM=/opt/llvm
-export LLVM_DIR=/opt/llvm/lib/cmake/llvm
 
 # TODO: Don't install this here
 if ! which conda; then
@@ -229,40 +236,6 @@ else
       cp build/.ninja_log dist
     fi
 
-    # Build custom operator tests.
-    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-    CUSTOM_OP_TEST="$PWD/test/custom_operator"
-    python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir "$CUSTOM_OP_BUILD"
-    pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
-
-    # Build jit hook tests
-    JIT_HOOK_BUILD="$PWD/../jit-hook-build"
-    JIT_HOOK_TEST="$PWD/test/jit_hooks"
-    python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir "$JIT_HOOK_BUILD"
-    pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
-
-    # Build custom backend tests.
-    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
-    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
-    python --version
-    mkdir "$CUSTOM_BACKEND_BUILD"
-    pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
   else
     # Test standalone c10 build
     if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
