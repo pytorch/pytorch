@@ -6,7 +6,12 @@ with open(log_file_path) as f:
     lines = f.readlines()
 
 for line in lines:
-    # Ignore errors from CPU instruction set or symbol existing testing
-    keywords = ['src.c', 'CheckSymbolExists.c']
+    # Ignore errors from CPU instruction set, symbol existing testing,
+    # or compilation error formatting
+    keywords = [
+        'src.c',
+        'CheckSymbolExists.c',
+        'test_compilation_error_formatting',
+    ]
     if all([keyword not in line for keyword in keywords]):
         print(line)
