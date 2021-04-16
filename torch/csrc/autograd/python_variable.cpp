@@ -822,13 +822,7 @@ struct THPVariableMeta {
   PyHeapTypeObject base;
 };
 
-int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
-  if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
-    return -1;
-  }
-  ((PyTypeObject*)cls)->tp_new = THPVariable_pynew;
-  return 0;
-}
+int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs);
 
 PyTypeObject THPVariableMetaType = {
   PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
@@ -914,6 +908,16 @@ PyTypeObject THPVariableType = {
   // then construct it
   nullptr,                                     /* tp_new */
 };
+
+int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
+  if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
+    return -1;
+  }
+  if (((PyTypeObject*)cls)->tp_base == &THPVariableType) {
+    ((PyTypeObject*)cls)->tp_new = THPVariable_pynew;
+  }
+  return 0;
+}
 
 namespace torch { namespace autograd {
 

@@ -2,12 +2,14 @@
 import torch
 import numpy as np
 
+import contextlib
 import io
 import inspect
 import math
 import random
 import re
 import copy
+import os
 import tempfile
 import unittest
 import warnings
@@ -31,7 +33,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIfNoMagma, skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
-    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipMeta,
+    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
+    skipCPUIfNoLapack, skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
     expectedAlertNondeterministic)
 from typing import Dict, List
@@ -2879,6 +2882,39 @@ def add_neg_dim_tests():
 
         assert not hasattr(AbstractTestCases._TestTorchMixin, test_name), "Duplicated test name: " + test_name
         setattr(AbstractTestCases._TestTorchMixin, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
+
+
+@contextlib.contextmanager
+def torch_vital_set(value):
+    stash = None
+    if 'TORCH_VITAL' in os.environ:
+        stash = os.environ['TORCH_VITAL']
+    os.environ['TORCH_VITAL'] = value
+    try:
+        yield
+    finally:
+        if stash:
+            os.environ['TORCH_VITAL'] = stash
+        else:
+            del os.environ['TORCH_VITAL']
+
+
+# Tests Vital Signs for Torch
+class TestVitalSigns(TestCase):
+    def test_basic_vitals(self):
+        with torch_vital_set(''):
+            self.assertFalse(torch.vitals_enabled())
+        with torch_vital_set('ON'):
+            self.assertTrue(torch.vitals_enabled())
+
+    def test_write_vital(self):
+        with torch_vital_set('ON'):
+            self.assertTrue(torch.vitals_enabled())
+            # This tests the code path of setting a vital
+            self.assertTrue(torch.set_vital('Dataloader', 'basic_unit_test', 'TEST'))
+            # Ideally we would have a read test for vitals, though because the the C++ design
+            # pattern of loggers we use, we can't know the whole list of vitals until the
+            # global C++ namespace is destructed.
 
 
 # Device-generic tests. Instantiated below and not run directly.
@@ -7359,7 +7395,7 @@ tensor_op_tests = [
     ('qr', 'big', _large_2d, lambda t, d: [],
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
     ('geqrf', '', _new_t((20, 20)), lambda t, d: [],
-        1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
+        1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
 ]

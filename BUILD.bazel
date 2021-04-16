@@ -508,6 +508,7 @@ filegroup(
         "aten/src/ATen/native/cuda/TensorTransformations.cu.cc",
         "aten/src/ATen/native/cuda/TriangularOps.cu.cc",
         "aten/src/ATen/native/cuda/UnaryOpsKernel.cu.cc",
+        "aten/src/ATen/native/cuda/UnarySpecialOpsKernel.cu.cc",
         "aten/src/ATen/native/cuda/Unique.cu.cc",
         "aten/src/ATen/native/cuda/UpSampleBicubic2d.cu.cc",
         "aten/src/ATen/native/cuda/UpSampleBilinear2d.cu.cc",

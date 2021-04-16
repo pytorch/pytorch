@@ -2,6 +2,7 @@ import builtins
 import contextlib
 import copy
 import functools
+import inspect
 import math
 import numbers
 import operator
@@ -2312,6 +2313,250 @@ class TestOperatorSignatures(JitTestCase):
 
         except Exception as e:
             assert op.name in known_no_schema
+
+
+class TestFunctionalTracing(JitTestCase):
+    IGNORE_FUNCS = ("has_torch_function", "has_torch_function_unary",
+                    "has_torch_function_variadic", "handle_torch_function",
+                    "boolean_dispatch")
+    TO_PATCH = {"has_torch_function": None,
+                "has_torch_function_unary": None,
+                "has_torch_function_variadic": None}
+
+    BUILT_IN_FUNC = (AssertionError, "")
+    PROXY_ITERABLE = (TypeError, r"argument of type 'Proxy' is not iterable")
+    PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
+    LEN_ERROR = (RuntimeError, r"'len' is not supported in symbolic tracing by default")
+    ARG_TYPE_MISMATCH = (TypeError, r", not Proxy$")
+    CONTROL_FLOW = (TraceError, r"symbolically traced variables cannot be used as inputs to control flow")
+    INTERPOLATE_ARGS_CONFLICT = (ValueError, r"only one of size or scale_factor should be defined")
+
+    UNTRACEABLE_FUNCTIONALS = {
+        "adaptive_avg_pool1d": BUILT_IN_FUNC,
+        "avg_pool1d": BUILT_IN_FUNC,
+        "avg_pool2d": BUILT_IN_FUNC,
+        "avg_pool3d": BUILT_IN_FUNC,
+        "celu_": BUILT_IN_FUNC,
+        "channel_shuffle": BUILT_IN_FUNC,
+        "conv1d": BUILT_IN_FUNC,
+        "conv2d": BUILT_IN_FUNC,
+        "conv3d": BUILT_IN_FUNC,
+        "conv_tbc": BUILT_IN_FUNC,
+        "conv_transpose1d": BUILT_IN_FUNC,
+        "conv_transpose2d": BUILT_IN_FUNC,
+        "conv_transpose3d": BUILT_IN_FUNC,
+        "cosine_similarity": BUILT_IN_FUNC,
+        "elu_": BUILT_IN_FUNC,
+        "hardtanh_": BUILT_IN_FUNC,
+        "leaky_relu_": BUILT_IN_FUNC,
+        "logsigmoid": BUILT_IN_FUNC,
+        "one_hot": BUILT_IN_FUNC,
+        "pdist": BUILT_IN_FUNC,
+        "pixel_shuffle": BUILT_IN_FUNC,
+        "pixel_unshuffle": BUILT_IN_FUNC,
+        "relu_": BUILT_IN_FUNC,
+        "rrelu_": BUILT_IN_FUNC,
+        "selu_": BUILT_IN_FUNC,
+        "softplus": BUILT_IN_FUNC,
+        "softshrink": BUILT_IN_FUNC,
+        "threshold_": BUILT_IN_FUNC,
+
+        "adaptive_avg_pool2d": LEN_ERROR,
+        "adaptive_avg_pool3d": LEN_ERROR,
+        "adaptive_max_pool2d_with_indices": LEN_ERROR,
+        "adaptive_max_pool3d_with_indices": LEN_ERROR,
+        "instance_norm": LEN_ERROR,
+        "pad": LEN_ERROR,
+
+        "adaptive_max_pool1d": PROXY_ITERABLE,
+        "adaptive_max_pool2d": PROXY_ITERABLE,
+        "adaptive_max_pool3d": PROXY_ITERABLE,
+        "fractional_max_pool2d": PROXY_ITERABLE,
+        "fractional_max_pool3d": PROXY_ITERABLE,
+        "max_pool1d": PROXY_ITERABLE,
+        "max_pool2d": PROXY_ITERABLE,
+        "max_pool3d": PROXY_ITERABLE,
+
+        "group_norm": PROXY_ITERATED,
+        "lp_pool2d": PROXY_ITERATED,
+        "max_unpool1d": PROXY_ITERATED,
+        "max_unpool2d": PROXY_ITERATED,
+        "max_unpool3d": PROXY_ITERATED,
+
+        "adaptive_max_pool1d_with_indices": ARG_TYPE_MISMATCH,
+        "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
+        "fractional_max_pool3d_with_indices": ARG_TYPE_MISMATCH,
+        "hardshrink": ARG_TYPE_MISMATCH,
+        "layer_norm": ARG_TYPE_MISMATCH,
+        "lp_pool1d": ARG_TYPE_MISMATCH,
+        "max_pool1d_with_indices": ARG_TYPE_MISMATCH,
+        "max_pool2d_with_indices": ARG_TYPE_MISMATCH,
+        "max_pool3d_with_indices": ARG_TYPE_MISMATCH,
+        "pairwise_distance": ARG_TYPE_MISMATCH,
+
+        "affine_grid": CONTROL_FLOW,
+        "alpha_dropout": CONTROL_FLOW,
+        "batch_norm": CONTROL_FLOW,
+        "binary_cross_entropy": CONTROL_FLOW,
+        "binary_cross_entropy_with_logits": CONTROL_FLOW,
+        "celu": CONTROL_FLOW,
+        "cosine_embedding_loss": CONTROL_FLOW,
+        "cross_entropy": CONTROL_FLOW,
+        "ctc_loss": CONTROL_FLOW,
+        "dropout": CONTROL_FLOW,
+        "dropout2d": CONTROL_FLOW,
+        "dropout3d": CONTROL_FLOW,
+        "elu": CONTROL_FLOW,
+        "embedding": CONTROL_FLOW,
+        "embedding_bag": CONTROL_FLOW,
+        "feature_alpha_dropout": CONTROL_FLOW,
+        "fold": CONTROL_FLOW,
+        "gaussian_nll_loss": CONTROL_FLOW,
+        "glu": CONTROL_FLOW,
+        "grid_sample": CONTROL_FLOW,
+        "gumbel_softmax": CONTROL_FLOW,
+        "hardsigmoid": CONTROL_FLOW,
+        "hardswish": CONTROL_FLOW,
+        "hardtanh": CONTROL_FLOW,
+        "hinge_embedding_loss": CONTROL_FLOW,
+        "huber_loss": CONTROL_FLOW,
+        "interpolate": CONTROL_FLOW,
+        "kl_div": CONTROL_FLOW,
+        "l1_loss": CONTROL_FLOW,
+        "leaky_relu": CONTROL_FLOW,
+        "local_response_norm": CONTROL_FLOW,
+        "margin_ranking_loss": CONTROL_FLOW,
+        "mse_loss": CONTROL_FLOW,
+        "multi_head_attention_forward": CONTROL_FLOW,
+        "multi_margin_loss": CONTROL_FLOW,
+        "multilabel_margin_loss": CONTROL_FLOW,
+        "multilabel_soft_margin_loss": CONTROL_FLOW,
+        "nll_loss": CONTROL_FLOW,
+        "poisson_nll_loss": CONTROL_FLOW,
+        "relu": CONTROL_FLOW,
+        "relu6": CONTROL_FLOW,
+        "rrelu": CONTROL_FLOW,
+        "selu": CONTROL_FLOW,
+        "silu": CONTROL_FLOW,
+        "smooth_l1_loss": CONTROL_FLOW,
+        "soft_margin_loss": CONTROL_FLOW,
+        "threshold": CONTROL_FLOW,
+        "triplet_margin_loss": CONTROL_FLOW,
+        "triplet_margin_with_distance_loss": CONTROL_FLOW,
+        "unfold": CONTROL_FLOW,
+        "upsample": CONTROL_FLOW,
+
+        "upsample_bilinear": INTERPOLATE_ARGS_CONFLICT,
+        "upsample_nearest": INTERPOLATE_ARGS_CONFLICT,
+    }
+
+    # List of nn.functionals with Tensor inputs but not with type annotation
+    FUNCTIONALS_WITHOUT_ANNOTATION = (
+        "adaptive_max_pool1d",
+        "adaptive_max_pool2d",
+        "adaptive_max_pool3d",
+        "fractional_max_pool2d",
+        "fractional_max_pool3d",
+        "max_pool1d",
+        "max_pool2d",
+        "max_pool3d",
+        "gaussian_nll_loss",
+        "upsample",
+        "upsample_bilinear",
+        "upsample_nearest",
+    )
+
+    # Inconsistent behavior between Python 3.8 and other Python versions:
+    # - Python 3.8: Re-raise internal exception like `PROXY_ITERATED`
+    # - Other Python: Raise `argument of type 'Proxy' is not iterable` due to the same
+    #                 internal exception above
+    # Use the following map to override the expected exception for Python 3.8
+    UNTRACEABLE_FUNCTIONALS_PY38 = {
+        "adaptive_max_pool1d": PROXY_ITERATED,
+        "adaptive_max_pool2d": PROXY_ITERATED,
+        "adaptive_max_pool3d": PROXY_ITERATED,
+        "fractional_max_pool2d": PROXY_ITERATED,
+        "fractional_max_pool3d": PROXY_ITERATED,
+        "max_pool1d": PROXY_ITERATED,
+        "max_pool2d": PROXY_ITERATED,
+        "max_pool3d": PROXY_ITERATED,
+
+        "group_norm": LEN_ERROR
+    }
+
+    @classmethod
+    def _get_functional(cls):
+        functional_list = []
+        for f in dir(torch.nn.functional):
+            if not f.islower():
+                continue
+            # Ignore internal functions
+            if f.startswith('_'):
+                continue
+            # Ignore supporting functions
+            if f in cls.IGNORE_FUNCS:
+                continue
+            fn = getattr(torch.nn.functional, f)
+            # Ignore non-callable object like modules
+            if not isinstance(fn, Callable):
+                continue
+            if f not in cls.FUNCTIONALS_WITHOUT_ANNOTATION:
+                try:
+                    sig = inspect.signature(fn)
+                    has_tensor_arg = False
+                    for arg, param in sig.parameters.items():
+                        if isinstance(param.annotation, type) and issubclass(param.annotation, torch.Tensor):
+                            has_tensor_arg = True
+                    if not has_tensor_arg:
+                        continue
+                # No signature or Object is not supported
+                except ValueError:
+                    pass
+            functional_list.append((f, fn))
+        return functional_list
+
+    @classmethod
+    def generate_test_func(cls, func_name, fn):
+
+        def functional_test(self):
+            if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 9):
+                exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
+                with self.assertRaisesRegex(exc, err):
+                    symbolic_trace(fn)
+            elif func_name in self.UNTRACEABLE_FUNCTIONALS:
+                exc, err = self.UNTRACEABLE_FUNCTIONALS[func_name]
+                with self.assertRaisesRegex(exc, err):
+                    symbolic_trace(fn)
+            else:
+                symbolic_trace(fn)
+        return functional_test
+
+    @classmethod
+    def generate_tests(cls):
+        functional_list = cls._get_functional()
+        for func_name, fn in functional_list:
+            test_name = "test_nn_functional_" + func_name
+            functional_test = cls.generate_test_func(func_name, fn)
+            setattr(cls, test_name, functional_test)
+
+    @classmethod
+    def setUpClass(cls):
+
+        def no(*args, **kwargs):
+            return False
+
+        for name in cls.TO_PATCH.keys():
+            cls.TO_PATCH[name] = getattr(torch.nn.functional, name)
+            setattr(torch.nn.functional, name, no)
+
+    @classmethod
+    def tearDownClass(cls):
+        for name in cls.TO_PATCH.keys():
+            setattr(torch.nn.functional, name, cls.TO_PATCH[name])
+
+TestFunctionalTracing.generate_tests()
+
 
 instantiate_device_type_tests(TestOperatorSignatures, globals())
 

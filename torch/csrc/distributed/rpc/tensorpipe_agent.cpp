@@ -611,24 +611,24 @@ void TensorPipeAgent::pipeRead(
         std::shared_ptr<LazyStreamContext>)> fn) noexcept {
   pipe->readDescriptor([fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
-                           tensorpipe::Message tpMessage) mutable {
+                           tensorpipe::Descriptor tpDescriptor) mutable {
     if (error) {
       fn(error, Message(), nullptr);
       return;
     }
 
     auto ctx = createLazyStreamContext();
-
-    TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage, ctx);
+    tensorpipe::Allocation tpAllocation;
+    TensorpipeReadBuffers tpBuffers;
+    std::tie(tpAllocation, tpBuffers) = tensorpipeAllocate(tpDescriptor, ctx);
 
     pipe->read(
-        std::move(tpMessage),
-        [tpBuffers{
+        std::move(tpAllocation),
+        [tpDescriptor{std::move(tpDescriptor)},
+         tpBuffers{
              std::make_shared<TensorpipeReadBuffers>(std::move(tpBuffers))},
          fn{std::move(fn)},
-         ctx{std::move(ctx)}](
-            const tensorpipe::Error& error,
-            tensorpipe::Message tpMessage) mutable {
+         ctx{std::move(ctx)}](const tensorpipe::Error& error) mutable {
           if (error) {
             fn(error, Message(), nullptr);
             return;
@@ -637,7 +637,7 @@ void TensorPipeAgent::pipeRead(
           // FIXME This does some unpickling, which could be a bit expensive:
           // perhaps it would be best to perform it inside the worker threads?
           Message rpcMessage = tensorpipeDeserialize(
-              std::move(tpMessage), std::move(*tpBuffers));
+              std::move(tpDescriptor), std::move(*tpBuffers));
 
           fn(error, std::move(rpcMessage), std::move(ctx));
         });
@@ -663,10 +663,7 @@ void TensorPipeAgent::pipeWrite(
       [tpBuffers{
            std::make_shared<TensorpipeWriteBuffers>(std::move(tpBuffers))},
        fn{std::move(fn)},
-       ctx{std::move(ctx)}](
-          const tensorpipe::Error& error, tensorpipe::Message /* unused */) {
-        fn(error);
-      });
+       ctx{std::move(ctx)}](const tensorpipe::Error& error) { fn(error); });
 }
 
 void TensorPipeAgent::sendCompletedResponseMessage(
