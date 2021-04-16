@@ -143,11 +143,13 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
   // See https://gist.github.com/zou3519/7ac92b84dd7d206dcc6eae55fee8372c
   // for more details about the race condition involving traversing the grad_fn
   // and the python GC.
-  const auto& tensor = THPVariable_Unpack(self);
-  if (tensor.defined()) {
-    for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
-        Py_VISIT(pyhook->dict);
+  if (!self->cdata.unsafeIsBorrowed()) {
+    const auto& tensor = THPVariable_Unpack(self);
+    if (tensor.defined()) {
+      for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
+        if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+          Py_VISIT(pyhook->dict);
+        }
       }
     }
   }
@@ -162,8 +164,12 @@ static int THPVariable_clear(THPVariable *self)
     if (auto grad_acc = torch::autograd::impl::try_get_grad_accumulator(tensor)) {
       grad_acc->pre_hooks().clear();
     }
-    set_pyobj(tensor, nullptr);
+
+    // Before we deallocate the C++ variable proper, manually clear out the pyobj.
+    // Technically, this should not be necessary, as tensor is not supposed to
+    // own the pyobj, but stranger things could happen.
     tensor.unsafeGetTensorImpl()->set_owns_pyobj(false);
+    set_pyobj(tensor, nullptr);
   }
   self->cdata = MaybeOwned<Variable>();
   return 0;
@@ -226,6 +232,7 @@ static void THPVariable_dealloc(THPVariable* self)
   // in another thread that successfully rezzes the object after we tested
   // the use_count, but before we actually managed to call the destructor.
   // I think it doesn't matter.
+  const auto& tensor = THPVariable_Unpack(self);
   PyObject_GC_UnTrack(self);
   THPVariable_clear(self);
   self->cdata.~MaybeOwned<Variable>();
@@ -817,6 +824,26 @@ int THPVariable_set_imag(THPVariable* self, THPVariable *imag, void *unused)
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
+
+struct ConcretePythonHooks : public c10::impl::PythonHooks {
+  void py_decref(void* _pyobj) const override {
+    THPVariable* pyobj = static_cast<THPVariable*>(_pyobj);
+
+    // Leak the pyobj if not initialized.  This can happen if we are running
+    // exit handlers that are destructing tensors with residual (owned)
+    // PyObjects stored in them.
+    if (!Py_IsInitialized()) return;
+
+    pybind11::gil_scoped_acquire gil;
+    // TODO This assert is not generally true for the op described here;
+    // rename method
+    TORCH_INTERNAL_ASSERT(Py_REFCNT(pyobj) == 1);
+    Py_DECREF(pyobj);
+  };
+};
+
+ConcretePythonHooks python_hooks;
+static c10::impl::PythonHooksRegisterer python_hooks_registerer(&python_hooks);
 
 // properties are registered here because we are currently only able to bind them
 // manually. TODO: make declarable in native_functions

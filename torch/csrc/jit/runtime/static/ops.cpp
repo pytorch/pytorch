@@ -1021,11 +1021,9 @@ REGISTER_OPERATOR_FUNCTOR(
     aten_embedding_bag,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        // TODO: Support only 9 args once the old signature has been removed.
         TORCH_CHECK(
-            p_node->inputs().size() == 8 ||
-            p_node->inputs().size() == 9,
-            "Expected number of inputs is 8 or 9, but got " +
+            p_node->inputs().size() == 8,
+            "Expected number of inputs are 8, but got " +
                 std::to_string(p_node->inputs().size()));
 
         const auto& weight = p_node->Input(0).toTensor();
@@ -1036,14 +1034,6 @@ REGISTER_OPERATOR_FUNCTOR(
         auto sparse = p_node->Input(5).toBool();
         auto per_sample_weights = p_node->Input(6).toOptional<at::Tensor>();
         auto include_last_offset = p_node->Input(7).toBool();
-        c10::optional<int64_t> padding_idx;
-        if (p_node->inputs().size() == 9) {
-          if (p_node->Input(8).isNone()) {
-            padding_idx = c10::nullopt;
-          } else {
-            padding_idx = p_node->Input(8).toInt();
-          }
-        }
 
         at::native::check_arguments(
             weight,
@@ -1083,8 +1073,7 @@ REGISTER_OPERATOR_FUNCTOR(
             indices,
             offsets,
             mode,
-            per_sample_weights,
-            padding_idx.value_or(-1));
+            per_sample_weights);
 
         if (p_node->Output(2).isNone()) {
           p_node->Output(2) = at::empty(offsets.sizes(), offsets.options());
@@ -1116,8 +1105,7 @@ REGISTER_OPERATOR_FUNCTOR(
             offsets,
             mode,
             per_sample_weights,
-            include_last_offset,
-            padding_idx.value_or(-1));
+            include_last_offset);
       };
     });
 

@@ -173,7 +173,9 @@ struct C10_API AutogradMetaFactoryRegisterer {
 // calls to Python API via hooks.
 struct C10_API PythonHooks {
   virtual ~PythonHooks() = default;
-  virtual void release_pyobj(PyObject*) const = 0;
+  // NB: py_decref is assumed to take out a GIL, caller does not have to
+  // handle GIL
+  virtual void py_decref(void*) const = 0;
 };
 
 C10_API void SetPythonHooks(PythonHooks* factory);

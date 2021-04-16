@@ -3,7 +3,6 @@
 namespace c10 {
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::shared_ptr<ThreadLocalDebugInfo> debug_info = nullptr;
 }
 

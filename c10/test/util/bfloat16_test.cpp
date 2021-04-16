@@ -7,39 +7,28 @@ namespace {
       uint32_t exponent,
       uint32_t fraction
   ) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       uint32_t bytes;
       bytes = 0;
       bytes |= sign;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       bytes <<= 8;
       bytes |= exponent;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       bytes <<= 23;
       bytes |= fraction;
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float res;
       std::memcpy(&res, &bytes, sizeof(res));
       return res;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
     float in[100];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int i = 0; i < 100; ++i) {
-      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
       in[i] = i + 1.25;
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
     c10::BFloat16 bfloats[100];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
     float out[100];
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int i = 0; i < 100; ++i) {
       bfloats[i].x = c10::detail::bits_from_f32(in[i]);
       out[i] = c10::detail::f32_from_bits(bfloats[i].x);
@@ -50,22 +39,15 @@ namespace {
     }
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
     float in[100];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int i = 0; i < 100; ++i) {
-      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
       in[i] = i + 1.25;
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
     c10::BFloat16 bfloats[100];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
     float out[100];
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int i = 0; i < 100; ++i) {
       bfloats[i].x = c10::detail::round_to_nearest_even(in[i]);
       out[i] = c10::detail::f32_from_bits(bfloats[i].x);
@@ -76,9 +58,7 @@ namespace {
     }
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   TEST(BFloat16Conversion, NaN) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     float inNaN = float_from_bytes(0, 0xFF, 0x7FFFFF);
     EXPECT_TRUE(std::isnan(inNaN));
 
@@ -88,9 +68,7 @@ namespace {
     EXPECT_TRUE(std::isnan(out));
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   TEST(BFloat16Conversion, Inf) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     float inInf = float_from_bytes(0, 0xFF, 0);
     EXPECT_TRUE(std::isinf(inInf));
 
@@ -100,7 +78,6 @@ namespace {
     EXPECT_TRUE(std::isinf(out));
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   TEST(BFloat16Conversion, SmallestDenormal) {
     float in =  std::numeric_limits<float>::denorm_min(); // The smallest non-zero subnormal number
     c10::BFloat16 a = c10::BFloat16(in);
@@ -109,7 +86,6 @@ namespace {
     EXPECT_FLOAT_EQ(in, out);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   TEST(BFloat16Math, Addition) {
     // This test verifies that if only first 7 bits of float's mantissa are
     // changed after addition, we should have no loss in precision.
@@ -117,16 +93,13 @@ namespace {
     // input bits
     // S | Exponent | Mantissa
     // 0 | 10000000 | 10010000000000000000000 = 3.125
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     float input = float_from_bytes(0, 0, 0x40480000);
 
     // expected bits
     // S | Exponent | Mantissa
     // 0 | 10000001 | 10010000000000000000000 = 6.25
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     float expected = float_from_bytes(0, 0, 0x40c80000);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     c10::BFloat16 b;
     b.x = c10::detail::bits_from_f32(input);
     b = b + b;
@@ -135,7 +108,6 @@ namespace {
     EXPECT_EQ(res, expected);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   TEST(BFloat16Math, Subtraction) {
     // This test verifies that if only first 7 bits of float's mantissa are
     // changed after subtraction, we should have no loss in precision.
@@ -143,19 +115,15 @@ namespace {
     // input bits
     // S | Exponent | Mantissa
     // 0 | 10000001 | 11101000000000000000000 = 7.625
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     float input = float_from_bytes(0, 0, 0x40f40000);
 
     // expected bits
     // S | Exponent | Mantissa
     // 0 | 10000000 | 01010000000000000000000 = 2.625
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     float expected = float_from_bytes(0, 0, 0x40280000);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     c10::BFloat16 b;
     b.x = c10::detail::bits_from_f32(input);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     b = b - 5;
 
     float res = c10::detail::f32_from_bits(b.x);
@@ -163,7 +131,6 @@ namespace {
   }
 
   float BinaryToFloat(uint32_t bytes) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     float res;
     std::memcpy(&res, &bytes, sizeof(res));
     return res;
@@ -178,14 +145,12 @@ namespace {
                        public ::testing::WithParamInterface<BFloat16TestParam> {
   };
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   TEST_P(BFloat16Test, BFloat16RNETest) {
     float value = BinaryToFloat(GetParam().input);
     uint16_t rounded = c10::detail::round_to_nearest_even(value);
     EXPECT_EQ(GetParam().rne, rounded);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   INSTANTIATE_TEST_CASE_P(
       BFloat16Test_Instantiation, BFloat16Test,
       ::testing::Values(BFloat16TestParam{0x3F848000, 0x3F84},

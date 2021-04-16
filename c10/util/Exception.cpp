@@ -122,11 +122,9 @@ namespace {
       }
 
     private:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
       static thread_local WarningHandler* warning_handler_;
   };
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   thread_local WarningHandler* ThreadWarningHandler::warning_handler_ = nullptr;
 
 }
@@ -143,7 +141,6 @@ WarningHandler* get_warning_handler() noexcept(true) {
   return ThreadWarningHandler::get_handler();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool warn_always = false;
 
 void set_warnAlways(bool setting) noexcept(true) {
