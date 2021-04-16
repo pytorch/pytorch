@@ -2145,10 +2145,15 @@ std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, std::strin
   // If there are no elements, then we simply return a pair of tensors of required dimensions
   if (self.numel() == 0) {
     int64_t n = self.size(-1);
-    r_working_copy = at::empty({n_columns_q, n}, self.options());
+    auto r_shape = self.sizes().vec();
+    r_shape.end()[-2] = n_columns_q;
+    r_shape.end()[-1] = n;
+    r_working_copy = at::empty(r_shape, self.options());
     if (compute_q) {
-        int64_t n_rows_q = q_sizes[self.dim() - 2];
-        q_working_copy = at::eye(n_rows_q, n_columns_q, self.options());
+        auto q_shape = q_sizes;
+        q_shape.end()[-1] = n_columns_q;
+        q_working_copy = at::zeros(q_shape, self.options());
+        q_working_copy.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
     } else {
       q_working_copy = at::empty({0}, self.options());
     }
