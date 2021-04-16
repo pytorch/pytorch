@@ -46,10 +46,13 @@ from torch.quantization.ns.mappings import (
     FUNS_IO_TYPE_FP32,
     FUNS_IO_TYPE_INT8,
     FUNS_IO_TYPE_FP32_OR_INT8,
+    FUNS_UNMATCHABLE,
     MODS_IO_TYPE_FP32,
     MODS_IO_TYPE_INT8,
     MODS_IO_TYPE_FP32_OR_INT8,
+    MODS_UNMATCHABLE,
     METHS_IO_TYPE_FP32_OR_INT8,
+    METHS_UNMATCHABLE,
 )
 from torch.quantization._numeric_suite_fx import (
     extract_weights,
@@ -1206,32 +1209,11 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                     qp.CopyNodeQuantizeHandler,
                 )
             ):
-                # TODO(future PR): move the skip list to a mapping and stop
-                # matching these nodes.
-                to_skip = set([
-                    operator.getitem,
-                    'view',
-                    'unsqueeze_',
-                    'unsqueeze',
-                    'transpose',
-                    'squeeze_',
-                    'squeeze',
-                    'size',
-                    'shape',
-                    'resize_',
-                    'reshape',
-                    'repeat_interleave',
-                    'repeat',
-                    'permute',
-                    'numel',
-                    'mean',
-                    'detach_',
-                    'detach',
-                    'contiguous',
-                    'clamp',
-                    'chunk',
-                ])
-                if base_op in to_skip:
+                if (
+                    base_op in FUNS_UNMATCHABLE or
+                    base_op in MODS_UNMATCHABLE or
+                    base_op in METHS_UNMATCHABLE
+                ):
                     continue
 
                 self.assertTrue(
