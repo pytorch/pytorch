@@ -14,14 +14,12 @@ namespace native {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t, typename IndexType, bool upper>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
-__global__
-void triu_tril_kernel(
+C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
+__global__ void triu_tril_kernel(
     cuda::detail::TensorInfo<scalar_t, IndexType> result_info,
     const cuda::detail::TensorInfo<scalar_t, IndexType> self_info,
-    const int64_t k, const int64_t N) {
+    const int64_t k,
+    const int64_t N) {
   int64_t linear_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_idx >= N) {
     return;
@@ -111,9 +109,7 @@ Tensor& triu_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
 
 // Copy the kth diagonal of a matrix B to a vector A.
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void copy_from_diagonal_kernel(
     scalar_t* a,
     scalar_t* b,
@@ -131,9 +127,7 @@ __global__ void copy_from_diagonal_kernel(
 
 // Copy vector B to the kth diagonal of a matrix A
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void copy_to_diagonal_kernel(
     scalar_t* a,
     scalar_t* b,
