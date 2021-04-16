@@ -9,25 +9,27 @@ import contextlib
 
 # Helper functions for defining generators on things in the model
 
-F = TypeVar('F', NativeFunction, NativeFunctionsGroup, Union[NativeFunction, NativeFunctionsGroup])
+F = TypeVar(
+    'F',
+    NativeFunction,
+    NativeFunctionsGroup,
+    ExternalBackendFunction,
+    ExternalBackendFunctionsGroup,
+    Union[NativeFunction, NativeFunctionsGroup, ExternalBackendFunction, ExternalBackendFunctionsGroup]
+)
 
 @contextlib.contextmanager
-def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunction, ExternalBackendFunction]) -> Iterator[None]:
-    # By default, we associate all errors with structured native functions
-    # with the out variant.  In some cases, it might be better to have
-    # a more specific place to hang things; if so, use
-    # native_function_manager again on the inside
-    external_loc = ''
-    if isinstance(g, ExternalBackendFunction) or isinstance(g, ExternalBackendFunctionsGroup):
-        # External backend functions currently don't have any local context,
-        # but it's helpful to know what line of the yaml file errors occur on.
-        # TODO: Information here can be clearer
-        if isinstance(g, ExternalBackendFunctionsGroup):
-            external_f = g.primary
-        else:
-            external_f = g
-        f = external_f.native_function
+def native_function_manager(g: Union[
+        NativeFunctionsGroup, NativeFunction, ExternalBackendFunction, ExternalBackendFunctionsGroup]) -> Iterator[None]:
+    if isinstance(g, ExternalBackendFunctionsGroup):
+        f = g.primary.native_function
+    elif isinstance(g, ExternalBackendFunction):
+        f = g.native_function
     elif isinstance(g, NativeFunctionsGroup):
+        # By default, we associate all errors with structured native functions
+        # with the out variant.  In some cases, it might be better to have
+        # a more specific place to hang things; if so, use
+        # native_function_manager again on the inside
         f = g.out
     else:
         f = g
