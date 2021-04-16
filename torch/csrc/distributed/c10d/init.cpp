@@ -38,6 +38,32 @@
 
 #include <torch/custom_class.h>
 
+// Wrapper to ensure GIL is released before destructing ProcessGroupGloo
+template <typename T>
+class IntrusivePtrNoGilDestructor {
+  c10::intrusive_ptr<T> impl_;
+public:
+  IntrusivePtrNoGilDestructor() = default;
+  IntrusivePtrNoGilDestructor(const IntrusivePtrNoGilDestructor&) = default;
+  IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) = default;
+  IntrusivePtrNoGilDestructor& operator=(const IntrusivePtrNoGilDestructor&) = default;
+  IntrusivePtrNoGilDestructor& operator=(IntrusivePtrNoGilDestructor&&) = default;
+  IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl) : impl_(std::move(impl)) {}
+  IntrusivePtrNoGilDestructor(T* impl) : impl_(c10::intrusive_ptr<T>::reclaim(impl)) {}
+  ~IntrusivePtrNoGilDestructor() {
+    pybind11::gil_scoped_release release;
+    impl_.reset();
+  }
+  T& operator*() const noexcept { return *impl_; }
+  T* operator->() const noexcept { return impl_.get(); }
+  T* get() const noexcept { return impl_.get(); }
+  void reset() noexcept { impl_.reset(); }
+  operator bool() const noexcept {
+    return impl_;
+  }
+};
+PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true);
+
 namespace torch {
 namespace distributed {
 namespace c10d {
@@ -1120,7 +1146,7 @@ distributed: (:class:`~torch.distributed.ProcessGroupGloo.Options` and
 #endif
 
 #ifdef USE_C10D_GLOO
-  auto processGroupGloo = intrusive_ptr_class_<::c10d::ProcessGroupGloo>(
+  auto processGroupGloo = py::class_<::c10d::ProcessGroupGloo, IntrusivePtrNoGilDestructor<::c10d::ProcessGroupGloo>>(
       module, "ProcessGroupGloo", processGroup);
 
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
