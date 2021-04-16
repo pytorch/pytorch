@@ -543,7 +543,7 @@ class QuantizationTestCase(TestCase):
         """
         nodes_in_graph = dict()
         node_list = []
-        modules = dict(graph_module.named_modules())
+        modules = dict(graph_module.named_modules(remove_duplicate=False))
         for node in graph_module.graph.nodes:
             n = None
             if node.op == 'call_function' or node.op == 'call_method':
