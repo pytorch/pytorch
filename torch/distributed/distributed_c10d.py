@@ -1741,7 +1741,7 @@ def broadcast_object_list(object_list, src=0, group=None):
         object_tensor = torch.cat(tensor_list)
     else:
         object_tensor = torch.empty(
-            torch.sum(object_sizes_tensor).int().item(),
+            torch.sum(object_sizes_tensor).int().item(),  # type: ignore[arg-type]
             dtype=torch.uint8
         )
 
