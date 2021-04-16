@@ -147,6 +147,16 @@ bool conv2dIsSupported(const torch::jit::Node* node) {
     return false;
   }
 
+  // Inputs should be float32.  Other dtypes need more testing.
+  auto isFloat = [](const torch::jit::Value* v) {
+    auto const& tt = v->type()->cast<TensorType>();
+    if (!tt) {
+      return false;
+    }
+    auto const& st = tt->scalarType();
+    return st && *st == c10::ScalarType::Float;
+  }
+
   // Proper ndim for tensor inputs.
   if (input->size() != 4 || weight->size() != 4 || bias->size() != 1) {
     GRAPH_DEBUG("inputs are the wrong size");
