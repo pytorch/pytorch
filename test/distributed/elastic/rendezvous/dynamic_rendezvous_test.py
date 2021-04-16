@@ -4,6 +4,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
+import socket
 from datetime import timedelta
 from typing import Optional
 from unittest import TestCase
@@ -14,8 +16,41 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     DynamicRendezvousHandler,
     RendezvousBackend,
     RendezvousTimeout,
+    _NodeDesc,
+    _NodeDescGenerator,
     create_handler,
 )
+
+
+class NodeDescTest(TestCase):
+    def test_repr(self) -> None:
+        desc = _NodeDesc("dummy_fqdn", 3, 5)
+
+        self.assertEqual(repr(desc), "dummy_fqdn_3_5")
+
+    def test_hash(self) -> None:
+        desc1 = _NodeDesc("dummy_fqdn", 2, 4)
+        desc2 = _NodeDesc("dummy_fqdn", 3, 5)
+
+        descs = {desc1, desc2}
+
+        self.assertIn(desc1, descs)
+        self.assertIn(desc2, descs)
+
+
+class NodeDescGeneratorTest(TestCase):
+    def test_generate(self) -> None:
+        desc_generator = _NodeDescGenerator()
+
+        fqdn = socket.getfqdn()
+
+        pid = os.getpid()
+
+        for local_id in range(4):
+            with self.subTest(fqdn=fqdn, pid=pid, local_id=local_id):
+                desc = desc_generator.generate()
+
+                self.assertEqual(repr(desc), f"{fqdn}_{pid}_{local_id}")
 
 
 class RendezvousTimeoutTest(TestCase):
