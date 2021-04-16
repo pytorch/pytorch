@@ -233,6 +233,15 @@ bool isSupported(Node* node) {
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = true;
+static bool texpr_parallel_cpu_enabled = false;
+
+bool texprParallelCPUEnabled() {
+  return texpr_parallel_cpu_enabled;
+}
+
+void setTexprParallelCPUEnabled(bool val) {
+  texpr_parallel_cpu_enabled = val;
+}
 
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
@@ -856,7 +865,13 @@ class TensorExprFuser {
     }
     if (device->is_cpu()) {
       // CPU fusion is only supported for single-thread.
-      return canFuseOnCPU() && at::get_num_threads() == 1;
+      if (!canFuseOnCPU()) {
+        return false;
+      }
+      if (at::get_num_threads() == 1 || texprParallelCPUEnabled()) {
+        return true;
+      }
+      return false;
     } else if (device->is_cuda()) {
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
@@ -907,15 +922,22 @@ class TensorExprFuser {
     for (const Value* v : node->inputs()) {
       if (auto const& tt = v->type()->cast<TensorType>()) {
         auto const& st = tt->scalarType();
+        auto const& device = tt->device();
 
         // All tensors must be typed.
-        if (!st) {
+        if (!st || !device) {
           return false;
         }
 
         // Byte tensors introduce too many corner cases in type promotion.
         // Better not to try to handle them.
         if (*st == c10::ScalarType::Byte) {
+          return false;
+        }
+
+        // Float16 has a few kinks on LLVM.  Disable it until we either move to
+        // a more stable version or find workarounds.
+        if (*st == c10::ScalarType::Half && *device == c10::kCPU) {
           return false;
         }
 
