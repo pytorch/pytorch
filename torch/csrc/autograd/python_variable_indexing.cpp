@@ -20,6 +20,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/TracerMode.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/irange.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 #include <vector>
@@ -40,7 +41,7 @@ Py_ssize_t THPVariable_length(PyObject* self) {
     }
     return length;
   }
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  const auto& self_ = THPVariable_Unpack(self);
   if (self_.dim() == 0) {
     return 0;
   }
@@ -62,7 +63,7 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     if (!THPVariable_CheckExact(obj) && check_has_torch_function(obj)) return -1;
     if (THPVariable_Check(obj)) {
-      auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
+      const auto& var = THPVariable_Unpack(obj);
       const auto& var_scalar_type = var.scalar_type();
       if (var_scalar_type == kByte || var_scalar_type == kBool) {
         count += var.dim();
@@ -83,13 +84,13 @@ static inline void invalid_index(PyObject* obj) {
     "Variables are valid indices (got %s)", Py_TYPE(obj)->tp_name);
 }
 
-static inline Variable sequenceToVariable(c10::DispatchKey dispatch_key, PyObject* seq) {
-  return torch::utils::indexing_tensor_from_data(dispatch_key, kLong, c10::nullopt, seq);
+static inline Variable sequenceToVariable(c10::TensorOptions options, PyObject* seq) {
+  return torch::utils::indexing_tensor_from_data(options, kLong, c10::nullopt, seq);
 }
 
 static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
   if (THPVariable_Check(value)) {
-    return reinterpret_cast<THPVariable*>(value)->cdata;
+    return THPVariable_Unpack(value);
   }
   at::AutoNonVariableTypeMode guard;  // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
@@ -147,7 +148,7 @@ static inline Variable applySlicing(
   }
 
   Variable result = self;
-  for (int64_t i = 0; i < size; i++) {
+  for(const auto i : c10::irange(size)) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     result = at::indexing::handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,
@@ -181,9 +182,7 @@ static inline Variable applySlicing(
           }
           return at::indexing::TensorIndex(std::move(tensor));
         } else if (PySequence_Check(obj)) {
-          // TODO: Naughty naughty get out of jail free
-          // (Fixing this means I have to fix the call chain though :/)
-          return at::indexing::TensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj));
+          return at::indexing::TensorIndex(sequenceToVariable(self.options(), obj));
         } else {
           auto idx = THPObjectPtr(PyNumber_Index(obj));
           if (!idx) {
@@ -272,7 +271,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   if (!THPVariable_CheckExact(self) && check_has_torch_function(self)) {
     return handle_torch_function_indexing(self, index);
   }
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  const auto& self_ = THPVariable_Unpack(self);
   OptionalDeviceGuard device_guard(device_of(self_));
 
   // handle simple types: none, ellipsis
@@ -357,7 +356,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     return 0;
   }
 
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  const auto& self_ = THPVariable_Unpack(self);
   if (self_.is_sparse())
   {
     throw TypeError("Cannot assign to a sparse tensor");

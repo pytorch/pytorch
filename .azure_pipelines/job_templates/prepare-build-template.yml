@@ -1,0 +1,62 @@
+# Build prepare steps for PyTorch on Azure DevOps to build from source.
+# These steps share between normal build process and semmle security scan tasks
+
+parameters:
+  build_stage: False
+  configuration: ''
+
+steps:
+# End Python tasks that may be lingering over from previous runs
+# Note: If python.exe isn't currently running, exit code becomes 128,
+# which fails the run. Here exit code is set to 0 to avoid failed run.
+- script: |
+    taskkill /f /im python.exe
+    IF %ERRORLEVEL% EQU 128 exit 0
+  displayName: End previous Python processes
+
+# Clean up env directory in conda for fresh builds and set up conda environment YAML
+- powershell: |
+    Remove-Item 'C:\Miniconda\envs' -Recurse -ErrorAction Ignore
+    $env:PYTHON_VERSION = $env:SYSTEM_JOBNAME.Substring(3,1) + '.' + $env:SYSTEM_JOBNAME.Substring(4,1)
+    (Get-Content .azure_pipelines\job_templates\common-packages.yml) -replace 'PYTHON_VERSION', $env:PYTHON_VERSION | Out-File -encoding ASCII .azure_pipelines\job_templates\common-packages.yml
+  displayName: Clean up previous environments and Set up conda environment YAML
+
+# Make conda environment and install required packages
+- script: |
+    call conda clean --all -y
+    call conda env create -n $(configuration) --file .azure_pipelines\job_templates\common-packages.yml
+    call activate $(configuration)
+    call conda install -c conda-forge libuv=1.39
+  displayName: Set up conda environment for building from source
+
+- ${{ if eq(parameters.build_stage, 'True') }}:
+  # Install MKL
+  - script: |
+      rmdir /s /q mkl
+      del mkl_2020.2.254.7z
+      curl https://s3.amazonaws.com/ossci-windows/mkl_2020.2.254.7z -k -O
+      7z x -aoa mkl_2020.2.254.7z -omkl
+    displayName: Install MKL
+
+  # Install sccache and randomtemp
+  # Related PyTorch GitHub issue: https://github.com/pytorch/pytorch/issues/25393
+  # Related fix: https://github.com/pytorch/builder/pull/448/
+  - script: |
+      mkdir .\tmp_bin
+      curl -k https://s3.amazonaws.com/ossci-windows/sccache.exe --output .\tmp_bin\sccache.exe
+      curl -k https://s3.amazonaws.com/ossci-windows/sccache-cl.exe --output .\tmp_bin\sccache-cl.exe
+      copy .\tmp_bin\sccache.exe .\tmp_bin\nvcc.exe
+      curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.3/randomtemp.exe --output .\tmp_bin\randomtemp.exe
+    displayName: Install sccache and randomtemp
+    condition: not(eq(variables.CUDA_VERSION, ''))
+
+  # CUDA 11.2's CUB directory conflicts with CUDA 10.2 and 10.1
+  # builds, where CUDA 11.2's CUB is injected into non-CUDA
+  # 11.2 builds.
+  - powershell: Remove-Item "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.2\include\cub" -Recurse -ErrorAction Ignore
+    displayName: Remove conflicting CUB from CUDA installation
+    condition: not(eq(variables.CUDA_VERSION, ''))
+
+  - powershell: Copy-Item -Path "F:\cuda_11_2\cub\" -Destination "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.2\include" -Recurse
+    displayName: Copy CUDA CUB for CUDA 11.2 build
+    condition: eq(variables.CUDA_VERSION, '112')

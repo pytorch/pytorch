@@ -166,7 +166,6 @@ class StoreTest(JitTestCase):
         ) -> torch.classes.dist_c10d.PrefixStore:
             return torch.classes.dist_c10d.PrefixStore(prefix, store)
 
-        print(create_prefix_file_store.graph)
         create_prefix_file_store(self.filestore, self.prefix)
 
 

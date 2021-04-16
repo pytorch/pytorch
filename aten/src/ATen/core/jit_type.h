@@ -1324,7 +1324,7 @@ struct TORCH_API NoneType : public Type {
     return rhs.kind() == kind();
   }
   std::string str() const override {
-    return "None";
+    return "NoneType";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const override {
     if (rhs->kind() == OptionalType::Kind) {
@@ -1541,6 +1541,8 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const Stride& s);
 // what is the type, ignoring extra size/shape information?
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
+// xxx: be careful with calls because this can be very slow. If calling this on a graph
+// use `EraseShapeInformation` in shape_analysis.h
 inline TypePtr unshapedType(const TypePtr& type) {
   if (type->isSubtypeOf(TensorType::get())) {
     return TensorType::get();

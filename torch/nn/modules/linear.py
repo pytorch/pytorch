@@ -76,9 +76,9 @@ class Linear(Module):
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = Parameter(torch.Tensor(out_features, in_features))
+        self.weight = Parameter(torch.empty(out_features, in_features))
         if bias:
-            self.bias = Parameter(torch.Tensor(out_features))
+            self.bias = Parameter(torch.empty(out_features))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -157,10 +157,10 @@ class Bilinear(Module):
         self.in1_features = in1_features
         self.in2_features = in2_features
         self.out_features = out_features
-        self.weight = Parameter(torch.Tensor(out_features, in1_features, in2_features))
+        self.weight = Parameter(torch.empty(out_features, in1_features, in2_features))
 
         if bias:
-            self.bias = Parameter(torch.Tensor(out_features))
+            self.bias = Parameter(torch.empty(out_features))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -211,6 +211,7 @@ class LazyLinear(LazyModuleMixin, Linear):
 
     cls_to_become = Linear  # type: ignore[assignment]
     weight: UninitializedParameter
+    bias: UninitializedParameter  # type: ignore[assignment]
 
     def __init__(self, out_features: int, bias: bool = True) -> None:
         # bias is hardcoded to False to avoid creating tensor

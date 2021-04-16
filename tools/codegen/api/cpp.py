@@ -1,5 +1,10 @@
-from tools.codegen.model import *
-from tools.codegen.api.types import *
+from tools.codegen.model import (Argument, Arguments, BaseTy, BaseType,
+                                 FunctionSchema, ListType, NativeFunction,
+                                 OptionalType, Return, SelfArgument,
+                                 TensorOptionsArguments, Type, assert_never)
+from tools.codegen.api.types import (ArgName, BaseCType, Binding,
+                                     ConstRefCType, CType, MutRefCType,
+                                     OptionalCType, SpecialArgName)
 from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
@@ -12,9 +17,6 @@ from typing import Optional, Sequence, Union, List, Set
 #     also has this, but tensor options is really most relevant
 #     for the C++ API; it makes calling kwarg factory functions
 #     pleasant)
-#
-#   - for 'use_c10_dispatcher: full' functions, optional tensors are
-#     represented explicitly using c10::optional
 #
 #   - defaulting lives here (in fact, the dispatcher is completely
 #     oblivious of defaults!)

@@ -11,6 +11,7 @@ const char* toString(DispatchKey t) {
       return "CPU";
     case DispatchKey::CUDA:
       return "CUDA";
+
     case DispatchKey::HIP:
       return "HIP";
     case DispatchKey::FPGA:
@@ -42,11 +43,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::QuantizedXPU:
       return "QuantizedXPU";
 
-    case DispatchKey::ComplexCPU:
-      return "ComplexCPU";
-    case DispatchKey::ComplexCUDA:
-      return "ComplexCUDA";
-
     case DispatchKey::CustomRNGKeyId:
       return "CustomRNGKeyId";
 
@@ -56,6 +52,10 @@ const char* toString(DispatchKey t) {
       return "SparseCPU";
     case DispatchKey::SparseCUDA:
       return "SparseCUDA";
+    case DispatchKey::SparseCsrCPU:
+      return "SparseCsrCPU";
+    case DispatchKey::SparseCsrCUDA:
+      return "SparseCsrCUDA";
     case DispatchKey::SparseHIP:
       return "SparseHIP";
     case DispatchKey::SparseXPU:
@@ -114,11 +114,11 @@ const char* toString(DispatchKey t) {
     case DispatchKey::VmapMode:
       return "VmapMode";
 
-    case DispatchKey::Math:
-      return "Math";
+    case DispatchKey::CompositeImplicitAutograd:
+      return "CompositeImplicitAutograd";
 
-    case DispatchKey::DefaultBackend:
-      return "DefaultBackend";
+    case DispatchKey::CompositeExplicitAutograd:
+      return "CompositeExplicitAutograd";
 
     case DispatchKey::TESTING_ONLY_GenericWrapper:
       return "TESTING_ONLY_GenericWrapper";

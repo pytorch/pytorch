@@ -15,6 +15,8 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 
+#include <c10/util/irange.h>
+
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmFP16.h>
@@ -134,7 +136,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
 
     // This is the end of the pipeline, pass the resulting matrix through
     fbgemm::DoNothing<float, float> kDoNothingObj{};
-    for (int task_id = begin; task_id < end; ++task_id) {
+    for (const auto task_id : c10::irange(begin, end)) {
       // After the uint8 * int8 matrix multiplication is performed, this
       // operation does:
       //  1) Add in row and column offsets to the rows and columns, respectively
@@ -242,7 +244,12 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   q_params.precision = kPrecision;
 
   Tensor quantized = at::native::empty_like(
-      weight_contig, weight_contig.options().dtype(at::kChar), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      weight_contig,
+      at::kChar,
+      weight_contig.options().layout_opt(),
+      weight_contig.options().device_opt(),
+      weight_contig.options().pinned_memory_opt(),
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   // Tensor quantized = at::native::empty_cpu(
   //     weight_contig.sizes(), weight_contig.options().dtype(at::kChar));
   fbgemm::Quantize<int8_t, false /*LEGACY*/>(
@@ -254,7 +261,12 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   // Calculate column offsets of the weight and store them away in a tensor.
   // Similarly to quantization, this can be done once and cached.
   Tensor col_offsets = at::empty(
-      {weight_contig.size(0)}, weight_contig.options().dtype(at::kInt), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      {weight_contig.size(0)},
+      at::kInt,
+      weight_contig.options().layout_opt(),
+      weight_contig.options().device_opt(),
+      weight_contig.options().pinned_memory_opt(),
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   CalcColOffsetsTranspose(
       /*K=*/quantized.size(1),
       /*N=*/quantized.size(0),

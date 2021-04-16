@@ -6,7 +6,6 @@ import textwrap
 import functools
 import warnings
 from typing import Dict, List, Set, Type
-from enum import Enum
 
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args, get_jit_class_def, get_jit_def, get_class_properties
@@ -17,7 +16,7 @@ from torch.nn import Module
 
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
-PropertyStub = collections.namedtuple('Property', ('resolution_callback', 'def_'))
+PropertyStub = collections.namedtuple('PropertyStub', ('resolution_callback', 'def_'))
 
 
 # TODO: there should be a more principled way of doing this.
@@ -36,11 +35,15 @@ ignored_attributes = [
 ]
 
 def _compile_and_register_class(obj, rcb, qualified_name):
-    if not _get_script_class(qualified_name):
+    script_class = _get_script_class(obj)
+
+    if not script_class:
         ast = get_jit_class_def(obj, obj.__name__)
         defaults = torch.jit.frontend.get_default_args_for_class(obj)
-        torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
-        _add_script_class(obj, qualified_name)
+        script_class = torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
+        _add_script_class(obj, script_class)
+
+    return script_class
 
 def make_stub(func, name):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
