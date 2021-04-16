@@ -295,6 +295,20 @@ class TestQuantizeFx(QuantizationTestCase):
         is_dynamic, ModuleClass, module_constructor_inputs,
         inputs, quantized_node, weight_prepack_op
         """
+        class Conv1d(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+                self.stride = 1
+                self.padding = 0
+                self.dilation = 1
+                self.groups = 1
+
+            def forward(self, x):
+                return F.conv1d(x, self.weight, None, self.stride, self.padding, self.dilation, self.groups)
+
+        conv1d_input = torch.rand(1, 3, 224)
+        conv1d_weight = torch.rand(3, 3, 3)
 
         class Conv2d(torch.nn.Module):
             def __init__(self, weight):
@@ -356,6 +370,14 @@ class TestQuantizeFx(QuantizationTestCase):
         linear_module_input = torch.rand(8, 5)
 
         tests = [
+            (
+                False,
+                Conv1d,
+                (conv1d_weight,),
+                (conv1d_input,),
+                ns.call_function(torch.ops.quantized.conv1d),
+                ns.call_function(torch.ops.quantized.conv1d_prepack),
+            ),
             (
                 False,
                 Conv2d,
