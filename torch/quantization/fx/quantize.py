@@ -56,6 +56,7 @@ from .graph_module import (
 from .quantization_patterns import (
     binary_op_supported_dtypes,
     BinaryOpQuantizeHandler,
+    CatQuantizeHandler,
     CopyNodeQuantizeHandler,
     CustomModuleQuantizeHandler,
     DefaultQuantizeHandler,
