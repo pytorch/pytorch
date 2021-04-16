@@ -72,12 +72,14 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     // }
 
     // Not setting atm
+#ifndef USE_KINETO_UPDATED
     op.inputTypes = "[]";
     op.arguments = "[]";
     op.outputDims = "[]";
     op.outputTypes = "[]";
     op.inputNames = "[]";
     op.outputNames = "[]";
+#endif
 
     // setting both pthread and linux tid for Kineto
     op.sysThreadId = cachedTid();
@@ -139,13 +141,23 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   void finalizeCPUTrace() {
     TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
     for (size_t idx = 0; idx < cpu_trace->activities.size(); ++idx) {
+#ifdef USE_KINETO_UPDATED
+      if (kineto_events_[idx].hasShapes()) {
+        cpu_trace->activities[idx].addMetadata("Input Dims", shapesToStr(kineto_events_[idx].shapes()));
+      }
+#else
       if (kineto_events_[idx].hasShapes()) {
         cpu_trace->activities[idx].inputDims = shapesToStr(kineto_events_[idx].shapes());
       } else {
         cpu_trace->activities[idx].inputDims = "[]";
       }
+#endif
       if (kineto_events_[idx].hasStack()) {
+#ifdef USE_KINETO_UPDATED
+        cpu_trace->activities[idx].addMetadata("Call stack", stacksToStr(kineto_events_[idx].stack()));
+#else
         cpu_trace->activities[idx].callStack = stacksToStr(kineto_events_[idx].stack());
+#endif
       }
     }
   }
