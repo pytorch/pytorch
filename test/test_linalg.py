@@ -2914,7 +2914,7 @@ class TestLinalg(TestCase):
                     A = root.tril()
                 return torch.cholesky_solve(b, A, upper)
 
-            gradcheck(func, [root, b, upper], fast_mode=False)
+            gradcheck(func, [root, b, upper])
             # TODO(#50743): the following fails with batched grad testing
             # TODO(#56235): disabling temporarily
             # gradgradcheck(func, [root, b, upper], atol=1e-3, check_batched_grad=False)
