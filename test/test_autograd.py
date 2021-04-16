@@ -21,6 +21,9 @@ import json
 # Autograd tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
+# TODO(alband) Remove this when this flag is not needed anymore
+torch._C._set_forward_AD_enabled(True)
+
 from torch import nn
 from torch._six import inf, nan
 from torch.autograd.function import once_differentiable
@@ -4668,7 +4671,7 @@ for shape in [(1,), ()]:
         # Take an invalid view on 'a' that should raise an error (warns during deprecation)
         view_a = MyFn.apply(a)
 
-        with self.assertWarnsRegex(UserWarning, "This view was created inside a custom Function"):
+        with self.assertRaisesRegex(RuntimeError, "This view was created inside a custom Function"):
             view_a += b
 
         # Extra test for copy_ that is a manual implementation and could be easily
@@ -4677,7 +4680,7 @@ for shape in [(1,), ()]:
         b = torch.rand(1, requires_grad=True)
         view_a = MyFn.apply(a)
 
-        with self.assertWarnsRegex(UserWarning, "This view was created inside a custom Function"):
+        with self.assertRaisesRegex(RuntimeError, "This view was created inside a custom Function"):
             view_a.copy_(b)
 
         # Functions that should throw must properly throw
@@ -4739,9 +4742,6 @@ for shape in [(1,), ()]:
                     ga_nz[0] = True
                 return ga + gab, gab, None
 
-        err_msg_two_outputs = "Output 0 of IdTwoOutputBackward is a view and is being modified inplace."
-        err_msg_two_outputs += " This view is the output of a function that returns multiple views."
-
         class ViewOfTemp(Function):
             @staticmethod
             def forward(ctx, a, make_view):
@@ -4760,6 +4760,15 @@ for shape in [(1,), ()]:
                 res = torch.zeros_like(a)
                 res.select(0, 0).copy_(grad)
                 return res, None
+
+        fn_id_to_inplace_view_err_msg = {
+            "one_output": ("Output 0 of IdOneOutputBackward is a view and is being "
+                           "modified inplace. This view was created inside a custom Function"),
+            "two_output": ("Output 0 of IdTwoOutputBackward is a view and is being modified inplace."
+                           " This view is the output of a function that returns multiple views."),
+            "view_of_temp": ("Output 0 of ViewOfTempBackward is a view and is being "
+                             "modified inplace. This view was created inside a custom Function")
+        }
 
         for fn_id in ["one_output", "two_output", "view_of_temp"]:
             for inplace in [True, False]:
@@ -4795,52 +4804,29 @@ for shape in [(1,), ()]:
                     a = torch.ones(2, dtype=dtype, requires_grad=True)
                     b = torch.ones(2, dtype=dtype, requires_grad=True)
 
+                    err_msg = fn_id_to_inplace_view_err_msg[fn_id]
 
-                    if fn_id == "two_output" and inplace and output_is_a_view:
-                        with self.assertRaisesRegex(RuntimeError, err_msg_two_outputs):
+                    if not inplace or not output_is_a_view:
+                        gradcheck(fn, (a, b), check_batched_grad=False)
+
+                    # Was the custom backward called properly
+                    bw_called[0] = 0
+                    ga_nz[0] = True  # For the case where the backward is called
+
+                    if inplace and output_is_a_view:
+                        with self.assertRaisesRegex(RuntimeError, err_msg):
                             fn(a, b)
                     else:
-                        # Are the computed gradients correct ?
-                        if inplace and output_is_a_view:
-                            with warnings.catch_warnings(record=True) as w:
-                                if fn_id == "view_of_temp":
-                                    # This will be fixed after the deprecation cycle and the warning becomes
-                                    # an error.
-                                    with self.assertRaisesRegex(RuntimeError,
-                                                                "a view of a leaf Variable that requires grad "
-                                                                "is being used in an in-place operation."):
-                                        gradcheck(fn, (a, b), check_batched_grad=False)
-                                else:
-                                    # This works but the custom backward is not called (or called with partial)
-                                    # gradients as tested below
-                                    gradcheck(fn, (a, b), check_batched_grad=False)
-                            self.assertTrue(len(w) > 0)
-                        else:
-                            gradcheck(fn, (a, b), check_batched_grad=False)
+                        fn(a, b).backward()
 
-                        # Was the custom backward called properly
-                        bw_called[0] = 0
-                        ga_nz[0] = True  # For the case where the backward is called
-                        with warnings.catch_warnings(record=True) as w:
-                            if inplace and output_is_a_view and fn_id != "one_output":
-                                with self.assertRaisesRegex(RuntimeError,
-                                                            "a view of a leaf Variable that requires grad "
-                                                            "is being used in an in-place operation."):
-                                    fn(a, b).backward()
-                            else:
-                                fn(a, b).backward()
+                    expected_called = 1
+                    expected_ga_nz = True
 
-                        expected_called = 1
-                        expected_ga_nz = True
-                        expected_warning = False
+                    if output_is_a_view and inplace:
+                        expected_called = 0
 
-                        if output_is_a_view and inplace:
-                            expected_called = 0
-                            expected_warning = True
-
-                        self.assertTrue(bw_called[0] == expected_called)
-                        self.assertTrue(ga_nz[0] == expected_ga_nz)
-                        self.assertTrue((len(w) == 1) == expected_warning)
+                    self.assertTrue(bw_called[0] == expected_called)
+                    self.assertTrue(ga_nz[0] == expected_ga_nz)
 
     def test_autograd_simple_views_python(self):
         self._do_test_autograd_simple_views_python(torch.double)
@@ -4884,9 +4870,9 @@ for shape in [(1,), ()]:
         self.assertTrue(bw_called[0] == 1)
 
         out = ComplexView.apply(a.clone(), idx)
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Output 0 of ComplexViewBackward is a view and is being modified inplace"):
             out += 1
-        self.assertEqual(len(w), 1)
 
     def test_autograd_inplace_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -5337,7 +5323,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-separate_complex_tests = ['view_as_real', 'real', 'imag', 'div', 'pow', '__rdiv__', 'add', 'sub']
+separate_complex_tests = ['view_as_real', 'div', 'pow', '__rdiv__', 'add', 'sub']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
@@ -5359,7 +5345,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'bmm', 'mv', 'ger', 'diagonal', 'fill_', 'sub',
                 'mean', 'inverse', 'linalg.tensorinv', 'matrix_exp',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split',
-                'baddbmm', 'addbmm', 'addmv'] + complex_list_filter + separate_complex_tests
+                'baddbmm'] + complex_list_filter + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
@@ -6971,6 +6957,13 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
 class TestAutogradForwardMode(TestCase):
+    def tearDown(self):
+        # Ensure that a failing test won't make others fail
+        while fwAD._current_level >= 0:
+            fwAD.exit_dual_level()
+
+        super().tearDown()
+
     def test_forward_level_cleanup(self):
         def get_tensor_and_weak_ref():
             # Create a new Tensor and weak reference
@@ -7015,6 +7008,249 @@ class TestAutogradForwardMode(TestCase):
                 dual = fwAD.make_dual(foo, tangent)
 
             dual = fwAD.make_dual(foo, tangent[1:])
+
+    # The following test functions want to ensure all the following behaviors:
+    #   - Ensure that default level system in the python binding works
+    #   - Ensure that only level 0 exists and nesting is properly disabled
+    #   - Ensure that printing works fine
+    #   - Ensure that basic packing/unpacking works
+    #   - Ensure that advanced packing/unpacking works
+    #     - For memory / version counter share
+    #     - For backward AD (regular ops)
+    #   - Ensure that view + inplace for both modes work fine
+    #   - Ensure we do proper cleanup on exit of a level
+
+    def test_default_level(self):
+        foo = torch.rand(2)
+        bar = torch.rand(2)
+
+        with fwAD.dual_level():
+            baz = fwAD.make_dual(foo, bar)
+            baz_primal, baz_tangent = fwAD.unpack_dual(baz)
+        self.assertEqual(baz_primal, foo)
+        # We don't actually need to enforce that these two are the exact same python
+        # object, feel free to relax in the future
+        self.assertIs(baz_tangent, bar)
+
+        baz_primal, baz_tangent = fwAD.unpack_dual(baz)
+        self.assertEqual(baz_primal, foo)
+        self.assertEqual(baz_tangent, None)
+
+    def test_nested_level(self):
+        with fwAD.dual_level() as level:
+            # For now only level 0 exists
+            self.assertEqual(level, 0)
+
+        with fwAD.dual_level():
+            with self.assertRaisesRegex(RuntimeError, "Nested forward mode AD is not supported at the moment"):
+                nest_level = fwAD.enter_dual_level()
+
+    def test_print(self):
+        with fwAD.dual_level() as level:
+            a = torch.rand(3)
+            self.assertFalse("tangent=" in str(a))
+
+            b = fwAD.make_dual(a, torch.rand(3))
+            self.assertFalse("tangent=" in str(a))
+            self.assertTrue("tangent=" in str(b))
+
+            b_primal, b_tangent = fwAD.unpack_dual(b)
+            self.assertFalse("tangent=" in str(b_primal))
+            self.assertFalse("tangent=" in str(b_tangent))
+
+    def test_basic_packing_unpacking(self):
+        foo = torch.rand(2)
+        bar = torch.rand(2)
+
+        with fwAD.dual_level():
+            baz = fwAD.make_dual(foo, bar)
+            baz_primal, baz_tangent = fwAD.unpack_dual(baz)
+            self.assertEqual(baz_primal, foo)
+            self.assertIs(baz_tangent, bar)
+
+            # Check that packing/unpacking did not change the input
+            foo_primal, foo_tangent = fwAD.unpack_dual(foo)
+            self.assertEqual(foo_primal, foo)
+            self.assertIsNone(foo_tangent)
+
+    def test_advanced_packing_unpacking(self):
+        foo = torch.rand(2)
+        bar = torch.ones(2)
+
+        # Memory and version counter check
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(foo, bar)
+
+            # Ensure that they are sharing memory and version counter
+            self.assertEqual(dual.storage().data_ptr(), foo.storage().data_ptr())
+
+            # Ensure we properly share the version counter
+            self.assertEqual(foo._version, dual._version)
+            foo.add_(1)
+            self.assertEqual(foo._version, dual._version)
+
+            # Unpacking should only create aliases as well
+            dual_primal, dual_tangent = fwAD.unpack_dual(dual)
+            self.assertEqual(dual_primal.storage().data_ptr(), foo.storage().data_ptr())
+            self.assertEqual(dual_tangent.storage().data_ptr(), bar.storage().data_ptr())
+            # And the tangent is actually re-used as-is so it is still the same Tensor
+            self.assertIs(dual_tangent, bar)
+
+            # Ensure we properly share the version counter
+            self.assertEqual(foo._version, dual_primal._version)
+            foo.add_(1)
+            self.assertEqual(foo._version, dual_primal._version)
+            self.assertEqual(bar._version, dual_tangent._version)
+            bar.add_(1)
+            self.assertEqual(bar._version, dual_tangent._version)
+
+        # backward mode check
+        with fwAD.dual_level():
+            foo.requires_grad_()
+            bar.requires_grad_()
+
+            # Check that backward gradients properly propagates through packing/unpacking
+            dual = fwAD.make_dual(foo, bar)
+            p, t = fwAD.unpack_dual(dual)
+
+            gfoo, gbar = torch.autograd.grad(p.sum(), (foo, bar), retain_graph=True, allow_unused=True)
+            self.assertEqual(gfoo, torch.ones_like(foo))
+            self.assertIsNone(gbar)
+
+            gfoo, gbar = torch.autograd.grad(t.sum(), (foo, bar), retain_graph=True, allow_unused=True)
+            self.assertIsNone(gfoo)
+            self.assertEqual(gbar, torch.ones_like(bar))
+
+            # Check that forward gradients are not impacted by detach
+            detached_dual = dual.detach()
+            out = detached_dual * 2
+            p, t = fwAD.unpack_dual(out)
+            self.assertFalse(p.requires_grad)
+            self.assertFalse(t.requires_grad)
+            self.assertEqual(p, foo * 2)
+            self.assertEqual(t, bar * 2)
+
+            # Check that forward gradients are not impacted by no_grad
+            with torch.no_grad():
+                out = dual * 3
+            p, t = fwAD.unpack_dual(out)
+            self.assertFalse(p.requires_grad)
+            self.assertFalse(t.requires_grad)
+            self.assertEqual(p, foo * 3)
+            self.assertEqual(t, bar * 3)
+
+            # Check that forward gradients are not impacted by inplace detach
+            dual = dual.clone()
+            dual.detach_()
+            out = dual * 2
+            p, t = fwAD.unpack_dual(out)
+            self.assertFalse(p.requires_grad)
+            self.assertFalse(t.requires_grad)
+            self.assertEqual(p, foo * 2)
+            self.assertEqual(t, bar * 2)
+
+    def test_view_inplace_non_differentiable_views(self):
+        original_foo = torch.rand(2)
+        original_bar = torch.ones(2)
+
+        # Do clones to be able to compare the values updated inplace
+        # with the original content of these Tensors
+        foo = original_foo.clone()
+        bar = original_bar.clone()
+
+        with fwAD.dual_level():
+            # Note that in this test, we use "update" to mean computing the right tangent for the dual
+            # All the inplace operations here are expected to update the primal value of the Tensors but
+            # not always their tangents.
+            # Also all mentions of "non differentiable view" here means non forward differentiable view
+            # unless specified otherwise.
+            # See note [Forward Grad View/inplace] for more details on how these views work.
+
+            # Check that inplace ops do not update non-differentiable views
+            # Non differentiable view
+            dual = fwAD.make_dual(foo, bar)
+            dual *= 2
+            # Check that non differentiable view's tangent was not updated
+            self.assertIsNone(fwAD.unpack_dual(foo)[1])
+            # Check that the computed result is correct
+            self.assertEqual(bar, original_bar * 2)
+            self.assertEqual(fwAD.unpack_dual(dual)[1], original_bar * 2)
+            self.assertEqual(foo, original_foo * 2)
+            self.assertEqual(fwAD.unpack_dual(dual)[0], original_foo * 2)
+            # Other non differentiable view
+            dual_primal, dual_tangent = fwAD.unpack_dual(dual)
+            self.assertIsNone(fwAD.unpack_dual(dual_primal)[1])
+            self.assertIsNone(fwAD.unpack_dual(dual_tangent)[1])
+            dual_primal *= 2
+            # Ensure dual's tangent did not change
+            self.assertEqual(fwAD.unpack_dual(dual)[0], original_foo * 4)
+            self.assertEqual(fwAD.unpack_dual(dual)[1], original_bar * 2)
+            dual_tangent *= 2
+            # Ensure dual's primal did not change
+            self.assertEqual(fwAD.unpack_dual(dual)[0], original_foo * 4)
+            self.assertEqual(fwAD.unpack_dual(dual)[1], original_bar * 4)
+
+
+    def test_view_inplace_differentiable_views(self):
+        original_foo = torch.rand(2)
+        original_bar = torch.ones(2)
+
+        # Do clones to be able to compare the values updated inplace
+        # with the original content of these Tensors
+        foo = original_foo.clone()
+        bar = original_bar.clone()
+
+        with fwAD.dual_level():
+            # Check that inplace ops do update differentiable view but stop at non differentiable ones
+            # A non differentiable view
+            dual = fwAD.make_dual(foo, bar)
+            # A differentiable view
+            view = dual.narrow(0, 0, 1)
+            view *= 2
+            # Check that non differentiable view was not updated
+            self.assertIsNone(fwAD.unpack_dual(foo)[1])
+            # Check that differentiable view was updated
+            self.assertEqual(fwAD.unpack_dual(dual)[1], torch.tensor([2., 1.]))
+            self.assertEqual(fwAD.unpack_dual(view)[1], torch.tensor([2.]))
+
+            # Check that we track differentiable view even for Tensors that are not dual
+            baz = torch.rand(2)
+            baz += dual
+            self.assertEqual(fwAD.unpack_dual(baz)[1], fwAD.unpack_dual(dual)[1])
+            # Updates on view should as well
+            baz = torch.rand(2)
+            baz[0] = dual[0]
+            self.assertEqual(fwAD.unpack_dual(baz)[1][0], fwAD.unpack_dual(dual)[1][0])
+            # Unused values get a gradient of 0
+            self.assertEqual(fwAD.unpack_dual(baz)[1][1], 0.)
+
+            # Check that backward non-differentiable views don't prevent gradient update
+            baz = torch.rand(2)
+            view = baz.detach()
+            view += dual
+            self.assertEqual(fwAD.unpack_dual(baz)[1], fwAD.unpack_dual(dual)[1])
+
+    def test_grad_cleanup(self):
+        foo = torch.rand(2)
+        bar = torch.rand(2)
+        baz = torch.rand(2)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(foo, bar)
+            self.assertIsNone(fwAD.unpack_dual(foo)[1])
+            self.assertIs(fwAD.unpack_dual(dual)[1], bar)
+
+        self.assertIsNone(fwAD.unpack_dual(dual)[1])
+
+        with fwAD.dual_level():
+            self.assertIsNone(fwAD.unpack_dual(foo)[1])
+            new_dual = fwAD.make_dual(foo, baz)
+
+            dual_primal, dual_tangent = fwAD.unpack_dual(dual)
+            new_dual_primal, new_dual_tangent = fwAD.unpack_dual(new_dual)
+            self.assertEqual(dual_primal, new_dual_primal)
+            self.assertIsNone(dual_tangent)
+            self.assertEqual(new_dual_tangent, baz)
 
 
 # Generic device type autograd tests.
@@ -7932,9 +8168,9 @@ class TestAutogradDeviceType(TestCase):
             a = torch.randn(3, 3, device=device, requires_grad=True)
             b = a + a
             s1, s2, s3 = f(b)
-            with warnings.catch_warnings(record=True) as w:
+            error_msg = 'This view is an output of a function that returns multiple views.'
+            with self.assertRaisesRegex(RuntimeError, error_msg):
                 s1.mul_(s2)
-            self.assertIn('Consider using `unsafe_` version', str(w[0].message))
 
     def test_mv_grad_stride_0(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/38315

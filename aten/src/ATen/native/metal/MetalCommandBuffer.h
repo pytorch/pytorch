@@ -1,20 +1,20 @@
-#import <Foundation/Foundation.h>
-#import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
-@protocol PTMetalCommandBufferDelegate<NSObject>
+@protocol PTMetalCommandBuffer<NSObject>
 @optional
-- (void)prepareForSynchronization;
+- (void)beginSynchronization;
+- (void)endSynchronization:(NSError*)error;
 @end
 
 @interface MetalCommandBuffer : NSObject
 @property(nonatomic, strong, readonly) id<MTLCommandBuffer> buffer;
+@property(nonatomic, assign, readonly) BOOL valid;
 
 + (MetalCommandBuffer*)newBuffer;
 + (MetalCommandBuffer*)currentBuffer;
-- (void)addDelegate:(id<PTMetalCommandBufferDelegate>)delegate;
-- (void)removeDelegate:(id<PTMetalCommandBufferDelegate>)delegate;
-- (void)synchronize;
+- (void)addSubscriber:(id<PTMetalCommandBuffer>)subscriber;
+- (void)removeSubscriber:(id<PTMetalCommandBuffer>)subscriber;
+- (void)commit;
 - (void)add:(MPSTemporaryImage*)image;
 - (void)remove:(MPSTemporaryImage*)image;
 

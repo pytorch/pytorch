@@ -7,7 +7,7 @@
 #import <ATen/native/metal/mpscnn/MPSImageWrapper.h>
 
 using namespace at::native::metal;
-@interface MPSImageWrapperTrampoline : NSObject<PTMetalCommandBufferDelegate>
+@interface MPSImageWrapperTrampoline : NSObject<PTMetalCommandBuffer>
 + (instancetype)newWithMPSImageWrapper:(MPSImageWrapper*)wrapper;
 @end
 
@@ -25,9 +25,19 @@ using namespace at::native::metal;
   _imageWrapper = nullptr;
 }
 
-- (void)prepareForSynchronization {
+- (void)beginSynchronization {
   if (_imageWrapper) {
     _imageWrapper->prepare();
+  }
+}
+
+- (void)endSynchronization:(NSError*)error {
+  if (error) {
+    if (_imageWrapper) {
+      _imageWrapper->release();
+    }
+    // throw exceptions if we failed to flush the command buffer
+    TORCH_CHECK(error);
   }
 }
 
@@ -49,7 +59,7 @@ MPSImageWrapper::~MPSImageWrapper() {
 void MPSImageWrapper::copyDataFromHost(const float* inputData) {
   TORCH_CHECK(inputData);
   _commandBuffer = [MetalCommandBuffer currentBuffer];
-  [_commandBuffer addDelegate:_delegate];
+  [_commandBuffer addSubscriber:_delegate];
   _image = createTemporaryImage(_commandBuffer, _textureSizes, inputData);
 }
 
@@ -63,13 +73,9 @@ MPSImage* MPSImageWrapper::image() const {
   return _image;
 }
 
-void MPSImageWrapper::recycleImage() {
-  release();
-}
-
 void MPSImageWrapper::setCommandBuffer(MetalCommandBuffer* cb) {
   _commandBuffer = cb;
-  [_commandBuffer addDelegate:_delegate];
+  [_commandBuffer addSubscriber:_delegate];
 }
 MetalCommandBuffer* MPSImageWrapper::commandBuffer() const {
   return _commandBuffer;
@@ -102,42 +108,30 @@ void MPSImageWrapper::copyFromTexture(MPSImage* image) {
 }
 
 void MPSImageWrapper::setTexture(MPSImage* image) {
-    TORCH_CHECK(image);
-    _image = image;
+  TORCH_CHECK(image);
+  _image = image;
 }
 
 void MPSImageWrapper::prepare() {
   // If the temporary image is still alive in the current command buffer,
   // make it a static image.
-  if ([_image isTemporaryImage] && _image.readCount != 0) {
 #if DEBUG
-    NSLog(
-        @"[MPSImageWrapper] Found a temporary image: [%lld, %lld, %lld, %lld]",
-        (int64_t)_image.numberOfImages,
-        (int64_t)_image.featureChannels,
-        (int64_t)_image.height,
-        (int64_t)_image.width);
+  NSLog(@"[MPSImageWrapper] prepare: [%lld, %lld, %lld, %lld] is static: %d \n",
+      (int64_t)_image.numberOfImages,
+      (int64_t)_image.featureChannels,
+      (int64_t)_image.height,
+      (int64_t)_image.width,
+      !_image.isTemporaryImage);
 #endif
+  if (_image.isTemporaryImage && _image.readCount != 0) {
     _image =
         createStaticImage((MPSTemporaryImage*)_image, _commandBuffer, false);
   }
-#if DEBUG
-  else {
-    if (_image) {
-      NSLog(
-          @"[MPSImageWrapper] Found a static image: [%lld, %lld, %lld, %lld]",
-          (int64_t)_image.numberOfImages,
-          (int64_t)_image.featureChannels,
-          (int64_t)_image.height,
-          (int64_t)_image.width);
-    }
-  }
-#endif
 }
 
 void MPSImageWrapper::synchronize() {
   TORCH_CHECK(commandBuffer());
-  [commandBuffer() synchronize];
+  [commandBuffer() commit];
 }
 
 void MPSImageWrapper::release() {
@@ -145,7 +139,7 @@ void MPSImageWrapper::release() {
     [_image recycle];
     [_commandBuffer remove:(MPSTemporaryImage*)_image];
   }
-  [_commandBuffer removeDelegate:_delegate];
+  [_commandBuffer removeSubscriber:_delegate];
   _delegate = nil;
   _commandBuffer = nil;
   _image = nil;
