@@ -466,6 +466,7 @@ void InplaceConverter::ValueTracker::recordSetValue(
     if (owning_block_nkind == prim::Loop) {
       owning_block->registerOutput(new_v);
       auto new_block_in = owning_block->addInput();
+      new_block_in->setType(new_v->type());
       sorted_alias.insert(new_block_in);
       alias_to_value_[new_block_in] = root_v;
       owning_blocknode->addInput(root_v);
@@ -479,6 +480,7 @@ void InplaceConverter::ValueTracker::recordSetValue(
       }
     }
     auto* new_blocknode_out = owning_blocknode->addOutput();
+    new_blocknode_out->setType(new_v->type());
     recordSetValue(root_v, new_blocknode_out);
   }
 
