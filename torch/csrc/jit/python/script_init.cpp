@@ -1,5 +1,5 @@
+#include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
-#include "jit/api/object.h"
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/api/module.h>
