@@ -13,6 +13,7 @@ from .mappings import (
     MODS_IO_TYPE_FP32,
     MODS_IO_TYPE_INT8,
     MODS_IO_TYPE_FP32_OR_INT8,
+    METHS_IO_TYPE_FP32_OR_INT8,
 )
 
 from typing import Any, Tuple, Callable
@@ -34,6 +35,10 @@ class NodeInputOrOutputType(enum.Enum):
     INT8 = enum.auto()  # torch.qint8 or torch.quint8
     FP16 = enum.auto()  # torch.float16
     UNKNOWN = enum.auto()  # we cannot determine input/output dtype
+    # TODO(future PR): while these functions can support multiple dtypes,
+    #   for the purposes of numerical debugging we want to get the actual
+    #   dtype used in the model. We will likely need some kind of dtype
+    #   propagation to estimate this.
     FP32_OR_INT8 = enum.auto()  # either torch.float or torch.quint8 or torch.qint8
     # TODO(future PRs): dynamic quant, fake quant, etc
 
@@ -111,6 +116,9 @@ def get_node_first_input_and_output_type(
 
             return (prev_node_output_type, NodeInputOrOutputType.FP16)
 
+        elif node.target in METHS_IO_TYPE_FP32_OR_INT8:
+            return (NodeInputOrOutputType.FP32_OR_INT8, NodeInputOrOutputType.FP32_OR_INT8)
+
         return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
     else:
         return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
@@ -174,7 +182,7 @@ def get_target_type_str(node: Node, gm: GraphModule) -> str:
     pointed to by this node, or '' for other op types.
     """
     target_type = ''
-    if node.op == 'call_function':
+    if node.op in ('call_function', 'call_method'):
         target_type = str(node.target)
     elif node.op == 'call_module':
         assert isinstance(node.target, str)

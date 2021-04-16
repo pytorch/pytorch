@@ -49,6 +49,7 @@ from torch.quantization.ns.mappings import (
     MODS_IO_TYPE_FP32,
     MODS_IO_TYPE_INT8,
     MODS_IO_TYPE_FP32_OR_INT8,
+    METHS_IO_TYPE_FP32_OR_INT8,
 )
 from torch.quantization._numeric_suite_fx import (
     extract_weights,
@@ -531,8 +532,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
             if isinstance(pattern, tuple):
                 base_op = pattern[-1]
             elif isinstance(pattern, str):
-                # TODO(future PR): add handling for these
-                continue
+                base_op = pattern
             else:
                 base_op = pattern
 
@@ -839,6 +839,21 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_match_activations_fun_qat(self):
         self._test_match_activations_fun_impl(prepare_fn=prepare_qat_fx)
 
+    @skipIfNoFBGEMM
+    def test_match_activations_meth_ptq(self):
+        """
+        Verify that add_loggers works on methods
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x.sigmoid()
+                return x
+
+        m = M().eval()
+        res = self._test_match_activations(
+            m, (torch.randn(4, 4),),
+            results_len=1)
+
     def _test_add_shadow_loggers_mod_impl(self, prepare_fn=prepare_fx):
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
@@ -875,6 +890,21 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     @skipIfNoFBGEMM
     def test_add_shadow_loggers_fun_qat(self):
         self._test_add_shadow_loggers_fun_impl(prepare_fn=prepare_qat_fx)
+
+    @skipIfNoFBGEMM
+    def test_add_shadow_loggers_meth_ptq(self):
+        """
+        Verify that add_loggers works on methods
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x.sigmoid()
+                return x
+
+        m = M().eval()
+        res = self._test_match_shadow_activations(
+            m, (torch.randn(4, 4),),
+            results_len=1)
 
     @skipIfNoFBGEMM
     def test_add_shadow_loggers_multiple_dtype_casts(self):
@@ -1141,8 +1171,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             if isinstance(pattern, tuple):
                 base_op = pattern[-1]
             elif isinstance(pattern, str):
-                # TODO(future PR): add handling for these
-                continue
+                base_op = pattern
             else:
                 base_op = pattern
 
@@ -1181,13 +1210,34 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 # matching these nodes.
                 to_skip = set([
                     operator.getitem,
+                    'view',
+                    'unsqueeze_',
+                    'unsqueeze',
+                    'transpose',
+                    'squeeze_',
+                    'squeeze',
+                    'size',
+                    'shape',
+                    'resize_',
+                    'reshape',
+                    'repeat_interleave',
+                    'repeat',
+                    'permute',
+                    'numel',
+                    'mean',
+                    'detach_',
+                    'detach',
+                    'contiguous',
+                    'clamp',
+                    'chunk',
                 ])
                 if base_op in to_skip:
                     continue
 
                 self.assertTrue(
                     (base_op in FUNS_IO_TYPE_FP32_OR_INT8) or
-                    (base_op in MODS_IO_TYPE_FP32_OR_INT8),
+                    (base_op in MODS_IO_TYPE_FP32_OR_INT8) or
+                    (base_op in METHS_IO_TYPE_FP32_OR_INT8),
                     f"missing IO type handling for {base_op}")
             elif qhandler_cls == qp.EmbeddingQuantizeHandler:
                 # embedding shadowing is not implemented, for now

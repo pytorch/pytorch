@@ -173,3 +173,14 @@ MODS_IO_TYPE_FP32_OR_INT8 = set([
     nn.MaxPool3d,
     nn.ReLU6,
 ])
+
+METHS_IO_TYPE_FP32_OR_INT8 = set([
+    'sigmoid_',
+    'sigmoid',
+    'tanh_',
+    'tanh',
+    'hardsigmoid_',
+    'hardsigmoid',
+    'relu_',
+    'relu',
+])
