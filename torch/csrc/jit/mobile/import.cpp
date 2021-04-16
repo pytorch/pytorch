@@ -463,8 +463,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   auto meta_dict = readMobileMetadata(mcu);
   auto m = mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-  std::unique_ptr<MobileDebugTable> debug_table =
-      std::make_unique<MobileDebugTable>(reader_, compilation_unit_);
+  MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
   m.setDebugTable(std::move(debug_table));
 #endif
   return m;
