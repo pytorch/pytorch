@@ -21,7 +21,7 @@ __host__ __device__ static inline std::complex<T> ceil_wrapper(std::complex<T> v
   return std::complex<T>(std::ceil(v.real()), std::ceil(v.imag()));
 }
 
-void ceil_kernel_cuda(TensorIterator& iter) {
+void ceil_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "ceil_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ceil_wrapper(a);
@@ -29,7 +29,7 @@ void ceil_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void frac_kernel_cuda(TensorIterator& iter) {
+void frac_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "frac_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return a - ::trunc(a);
@@ -48,7 +48,7 @@ __host__ __device__ static inline std::complex<T> floor_wrapper(std::complex<T> 
   return std::complex<T>(std::floor(v.real()), std::floor(v.imag()));
 }
 
-void floor_kernel_cuda(TensorIterator& iter) {
+void floor_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "floor_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return floor_wrapper(a);
@@ -87,7 +87,7 @@ __host__ __device__ static inline c10::complex<T> reciprocal_wrapper(c10::comple
   return one/v;
 }
 
-void reciprocal_kernel_cuda(TensorIterator& iter) {
+void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "reciprocal_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return reciprocal_wrapper(a);
@@ -116,7 +116,7 @@ __host__ __device__ static inline c10::complex<double> nearbyint_wrapper(c10::co
 }
 #pragma pop
 
-void round_kernel_cuda(TensorIterator& iter) {
+void round_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "round_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       // We do not use std::round because we would like to round midway numbers to the nearest even integer.
@@ -143,7 +143,7 @@ __host__ __device__ static inline c10::complex<double> trunc_wrapper(c10::comple
   return c10::complex<double>(::trunc(static_cast<double>(a.real())), ::trunc(static_cast<double>(a.imag())));
 }
 
-void trunc_kernel_cuda(TensorIterator& iter) {
+void trunc_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "trunc_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return trunc_wrapper(a);
