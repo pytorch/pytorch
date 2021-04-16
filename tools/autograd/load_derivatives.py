@@ -9,7 +9,9 @@ import yaml
 
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
-from tools.codegen.api.types import Binding, CppSignatureGroup
+from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
+                                     intArrayRefT, tensorOptionsT, typeAndSizeT, intT,
+                                     tensorGeometryT, scalarTypeT, SpecialArgName)
 from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
@@ -69,15 +71,15 @@ def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
 
 def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...]) -> Derivative:
     original_formula = formula
-    arguments = cpp_arguments(f)
-    argument_names = tuple(a.name for a in arguments)
-    argument_types = tuple(a.type for a in arguments)
+    arguments: List[NamedCType] = [a.nctype.remove_const_ref() for a in cpp_arguments(f)]
 
     return_names = tuple(n if n != 'self' else 'result' for n in cpp.return_names(f))
-    return_types = tuple(cpp.return_type(r) for r in f.func.returns)
+    return_types = tuple(cpp.return_type(r).remove_const_ref() for r in f.func.returns)
 
-    formula, saved_inputs = saved_variables(formula, argument_names, argument_types, var_names)
-    formula, saved_outputs = saved_variables(formula, return_names, return_types, var_names)
+    named_returns = [NamedCType(name, type) for name, type in zip(return_names, return_types)]
+
+    formula, saved_inputs = saved_variables(formula, arguments, var_names)
+    formula, saved_outputs = saved_variables(formula, named_returns, var_names)
 
     # Check that the referenced derivatives in the formula are in bounds
     for i in used_gradient_indices(formula):
@@ -422,8 +424,7 @@ def used_gradient_indices(formula: str) -> List[int]:
 
 def saved_variables(
     formula: str,
-    arg_names: Tuple[str, ...],
-    arg_types: Tuple[str, ...],
+    nctypes: List[NamedCType],
     var_names: Tuple[str, ...],
 ) -> Tuple[str, Tuple[SavedAttribute, ...]]:
 
@@ -437,58 +438,58 @@ def saved_variables(
         # replace self.sizes() with self_sizes
         (r'{}.sizes\(\)', {
             'suffix': '_sizes',
-            'type': 'IntArrayRef',
+            'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
         }),
         # replace self.options() with self_options
         (r'{}.options\(\)', {
             'suffix': '_options',
-            'type': 'at::TensorOptions',
+            'nctype': lambda name: NamedCType(name, BaseCType(tensorOptionsT)),
         }),
         # replace zeros_like(self) with self_info
         (r'zeros_like\({}\)', {
             'suffix': '_info',
-            'type': 'TypeAndSize',
+            'nctype': lambda name: NamedCType(name, BaseCType(typeAndSizeT)),
             'expr': lambda name: name,  # at save-time
             'res': lambda name: name + '_info.zeros()',  # at eval-time
         }),
         # replace self.size(2) with self_size_2
         (r'{}.size\((\w+)\)', {
             'suffix': lambda m: '_argsize_{}'.format(*m.groups()),
-            'type': 'int64_t',
+            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
         }),
         # replace self.numel() with self_numel
         (r'{}.numel\(\)', {
             'suffix': '_numel',
-            'type': 'int64_t',
+            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
         }),
         # replace to_args_sizes(self) with self_args_sizes
         (r'to_args_sizes\({}\)', {
             'suffix': '_args_sizes',
-            'type': 'std::vector<std::vector<int64_t>>',
+            'nctype': lambda name: NamedCType(name, VectorCType(VectorCType(BaseCType(intT)))),
         }),
         # replace to_args_scalartypes(self) with self_args_scalartypes
         (r'to_args_scalartypes\({}\)', {
             'suffix': '_args_scalartypes',
-            'type': 'std::vector<ScalarType>',
+            'nctype': lambda name: NamedCType(name, VectorCType(BaseCType(scalarTypeT))),
         }),
         # replace TensorGeometry(self) with self_geometry
         (r'TensorGeometry\({}\)', {
             'suffix': '_geometry',
-            'type': 'TensorGeometry',
+            'nctype': lambda name: NamedCType(name, BaseCType(tensorGeometryT)),
         }),
         (r'{}.scalar_type\(\)', {
             'suffix': '_scalar_type',
-            'type': 'ScalarType',
+            'nctype': lambda name: NamedCType(name, BaseCType(scalarTypeT)),
         }),
         # replace self.dim() with self_dim
         (r'{}.dim\(\)', {
             'suffix': '_dim',
-            'type': 'int64_t',
+            'nctype': lambda name: NamedCType(name, BaseCType(intT)),
         }),
         # replace self.strides() with self_strides
         (r'{}.strides\(\)', {
             'suffix': '_strides',
-            'type': 'IntArrayRef',
+            'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
             'expr': stride_expr,
         }),
     ]
@@ -496,7 +497,8 @@ def saved_variables(
     # find which arguments need to be saved
     saved: List[SavedAttribute] = []
 
-    for name, type in zip(arg_names, arg_types):
+    for nctype in nctypes:
+        name = nctype.name.name if isinstance(nctype.name, SpecialArgName) else nctype.name
         # First search the formula for expressions which can be evaluated
         # when the autograd Function is created to avoid saving variables
         for regex, info in REPLACEMENTS:
@@ -504,8 +506,7 @@ def saved_variables(
                 suffix: str = info['suffix'](m) if callable(info['suffix']) else info['suffix']
                 expr: str = info['expr'](name) if 'expr' in info else m.group(0)
                 saved.append(SavedAttribute(
-                    name=name + suffix,
-                    type=info['type'],
+                    nctype=info['nctype'](name + suffix),
                     expr=expr,
                 ))
                 if 'res' in info:
@@ -518,9 +519,7 @@ def saved_variables(
         # Find any variables which remain in the formula and save them
         if re.search(IDENT_REGEX.format(name), formula):
             saved.append(SavedAttribute(
-                name=name,
-                # TODO: change from string to type data model
-                type=type.replace('const ', '').replace(' &', ''),
+                nctype=nctype,
                 expr=name,
             ))
 
@@ -560,8 +559,9 @@ def dedup_vars(vars: Sequence[SavedAttribute]) -> Sequence[SavedAttribute]:
     seen: Set[str] = set()
     saved: List[SavedAttribute] = []
     for var in vars:
-        if var.name in seen:
+        name = var.nctype.name.name if isinstance(var.nctype.name, SpecialArgName) else var.nctype.name
+        if name in seen:
             continue
-        seen.add(var.name)
+        seen.add(name)
         saved.append(var)
     return saved
