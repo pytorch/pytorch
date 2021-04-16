@@ -16,6 +16,9 @@ namespace metal {
 Tensor copy_to_host(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   MPSImage* X = imageFromTensor(input);
+  if (X && !X.isTemporaryImage) {
+    return input;
+  }
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   auto&& sizes = [X sizes];
   MetalTensorImplStorage mt{sizes};
