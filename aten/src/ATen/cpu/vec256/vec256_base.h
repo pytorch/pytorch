@@ -637,9 +637,9 @@ inline Vec256<T> fmax(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] > b[i] ? a[i] : b[i];
-    if (_isnan(a[i])) {
+    if (_isnan(b[i])) {
       // If either input is NaN, the result is the other input.
-      c[i] = b[i];
+      c[i] = a[i];
     }
   }
   return c;
@@ -652,9 +652,9 @@ inline Vec256<T> fmin(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] < b[i] ? a[i] : b[i];
-    if (_isnan(a[i])) {
+    if (_isnan(b[i])) {
       // If either input is NaN, the result is the other input.
-      c[i] = b[i];
+      c[i] = a[i];
     }
   }
   return c;

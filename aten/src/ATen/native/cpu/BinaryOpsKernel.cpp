@@ -617,7 +617,9 @@ void fmax_kernel(TensorIterator& iter) {
           [](scalar_t a, scalar_t b) -> scalar_t {
             return std::fmax(a, b);
           },
-          [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::fmax(a, b); });
+          [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+            return at::vec256::fmax(a, b);
+          });
       });
     }
   } else {
