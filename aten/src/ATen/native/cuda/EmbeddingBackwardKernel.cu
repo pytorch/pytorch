@@ -190,7 +190,6 @@ Tensor embedding_backward_cuda_kernel(
         const Tensor &count,
         int64_t num_weights,
         int padding_idx,
-        bool scale_grad_by_freq,
         bool mode_mean,
         const Tensor &offset2bag,
         const Tensor &bag_size,
