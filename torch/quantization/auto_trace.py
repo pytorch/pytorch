@@ -9,8 +9,7 @@ from torch.fx.node import map_aggregate
 def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
     def convert_to_proxy(x):
         if isinstance(x, torch.Tensor):
-            x.__class__ = QuantizationInterceptionProxy
-            return x
+            return x.as_subclass(QuantizationInterceptionProxy)
         else:
             return x
 
@@ -37,6 +36,11 @@ def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
         def __torch_function__(self, func, types, args=(), kwargs=None):
             kwargs = kwargs if kwargs else {}
             output = super().__torch_function__(func, types, args, kwargs)
+
+            # TODO: is this right? Don't really understand this
+            if output is NotImplemented:
+                with torch._C.DisableTorchFunction():
+                    output = func(*args, **kwargs).as_subclass(QuantizationInterceptionProxy)
 
             if cur_module and cur_module in modules_to_introspect:
                 if func in {torch.Tensor.add, torch.Tensor.mul, torch.add, torch.mul,
@@ -119,8 +123,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
     def convert_to_proxy(x):
         if isinstance(x, torch.Tensor):
-            x.__class__ = QuantizationDispatchProxy
-            return x
+            return x.as_subclass(QuantizationDispatchProxy)
         else:
             return x
 
