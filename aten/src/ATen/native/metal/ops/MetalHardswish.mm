@@ -44,7 +44,7 @@ Tensor& hardswish_(Tensor& input) {
   [X markRead];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
-  implStorage.texture()->copyFromTexture(Y);
+  implStorage.texture()->setTexture(Y);
   return input;
 }
 
