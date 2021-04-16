@@ -10309,6 +10309,44 @@ dedent """
 
         self.checkScript(t, (torch.zeros(3, 2, 3),))
 
+    def test_torch_ignore_conversion_to_none(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            @torch.jit.ignore
+            def ignored(self, a: int) -> None:
+                l: int = len([2 for i in range(a) if i > 2])
+                return
+
+            def forward(self) -> int:
+                a: int = 4
+                b: int = 5
+                self.ignored(a)
+                return a + b
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+
+            @torch.jit.ignore
+            def ignored(self, a: int):
+                l: int = len([2 for i in range(a) if i > 2])
+                return
+
+            def forward(self) -> int:
+                a: int = 4
+                b: int = 5
+                self.ignored(a)
+                return a + b
+
+        modelA = torch.jit.script(A())
+        self.assertEqual(modelA(), 9)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "expected value of type Tensor", "self.ignored"):
+            modelB = torch.jit.script(B())
+            modelB()
+
     def test_addmm_grad(self):
         """ This test checks several things:
             1. An expand node was inserted before the addmm operating on the
