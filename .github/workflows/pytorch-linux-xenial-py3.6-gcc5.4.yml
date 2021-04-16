@@ -82,7 +82,7 @@ jobs:
       - name: Archive artifacts into zip
         run: |
           # TODO: only build test artifacts in the test phase
-          (cd ../ && zip -q -r pytorch/artifacts.zip pytorch/dist pytorch/build custom-op-build custom-backend-build jit-hook-build)
+          (cd "${GITHUB_WORKSPACE}/../" && zip -r pytorch/artifacts.zip pytorch/dist pytorch/build custom-op-build/ custom-backend-build/ jit-hook-build/)
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Build Artifacts
         with:
@@ -141,7 +141,7 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
       - name: Unzip artifacts
         run: |
-          (cd ../ && unzip -q pytorch/artifacts.zip)
+          (cd "${GITHUB_WORKSPACE}/../" && unzip -q pytorch/artifacts.zip)
       - name: Output disk space left
         run: |
           sudo df -H
