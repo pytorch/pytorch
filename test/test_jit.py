@@ -10309,16 +10309,6 @@ dedent """
 
         self.checkScript(t, (torch.zeros(3, 2, 3),))
 
-    def test_slice_dynamic_index(self):
-        def t(x):
-            slice1 = x[0:1]
-            zero = 0
-            one = zero + 1
-            slice2 = x[zero:one]
-            return slice1 + slice2
-
-        self.checkScript(t, (torch.zeros(3, 2, 3),))
-
     def test_torch_ignore_conversion_to_none(self):
         class A(torch.nn.Module):
             def __init__(self):
