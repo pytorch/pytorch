@@ -1335,7 +1335,24 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self.assertTrue(len(act_compare_dict) == 1)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
-        # TODO(future PR): test shadowed activations
+        # test shadowed activations
+
+        node_type_to_io_type_map = get_node_type_to_io_type_map()
+        node_type_to_io_type_map['funs_io_type_fp32'].add(_wrapped_hardswish)
+
+        m1_shadows_m2_ns = _add_shadow_loggers_impl(
+            'a', m1, 'b', m2, OutputLogger,
+            should_log_inputs=False,
+            base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops,
+            node_type_to_io_type_map=node_type_to_io_type_map)
+
+        # calibrate
+        m1_shadows_m2_ns(data)
+
+        # check activation result correctness
+        act_compare_dict = extract_shadow_logger_info(m1_shadows_m2_ns, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 1)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):

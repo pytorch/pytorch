@@ -16,9 +16,13 @@ from .utils import (
 from .ns_types import (
     NSSingleResultValuesType,
     NSSubgraph,
+    NSNodeTargetType,
+)
+from torch.quantization.ns.mappings import (
+    get_node_type_to_io_type_map,
 )
 
-from typing import Dict, Tuple, Callable, List, Any, Union, Optional
+from typing import Dict, Tuple, Callable, List, Any, Union, Optional, Set
 
 def _insert_logger_after_node(
     node: Node,
@@ -136,6 +140,7 @@ def _insert_dtype_cast_after_node(
     graph_c: Graph,
     node_name_prefix: str,
     logger_cls: Callable,
+    node_type_to_io_type_map: Dict[str, Set[NSNodeTargetType]],
 ) -> Union[Node, List[Node]]:
     """
     Given a starting graph C (derived from graph B) of
@@ -156,9 +161,11 @@ def _insert_dtype_cast_after_node(
     dtype_cast_op = None
     dtype_cast_mod_cls = None
     node_input_type_a, _node_output_type_a = \
-        get_node_first_input_and_output_type(node_a, gm_a, logger_cls)
+        get_node_first_input_and_output_type(
+            node_a, gm_a, logger_cls, node_type_to_io_type_map)
     node_input_type_c, _node_output_type_c = \
-        get_node_first_input_and_output_type(node_c, gm_b, logger_cls)
+        get_node_first_input_and_output_type(
+            node_c, gm_b, logger_cls, node_type_to_io_type_map)
 
     if (
         (node_input_type_a == NodeInputOrOutputType.FP32 and
@@ -400,6 +407,7 @@ def create_a_shadows_b(
     matched_subgraph_pairs: Dict[str, Tuple[NSSubgraph, NSSubgraph]],
     logger_cls: Callable,
     should_log_inputs: bool,
+    node_type_to_io_type_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> GraphModule:
     """
     Creates a new GraphModule consisting of the graph of C, with the meaningful
@@ -426,6 +434,9 @@ def create_a_shadows_b(
     * adds a copy of node_a in gm_b's graph
     * adds loggers to the outputs of node_a and node_b
     """
+
+    if node_type_to_io_type_map is None:
+        node_type_to_io_type_map = get_node_type_to_io_type_map()
 
     # graph_c is the graph created from copying the nodes of graph_b and inserting
     # the shadows with the nodes copied from graph_a
@@ -473,9 +484,13 @@ def create_a_shadows_b(
             # For both start_node and end_node verify that we know how to do
             # the dtype cast. If we do not, skip.
             node_input_type_a, node_output_type_a = \
-                get_node_first_input_and_output_type(subgraph_a.start_node, gm_a, logger_cls)
+                get_node_first_input_and_output_type(
+                    subgraph_a.start_node, gm_a, logger_cls,
+                    node_type_to_io_type_map)
             node_input_type_b, node_output_type_b = \
-                get_node_first_input_and_output_type(node_b, gm_b, logger_cls)
+                get_node_first_input_and_output_type(
+                    node_b, gm_b, logger_cls,
+                    node_type_to_io_type_map)
             node_io_types_known_a_and_b = (
                 node_input_type_a != NodeInputOrOutputType.UNKNOWN and
                 node_output_type_a != NodeInputOrOutputType.UNKNOWN and
@@ -551,7 +566,8 @@ def create_a_shadows_b(
                         prev_node_c = [arg.args[0] for arg in prev_node_c]
                 dtype_cast_node = _insert_dtype_cast_after_node(
                     subgraph_a.start_node, node_c, prev_node_c, gm_a, gm_b, graph_c,
-                    node_b.name + '_dtype_cast_', logger_cls)
+                    node_b.name + '_dtype_cast_', logger_cls,
+                    node_type_to_io_type_map)
                 # note: not inserting to env_c because all nodes which use the dtype
                 #   casts are copied from graph_a
                 #
