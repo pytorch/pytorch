@@ -63,7 +63,7 @@ class TORCH_API ScriptModuleSerializer {
       : writer_(export_writer), next_ts_id(0) {}
 
   void writeFiles(const std::string& code_dir);
-  int serialize(
+  void serialize(
       const Module& module,
       const ExtraFilesMap& extra_files,
       bool bytecode_format,
