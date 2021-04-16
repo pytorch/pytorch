@@ -381,6 +381,9 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/mobile/export_data.cpp",
+    # To be included for eager symbolication in lite interpreter
+    # when it is built in libtorch
+    "torch/csrc/jit/mobile/debug_info.cpp",
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/import_data.cpp",

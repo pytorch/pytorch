@@ -125,7 +125,7 @@ MobileDebugTable::MobileDebugTable(
 
 std::string MobileDebugTable::getModuleHierarchyInfo(
     const int64_t debug_handle,
-    const std::string& top_module_type_name) {
+    const std::string& top_module_type_name) const {
   const auto it = callstack_ptr_map_.find(debug_handle);
   if (it == callstack_ptr_map_.end()) {
     return "debug_handle:" + std::to_string(debug_handle);
@@ -137,7 +137,7 @@ std::string MobileDebugTable::getModuleHierarchyInfo(
 
 std::string MobileDebugTable::getSourceDebugString(
     const int64_t debug_handle,
-    const std::string& top_module_type_name) {
+    const std::string& top_module_type_name) const {
   const auto it = callstack_ptr_map_.find(debug_handle);
   if (it == callstack_ptr_map_.end()) {
     return "debug_handle:" + std::to_string(debug_handle);
