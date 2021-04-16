@@ -49,12 +49,6 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // mul(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
-static Tensor wrapped_scalar_tensor(const Scalar& s) {
-  auto tensor = scalar_to_tensor(s);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
 SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
@@ -819,6 +813,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
   // r_ = alpha * sparse * dense
   scalar_t cast_alpha = alpha.to<scalar_t>();
   scalar_t cast_beta = beta.to<scalar_t>();
+
   if (cast_beta == 0) {
     r.zero_();
   } else if (cast_beta == 1) {
@@ -981,8 +976,7 @@ Tensor _sparse_mm(
 // we can redispatch to addmm_out; this is NOT an implementation of
 // the sparse masking version of mm
 SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
-  const Tensor& dense
-,
+  const Tensor& dense,
   SparseTensor& result) {
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
@@ -1600,6 +1594,7 @@ Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor&
           Tensor sparse_indices = indices_dim1_dim2.slice(1, mat_el_begin_idx, mat_el_end_idx);
           Tensor sparse_values = values.slice(0, mat_el_begin_idx, mat_el_end_idx);
           int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
+
 
           s_addmm_out_sparse_dense_worker<scalar_t>(
             sparse_nnz,
