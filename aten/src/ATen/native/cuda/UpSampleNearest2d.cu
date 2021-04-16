@@ -188,18 +188,18 @@ static void upsample_nearest2d_out_cuda_template(
       const scalar_t* idata = input.data_ptr<scalar_t>();
       scalar_t* odata = output.data_ptr<scalar_t>();
 
-      upsample_nearest2d_nhwc_out_frame
-          <<<cuda::ATenCeilDiv(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-        idata,
-        odata,
-        channels,
-        input_height,
-        input_width,
-        output_height,
-        output_width,
-        height_scale,
-        width_scale,
-        output.numel()
+      upsample_nearest2d_nhwc_out_frame<scalar_t>
+        <<<cuda::ATenCeilDiv(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+          idata,
+          odata,
+          channels,
+          input_height,
+          input_width,
+          output_height,
+          output_width,
+          height_scale,
+          width_scale,
+          output.numel()
       );
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     });

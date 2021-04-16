@@ -12917,10 +12917,14 @@ class TestNNDeviceType(NNTestCase):
             helper('bilinear', (2, 4, 16, 16), 8, align_corners)
             helper('bilinear', (2, 4, 16, 16), 16, align_corners)
             helper('bilinear', (2, 4, 16, 16), 32, align_corners)
+            helper('bilinear', (2, 4, 16, 8), (5, 24), align_corners)
+            helper('bilinear', (2, 4, 8, 16), (24, 5), align_corners)
 
         helper('nearest', (2, 4, 16, 16), 8, None)
         helper('nearest', (2, 4, 16, 16), 16, None)
         helper('nearest', (2, 4, 16, 16), 32, None)
+        helper('nearest', (2, 4, 16, 8), (5, 24), None)
+        helper('nearest', (2, 4, 8, 16), (24, 5), None)
 
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
