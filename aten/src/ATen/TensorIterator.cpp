@@ -951,7 +951,9 @@ void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config
   for (int i = 0; i < num_outputs_; i++) {
     const auto& output = operands_[i].tensor;
     if (!output.defined()) continue;
-    assert_no_internal_overlap(output);
+    if (!output.is_contiguous()) {
+      assert_no_internal_overlap(output);
+    }
     for (int j = num_outputs_; j < ntensors(); j++) {
       const auto& input = operands_[j].tensor;
       assert_no_partial_overlap(output, input);
