@@ -268,7 +268,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               std::vector<std::vector<bool>>,
               int64_t,
               bool,
-              bool>(),
+              bool,
+              std::unordered_map<size_t, std::string>
+            >(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
           py::arg("process_group"),
@@ -276,6 +278,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
           py::arg("find_unused_parameters") = false,
           py::arg("gradient_as_bucket_view") = false,
+          py::arg("param_to_name_mapping") = std::unordered_map<size_t, std::string>(),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "initialize_buckets",

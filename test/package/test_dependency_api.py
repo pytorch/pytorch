@@ -77,11 +77,13 @@ class TestDependencyAPI(PackageTestCase):
         Test that an error is thrown when a extern glob is specified with allow_empty=True
         and no matching module is required during packaging.
         """
+        import package_a.subpackage  # noqa: F401
+
         buffer = BytesIO()
         with self.assertRaisesRegex(EmptyMatchError, r"did not match any modules"):
             with PackageExporter(buffer, verbose=False) as exporter:
-                exporter.extern(include=["package_a.*"], allow_empty=False)
-                exporter.save_module("package_b.subpackage")
+                exporter.extern(include=["package_b.*"], allow_empty=False)
+                exporter.save_module("package_a.subpackage")
 
     def test_deny(self):
         """
@@ -174,11 +176,13 @@ class TestDependencyAPI(PackageTestCase):
         Test that an error is thrown when a mock glob is specified with allow_empty=True
         and no matching module is required during packaging.
         """
+        import package_a.subpackage  # noqa: F401
+
         buffer = BytesIO()
         with self.assertRaisesRegex(EmptyMatchError, r"did not match any modules"):
             with PackageExporter(buffer, verbose=False) as exporter:
-                exporter.mock(include=["package_a.*"], allow_empty=False)
-                exporter.save_module("package_b.subpackage")
+                exporter.mock(include=["package_b.*"], allow_empty=False)
+                exporter.save_module("package_a.subpackage")
 
     def test_module_glob(self):
         from torch.package.package_exporter import _GlobGroup
@@ -232,6 +236,22 @@ class TestDependencyAPI(PackageTestCase):
         hi = PackageImporter(buffer)
         with self.assertRaises(NotImplementedError):
             hi.load_pickle("obj", "obj.pkl")
+
+    def test_allow_empty_with_error(self):
+        """If an error occurs during packaging, it should not be shadowed by the allow_empty error."""
+        buffer = BytesIO()
+        with self.assertRaises(ModuleNotFoundError):
+            with PackageExporter(buffer, verbose=False) as pe:
+                # Even though we did not extern a module that matches this
+                # pattern, we want to show the save_module error, not the allow_empty error.
+
+                pe.extern("foo", allow_empty=False)
+                pe.save_module("aodoifjodisfj")  # will error
+
+                # we never get here, so technically the allow_empty check
+                # should raise an error. However, the error above is more
+                # informative to what's actually going wrong with packaging.
+                pe.save_source_string("bar", "import foo\n")
 
 
 if __name__ == "__main__":
