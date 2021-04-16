@@ -11,6 +11,7 @@
 #include <ATen/metal/Context.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/Parallel.h>
 #include <torch/library.h>
 
 #ifdef USE_FBGEMM
@@ -111,14 +112,38 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
         ((self.is_contiguous() && src.is_contiguous()) ||
          (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
-        auto* output_ptr = reinterpret_cast<fbgemm::float16*>(
-            self.data_ptr<at::Half>());
-        fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, self.numel());
+        auto* output_ptr =
+            reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
+        if (self.numel() < at::internal::GRAIN_SIZE) {
+          fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, self.numel());
+        } else {
+          at::parallel_for(
+              0,
+              self.numel(),
+              at::internal::GRAIN_SIZE,
+              [&](int64_t begin, int64_t end) {
+                fbgemm::FloatToFloat16_simd(
+                    src.data_ptr<float>() + begin,
+                    output_ptr + begin,
+                  end - begin);
+              });
+        }
       } else {
         auto in_data = reinterpret_cast<fbgemm::float16*>(
             src.data_ptr<at::Half>());
         auto* output_ptr = self.data_ptr<float>();
-        fbgemm::Float16ToFloat_simd(in_data, output_ptr, self.numel());
+        if (self.numel() < at::internal::GRAIN_SIZE) {
+          fbgemm::Float16ToFloat_simd(in_data, output_ptr, self.numel());
+        } else {
+          at::parallel_for(
+              0,
+              self.numel(),
+              at::internal::GRAIN_SIZE,
+              [&](int64_t begin, int64_t end) {
+                fbgemm::Float16ToFloat_simd(
+                    in_data + begin, output_ptr + begin, end - begin);
+              });
+        }
       }
       return self;
     }
@@ -133,6 +158,16 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   if (self.is_same(src)) {
     return self;
+  }
+
+  // Copies into meta self are OK and just ignored (similar to inplace)
+  if (self.is_meta()) {
+    // TODO: need to see if there is extra error checking needed
+    return self;
+  }
+
+  if (src.is_meta()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot copy out of meta tensor; no data!")
   }
 
   // Re-dispatch copies when either src or self device not implemented here (e.g. XLA).
@@ -154,7 +189,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     TORCH_CHECK(self.qscheme() == src.qscheme(),
                 "Quantized Copy only works with same qscheme");
     TORCH_CHECK(self.scalar_type() == src.scalar_type());
-    self.set_quantizer_(src.quantizer());
+    set_quantizer_(self, src.quantizer());
   }
 
   if (!self.is_quantized() && src.is_quantized()) {
@@ -201,7 +236,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   if(!self.is_complex() && src.is_complex()) {
     TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
   }
-
   copy_stub(device_type, iter, non_blocking);
   return self;
 }

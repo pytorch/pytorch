@@ -38,8 +38,8 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
       const std::vector<int64_t>& padding,
       const std::vector<int64_t>& dilation,
       int64_t groups,
-      c10::optional<Scalar> output_min,
-      c10::optional<Scalar> output_max)
+      const c10::optional<Scalar>& output_min,
+      const c10::optional<Scalar>& output_max)
       : weight(std::move(weight)),
         bias(std::move(bias)),
         stride(stride),
@@ -70,7 +70,7 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
 
 // The MPSCNNConvolution class takes weights in the order
 // [outputChannels][kernelHeight][kernelWidth][inputChannels/groups].
-static std::vector<float> permuteWeights(
+static inline std::vector<float> permuteWeights(
     const float* src,
     const std::vector<int64_t>& sizes) {
   const int64_t M = sizes[0];

@@ -25,7 +25,7 @@ static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
   __m256i hi = _mm256_castps_si256(b);
-  __m256i nan = _mm256_set1_epi32(0x7fc0);
+  __m256i nan = _mm256_set1_epi32(0xffff);
   __m256i mask_lo = _mm256_castps_si256(_mm256_cmp_ps(a, a, _CMP_ORD_Q));
   __m256i mask_hi = _mm256_castps_si256(_mm256_cmp_ps(b, b, _CMP_ORD_Q));
   __m256i ones = _mm256_set1_epi32(0x1);
@@ -48,6 +48,15 @@ static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
 
   t_lo = _mm256_packus_epi32(t_lo, t_hi);      // t_hi[4-7] t_lo[4-7] t_hi[0-4] t_lo[0-4]
   return _mm256_permute4x64_epi64(t_lo, 0xd8); // 11        01        10        00
+}
+
+static inline __m256i merge_compare_result(const __m256& a, const __m256& b) {
+  __m256i lo = _mm256_castps_si256(a);
+  __m256i hi = _mm256_castps_si256(b);
+  lo = _mm256_srli_epi32(lo, 16);
+  hi = _mm256_srli_epi32(hi, 16);
+  auto out = _mm256_packus_epi32(lo, hi);
+  return _mm256_permute4x64_epi64(out, 0xd8);
 }
 
 template <> class Vec256<BFloat16> {
@@ -203,7 +212,23 @@ public:
     return cvtfp32_bf16(o1, o2);
   }
   Vec256<BFloat16> angle() const {
-    return _mm256_set1_epi16(0);
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto angle_lambda = [](__m256 values) {
+      const auto zero_vec = _mm256_set1_ps(0.f);
+      const auto nan_vec = _mm256_set1_ps(NAN);
+      const auto not_nan_mask = _mm256_cmp_ps(values, values, _CMP_EQ_OQ);
+      const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
+      const auto pi = _mm256_set1_ps(c10::pi<float>);
+
+      const auto neg_mask = _mm256_cmp_ps(values, zero_vec, _CMP_LT_OQ);
+      auto angle = _mm256_blendv_ps(zero_vec, pi, neg_mask);
+      angle = _mm256_blendv_ps(angle, nan_vec, nan_mask);
+      return angle;
+    };
+    auto o1 = angle_lambda(lo);
+    auto o2 = angle_lambda(hi);
+    return cvtfp32_bf16(o1, o2);
   }
   Vec256<BFloat16> real() const {
     return *this;
@@ -290,6 +315,22 @@ public:
     auto o2 = _mm256_loadu_ps(tmp2);
     return cvtfp32_bf16(o1, o2);
   }
+  Vec256<BFloat16> i0e() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto sz = size();
+    __at_align32__ float tmp1[sz / 2], tmp2[sz / 2];
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
+
+    for (decltype(sz) i = 0; i < sz / 2; i++) {
+      tmp1[i] = calc_i0e(tmp1[i]);
+      tmp2[i] = calc_i0e(tmp2[i]);
+    }
+    auto o1 = _mm256_loadu_ps(tmp1);
+    auto o2 = _mm256_loadu_ps(tmp2);
+    return cvtfp32_bf16(o1, o2);
+  }
   Vec256<BFloat16> igamma(const Vec256<BFloat16> &x) const {
     __m256 lo, hi;
     __m256 xlo, xhi;
@@ -304,6 +345,26 @@ public:
     for (int64_t i = 0; i < size() / 2; ++i) {
       tmp1[i] = calc_igamma(tmp1[i], tmpx1[i]);
       tmp2[i] = calc_igamma(tmp2[i], tmpx2[i]);
+    }
+    auto o1 = _mm256_loadu_ps(tmp1);
+    auto o2 = _mm256_loadu_ps(tmp2);
+    return cvtfp32_bf16(o1, o2);
+  }
+
+  Vec256<BFloat16> igammac(const Vec256<BFloat16> &x) const {
+    __m256 lo, hi;
+    __m256 xlo, xhi;
+    cvtbf16_fp32(values, lo, hi);
+    cvtbf16_fp32(x.values, xlo, xhi);
+    __at_align32__ float tmp1[size() / 2], tmp2[size() / 2];
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
+    __at_align32__ float tmpx1[size() / 2], tmpx2[size() / 2];
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmpx1), xlo);
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmpx2), xhi);
+    for (int64_t i = 0; i < size() / 2; ++i) {
+      tmp1[i] = calc_igammac(tmp1[i], tmpx1[i]);
+      tmp2[i] = calc_igammac(tmp2[i], tmpx2[i]);
     }
     auto o1 = _mm256_loadu_ps(tmp1);
     auto o2 = _mm256_loadu_ps(tmp2);
@@ -438,33 +499,44 @@ Vec256<BFloat16> static inline bfloat16_binary_op_as_fp32(const Vec256<BFloat16>
   return cvtfp32_bf16(o1, o2);
 }
 
+template<typename Op>
+Vec256<BFloat16> static inline bfloat16_compare_as_fp32(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b, Op op) {
+  __m256 a_lo, a_hi;
+  __m256 b_lo, b_hi;
+  cvtbf16_fp32(__m256i(a), a_lo, a_hi);
+  cvtbf16_fp32(__m256i(b), b_lo, b_hi);
+  auto o1 = op(a_lo, b_lo);
+  auto o2 = op(a_hi, b_hi);
+  return merge_compare_result(o1, o2);
+}
+
 Vec256<BFloat16> inline Vec256<BFloat16>::operator>(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_GT_OQ);
   });
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator<(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_LT_OQ);
   });
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator>=(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_GE_OQ);
   });
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator<=(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_LE_OQ);
   });
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator==(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_EQ_OQ);
   });
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator!=(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_NEQ_UQ);
   });
 }

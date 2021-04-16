@@ -6,7 +6,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, skipCPUIfNoLapack, skipCUDAIfNoMagma, onlyCPU)
-import collections
+from collections.abc import Sequence
 
 # Information for generating an alias test
 # NOTE: ending the alias_name with an underscore will interpret the test
@@ -33,15 +33,7 @@ class AliasInfo(object):
         self.decorators = decorators
 
 alias_infos = (
-    AliasInfo('absolute', torch.absolute, 'abs', torch.abs,
-              lambda d: torch.randn(20, device=d)),
-    AliasInfo('absolute_', torch.Tensor.absolute_, 'abs_', torch.Tensor.abs_,
-              lambda d: torch.randn(20, device=d)),
-    AliasInfo('clip', torch.clip, 'clamp', torch.clamp,
-              lambda d: torch.randn(20, device=d), get_args=lambda d: (.4, .6)),
-    AliasInfo('clip_', torch.Tensor.clip_, 'clamp_', torch.Tensor.clamp_,
-              lambda d: torch.randn(20, device=d), get_args=lambda d: (.4, .6)),
-    AliasInfo('linalg.det', torch.linalg.det, 'det', torch.det,
+    AliasInfo('linalg_det', torch.linalg.det, 'det', torch.det,
               lambda d: torch.randn(10, 10, device=d),
               decorators=(skipCPUIfNoLapack, skipCUDAIfNoMagma)),
     # NOTE: only runs on CPU because it leaks CUDA memory
@@ -49,38 +41,6 @@ alias_infos = (
     AliasInfo('ger', torch.ger, 'outer', torch.outer,
               lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.randn(20, device=d),),
               decorators=(onlyCPU,)),
-    AliasInfo('arccosh', torch.arccosh, 'acosh', torch.acosh,
-              lambda d: torch.randn(20, device=d) + 2),
-    AliasInfo('arccosh_', torch.Tensor.arccosh_, 'acosh_', torch.Tensor.acosh_,
-              lambda d: torch.randn(20, device=d) + 2),
-    AliasInfo('arccos', torch.arccos, 'acos', torch.acos,
-              lambda d: torch.randn(20, device=d)),
-    AliasInfo('arccos_', torch.Tensor.arccos_, 'acos_', torch.Tensor.acos_,
-              lambda d: torch.randn(20, device=d)),
-    AliasInfo('arcsin', torch.arcsin, 'asin', torch.asin,
-              lambda d: torch.randn(20, device=d)),
-    AliasInfo('arcsin_', torch.Tensor.arcsin_, 'asin_', torch.Tensor.asin_,
-              lambda d: torch.randn(20, device=d)),
-    AliasInfo('arctan', torch.arctan, 'atan', torch.atan,
-              lambda d: torch.randn(20, device=d)),
-    AliasInfo('arctan_', torch.Tensor.arctan_, 'atan_', torch.Tensor.atan_,
-              lambda d: torch.randn(20, device=d)),
-    AliasInfo('fix', torch.fix, 'trunc', torch.trunc,
-              lambda d: 10 * torch.randn(20, device=d)),
-    AliasInfo('fix_', torch.Tensor.fix_, 'trunc_', torch.Tensor.trunc_,
-              lambda d: 10 * torch.randn(20, device=d)),
-    AliasInfo('negative', torch.negative, 'neg', torch.neg,
-              lambda d: 10 * torch.randn(20, device=d)),
-    AliasInfo('negative_', torch.Tensor.negative_, 'neg_', torch.Tensor.neg_,
-              lambda d: 10 * torch.randn(20, device=d)),
-    AliasInfo('arcsinh', torch.arcsinh, 'asinh', torch.asinh,
-              lambda d: torch.randn(20, device=d)),
-    AliasInfo('arcsinh_', torch.Tensor.arcsinh_, 'asinh_', torch.Tensor.asinh_,
-              lambda d: torch.randn(20, device=d)),
-    AliasInfo('arctanh', torch.arctanh, 'atanh', torch.atanh,
-              lambda d: torch.clamp(torch.randn(20, device=d), -1, 1)),
-    AliasInfo('arctanh_', torch.Tensor.arctanh_, 'atanh_', torch.Tensor.atanh_,
-              lambda d: torch.clamp(torch.randn(20, device=d), -1, 1)),
     AliasInfo('subtract', torch.subtract, 'sub', torch.sub,
               lambda d: torch.randn(20, device=d),
               get_args=lambda d: (torch.randn(20, device=d),),
@@ -151,8 +111,18 @@ alias_infos = (
     AliasInfo('true_divide_', torch.Tensor.true_divide_, 'div_', torch.Tensor.div_,
               lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d) + .1,),
               decorators=(onlyCPU,)),
+    AliasInfo('swapdims', torch.swapdims, 'transpose', torch.transpose,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
+    AliasInfo('swapdims_', torch.Tensor.swapdims_, 'transpose_', torch.Tensor.transpose_,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
+    AliasInfo('swapaxes', torch.swapaxes, 'transpose', torch.transpose,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
+    AliasInfo('swapaxes_', torch.Tensor.swapaxes_, 'transpose_', torch.Tensor.transpose_,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
     AliasInfo('row_stack', torch.row_stack, 'vstack', torch.vstack,
               lambda d: ((torch.randn(20, device=d), torch.randn(20, device=d)))),
+    AliasInfo('moveaxis', torch.moveaxis, 'movedim', torch.movedim,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
 )
 
 # Placeholder test class for validating that aliases are correctly
@@ -163,7 +133,7 @@ class TestOpNormalization(JitTestCase):
 
 # Clone input tensor and sequence of Tensors
 def clone_inp(inp):
-    if isinstance(inp, collections.Sequence):
+    if isinstance(inp, Sequence):
         return list(map(torch.clone, inp))
     else:
         return inp.clone()
@@ -191,7 +161,7 @@ def create_alias_tests(cls):
                 arg_string = ', '.join((str(arg) for arg in info.get_args(device)))
                 script = fn_template.format(alias_name=info.alias_name, args=arg_string)
             else:
-                is_input_tensor_list = isinstance(info.get_input(device), collections.Sequence)
+                is_input_tensor_list = isinstance(info.get_input(device), Sequence)
                 # For sequence of Tensors, annotate the type to be List[Tensor]
                 if is_input_tensor_list:
                     fn_template = '''

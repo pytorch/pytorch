@@ -223,9 +223,9 @@ This is how a ``Linear`` module can be implemented::
             # won't be converted when e.g. .cuda() is called. You can use
             # .register_buffer() to register buffers.
             # nn.Parameters require gradients by default.
-            self.weight = nn.Parameter(torch.Tensor(output_features, input_features))
+            self.weight = nn.Parameter(torch.empty(output_features, input_features))
             if bias:
-                self.bias = nn.Parameter(torch.Tensor(output_features))
+                self.bias = nn.Parameter(torch.empty(output_features))
             else:
                 # You should always register all possible parameters, but the
                 # optional ones can be None if you want.
@@ -246,6 +246,8 @@ This is how a ``Linear`` module can be implemented::
             return 'input_features={}, output_features={}, bias={}'.format(
                 self.input_features, self.output_features, self.bias is not None
             )
+
+.. _extending-torch:
 
 Extending :mod:`torch`
 ----------------------
@@ -342,7 +344,7 @@ The ``__torch_function__`` method takes four arguments: ``func``, a reference
 to the torch API function that is being overridden, ``types``, the list of
 types of Tensor-likes that implement ``__torch_function__``, ``args``, the
 tuple of arguments passed to the function, and ``kwargs``, the dict of keyword
-arguments passed to the function. It uses a global dispatch stable named
+arguments passed to the function. It uses a global dispatch table named
 ``HANDLED_FUNCTIONS`` to store custom implementations. The keys of this
 dictionary are functions in the ``torch`` namespace and the values are
 implementations for ``ScalarTensor``.
@@ -484,14 +486,15 @@ of a function from ``torch.Tensor`` subclasses, they must use
 
 Subclassing ``torch.Tensor``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-As of version 1.7.0, methods and functions applied on ``torch.Tensor`` subclasses
+As of version 1.7.0, methods on ``torch.Tensor`` and functions in public
+``torch.*`` namespaces applied on ``torch.Tensor`` subclasses
 will return subclass instances instead of ``torch.Tensor`` instances::
 
   >>> class SubTensor(torch.Tensor):
   ...     pass
   >>> type(torch.add(SubTensor([0]), SubTensor([1]))).__name__
   'SubTensor'
-  >>> type(torch.add(SubTensor([0]), torch.Tensor([1]))).__name__
+  >>> type(torch.add(SubTensor([0]), torch.tensor([1]))).__name__
   'SubTensor'
 
 If multiple subclasses exist, the lowest one in the hierarchy will be chosen by
@@ -500,7 +503,7 @@ default. If there is no unique way to determine such a case, then a
 
   >>> type(torch.add(SubTensor2([0]), SubTensor([1]))).__name__
   'SubTensor2'
-  >>> type(torch.add(SubTensor2([0]), torch.Tensor([1]))).__name__
+  >>> type(torch.add(SubTensor2([0]), torch.tensor([1]))).__name__
   'SubTensor2'
   >>> torch.add(SubTensor([0]), OtherSubTensor([1]))
   Traceback (most recent call last):
@@ -514,7 +517,9 @@ calls::
   class LoggingTensor(torch.Tensor):
       @classmethod
       def __torch_function__(cls, func, types, args=(), kwargs=None):
-          logging.info(f"func: {func.__name__}, args: {args!r}, kwargs: {kwargs!r}")
+          # NOTE: Logging calls Tensor.__repr__, so we can't log __repr__ without infinite recursion
+          if func is not torch.Tensor.__repr__:
+              logging.info(f"func: {func.__name__}, args: {args!r}, kwargs: {kwargs!r}")
           if kwargs is None:
               kwargs = {}
           return super().__torch_function__(func, types, args, kwargs)
@@ -561,7 +566,7 @@ This simple implementation won't necessarily work with every function in the
 
   >>> metadata = {'owner': 'Ministry of Silly Walks'}
   >>> m = MetadataTensor([[1, 2], [3, 4]], metadata=metadata)
-  >>> t = torch.tensor([[1, 2], [1, 2]]])
+  >>> t = torch.tensor([[1, 2], [1, 2]])
   >>> torch.add(t, m)
   Metadata:
   {'owner': 'Ministry of Silly Walks'}
@@ -605,13 +610,13 @@ provides a developer-facing API for ensuring full support for
 changes without warning in the future.
 
 First, to get a listing of all overridable functions, use
-``torch._overrides.get_overridable_functions``. This returns a dictionary whose
+``torch.overrides._get_overridable_functions``. This returns a dictionary whose
 keys are namespaces in the ``PyTorch`` Python API and whose values are a list of
 functions in that namespace that can be overriden. For example, let's print the
 names of the first 5 functions in ``torch.nn.functional`` that can be
 overriden::
 
-  >>> from torch._overrides import get_overridable_functions
+  >>> from torch.overrides import get_overridable_functions
   >>> func_dict = get_overridable_functions()
   >>> nn_funcs = func_dict[torch.nn.functional]
   >>> print([f.__name__ for f in nn_funcs[:5])
@@ -622,20 +627,20 @@ This listing of functions makes it possible to iterate over all overridable
 functions, however in practice this is not enough to write tests for all of
 these functions without laboriously and manually copying the signature of each
 function for each test. To ease this process, the
-``torch._overrides.get_testing_overrides`` function returns a dictionary mapping
+``torch.overrides._get_testing_overrides`` function returns a dictionary mapping
 overridable functions in the ``PyTorch`` API to dummy lambda functions that have
 the same signature as the original function but unconditionally return -1. These
 functions are most useful to use with ``inspect`` to analyze the function
 signature of the original ``PyTorch`` function::
 
   >>> import inspect
-  >>> from torch._overrides import get_testing_overrides
+  >>> from torch.overrides import get_testing_overrides
   >>> override_dict = get_testing_overrides()
   >>> dummy_add = override_dict[torch.add]
   >>> inspect.signature(dummy_add)
   <Signature (input, other, out=None)>
 
-Finally, ``torch._overrides.get_ignored_functions`` returns a tuple of functions
+Finally, ``torch.overrides.get_ignored_functions`` returns a tuple of functions
 that explicitly cannot be overrided by ``__torch_function__``. This list can be
 useful to confirm that a function that isn't present in the dictionary returned
 by ``get_overridable_functions`` cannot be overriden.

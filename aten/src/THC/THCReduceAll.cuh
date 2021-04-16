@@ -10,6 +10,7 @@
 //
 
 #include <THC/THCReduceApplyUtils.cuh>
+#include <c10/cuda/CUDAException.h>
 #include <c10/macros/Macros.h>
 
 #ifdef __HIP_PLATFORM_HCC__
@@ -30,9 +31,7 @@ template <typename T,
           typename ReduceOp,
           int ADims>
 __global__ void
-#if defined(__HIP_PLATFORM_HCC__)
 C10_LAUNCH_BOUNDS_1(THC_REDUCE_ALL_BLOCK_SIZE)
-#endif
 kernelReduceAll(TensorInfo<T, IndexType> in,
                 IndexType totalElements,
                 AccT init,
@@ -77,9 +76,7 @@ template <typename T,
           typename ModifyOp,
           typename ReduceOp,
           int ADims>
-#if defined(__HIP_PLATFORM_HCC__)
 C10_LAUNCH_BOUNDS_1(THC_REDUCE_ALL_BLOCK_SIZE)
-#endif
 __global__ void
 kernelReduceAllPass1(TensorInfo<T, IndexType> in,
                      IndexType totalElements,
@@ -110,9 +107,7 @@ kernelReduceAllPass1(TensorInfo<T, IndexType> in,
 }
 
 template <typename T, typename ReduceOp>
-#if defined(__HIP_PLATFORM_HCC__)
 C10_LAUNCH_BOUNDS_1(THC_REDUCE_ALL_BLOCK_SIZE)
-#endif
 __global__ void
 kernelReduceAllPass2(int numPass1Blocks,
                      T init,
@@ -209,6 +204,7 @@ void callReduceAll(THCState* state,
       <<<grid, block, smemSize, c10::cuda::getCurrentCUDAStream()>>>(
         in, (IndexType) totalElements, init, modifyOp, reduceOp,
         (AccT*) scratchSpace);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     int numPass1Blocks = grid.x;
     getPass2ReduceBlockGrid<AccT>(state, totalElements, grid, block);
@@ -218,6 +214,7 @@ void callReduceAll(THCState* state,
       <<<grid, block, smemSize, c10::cuda::getCurrentCUDAStream()>>>(
         numPass1Blocks, init, reduceOp,
         (AccT*) scratchSpace, devOut);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     THCudaFree(state, scratchSpace);
   } else {
@@ -227,6 +224,7 @@ void callReduceAll(THCState* state,
     kernelReduceAll<T, IndexType, AccT, ModifyOp, ReduceOp, ADims>
       <<<grid, block, smemSize, c10::cuda::getCurrentCUDAStream()>>>(
         in, (IndexType) totalElements, init, modifyOp, reduceOp, devOut);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 

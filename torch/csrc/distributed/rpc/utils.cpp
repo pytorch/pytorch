@@ -23,6 +23,8 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
+using namespace torch::autograd::profiler;
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -30,43 +32,40 @@ namespace {
 void processRemoteProfiledEvents(
     autograd::RpcWithProfilingResp& rpcWithProfilingResp) {
   // Check if the profiler is enabled
-  auto enabled = torch::autograd::profiler::profilerEnabled();
+  auto enabled = profilerEnabled();
   TORCH_CHECK(
       enabled,
       "Profiler was expected to be enabled. This can happen in callback "
       " continutations that run in different threads, and the TLS of the "
       " profiler was not propagated.");
-  std::vector<torch::autograd::profiler::Event> events =
-      rpcWithProfilingResp.getProfiledEvents();
+  std::vector<LegacyEvent> events = rpcWithProfilingResp.getProfiledEvents();
   const auto& profilingId = rpcWithProfilingResp.getProfilingId();
   auto& remoteProfilerManager = RemoteProfilerManager::getInstance();
   auto key = remoteProfilerManager.retrieveRPCProfilingKey(profilingId);
   remoteProfilerManager.eraseKey(profilingId);
   auto keyPrefixStr = key + rpc::REMOTE_PROFILING_KEY_PREFIX;
   std::for_each(
-      events.begin(),
-      events.end(),
-      [&keyPrefixStr](torch::autograd::profiler::Event& event) {
+      events.begin(), events.end(), [&keyPrefixStr](LegacyEvent& event) {
         std::string name = keyPrefixStr + std::string(event.name());
         event.setName(at::StringView(name));
       });
   // Add event list to the thread local profiler.
-  torch::autograd::profiler::addEventList(std::move(events));
+  addEventList(std::move(events));
 }
 
 } // namespace
 
 const std::string kRPCErrorPrefix = std::string("RPCErr");
 
-RPCErrorType getRPCErrorType(const FutureMessage& fm) {
+RPCErrorType getRPCErrorType(const JitFuture& jitFuture) {
   TORCH_INTERNAL_ASSERT(
-      fm.hasError(),
-      "FutureMessage passed to getRPCErrorType does not have an error.");
+      jitFuture.hasError(),
+      "JitFuture of Message passed to getRPCErrorType does not have an error.");
 
   // Attempt to parse for error string given by makeRPCError, otherwise return
   // unknown error.
   // Note that this function expects errors formatted with makeRPCError().
-  auto err = std::string(fm.error()->what());
+  auto err = jitFuture.tryRetrieveErrorMessage();
   size_t pos = err.find(kRPCErrorPrefix);
   if (pos != std::string::npos) {
     // Parse the RPCErrorType.
@@ -174,11 +173,19 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
       RpcCommandBase& rpc = *rpcPtr;
       auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(rpc);
 
+      // Need to reverse the device map for the backward pass of distributed
+      // autograd.
+      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
+      for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
+        reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
+      }
+
       // Attach 'recv' autograd function.
       addRecvRpcBackward(
           rpcWithAutograd.autogradMetadata(),
           rpcWithAutograd.tensors(),
-          rpcWithAutograd.fromWorkerId());
+          rpcWithAutograd.fromWorkerId(),
+          reverseDeviceMap);
 
       wrappedMsgType = rpcWithAutograd.wrappedMessageType();
 
@@ -379,9 +386,10 @@ std::string wireSerialize(
       // converts CUDA tensor to cpu and data() might get destructed as we go
       // out of scope of this loop.
       auto writeableTensorData = jit::getWriteableTensorData(tensorData[i]);
-      entries.push_back({c10::to_string(i),
-                         writeableTensorData.data(),
-                         writeableTensorData.sizeInBytes()});
+      entries.push_back(
+          {c10::to_string(i),
+           writeableTensorData.data(),
+           writeableTensorData.sizeInBytes()});
     }
   }
 
@@ -504,86 +512,64 @@ std::vector<at::IValue> readWrappedPayload(
       wrappedPayloadBegin,
       additionalPayloadSize,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &tensorTable);
+      tensorTable);
   std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
   payload.resize(payload.size() - additionalPayloadSize);
   return tupleElements;
 }
 
 void populateRemoteProfiledEvents(
-    std::vector<torch::autograd::profiler::Event>& profiledEvents,
-    const torch::autograd::profiler::ProfilerConfig& profilingConfig,
-    const std::vector<std::vector<torch::autograd::profiler::Event>>&
-        eventLists) {
+    std::vector<LegacyEvent>& profiledEvents,
+    const ProfilerConfig& profilingConfig,
+    const std::vector<std::vector<LegacyEvent>>& eventLists) {
   // Gather all events into a vector
   for (auto& l : eventLists) {
     for (auto& e : l) {
       profiledEvents.push_back(e);
     }
   }
-  // find __start_profile event and __cuda_start_event.
-  bool cudaProfilingEnabled =
-      profilingConfig.state == torch::autograd::profiler::ProfilerState::CUDA;
-  bool foundCpuStart = false;
-  const torch::autograd::profiler::Event* profilerStart = nullptr;
-  // Each device has its own cudaProfilerStart, so we must take
-  // care to use the correct one depending on the device the
-  // operation ran on.
-  std::unordered_map<int, const torch::autograd::profiler::Event*>
-      cudaProfilerStarts;
-  for (auto& e : profiledEvents) {
-    if (!foundCpuStart && 0 == strcmp(e.name(), "__start_profile")) {
-      profilerStart = &e;
-      foundCpuStart = true;
-    } else if (
-        cudaProfilingEnabled && 0 == strcmp(e.name(), "__cuda_start_event")) {
-      e.setCudaUs(e.cpuUs());
-      auto device = e.device();
-      TORCH_CHECK(
-          device != -1,
-          "CUDA profiling was enabled but could not find CUDA device.");
-      TORCH_CHECK(
-          cudaProfilerStarts.find(device) == cudaProfilerStarts.end(),
-          c10::str("Duplicate __cuda_start_event found for ", device));
-      cudaProfilerStarts[device] = &e;
-    }
+  // find __start_profile event
+  bool cudaProfilingEnabled = profilingConfig.state == ProfilerState::CUDA;
+  const LegacyEvent* profilerStart = nullptr;
 
-    // TODO: determine no. of CUDA devices and break here if we have
-    // a cudaProfilerStart for all of them, in the case of cuda
-    // profiling.
-    if (foundCpuStart && !cudaProfilingEnabled) {
+  for (auto& e : profiledEvents) {
+    if (std::string(e.name()) == "__start_profile") {
+      profilerStart = &e;
       break;
     }
   }
   // We should always find __start_profile.
   TORCH_CHECK(
       profilerStart != nullptr, "Expected to find __start_profile event.");
-  // Should have >= 1 CUDA start event if cudaProfilingEnabled.
-  // TODO: we can enhance this assert by ensuring we have found a
-  // start for every available CUDA device.
-  TORCH_CHECK(
-      !cudaProfilingEnabled || cudaProfilerStarts.size() > 0,
-      "Profiler was enabled with CUDA recording, but did not find __cuda_start_event.");
 
   if (cudaProfilingEnabled) {
-    // Compute and set global time for when this CUDA kernel was
-    // launched/ended, since deserialized event will not have a
-    // corresponding CUDA event.
+    // Deserialized events don't have the corresponding CUDA events, making it
+    // impossible to use cudaEventElapsedTime the receiving end. To avoid this,
+    // find all push/pop pairs of CUDA events and set the corresponding CUDA
+    // time to zero for the push event and to the elapsed time for the pop
+    // event, to be used later for the elapsed CUDA time computation.
+    std::unordered_map<at::RecordFunctionHandle, const LegacyEvent*>
+        startEvents;
     for (auto& e : profiledEvents) {
       if (e.hasCuda()) {
-        auto cudaDevice = e.device();
-        TORCH_CHECK(
-            cudaDevice != -1,
-            "CUDA profiling was enabled but could not find CUDA device.");
-        auto it = cudaProfilerStarts.find(cudaDevice);
-        TORCH_CHECK(
-            it != cudaProfilerStarts.end(),
-            c10::str(
-                "Failed to find __cuda_start_event for device ", cudaDevice));
-        auto cudaProfilerStartEvent = it->second;
-        double cudaElapsedUs = cudaProfilerStartEvent->cudaElapsedUs(e);
-        int64_t cudaUs = cudaElapsedUs + cudaProfilerStartEvent->cpuUs();
-        e.setCudaUs(cudaUs);
+        if (e.kind() == EventKind::PushRange) {
+          startEvents[e.handle()] = &e;
+        }
+      }
+    }
+    for (auto& e : profiledEvents) {
+      if (e.hasCuda()) {
+        if (e.kind() == EventKind::PopRange) {
+          auto it = startEvents.find(e.handle());
+          if (it != startEvents.end()) {
+            e.setCudaUs(it->second->cudaElapsedUs(e));
+          } else {
+            TORCH_WARN("Found a pop event without a corresponding push event");
+            e.setCudaUs(0);
+          }
+        } else {
+          e.setCudaUs(0);
+        }
       }
     }
   }

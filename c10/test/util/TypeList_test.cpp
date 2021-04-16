@@ -83,6 +83,15 @@ namespace test_head {
     static_assert(std::is_same<bool, head_t<typelist<bool>>>::value, "");
 }
 
+namespace test_head_with_default {
+    class MyClass {};
+    static_assert(std::is_same<int, head_with_default_t<bool, typelist<int, double>>>::value, "");
+    static_assert(std::is_same<const MyClass&, head_with_default_t<bool, typelist<const MyClass&, double>>>::value, "");
+    static_assert(std::is_same<MyClass&&, head_with_default_t<bool, typelist<MyClass&&, MyClass>>>::value, "");
+    static_assert(std::is_same<int, head_with_default_t<bool, typelist<int>>>::value, "");
+    static_assert(std::is_same<bool, head_with_default_t<bool, typelist<>>>::value, "");
+}
+
 namespace test_reverse {
     class MyClass {};
     static_assert(std::is_same<
@@ -100,9 +109,11 @@ namespace test_map_types_to_values {
       template<class T> constexpr size_t operator()(T) const {return sizeof(typename T::type);}
     };
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TEST(TypeListTest, MapTypesToValues_sametype) {
         auto sizes =
             map_types_to_values<typelist<int64_t, bool, uint32_t>>(map_to_size());
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         std::tuple<size_t, size_t, size_t> expected(8, 1, 4);
         static_assert(std::is_same<decltype(expected), decltype(sizes)>::value, "");
         EXPECT_EQ(expected, sizes);
@@ -114,6 +125,7 @@ namespace test_map_types_to_values {
       }
     };
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TEST(TypeListTest, MapTypesToValues_differenttypes) {
         auto shared_ptrs =
                 map_types_to_values<typelist<int, double>>(map_make_shared());
@@ -121,15 +133,18 @@ namespace test_map_types_to_values {
     }
 
     struct Class1 {static int func() {return 3;}};
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     struct Class2 {static double func() {return 2.0;}};
 
     struct mapper_call_func {
       template<class T> decltype(auto) operator()(T) { return T::type::func(); }
     };
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TEST(TypeListTest, MapTypesToValues_members) {
         auto result =
                 map_types_to_values<typelist<Class1, Class2>>(mapper_call_func());
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         std::tuple<int, double> expected(3, 2.0);
         static_assert(std::is_same<decltype(expected), decltype(result)>::value, "");
         EXPECT_EQ(expected, result);
@@ -139,6 +154,7 @@ namespace test_map_types_to_values {
       template<class T> decltype(auto) operator()(T) { return T::type::this_doesnt_exist(); }
     };
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TEST(TypeListTest, MapTypesToValues_empty) {
         auto result =
                 map_types_to_values<typelist<>>(mapper_call_nonexistent_function());
@@ -178,4 +194,15 @@ namespace test_drop {
     static_assert(std::is_same<typelist<int64_t, int32_t>, drop_t<typelist<int64_t, int32_t>, 0>>::value, "");
     static_assert(std::is_same<typelist<int32_t>, drop_t<typelist<int64_t, int32_t>, 1>>::value, "");
     static_assert(std::is_same<typelist<>, drop_t<typelist<int64_t, int32_t>, 2>>::value, "");
+}
+
+namespace test_drop_if_nonempty {
+    static_assert(std::is_same<typelist<>, drop_if_nonempty_t<typelist<>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int64_t>, drop_if_nonempty_t<typelist<int64_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_if_nonempty_t<typelist<int64_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<int64_t, int32_t>, drop_if_nonempty_t<typelist<int64_t, int32_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int32_t>, drop_if_nonempty_t<typelist<int64_t, int32_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_if_nonempty_t<typelist<int64_t, int32_t>, 2>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_if_nonempty_t<typelist<>, 1>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_if_nonempty_t<typelist<int64_t, int32_t>, 3>>::value, "");
 }

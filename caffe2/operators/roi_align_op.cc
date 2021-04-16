@@ -312,17 +312,3 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     "    bool aligned"
     ") -> Tensor",
     caffe2::RoIAlignCPUOp<float>);
-
-C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
-    RoIAlign2,
-    "__caffe2::RoIAlign("
-    "    Tensor features,"
-    "    Tensor rois,"
-    "    str order,"
-    "    float spatial_scale,"
-    "    int pooled_h,"
-    "    int pooled_w,"
-    "    int sampling_ratio,"
-    "    bool aligned"
-    ") -> Tensor",
-    caffe2::RoIAlignCPUOp<float>);

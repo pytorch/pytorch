@@ -228,8 +228,7 @@ class Errors(object):
 def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode.EVAL, rtol=1e-3, atol=1e-7,
            test_args=2, do_constant_folding=True, example_outputs=None, opset_version=None,
            keep_initializers_as_inputs=True, add_node_names=False,
-           operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
-           use_new_jit_passes=False):
+           operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
     """
     Export a model into ONNX, import it into a specified ONNX backend, and then
     on a few random inputs verify that PyTorch and the backend produced the same
@@ -246,7 +245,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
     For reproducibility, we recommend explicitly setting PyTorch's seed before
     invoking this function.
 
-    Arguments:
+    Args:
         model (torch.nn.Module): the model to be exported and verified
         args (tuple of arguments): the inputs to
             the model, e.g., such that ``model(*args)`` is a valid
@@ -354,8 +353,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                                        opset_version=opset_version,
                                        keep_initializers_as_inputs=keep_initializers_as_inputs,
                                        add_node_names=add_node_names,
-                                       operator_export_type=operator_export_type,
-                                       use_new_jit_passes=use_new_jit_passes)
+                                       operator_export_type=operator_export_type)
         if isinstance(model, torch.jit.ScriptModule):
             torch_out = model(*args)
         proto = load_bytes(proto_bytes)
@@ -369,8 +367,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                                            opset_version=opset_version,
                                            keep_initializers_as_inputs=keep_initializers_as_inputs,
                                            add_node_names=add_node_names,
-                                           operator_export_type=operator_export_type,
-                                           use_new_jit_passes=use_new_jit_passes)
+                                           operator_export_type=operator_export_type)
             if isinstance(model, torch.jit.ScriptModule):
                 torch_out = model(*args)
             alt_proto = load_bytes(alt_proto_bytes)

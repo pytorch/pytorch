@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -ex
+
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
@@ -7,13 +9,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
-# Temp: use new sccache
-if [[ -n "$IN_CI" && "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  # Download customized sccache
-  sudo curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
-  sudo chmod 755 /opt/cache/bin/sccache
-fi
-
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
@@ -26,6 +22,17 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7* ]]; then
+  # Enabling DEPLOY build (embedded torch python interpreter, experimental)
+  # only on one config for now, can expand later
+  export USE_DEPLOY=ON
+
+  # Deploy feature builds cpython. It requires these packages.
+  # TODO move this to dockerfile?
+  sudo apt-get -qq update
+  sudo apt-get -qq install libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev
 fi
 
 echo "Python version:"
@@ -45,6 +52,11 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   # enable build option in CMake
   export USE_CPP_CODE_COVERAGE=ON
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
+  # enable split torch_cuda build option in CMake
+  export BUILD_SPLIT_CUDA=ON
 fi
 
 # TODO: Don't run this...
@@ -112,7 +124,8 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
   export USE_VULKAN=1
-  export VULKAN_SDK=/var/lib/jenkins/vulkansdk/
+  # shellcheck disable=SC1091
+  source /var/lib/jenkins/vulkansdk/setup-env.sh
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -124,32 +137,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 
-  # ROCm CI is using Caffe2 docker images, which needs these wrapper
-  # scripts to correctly use sccache.
-  if [[ -n "${SCCACHE_BUCKET}" && -z "$IN_CI" ]]; then
-    mkdir -p ./sccache
-
-    SCCACHE="$(which sccache)"
-    if [ -z "${SCCACHE}" ]; then
-      echo "Unable to find sccache..."
-      exit 1
-    fi
-
-    # Setup wrapper scripts
-    for compiler in cc c++ gcc g++ clang clang++; do
-      (
-        echo "#!/bin/sh"
-        echo "exec $SCCACHE $(which $compiler) \"\$@\""
-      ) > "./sccache/$compiler"
-      chmod +x "./sccache/$compiler"
-    done
-
-    export CACHE_WRAPPER_DIR="$PWD/sccache"
-
-    # CMake must find these wrapper scripts
-    export PATH="$CACHE_WRAPPER_DIR:$PATH"
-  fi
-
   if [[ -n "$IN_CI" ]]; then
       # Set ROCM_ARCH to gfx900 and gfx906 for CI builds
       echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
@@ -157,7 +144,20 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   python tools/amd_build/build_amd.py
-  python setup.py install --user
+  python setup.py install
+
+  # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
+  sudo rm -f /opt/cache/bin/cc
+  sudo rm -f /opt/cache/bin/c++
+  sudo rm -f /opt/cache/bin/gcc
+  sudo rm -f /opt/cache/bin/g++
+  pushd /opt/rocm/llvm/bin
+  if [[ -d original ]]; then
+    sudo mv original/clang .
+    sudo mv original/clang++ .
+  fi
+  sudo rm -rf original
+  popd
 
   exit 0
 fi
@@ -206,7 +206,7 @@ else
     # ppc64le build fails when WERROR=1
     # set only when building other architectures
     # only use for "python setup.py install" line
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
       WERROR=1 python setup.py bdist_wheel
       python -mpip install dist/*.whl
     else
@@ -241,6 +241,18 @@ else
     popd
     assert_git_not_dirty
 
+    # Build jit hook tests
+    JIT_HOOK_BUILD="$PWD/../jit-hook-build"
+    JIT_HOOK_TEST="$PWD/test/jit_hooks"
+    python --version
+    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    mkdir "$JIT_HOOK_BUILD"
+    pushd "$JIT_HOOK_BUILD"
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+
     # Build custom backend tests.
     CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
     CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
@@ -269,7 +281,7 @@ else
     BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
     mkdir -p ../cpp-build/caffe2
     pushd ../cpp-build/caffe2
-    WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+    WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
     popd
   fi
 fi
@@ -279,6 +291,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # TODO: Move this to Dockerfile.
 
   pip_install lark-parser
+  pip_install cloud-tpu-client
 
   sudo apt-get -qq update
   sudo apt-get -qq install npm nodejs
@@ -296,13 +309,20 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     exit 1
   fi
 
-  bazels3cache --bucket=${XLA_CLANG_CACHE_S3_BUCKET_NAME} --maxEntrySizeBytes=0
+  bazels3cache --bucket="${XLA_CLANG_CACHE_S3_BUCKET_NAME}" --maxEntrySizeBytes=0
   pushd xla
   export CC=clang-9 CXX=clang++-9
   # Use cloud cache to build when available.
+  # shellcheck disable=SC1003
   sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
 
   python setup.py install
   popd
   assert_git_not_dirty
+fi
+
+if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
+  # export test times so that potential sharded tests that'll branch off this build will use consistent data
+  # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
+  python test/run_test.py --export-past-test-times
 fi

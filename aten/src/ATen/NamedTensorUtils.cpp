@@ -264,11 +264,11 @@ static std::vector<Dimname> compute_dot_product_outnames(
   }
   std::vector<Dimname> outnames(num_outnames, Dimname::wildcard());
   int64_t index = 0;
-  for (int64_t j = 0; j < tensor_names.size(); ++j) {
+  for (size_t j = 0; j < tensor_names.size(); ++j) {
     if (j == tensor_dotted_dim) continue;
     outnames[index++] = tensor_names[j];
   }
-  for (int64_t j = 0; j < other_names.size(); ++j) {
+  for (size_t j = 0; j < other_names.size(); ++j) {
     if (j == other_dotted_dim) continue;
     outnames[index++] = other_names[j];
   }
@@ -369,18 +369,16 @@ static std::vector<Dimname> compute_matmul_outnames(
   return result;
 }
 
-void propagate_names_for_addmv(
-    Tensor& result,
+std::vector<Dimname> propagate_names_for_addmv(
     const Tensor& mat,
     const Tensor& vec,
     const Tensor& bias) {
-  if (!result.has_names() && !mat.has_names() &&
+  if (!mat.has_names() &&
       !vec.has_names() && !bias.has_names()) {
-    return;
+    return std::vector<Dimname>{};
   }
   auto mv_outnames = compute_matmul_outnames(mat.names(), vec.names());
-  auto add_outnames = unify_from_right(mv_outnames, bias.names());
-  propagate_names(result, add_outnames);
+  return unify_from_right(mv_outnames, bias.names());
 }
 
 void propagate_names_for_addmm(

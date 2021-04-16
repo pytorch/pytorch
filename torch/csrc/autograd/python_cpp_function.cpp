@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -42,7 +43,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
     if (!THPVariable_Check(arg)) {
       return PyErr_Format(PyExc_TypeError, "argument %d is not a Variable", i);
     }
-    vars[i] = ((THPVariable*)arg)->cdata;
+    vars[i] = THPVariable_Unpack(arg);
   }
 
   variable_list output;
@@ -114,7 +115,7 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
     PyObject *py_fn = functionToPyObject(c_tuple.function);
     if (!py_fn) return nullptr;
     PyTuple_SET_ITEM(tuple.get(), 0, py_fn);
-    PyObject *py_idx = PyLong_FromLong(c_tuple.input_nr);
+    PyObject *py_idx = THPUtils_packUInt32(c_tuple.input_nr);
     if (!py_idx) return nullptr;
     PyTuple_SET_ITEM(tuple.get(), 1, py_idx);
     PyTuple_SET_ITEM(py_functions.get(), i, tuple.release());
@@ -142,7 +143,7 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
   auto var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
   std::unique_ptr<FunctionPreHook> hook(
-      new PyFunctionPreHook(var->backward_hooks, var->cdata.output_nr()));
+      new PyFunctionPreHook(var->backward_hooks, THPVariable_Unpack(var).output_nr()));
   fn.add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
 }

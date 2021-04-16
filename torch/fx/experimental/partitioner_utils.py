@@ -1,5 +1,6 @@
 from typing import NamedTuple, Dict, List, Set
 from torch.fx.node import Node, map_arg
+from enum import Enum
 class Partition:
     """Partition class contains all the information about an individual partition.
     It also provides necessary methods for manipulation the partition.
@@ -30,6 +31,7 @@ class Partition:
             if n.op in {'placeholder', 'get_attr'}:
                 self.nodes.add(n)
         self.nodes.add(node)
+        self.recalculate_mem_size()
 
     def remove_node(self, node):
         # Remove a node only if the node is in the partition
@@ -43,8 +45,9 @@ class Partition:
             # and this input node is not used by some other nodes in this partition,
             # the remove this input node
             for input_node in input_nodes:
-                if all([n not in self.nodes for n in input_node.users]):
+                if all([n not in self.nodes for n in input_node.users]) and input_node.op in {'placeholder', 'get_attr'}:
                     self.nodes.remove(input_node)
+            self.recalculate_mem_size()
 
 class Device(NamedTuple):
     name: str
@@ -65,12 +68,20 @@ class PartitionLatency(NamedTuple):
     # Latency of the critical path
     overall_latency_sec: float
 
+class PartitionMode(Enum):
+    size_based = 0
+    sparse_nn = 1
+    cost_aware = 2
+    kl_based = 3
+    aot_based = 4
+
 class PartitionerConfig(NamedTuple):
     devices: List[Device]
-    is_sparse_nn: bool = False
-    is_cost_aware: bool = False
+    mode: PartitionMode = PartitionMode.size_based
     transfer_rate_bytes_per_sec: float = 0.
     node_to_latency_mapping: Dict[Node, NodeLatency] = {}
+    node_to_partition_mapping: Dict[Node, int] = {}
+    partition_to_logical_device_mapping: Dict[int, List[int]] = {}
 
 def get_extra_size_of(node: Node, nodes: Set[Node]) -> int:
     """Given a node and a set of nodes,
@@ -197,7 +208,7 @@ def get_comm_latency_between(parent_partition: Partition, child_partition: Parti
                 if size_bytes is not None:
                     comm_size += size_bytes.output_size
                 visited_nodes.add(n)
-    return comm_size * transfer_rate_bytes_per_sec
+    return comm_size / transfer_rate_bytes_per_sec
 
 def get_latency_of_partitioned_graph(
     partitions: List[Partition],

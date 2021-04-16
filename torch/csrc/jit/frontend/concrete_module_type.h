@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aten/src/ATen/core/ivalue.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <memory>
@@ -66,7 +66,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   void addConstant(std::string name, IValue value);
   void addAttribute(
       std::string name,
-      TypePtr type,
+      const TypePtr& type,
       bool isParameter,
       bool isBuffer);
   void addFunctionAttribute(
@@ -76,10 +76,13 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
 
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
 
+  void addForwardHook(py::object hook);
+  void addForwardPreHook(py::object pre_hook);
+
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
-  void addBuiltinFunction(std::string name, std::string symbol_name);
+  void addBuiltinFunction(std::string name, const std::string& symbol_name);
   void addFailedAttribute(std::string name, std::string failureReason);
   void addIgnoredAttribute(std::string name);
   void setIterableModuleKind(IterableModuleKind kind);
@@ -134,7 +137,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   };
 
  private:
-  ConcreteModuleTypeBuilder() {}
+  ConcreteModuleTypeBuilder() = default;
   ClassTypePtr createTypeFromThis() const;
 
   // If true, this type will never compare equally to anything else. This is
@@ -163,6 +166,12 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   std::unordered_map<std::string, c10::Symbol> builtinFunctions_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
+  // Hooks to be called before/after forward when the module
+  // is called directly. Used to ensure modules have different types
+  // when they have different python hooks
+  // Actual hooks are added to ClassType directly during compilation
+  std::vector<py::object> forwardHooks_;
+  std::vector<py::object> forwardPreHooks_;
 
   // If something is a ModuleDict/ModuleList, it means:
   //   1. The order of the submodules matters for comparing the type
@@ -221,7 +230,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   void dump() const;
 
  private:
-  ConcreteModuleType() {}
+  ConcreteModuleType() = default;
 
   // The JIT type derived from this ConcreteModuleType.
   ConcreteModuleTypeBuilder data_;

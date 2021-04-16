@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -11,6 +12,12 @@ namespace tensorexpr {
 // Walk the Statment looking for Half size loads/stores.
 class HalfChecker : public IRVisitor {
  public:
+  HalfChecker(const std::vector<CodeGen::BufferArg>& args) {
+    for (const auto& BA : args) {
+      hasHalf_ |= BA.dtype().scalar_type() == ScalarType::Half;
+    }
+  }
+
   bool hasHalf() {
     return hasHalf_;
   }
@@ -62,7 +69,7 @@ class HalfRewriter : public IRMutator {
       inserted_half_casts_.insert(new_val);
     }
 
-    return new Store(v->buf(), v->indices(), new_val, v->mask());
+    return new Store(v->buf(), v->indices(), new_val);
   }
 
   const Expr* mutate(const HalfImm* v) override {

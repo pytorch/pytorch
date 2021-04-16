@@ -8,6 +8,7 @@ from caffe2.python.fakelowp.test_utils import print_test_debug_info
 from hypothesis import given, settings
 from hypothesis import strategies as st
 import caffe2.python.serialized_test.serialized_test_util as serial
+import datetime
 
 core.GlobalInit(["caffe2",
                  "--glow_global_fp16=1",
@@ -25,8 +26,8 @@ class LayerNorm(serial.SerializedTestCase):
            size=st.integers(min_value=2, max_value=128),
            epsilon=st.floats(min_value=1e-4, max_value=1e-3),
            elementwise_affine=st.booleans())
-    @settings(deadline=None)
-    def Skip_test_layernorm(self, seed, batch_size, size, epsilon, elementwise_affine):
+    @settings(deadline=datetime.timedelta(seconds=10))
+    def test_layernorm(self, seed, batch_size, size, epsilon, elementwise_affine):
         np.random.seed(seed)
         # Reset the workspace
         workspace.ResetWorkspace()
@@ -121,7 +122,7 @@ class LayerNorm(serial.SerializedTestCase):
         tensor_min = min(0, np.min(tensor))
         scale = np.float32(np.float16((tensor_max - tensor_min) / 255.0))
         if scale < 1e-6:
-            scale = 1e-6
+            scale = np.float32(1e-6)
         zero_point = 0 - tensor_min / scale
         zero_point = int(round(np.clip(zero_point, 0, 255.0)))
         return (scale, zero_point)
@@ -139,9 +140,9 @@ class LayerNorm(serial.SerializedTestCase):
            size=st.integers(min_value=2, max_value=128),
            epsilon=st.floats(min_value=1e-4, max_value=1e-3),
            elementwise_affine=st.booleans())
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     # re-enable when T74553975 gets fixed
-    def Skip_test_fused_ln_quantize(self, seed, batch_size, size, epsilon, elementwise_affine):
+    def test_fused_ln_quantize(self, seed, batch_size, size, epsilon, elementwise_affine):
         np.random.seed(seed)
 
         # Reset the workspace

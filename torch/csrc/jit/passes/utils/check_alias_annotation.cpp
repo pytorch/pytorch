@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
+
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -17,13 +18,6 @@ IValue deepCopy(const IValue& self) {
   if (self.isTensor()) {
     return IValue(self.toTensor().clone(at::MemoryFormat::Preserve));
   }
-  if (self.isTensorList()) {
-    c10::List<at::Tensor> newList;
-    for (const at::Tensor& oldTensor : self.toTensorVector()) {
-      newList.push_back(oldTensor.clone(at::MemoryFormat::Preserve));
-    }
-    return newList;
-  }
 
   // Lists of ivalues should recursively deep copy their contents
   if (self.isList()) {
@@ -41,6 +35,8 @@ IValue deepCopy(const IValue& self) {
     return IValue(self.toIntList().copy());
   } else if (self.isDoubleList()) {
     return IValue(self.toDoubleList().copy());
+  } else if (self.isComplexDoubleList()) {
+    return IValue(self.toComplexDoubleList().copy());
   } else if (self.isBoolList()) {
     return IValue(self.toBoolList().copy());
   } else if (self.isString()) {
@@ -64,6 +60,20 @@ Stack deepCopy(const Stack& stack) {
 bool deepEquals(const IValue& lhs, const IValue& rhs) {
   if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
+  }
+
+  if (lhs.isTensorList() && rhs.isTensorList()) {
+    const auto a = lhs.toTensorList();
+    const auto b = rhs.toTensorList();
+    if (a.size() != b.size()) {
+      return false;
+    }
+    for (auto i = decltype(a.size()){0}; i < a.size(); ++i) {
+      if (!a[i].equal(b[i])) {
+        return false;
+      }
+    }
+    return true;
   }
 
   return lhs == rhs;

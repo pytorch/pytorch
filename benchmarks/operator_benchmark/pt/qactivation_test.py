@@ -42,7 +42,7 @@ qactivation_short_configs = op_bench.cross_product_configs(
 
 qactivation_ops = op_bench.op_list(
     attrs=(
-        ('relu', nnq.functional.relu),
+        ('relu', torch.nn.ReLU()),
         ('relu6', torch.ops.quantized.relu6),
         ('functional.hardtanh', nnq.functional.hardtanh),
         ('functional.hardsigmoid', nnq.functional.hardsigmoid),

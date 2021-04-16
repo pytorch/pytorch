@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ATen/Functions.h>
+#include <ATen/Utils.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/core/TensorOptions.h>
@@ -87,8 +89,6 @@ using binary_fn = void (*)(TensorIterator&);
 
 DECLARE_DISPATCH(binary_fn, complex_stub);
 DECLARE_DISPATCH(binary_fn, polar_stub);
-
-DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t, const double), kaiser_window_stub);
 
 } // namespace native
 } // namespace at

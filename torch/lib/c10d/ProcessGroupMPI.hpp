@@ -16,6 +16,8 @@
 
 namespace c10d {
 
+constexpr const char* MPI_BACKEND_NAME = "mpi";
+
 // WorkEntry is the state associated with a single MPI run instance.
 // It include the source Tensor list and destination Tensor list, as well as
 // The actual run function that will operate either on src or dst or both.
@@ -73,13 +75,30 @@ struct WorkEntry {
 class ProcessGroupMPI : public ProcessGroup {
  public:
   class WorkMPI : public ProcessGroup::Work {
+   public:
+    WorkMPI(
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt)
+        : ProcessGroup::Work(
+              -1,
+              OpType::UNKNOWN,
+              profilingTitle,
+              inputTensors) {}
+
    protected:
     friend class ProcessGroupMPI;
   };
 
   class AsyncWork : public ProcessGroup::Work {
    public:
-    AsyncWork(at::Tensor tensor, MPI_Request request);
+    AsyncWork(
+        at::Tensor tensor,
+        MPI_Request request,
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt);
+
     virtual ~AsyncWork();
 
     bool isCompleted() override;
@@ -107,6 +126,10 @@ class ProcessGroupMPI : public ProcessGroup {
 
   // Abort the MPI program, needs to be called when exception is detected
   void abort();
+
+  const std::string getBackendName() const override {
+    return std::string(MPI_BACKEND_NAME);
+  }
 
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& data,
@@ -170,16 +193,16 @@ class ProcessGroupMPI : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
-      int tag);
+      int tag) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
-      int tag);
+      int tag) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensor,
-      int tag);
+      int tag) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
@@ -196,7 +219,10 @@ class ProcessGroupMPI : public ProcessGroup {
   // Helper function that is called by the destructor
   void destroy();
 
-  c10::intrusive_ptr<ProcessGroup::Work> enqueue(std::unique_ptr<WorkEntry> entry);
+  c10::intrusive_ptr<ProcessGroup::Work> enqueue(
+      std::unique_ptr<WorkEntry> entry,
+      const char* profilingTitle = nullptr,
+      const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt);
 
   bool stop_;
 

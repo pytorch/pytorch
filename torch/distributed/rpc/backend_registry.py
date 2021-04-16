@@ -38,7 +38,7 @@ def backend_registered(backend_name):
     """
     Checks if backend_name is registered as an RPC backend.
 
-    Arguments:
+    Args:
         backend_name (str): string to identify the RPC backend.
     Returns:
         True if the backend has been registered with ``register_backend``, else
@@ -52,7 +52,7 @@ def register_backend(
 ):
     """Registers a new RPC backend.
 
-    Arguments:
+    Args:
         backend_name (str): backend string to identify the handler.
         construct_rpc_backend_options_handler (function):
             Handler that is invoked when
@@ -157,6 +157,7 @@ def _process_group_init_backend_handler(
 
     # TODO: add try-except and destroy _agent in all processes if any fails.
     return ProcessGroupAgent(
+        store,
         name,
         group,
         rpc_backend_options.num_send_recv_threads,
@@ -255,6 +256,14 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
                 rpc_backend_options
             )
         )
+
+    if torch.cuda.is_available():
+        # It's necessary to initialize PyTorch CUDA states here (e.g.,
+        # CUDACachingAllocator). If this is missing, we could hit errors like
+        # "allocator not initialized", because other processes might send
+        # CUDA-related RPC request to this process before user code in this
+        # process initializes its PyTorch CUDA states.
+        torch.cuda.init()
 
     # The agent's join method is required to behave like a barrier and perform
     # collective operations, for which it relies on a process group, instead of

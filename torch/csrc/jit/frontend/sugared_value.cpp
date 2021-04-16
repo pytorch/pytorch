@@ -37,6 +37,8 @@ builtin_cast_method_to_scalar_type() {
       {"char", at::kChar},
       {"double", at::kDouble},
       {"float", at::kFloat},
+      {"cfloat", at::kComplexFloat},
+      {"cdouble", at::kComplexDouble},
       {"int", at::kInt},
       {"long", at::kLong},
       {"short", at::kShort},
@@ -99,25 +101,22 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       std::unordered_map<std::string, std::string>,
       EnumClassHash>;
   static const PropertiesLookup builtin_properties = {
+      {TypeKind::OptionalType,
+       {
+           {"unchecked_unwrap_optional", "prim"},
+       }},
       {TypeKind::TensorType,
        {
-           {"dtype", "prim"},
-           {"device", "prim"},
-           {"grad", "prim"},
-           {"data", "prim"},
-           {"shape", "prim"},
-           {"is_cuda", "prim"},
-           {"is_sparse", "prim"},
-           {"is_mkldnn", "prim"},
-           {"is_quantized", "prim"},
-           {"is_vulkan", "prim"},
-           {"is_meta", "prim"},
-           {"is_leaf", "aten"},
-           {"requires_grad", "prim"},
-           {"layout", "prim"},
-           {"T", "prim"},
-           {"ndim", "prim"},
-           {"name", "prim"},
+           {"dtype", "prim"},         {"device", "prim"},
+           {"grad", "prim"},          {"data", "prim"},
+           {"shape", "prim"},         {"is_cuda", "prim"},
+           {"is_xpu", "prim"},        {"is_sparse", "prim"},
+           {"is_sparse_csr", "prim"}, {"is_mkldnn", "prim"},
+           {"is_mlc", "prim"},        {"is_quantized", "prim"},
+           {"is_vulkan", "prim"},     {"is_meta", "prim"},
+           {"is_leaf", "aten"},       {"requires_grad", "prim"},
+           {"layout", "prim"},        {"T", "prim"},
+           {"ndim", "prim"},          {"name", "prim"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
   auto kind = value_->type()->kind();
@@ -186,6 +185,14 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   }
 
   // none of the more-specific cases worked, so see if this is a builtin method
+  // If field is a type, then call the aten::to op
+  if (field == "type") {
+    if (auto builtin = BuiltinFunction::tryCreate(
+            Symbol::aten("to"), NamedValue(loc, "self", value_))) {
+      return builtin;
+    }
+  }
+
   if (auto builtin = BuiltinFunction::tryCreate(
           Symbol::aten(field), NamedValue(loc, "self", value_))) {
     return builtin;
@@ -226,6 +233,9 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     Node* unpack =
         graph->insertNode(graph->createListUnpack(value_, *size_hint));
     return fmap(unpack->outputs(), make_simple_value);
+  } else if (value_->type()->kind() == TypeKind::AnyTupleType) {
+    throw ErrorReport(loc)
+        << "Provided tuple is not fully defined/refined including its element types, please provide a value of type like Tuple[int, int]";
   }
   throw ErrorReport(loc) << value_->type()->repr_str()
                          << " cannot be used as a tuple";
@@ -298,6 +308,10 @@ void SimpleValue::setAttr(
         MethodValue(value_, prop->setter->name())
             .call(loc, m, {newValue}, {}, /*n_binders=*/1);
         return;
+      }
+
+      if (prop && !prop->setter) {
+        throw ErrorReport(loc) << "Tried to set read-only attribute: " << field;
       }
 
       throw ErrorReport(loc)
@@ -399,7 +413,7 @@ SugaredValuePtr SimpleValue::getitem(
     // sure its contents implement the module interface referred to by
     // type_hint.
     if (class_type->is_module() && type_hint) {
-      auto res = g.insert(prim::ModuleDictIndex, {val, idx}, {}, loc);
+      auto res = g.insert(prim::ModuleContainerIndex, {val, idx}, {}, loc);
       res->setType(type_hint);
       return std::make_shared<SimpleValue>(res);
     }
@@ -560,7 +574,7 @@ SugaredValuePtr IterableTree::getitem(
 void IterableTree::addChild(
     const SourceRange& range,
     Function& m,
-    const SugaredValuePtr iter_value) {
+    const SugaredValuePtr& iter_value) {
   c10::optional<int64_t> child_len = iter_value->staticLen();
   if (children_.size() == 0) {
     unroll_length_ = child_len;
@@ -625,6 +639,13 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
+  // Allow import_source.cpp to resolve calls to a submodule's
+  // hooks. Edge case because normally you wouldn't allow a module to
+  // call functions of a submodule
+  if (Function* hook = type_->findHook(field)) {
+    return std::make_shared<FunctionValue>(hook);
+  }
+
   if (field != "__new__") {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class "
                            << type_->annotation_str();

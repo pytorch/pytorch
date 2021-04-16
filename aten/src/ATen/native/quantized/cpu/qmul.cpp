@@ -38,7 +38,7 @@ Tensor _mul_out(Tensor& out, const Tensor& self, const Tensor& other) {
 }
 
 template <bool ReLUFused = false>
-Tensor _mul_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
+Tensor _mul_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
   int64_t self_zero_point = self.q_zero_point();
   double self_scale = self.q_scale();
   double other_val = other.toDouble();
@@ -59,7 +59,7 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
       } else {
         out.copy_(self);
       }
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           scale_prime, zero_point_prime, self.scalar_type()));
     } else if (other_val == 0.0) {
       scale_prime = 1.0;
@@ -74,7 +74,7 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
           [&](Vec256<scalar_t> vec) -> Vec256<scalar_t> {
             return Vec256<scalar_t>(scalar_t(0));
           });
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           scale_prime, zero_point_prime, self.scalar_type()));
     } else /* other_val < 0.0 */ {
       scale_prime = std::abs(other_val) * self_scale;
@@ -91,7 +91,7 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
             }
             return a;
           });
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           scale_prime, zero_point_prime, self.scalar_type()));
     }
   });
@@ -105,7 +105,7 @@ class QMul final {
   static Tensor run(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     check_inputs(qa, qb);
     auto qc = at::_empty_affine_quantized(
-        DimVector(infer_size(qa.sizes(), qb.sizes())),
+        infer_size_dimvector(qa.sizes(), qb.sizes()),
         at::device(kCPU).dtype(qa.scalar_type()),
         scale,
         zero_point,
@@ -127,7 +127,7 @@ class QMulOut final {
 template <bool ReLUFused = false>
 class QMulScalar final {
  public:
-  static Tensor run(Tensor qa, Scalar b) {
+  static Tensor run(Tensor qa, const Scalar& b) {
     TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is supported in Mul.");
@@ -139,7 +139,7 @@ class QMulScalar final {
 template <bool ReLUFused = false>
 class QMulScalar2 final {
  public:
-  static Tensor run(Scalar b, Tensor qa) {
+  static Tensor run(const Scalar& b, Tensor qa) {
     TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is supported in Mul.");
@@ -151,7 +151,7 @@ class QMulScalar2 final {
 template <bool ReLUFused = false>
 class QMulScalarOut final {
  public:
-  static Tensor run(Tensor qa, Scalar b, Tensor out) {
+  static Tensor run(Tensor qa, const Scalar& b, Tensor out) {
     check_inputs(qa, out);
     return _mul_scalar_out<ReLUFused>(out, qa, b);
   }

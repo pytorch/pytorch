@@ -7,7 +7,7 @@ import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
                                                   TEST_NUMPY, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
-                                                        dtypes, dtypesIfCUDA, onlyCPU)
+                                                        dtypes, dtypesIfCUDA, onlyCPU, expectedFailureMeta)
 
 if TEST_NUMPY:
     import numpy as np
@@ -560,14 +560,17 @@ class TestTypePromotion(TestCase):
         for dtype in torch.testing.get_all_dtypes():
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
+    @expectedFailureMeta
     @float_double_default_dtype
-    def test_indexing(self, device):
+    def test_indexing_fail(self, device):
         # https://github.com/pytorch/pytorch/issues/28010
         a = torch.ones(5, 2, dtype=torch.double, device=device)
         b = torch.zeros(5, dtype=torch.int, device=device)
         with self.assertRaises(RuntimeError):
             a[:, [1]] = b.unsqueeze(-1)
 
+    @float_double_default_dtype
+    def test_indexing(self, device):
         x = torch.ones(5, 2, dtype=torch.double, device=device)
         y = torch.zeros(5, dtype=torch.double, device=device)
         x[:, [1]] = y.unsqueeze(-1)
@@ -919,9 +922,9 @@ class TestTypePromotion(TestCase):
         t = torch.tensor((1), dtype=dtypes[0], device=device)
         out = torch.empty(0, dtype=dtypes[1], device=device)
 
-        ops = (torch.neg, torch.floor, torch.ceil, torch.erf)
-        float_only_ops = {torch.floor, torch.ceil, torch.erf}
-        real_only_ops = {torch.floor, torch.ceil, torch.erf}
+        ops = (torch.neg, torch.floor, torch.ceil)
+        float_only_ops = {torch.floor, torch.ceil}
+        real_only_ops = {torch.floor, torch.ceil}
         for op in ops:
             if dtypes[0] is not dtypes[1]:
                 with self.assertRaises(RuntimeError):

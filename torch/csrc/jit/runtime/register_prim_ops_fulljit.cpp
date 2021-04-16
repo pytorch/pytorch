@@ -29,7 +29,6 @@ RegisterOperators reg(
     {Operator(
          prim::profile,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOp>()->getCallback();
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
@@ -37,9 +36,8 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::profile_optional,
+         prim::profile_ivalue,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOptionalOp>()->getCallback();
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
@@ -57,8 +55,35 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         prim::RequiresGradCheck /* (...)  -> (..., bool) */,
+         [](const Node* node) -> Operation {
+           std::vector<bool> rg_props =
+               fmap(node->tys(attr::types), [](const TypePtr& t) {
+                 // if an rg property changes we assume a tensor does require
+                 // gradients which is set in `guardDifferentiableGraph`
+                 TORCH_INTERNAL_ASSERT(
+                     t->castRaw<TensorType>()->requiresGrad().has_value());
+                 return *t->castRaw<TensorType>()->requiresGrad();
+               });
+           return [rg_props](Stack* stack) {
+             auto num_inputs = rg_props.size();
+             // Check every input's shape against profiled (expected) shape.
+             for (size_t i = 0; i < num_inputs; i++) {
+               auto& input = peek(stack, i, num_inputs);
+               const auto& t = input.toTensor();
+               if (rg_props[i] != t.requires_grad()) {
+                 push(stack, false);
+                 return;
+               }
+             }
+
+             push(stack, true);
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          prim::TypeCheck /* (...)  -> (..., bool) */,
-         [](const Node * /* node */) -> Operation {
+         [](const Node* /* node */) -> Operation {
            return [](Stack* /* stack */) {
              AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
            };
@@ -233,14 +258,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::eq.device(Device a, Device b) -> bool",
-         [](Stack* stack) {
-           auto a = pop(stack).toDevice();
-           auto b = pop(stack).toDevice();
-           push(stack, a == b);
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::requires_grad(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
@@ -265,11 +282,27 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::is_sparse_csr(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_sparse_csr());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_mkldnn(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_mkldnn());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_mlc(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_mlc());
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -309,14 +342,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::layout(Tensor a) -> int",
-         [](Stack* stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.layout());
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::index(Device self) -> int?",
          [](Stack* stack) {
            auto d = pop(stack).toDevice();
@@ -346,6 +371,34 @@ RegisterOperators reg(
          [](Stack* stack) { stack->emplace_back(at::Tensor()); },
          aliasAnalysisSpecialCase()),
      Operator(
+         "prim::ReductionSizes(int[] size, int[] red_axes, bool keepdim = False) -> int[]",
+         [](Stack* stack) {
+           bool keepdim = pop(stack).toBool();
+           c10::List<int64_t> axes = pop(stack).toIntList();
+           c10::List<int64_t> size = pop(stack).toIntList();
+           if (keepdim) {
+             for (const auto& axis : axes) {
+               size.set(axis, 1);
+             }
+           } else {
+             int64_t index = 0;
+             auto iter = size.begin();
+             std::sort(axes.begin(), axes.end());
+             for (const auto& axis : axes) {
+               // move iter to the next axis
+               iter += axis - index;
+
+               // input iter points to axis and is updated to axis + 1
+               iter = size.erase(iter);
+
+               // update current index for iter
+               index = axis + 1;
+             }
+           }
+           push(stack, IValue(std::move(size)));
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::BroadcastSizes(...) -> int[]",
          [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
@@ -356,7 +409,7 @@ RegisterOperators reg(
                  at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
            }
            drop(stack, num_inputs);
-           push(stack, IValue(std::move(size)));
+           push(stack, IValue(size));
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -501,6 +554,7 @@ RegisterOperators reg(
      Operator(
          "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
          [](Stack* stack) {
+           RECORD_FUNCTION("_grad_sum_to_size", std::vector<c10::IValue>());
            IValue self, size;
            pop(stack, self, size);
            if (size.isNone()) {
@@ -569,23 +623,29 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      // This operator is generated inside the compiler for indexing into
+     // ModuleList without a statically determinable key. Accordingly,
+     // self must be a ModuleType and the output must be an InterfaceType.
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "prim::ModuleContainerIndex.list(Any self, int ind) -> Any"),
+         [](Stack* stack) {
+           IValue ind = pop(stack);
+           IValue module_dict = pop(stack);
+           std::stringstream ss;
+           ss << ind.toInt();
+           push(stack, module_dict.toModule().attr(ss.str()));
+         },
+         aliasAnalysisFromSchema()),
+     // This operator is generated inside the compiler for indexing into
      // ModuleDict without a statically determinable key. Accordingly,
      // self must be a ModuleType and the output must be an InterfaceType.
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "prim::ModuleDictIndex(Any self, str ind) -> Any"),
+             "prim::ModuleContainerIndex.dict(Any self, str ind) -> Any"),
          [](Stack* stack) {
            IValue ind = pop(stack);
            IValue module_dict = pop(stack);
            push(stack, module_dict.toModule().attr(ind.toStringRef()));
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::dict() -> Dict(str, Tensor)",
-         [](Stack* stack) {
-           auto dict =
-               c10::impl::GenericDict(StringType::get(), TensorType::get());
-           push(stack, dict);
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -639,7 +699,7 @@ RegisterOperators logging_operators(
              tracer::recordSourceLocation(node);
              graph->insertNode(node);
            }
-           auto output = autograd::profiler::getTime();
+           auto output = autograd::profiler::getTime(/*allow_monotonic=*/true);
            push(stack, output);
            if (jit::tracer::isTracing()) {
              jit::tracer::addOutput(node, output);
@@ -650,19 +710,6 @@ RegisterOperators logging_operators(
 void hashValue(Stack* stack) {
   auto value = pop(stack);
   push(stack, value.hash());
-}
-
-// As described in https://docs.python.org/3/library/functions.html#round
-// When a number is exactly halfway between two integers, python builtin round
-// function will round to even number. We use round(x/2)*2 to handle the
-// special halfway case. For positive 'x', round(x/2)*2 =
-// round((x_e + x_r)/2)*2 = x_e + round(x_r/2)*2, where x_e is an even integer,
-// x_r is either 0.5 of 1.5, round(x_r/2)*2 results a 0 or 2, so the final
-// result will always be a even number. Due to symmetricity, it also applies to
-// negative cases.
-double round_to_even(double a) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
 }
 
 RegisterOperators reg2({
@@ -704,10 +751,6 @@ RegisterOperators reg2({
 
     // `listContains<T>` is not implemented for non-primitive types
     // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
-    Operator(
-        "aten::__contains__.int_list(int[] l, int item) -> bool",
-        listContains<int64_t>,
-        aliasAnalysisFromSchema()),
     Operator(
         "aten::__contains__.float_list(float[] l, float item) -> bool",
         listContains<double>,
@@ -889,7 +932,6 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__lshift__, a << b),
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
-    DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
     DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_SCALAR_SCALAR_BINARY_OP(
@@ -898,11 +940,11 @@ RegisterOperators reg2({
         std::log(a) / std::log(b),
         float),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
-    DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
-    DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
-    DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
-    DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
-    DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::log10, std::log10(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sqrt, std::sqrt(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::acos, std::acos(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::asin, std::asin(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::atan, std::atan(a), float, float),
     DEFINE_GENERIC_OP(
         aten::atan2,
         std::atan2(a, b),
@@ -915,15 +957,22 @@ RegisterOperators reg2({
         std::atan2(a, b),
         std::atan2(a, b),
         float),
-    DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
-    DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
-    DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
-    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
-    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
-    DEFINE_UNARY_OP(aten::acosh, std::acosh(a), float, float),
-    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
-    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
-    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::cos, std::cos(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sin, std::sin(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::tan, std::tan(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::asinh, std::asinh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::atanh, std::atanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::acosh, std::acosh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sinh, std::sinh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::cosh, std::cosh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::tanh, std::tanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX_CAST(
+        aten::angle,
+        std::arg(a),
+        float,
+        float,
+        float,
+        float),
     DEFINE_UNARY_OP(aten::degrees, degrees(a), float, float),
     DEFINE_UNARY_OP(aten::radians, radians(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
@@ -939,7 +988,13 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
 
     // TODO: move abs to aten namespace because it's schematized!
-    DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX_CAST(
+        prim::abs,
+        std::abs(a),
+        int,
+        float,
+        float,
+        float),
     Operator(
         "prim::abs(Tensor x) -> Tensor",
         [](Stack* stack) {
@@ -986,6 +1041,93 @@ RegisterOperators reg2({
             t[i] = l.get(i);
           }
           push(stack, std::move(t));
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.int(int[] self) -> int",
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          auto sum = 0;
+          for (const auto& elem : l) {
+            sum += elem;
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.float(float[] self) -> float",
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          auto sum = 0.0;
+          for (const auto& elem : l) {
+            sum += elem;
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.bool(bool[] self) -> int",
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          auto sum = 0;
+          for (const auto& elem : l) {
+            if (elem) {
+              sum += 1;
+            }
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.str(str[] self) -> bool",
+        [](Stack* stack) {
+          auto l = pop(stack).toList();
+          for (const auto& elem : l) {
+            if (elem != "") {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.int(int[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.float(float[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.bool(bool[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
         },
         aliasAnalysisFromSchema()),
     Operator(
@@ -1101,6 +1243,57 @@ RegisterOperators reg2({
         "aten::hash.generic(t value) -> int",
         hashValue,
         aliasAnalysisFromSchema()),
+
+#define DEFINE_COMPLEX_OP(type_a, type_b, actual_type_a, actual_type_b) \
+  Operator(                                                             \
+      "aten::Complex." #type_a "_" #type_b "(" #type_a " x," #type_b    \
+      " y) -> complex",                                                 \
+      [](Stack* stack) {                                                \
+        actual_type_a a;                                                \
+        actual_type_b b;                                                \
+        pop(stack, a, b);                                               \
+        auto comp = c10::complex<double>(a, b);                         \
+        push(stack, comp);                                              \
+      },                                                                \
+      aliasAnalysisFromSchema())
+
+#define DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(                               \
+    type_a, type_b, actual_type_a, actual_type_b)                        \
+  Operator(                                                              \
+      "aten::Complex." #type_a "_" #type_b "(" #type_a " x," #type_b     \
+      " y) -> complex",                                                  \
+      [](Stack* stack) {                                                 \
+        actual_type_a a;                                                 \
+        actual_type_b b;                                                 \
+        pop(stack, a, b);                                                \
+        auto comp = c10::complex<double>(a.item<double>(), b);           \
+        push(stack, comp);                                               \
+      },                                                                 \
+      aliasAnalysisFromSchema()),                                        \
+      Operator(                                                          \
+          "aten::Complex." #type_b "_" #type_a "(" #type_b " x," #type_a \
+          " y) -> complex",                                              \
+          [](Stack* stack) {                                             \
+            actual_type_b a;                                             \
+            actual_type_a b;                                             \
+            pop(stack, a, b);                                            \
+            auto comp = c10::complex<double>(a, b.item<double>());       \
+            push(stack, comp);                                           \
+          },                                                             \
+          aliasAnalysisFromSchema())
+
+    DEFINE_COMPLEX_OP(int, bool, int, bool),
+    DEFINE_COMPLEX_OP(bool, int, bool, int),
+    DEFINE_COMPLEX_OP(float, bool, double, bool),
+    DEFINE_COMPLEX_OP(bool, float, bool, double),
+    DEFINE_COMPLEX_OP(float, int, double, int),
+    DEFINE_COMPLEX_OP(int, float, int, double),
+    DEFINE_COMPLEX_OP(int, int, int, int),
+    DEFINE_COMPLEX_OP(bool, bool, bool, bool),
+    DEFINE_COMPLEX_OP(float, float, double, double),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, float, at::Tensor, double),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, int, at::Tensor, int),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, bool, at::Tensor, bool),
 });
 
 bool isSortableTupleType(

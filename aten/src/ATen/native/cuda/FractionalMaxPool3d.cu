@@ -148,6 +148,10 @@ void fractional_max_pool3d_out_cuda_template(
   IntArrayRef pool_size,
   IntArrayRef output_size,
   const Tensor& randomSamples) {
+    TORCH_CHECK(pool_size.size() == 3,
+                "fractional_max_pool3d: kernel_size must either be a single Int or tuple of three Ints")
+    TORCH_CHECK(output_size.size() == 3,
+                "fractional_max_pool3d: output_size must either be a single Int or tuple of three Ints")
     int64_t planeDim = 0;
     int64_t dimt = 1;
     int64_t dimh = 2;
@@ -241,7 +245,7 @@ void fractional_max_pool3d_out_cuda_template(
           randomSamples.packed_accessor64<scalar_t, 3>(),
           poolSizeT, poolSizeH, poolSizeW
         );
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     );
   }
@@ -327,20 +331,19 @@ void fractional_max_pool3d_backward_out_cuda_template(
           gradOutput_.packed_accessor64<scalar_t, 5>(),
           indices_.packed_accessor64<int64_t, 5>()
         );
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     );
   }
 
 }// namespace
 
-std::tuple<Tensor&, Tensor&> fractional_max_pool3d_out_cuda(
-   at::Tensor& output,
-   at::Tensor& indices,
-   const at::Tensor& input,
+std::tuple<Tensor&, Tensor&> fractional_max_pool3d_out_cuda(const at::Tensor& input,
    IntArrayRef pool_size,
    IntArrayRef output_size,
-   const at::Tensor& randomSamples) {
+   const at::Tensor& randomSamples,
+   at::Tensor& output,
+   at::Tensor& indices) {
    fractional_max_pool3d_out_cuda_template(
      output,
      indices,
@@ -370,13 +373,12 @@ std::tuple<Tensor, Tensor> fractional_max_pool3d_cuda(
     return std::tuple<Tensor, Tensor>(output, indices);
   }
 
-Tensor& fractional_max_pool3d_backward_out_cuda(
-  at::Tensor& gradInput,
-  const at::Tensor& gradOutput_,
+Tensor& fractional_max_pool3d_backward_out_cuda(const at::Tensor& gradOutput_,
   const at::Tensor& input,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const at::Tensor& indices) {
+  const at::Tensor& indices,
+  at::Tensor& gradInput) {
     // See Note [Writing Nondeterministic Operations]
     // Nondeterministic because of atomicAdd usage
     globalContext().alertNotDeterministic("fractional_max_pool3d_backward_out_cuda");

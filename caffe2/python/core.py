@@ -40,15 +40,36 @@ NameScope = scope.NameScope
 
 # Bring datatype enums to the main namespace
 class DataType:
-    pass
+    UNDEFINED = 0
+    FLOAT = 1
+    INT32 = 2
+    BYTE = 3
+    STRING = 4
+    BOOL = 5
+    UINT8 = 6
+    INT8 = 7
+    UINT16 = 8
+    INT16 = 9
+    INT64 = 10
+    FLOAT16 = 12
+    DOUBLE = 13
+    ZERO_COLLISION_HASH = 14
+    REBATCHING_BUFFER = 15
 
 
-def _InitDataType():
+def _CheckDataType():
+    # Verify that the DataType values defined above match the ones defined in
+    # the caffe2.proto file
     for name, value in caffe2_pb2.TensorProto.DataType.items():
-        setattr(DataType, name, value)
+        py_value = getattr(DataType, name, None)
+        if py_value != value:
+            raise AssertionError(
+                f"DataType {name} does not match the value defined in "
+                f"caffe2.proto: {py_value} vs {value}"
+            )
 
 
-_InitDataType()
+_CheckDataType()
 
 
 def _GetRegisteredOperators():
@@ -1506,6 +1527,10 @@ class Net(object):
         # make sure that this net name hasn't been used before
         self._net.name = Net._get_next_net_name(name)
 
+        # a map between prefix and ID for fast generation of blob names
+        self._next_blob_name_ids = {}
+
+
     def AppendNet(self, net, device_option=None):
         assert isinstance(net, Net)
         for i in net.Proto().external_input:
@@ -1937,12 +1962,14 @@ class Net(object):
             output_name = output_name_base
             if output_id is not None:
                 output_name += ':' + str(output_id)
-            index = 2
+            key = output_name
+            index = self._next_blob_name_ids.get(key, 2)
             while self.BlobIsDefined(str(ScopedBlobReference(output_name))):
                 output_name = output_name_base + '_' + str(index)
                 if output_id is not None:
                     output_name += ':' + str(output_id)
                 index += 1
+                self._next_blob_name_ids[key] = index
         else:
             output_name = self._net.name + '_blob_' + str(self._next_name_index)
             self._next_name_index += 1
@@ -2337,6 +2364,9 @@ class Net(object):
         )
 
     def is_external_input(self, blob):
+        if self._recreate_lookup_tables:
+            self._RecreateLookupTables()
+
         name = str(blob)
         return name in self._external_input_map
 

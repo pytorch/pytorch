@@ -18,13 +18,27 @@ struct THPVariable {
     PyObject* backward_hooks = nullptr;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THP_API PyObject *THPVariableClass;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+THP_API PyObject *ParameterClass;
 
 bool THPVariable_initModule(PyObject *module);
 THP_API PyObject * THPVariable_Wrap(torch::autograd::Variable var);
 
+static inline bool THPVariable_CheckTypeExact(PyTypeObject* tp) {
+  // Check that a python object is a `Tensor`, but not a `Tensor` subclass.
+  // (A subclass could have different semantics.) The one exception is
+  // Parameter, which is used for Python bookkeeping but is equivalent to
+  // Tensor as far as C++ is concerned.
+  return (
+    tp == (PyTypeObject*)THPVariableClass ||
+    tp == (PyTypeObject*)ParameterClass
+  );
+}
+
 static inline bool THPVariable_CheckExact(PyObject *obj) {
-  return Py_TYPE(obj) == (PyTypeObject*)THPVariableClass;
+  return THPVariable_CheckTypeExact(Py_TYPE(obj));
 }
 
 inline bool THPVariable_Check(PyObject *obj)
@@ -32,7 +46,10 @@ inline bool THPVariable_Check(PyObject *obj)
   return THPVariableClass && PyObject_IsInstance(obj, THPVariableClass);
 }
 
-inline torch::autograd::Variable& THPVariable_Unpack(PyObject* obj) {
-  auto var = (THPVariable*)obj;
+inline const at::Tensor& THPVariable_Unpack(THPVariable* var) {
   return var->cdata;
+}
+
+inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {
+  return THPVariable_Unpack(reinterpret_cast<THPVariable*>(obj));
 }

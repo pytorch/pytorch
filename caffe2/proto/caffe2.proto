@@ -11,33 +11,6 @@ package caffe2;
 //     is mainly for backward compatibility purposes but we may consider using
 //     those in the future.
 
-// ExternalDataProto stores the pointer to the content of TensorProto
-// the content are stored in the raw format as little endian
-message ExternalDataProto {
-  // type of the external storage type, can be the following:
-  enum SourceType {
-    // the container defined in torch/csrc/jit/serialization.h is used,
-    // and record_id is the tag to help the runtime identify the data
-    // this type of storage is set as DEFAULT and recommended for external
-    // data storage
-    INLINE_CONTAINER = 0;
-    // use external file to store the data, and record_id is the POSIX relative path
-    // to the file. this (simple) file is only for the data, and the data is stored
-    // as little endian in the file
-    SIMPLE_FILE = 1;
-  }
-  optional SourceType source_type = 1 [default = INLINE_CONTAINER];
-  // used together with type
-  optional string record_id = 2;
-  // the size of the entire record (in bytes)
-  optional uint64 record_size = 5;
-  // the offset of the starting point, the content may be shared between
-  // multiple tensors
-  optional int64 offset = 3 [default = 0];
-  // the strides of the content
-  repeated int64 strides = 4;
-}
-
 // TensorProto stores serialized Tensor objects.
 message TensorProto {
   // The dimensions in the tensor.
@@ -64,30 +37,38 @@ message TensorProto {
     DOUBLE = 13;   // double
 
     ZERO_COLLISION_HASH = 14;  // zero-collision hash state
+    REBATCHING_BUFFER= 15;     // rebatching buffer
   }
+  // The type of the deserialized tensor data
   optional DataType data_type = 2 [default = FLOAT];
 
-  // data storage
-  enum StorageType {
-    // the content is stored in typed field, for example, if the data_type is
-    // FLOAT, float_data is used to store the content.
-    TYPED = 1;
-    // the content is serialized in field raw_data as little-endian
-    RAW = 2;
-    // the pointer to the content is stored in field external_data
-    // the content is serialized as little-endian
-    EXTERNAL = 3;
-    // When StorageType is NO_CONTENT, we use TensorProto to store only type
-    // and shape information. Reuse TensorProto to store type and shape
-    // because we can just have one proto, not having another ValueInfoProto
-    NO_CONTENT = 4;
+  // The format of the serialized data.
+  enum SerializationFormat {
+    // FMT_PROTOBUF is the existing serialization format from before the
+    // data_format field was introduced. Most data types are serialized using
+    // the protobuf typed fields, although in some cases raw little endian data
+    // is stored in the byte_data field instead.
+    FMT_PROTOBUF = 0;
+    // bfloat16 data stored in the raw_data field.
+    FMT_BFLOAT16 = 1;
   }
-  optional StorageType storage_type = 12 [default = TYPED];
+  // data_format is a SerializationFormat enum value.
+  // However, we intentionally store it as an integer value so we can
+  // distinguish between old messages that do not have a data_format value vs
+  // new messages that have a SerializationFormat value that we don't
+  // understand.  If we stored this as an enum then protobuf would deserialize
+  // both of these cases the same way.
+  optional uint32 data_format = 15 [default = 0];
+
   // For float
   repeated float float_data = 3 [packed = true];
   // For int32, uint8, int8, uint16, int16, bool, and float16
   // Note about float16: in storage we will basically convert float16 byte-wise
   // to unsigned short and then store them in the int32_data field.
+  // Note: storing int8 and uint8 values in this field unfortunately results in
+  // larger serialized data than necessary, as protobuf's varint encoding
+  // scheme requires 2 bytes to represent int8 and uint8 values that have the
+  // MSB set.
   repeated int32 int32_data = 4 [packed = true];
   // For bytes
   optional bytes byte_data = 5;
@@ -99,8 +80,6 @@ message TensorProto {
   repeated int64 int64_data = 10 [packed = true];
   // store the raw data, contents are serialized as little-endian
   optional bytes raw_data = 13;
-  // store the pointer to the data
-  optional ExternalDataProto external_data = 14;
 
   // Optionally, a name for the tensor.
   optional string name = 7;
@@ -117,6 +96,9 @@ message TensorProto {
     required int64 end = 2;
   }
   optional Segment segment = 11;
+
+  // Field numbers 12 and 14 were previously used for now-deprecated fields.
+  // reserved 12, 14;
 }
 
 message QTensorProto {
@@ -197,10 +179,12 @@ message TensorBoundShapes {
   optional int64 max_feature_len = 3;
 }
 
-message AOTConfig{
+message AOTConfig {
   required int64 max_batch_size = 1;
   required int64 max_seq_size = 2;
   required bool in_batch_broadcast = 3;
+  optional string onnxifi_blacklist_ops = 4;
+  optional int32 onnxifi_min_ops = 5;
 }
 
 // A named argument containing either singular float, integer and string
@@ -237,9 +221,9 @@ enum DeviceTypeProto {
   PROTO_FPGA = 7;                   // FPGA
   PROTO_MSNPU = 8;                  // MSNPU
   PROTO_XLA = 9;                    // XLA / TPU
+  PROTO_MLC = 10;                   // ML Compute
   // Change the following number if you add more devices in the code.
-  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 10;
-  PROTO_ONLY_FOR_TEST = 20901;   // This device type is only for test.
+  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 11;
 }
 
 // Device-specific options. We do not distinguish DeviceOption protos for
@@ -508,4 +492,39 @@ message DBReaderProto {
   optional string db_type = 3;
   // The current key of the DB if the DB supports seeking.
   optional string key = 4;
+}
+
+message BlobSerializationOptions {
+  // This set of options will only apply to blobs whose name matches this
+  // pattern.  If the blob_name_pattern is empty then it will be treated as
+  // matching all blobs.
+  optional string blob_name_regex = 1;
+
+  // Note:
+  // - a chunk_size of 0 means "use the default chunk size".  The default chunk
+  //   size is controlled by the --caffe2_tensor_chunk_size command line flag.
+  // - a chunk size of -1 means to disable chunking, and serialize the blob in
+  //   a single chunk.
+  optional int64 chunk_size = 2;
+
+  enum FloatFormat {
+    // Use the current default serialization format, as chosen by the
+    // current version of the code.  (At the time of writing this is PROTOBUF)
+    FLOAT_DEFAULT = 0;
+    // Store the data in the TensorProto's float_data field
+    FLOAT_PROTOBUF = 1;
+    // Serialize float values as bfloat16.  Note that this conversion is lossy.
+    FLOAT_BFLOAT16 = 2;
+  }
+
+  // Settings for how to serialize tensors containing float values
+  optional FloatFormat float_format = 3;
+}
+
+message SerializationOptions {
+  // A set of options to use when serialializing blobs.
+  // This is a list, sorted from highest to lowest precedence.  When
+  // serializing a blob, the first entry whose blob_name_pattern matches the
+  // blob name will be used.
+  repeated BlobSerializationOptions options = 1;
 }

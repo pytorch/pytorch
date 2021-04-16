@@ -16,8 +16,8 @@ class LayerNorm(torch.nn.LayerNorm):
             normalized_shape, eps=eps, elementwise_affine=elementwise_affine)
         self.weight = weight
         self.bias = bias
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor(scale))
+        self.register_buffer('zero_point', torch.tensor(zero_point))
 
     def forward(self, input):
         return torch.ops.quantized.layer_norm(
@@ -29,7 +29,6 @@ class LayerNorm(torch.nn.LayerNorm):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.normalized_shape, mod.weight, mod.bias, float(scale),
@@ -50,8 +49,8 @@ class GroupNorm(torch.nn.GroupNorm):
         super(GroupNorm, self).__init__(num_groups, num_channels, eps, affine)
         self.weight = weight
         self.bias = bias
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor(scale))
+        self.register_buffer('zero_point', torch.tensor(zero_point))
 
     def forward(self, input):
         return torch.ops.quantized.group_norm(
@@ -63,7 +62,6 @@ class GroupNorm(torch.nn.GroupNorm):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_groups, mod.num_channels, mod.weight, mod.bias, float(scale), int(zero_point),
@@ -85,8 +83,8 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
             num_features, eps, momentum, affine, track_running_stats)
         self.weight = weight
         self.bias = bias
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor(scale))
+        self.register_buffer('zero_point', torch.tensor(zero_point))
 
     def forward(self, input):
         return torch.ops.quantized.instance_norm(
@@ -98,7 +96,6 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
@@ -120,8 +117,8 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
             num_features, eps, momentum, affine, track_running_stats)
         self.weight = weight
         self.bias = bias
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor(scale))
+        self.register_buffer('zero_point', torch.tensor(zero_point))
 
     def forward(self, input):
         return torch.ops.quantized.instance_norm(
@@ -133,7 +130,6 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
@@ -155,8 +151,8 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
             num_features, eps, momentum, affine, track_running_stats)
         self.weight = weight
         self.bias = bias
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor(scale))
+        self.register_buffer('zero_point', torch.tensor(zero_point))
 
     def forward(self, input):
         return torch.ops.quantized.instance_norm(
@@ -168,7 +164,6 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),

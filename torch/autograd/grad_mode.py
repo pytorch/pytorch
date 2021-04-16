@@ -1,3 +1,4 @@
+import sys
 import torch
 import functools
 import inspect
@@ -31,13 +32,46 @@ class _DecoratorContextManager:
         @functools.wraps(func)
         def generator_context(*args, **kwargs):
             gen = func(*args, **kwargs)
-            while True:
-                try:
-                    with self.__class__():
-                        x = next(gen)
-                    yield x
-                except StopIteration:
-                    break
+
+            # Generators are suspended and unsuspended at `yield`, hence we
+            # make sure the grad mode is properly set every time the execution
+            # flow returns into the wrapped generator and restored when it
+            # returns through our `yield` to our caller (see PR #49017).
+            cls = type(self)
+            try:
+                # Issuing `None` to a generator fires it up
+                with cls():
+                    response = gen.send(None)
+
+                while True:
+                    try:
+                        # Forward the response to our caller and get its next request
+                        request = yield response
+
+                    except GeneratorExit:
+                        # Inform the still active generator about its imminent closure
+                        with cls():
+                            gen.close()
+                        raise
+
+                    except BaseException:
+                        # Propagate the exception thrown at us by the caller
+                        with cls():
+                            response = gen.throw(*sys.exc_info())
+
+                    else:
+                        # Pass the last request to the generator and get its response
+                        with cls():
+                            response = gen.send(request)
+
+            # We let the exceptions raised above by the generator's `.throw` or
+            # `.send` methods bubble up to our caller, except for StopIteration
+            except StopIteration as e:
+                # The generator informed us that it is done: take whatever its
+                # returned value (if any) was and indicate that we're done too
+                # by returning it (see docs for python's return-statement).
+                return e.value
+
         return generator_context
 
     def __enter__(self) -> None:
@@ -104,7 +138,7 @@ class enable_grad(_DecoratorContextManager):
 
     Example::
 
-        >>> x = torch.tensor([1], requires_grad=True)
+        >>> x = torch.tensor([1.], requires_grad=True)
         >>> with torch.no_grad():
         ...   with torch.enable_grad():
         ...     y = x * 2
@@ -138,7 +172,7 @@ class set_grad_enabled(object):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Arguments:
+    Args:
         mode (bool): Flag whether to enable grad (``True``), or disable
                      (``False``). This can be used to conditionally enable
                      gradients.

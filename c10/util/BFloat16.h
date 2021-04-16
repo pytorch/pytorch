@@ -81,7 +81,7 @@ struct alignas(2) BFloat16 {
 #endif
 
   struct from_bits_t {};
-  static constexpr from_bits_t from_bits() {
+  static constexpr C10_HOST_DEVICE from_bits_t from_bits() {
     return from_bits_t();
   }
 

@@ -2,6 +2,7 @@
 
 #include <string>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_tuples.h>
 
@@ -40,7 +41,7 @@ PyObject * THPSize_NewFromSizes(int dim, const int64_t *sizes)
 
 static bool isTracedZeroDimVar(PyObject *item) {
   if (!THPVariable_Check(item)) return false;
-  auto & var = reinterpret_cast<THPVariable*>(item)->cdata;
+  auto & var = THPVariable_Unpack(item);
   return var.dim() == 0 && torch::jit::tracer::getValueTrace(var);
 }
 
@@ -84,7 +85,7 @@ static PyObject * THPSize_repr(THPSize *self)
     if (i != 0) {
       repr += ", ";
     }
-    repr += std::to_string(PyLong_AsLong(PyTuple_GET_ITEM(self, i)));
+    repr += std::to_string(THPUtils_unpackLong(PyTuple_GET_ITEM(self, i)));
   }
   repr += "])";
   return THPUtils_packString(repr);
@@ -136,7 +137,7 @@ static PyObject *THPSize_numel(PyObject *_self, PyObject *noargs)
   auto self = (THPSize*)_self;
   int64_t numel = 1;
   for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
-    numel *= PyLong_AsLong(PyTuple_GET_ITEM(self, i));
+    numel *= THPUtils_unpackLong(PyTuple_GET_ITEM(self, i));
   }
   return THPUtils_packInt64(numel);
   END_HANDLE_TH_ERRORS

@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <ATen/BatchedTensorImpl.h>
 
 #include <mutex>
 
@@ -99,11 +100,12 @@ struct TORCH_API AccumulateGrad : public Node {
       if (!GradMode::is_enabled() &&
           !new_grad.is_sparse() &&
           new_grad.use_count() <= num_expected_refs &&
-          utils::obeys_layout_contract(new_grad, variable)) {
+          (new_grad.is_mkldnn() || utils::obeys_layout_contract(new_grad, variable))) {
         // we aren't setting up for double-backward
         // not sparse
         // no other user-visible tensor references new_grad
-        // new_grad obeys the "Gradient Layout Contract"
+        // new_grad obeys the "Gradient Layout Contract", there has a special case,
+        // For MKLDNN tensor, which is a opaque tensor, assuming it obeys layout_contract.
         // Under these conditions, we can steal new_grad without a deep copy.
         update_grad(new_grad.detach());
       } else if (
@@ -133,8 +135,12 @@ struct TORCH_API AccumulateGrad : public Node {
         if (new_grad.is_sparse()) {
           update_grad(new_grad.clone());
         } else {
-          // Deep copies new_grad according to the "Gradient Layout Contract."
-          update_grad(utils::clone_obey_contract(new_grad, variable));
+          if (new_grad.is_mkldnn()) {
+            update_grad(new_grad.clone());
+          } else {
+            // Deep copies new_grad according to the "Gradient Layout Contract."
+            update_grad(utils::clone_obey_contract(new_grad, variable));
+          }
         }
       }
     } else if (!GradMode::is_enabled()) {
@@ -149,6 +155,14 @@ struct TORCH_API AccumulateGrad : public Node {
         auto result = new_grad + variable_grad;
         CHECK_RESULT(result, variable);
         update_grad(std::move(result));
+      } else if (!at::inplaceIsVmapCompatible(variable_grad, new_grad)) {
+        // Ideally we'd perform an in-place operation to avoid changing
+        // the grad tensor. However, if that's impossible because the grads
+        // are vmap-incompatible (See NOTE: [vmap-incompatible in-place operations]),
+        // then we just add them out-of-place.
+        auto result = variable_grad + new_grad;
+        CHECK_RESULT(result, variable);
+        update_grad(std::move(result));
       } else {
         // In this case we can avoid changing the grad tensor. There are three
         // scenarios when we'll hit this case:
@@ -156,8 +170,9 @@ struct TORCH_API AccumulateGrad : public Node {
         // 1. `variable_grad` is sparse, and `new_grad` is sparse.
         // 2. `variable_grad` is dense, and `new_grad` is sparse.
         // 3. `variable_grad` is dense, and `new_grad` is dense.
+        // 4. `variable_grad` is mkldnn, and `new_grad` is mkldnn.
         //
-        // In all of these three cases, `variable_grad += new_grad` is a
+        // In all of these four cases, `variable_grad += new_grad` is a
         // valid operation which adds `new_grad` to `variable_grad` in
         // place. `variable_grad` is thus still referring to the same tensor
         // after the operation.

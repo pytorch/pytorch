@@ -138,3 +138,37 @@ TEST(TestScalar, TestConj) {
   ASSERT_EQ(float_scalar.conj().toDouble(), 3.0);
   ASSERT_EQ(complex_scalar.conj().toComplexDouble(), c10::complex<double>(2.3, -3.5));
 }
+
+TEST(TestScalar, TestEqual) {
+  ASSERT_FALSE(Scalar(1.0).equal(false));
+  ASSERT_FALSE(Scalar(1.0).equal(true));
+  ASSERT_FALSE(Scalar(true).equal(1.0));
+  ASSERT_TRUE(Scalar(true).equal(true));
+
+  ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 5.0}).equal(c10::complex<double>{2.0, 5.0}));
+  ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 0}).equal(2.0));
+  ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 0}).equal(2));
+
+  ASSERT_TRUE(Scalar(2.0).equal(c10::complex<double>{2.0, 0.0}));
+  ASSERT_FALSE(Scalar(2.0).equal(c10::complex<double>{2.0, 4.0}));
+  ASSERT_FALSE(Scalar(2.0).equal(3.0));
+  ASSERT_TRUE(Scalar(2.0).equal(2));
+
+  ASSERT_TRUE(Scalar(2).equal(c10::complex<double>{2.0, 0}));
+  ASSERT_TRUE(Scalar(2).equal(2));
+  ASSERT_TRUE(Scalar(2).equal(2.0));
+}
+
+TEST(TestScalar, TestFormatting) {
+  auto format = [] (Scalar a) {
+    std::ostringstream str;
+    str << a;
+    return str.str();
+  };
+  ASSERT_EQ("3", format(Scalar(3)));
+  ASSERT_EQ("3.1", format(Scalar(3.1)));
+  ASSERT_EQ("true", format(Scalar(true)));
+  ASSERT_EQ("false", format(Scalar(false)));
+  ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<double>(2.0, 3.1))));
+  ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<float>(2.0, 3.1))));
+}

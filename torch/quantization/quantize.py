@@ -12,16 +12,16 @@ from .quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
+    no_observer_set,
     _has_special_act_post_process,
     _get_special_act_post_process,
 )
 
 from .stubs import DeQuantStub, QuantWrapper
-from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_dynamic_qconfig
+from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_weight_only_qconfig
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantize) or
             isinstance(module, torch.quantization.FakeQuantizeBase))
 
 def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
@@ -49,6 +49,8 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
     module_qconfig = qconfig_dict.get(type(module), qconfig_parent)
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
+
+    torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
 
     module.qconfig = module_qconfig
     for name, child in module.named_children():
@@ -127,7 +129,8 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         """ Adds an activation post process module and register
         a post hook that calls the module
         """
-        if needs_observation(m):
+        # We don't insert observer/fake_quantize for DeQuantStub
+        if needs_observation(m) and not isinstance(m, DeQuantStub):
             # observer and hook will be gone after we swap the module
             m.add_module('activation_post_process', get_activation_post_process(m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
@@ -136,19 +139,26 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             m._forward_hooks.move_to_end(handle.id, last=False)
 
     for name, child in module.named_children():
-        if type(child) in [nnq.FloatFunctional, nnq.QFunctional] or \
-           isinstance(child, _FusedModule):
+        if type(child) in [nnq.FloatFunctional, nnq.QFunctional]:
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
+        elif isinstance(child, _FusedModule):
+            # activation_post_process are now added directly to nn.Sequentail/_FusedModule
+            if needs_observation(child):
+                insert_activation_post_process(child)
         elif _has_special_act_post_process(child):
             special_act_post_process = _get_special_act_post_process(child)
             insert_activation_post_process(child, special_act_post_process)
         elif non_leaf_module_list is not None and type(child) in non_leaf_module_list:
-            insert_activation_post_process(child)
+            if needs_observation(child):
+                insert_activation_post_process(child)
         elif needs_observation(child) and type(child) in custom_module_class_mapping:
             observed_child = custom_module_class_mapping[type(child)].from_float(child)
             setattr(module, name, observed_child)
-            insert_activation_post_process(observed_child)
+            # TODO: These are the modules that cannot be observed
+            #       Once there are more, we should move them to a separate list
+            if custom_module_class_mapping[type(child)] not in no_observer_set():
+                insert_activation_post_process(observed_child)
         else:
             add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
 
@@ -248,9 +258,12 @@ def _remove_activation_post_process(module):
         delattr(module, 'activation_post_process')
 
     # remove activation_post_proceess hook
+    handle_ids_to_remove = set()
     for handle_id, hook_fn in module._forward_hooks.items():
         if hook_fn is _observer_forward_hook:
-            module._forward_hooks.pop(handle_id)
+            handle_ids_to_remove.add(handle_id)
+    for handle_id in handle_ids_to_remove:
+        module._forward_hooks.pop(handle_id)
 
 # TODO: rename to something more general
 def _remove_qconfig(module):
@@ -292,7 +305,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
         model = copy.deepcopy(model)
     model.eval()
     prepare(model, inplace=True)
-    run_fn(model, run_args)
+    run_fn(model, *run_args)
     convert(model, mapping, inplace=True)
     return model
 
@@ -348,7 +361,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             }
         elif dtype == torch.quint8:
             qconfig_spec = {
-                nn.EmbeddingBag : float_qparams_dynamic_qconfig,
+                nn.EmbeddingBag : float_qparams_weight_only_qconfig,
             }
         else:
             raise ValueError(
@@ -359,7 +372,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
         elif dtype is torch.float16:
             default_qconfig = float16_dynamic_qconfig
         elif dtype is torch.quint8:
-            default_qconfig = float_qparams_dynamic_qconfig
+            default_qconfig = float_qparams_weight_only_qconfig
         else:
             raise RuntimeError('Unknown dtype specified for quantize_dynamic: ', str(dtype))
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
@@ -419,7 +432,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
         model = copy.deepcopy(model)
     model.train()
     prepare_qat(model, inplace=True)
-    run_fn(model, run_args)
+    run_fn(model, *run_args)
     convert(model, inplace=True)
     return model
 
@@ -512,8 +525,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
         The corresponding quantized module of `mod`
     """
     new_mod = mod
-    # Always replace dequantstub with dequantize
-    if hasattr(mod, 'qconfig') and mod.qconfig is not None or type(mod) == DeQuantStub:
+    if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         swapped = False
         if type(mod) in custom_module_class_mapping:
             new_mod = custom_module_class_mapping[type(mod)].from_observed(mod)

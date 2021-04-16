@@ -1,5 +1,7 @@
 #pragma once
+#include <ATen/core/ivalue.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 
 namespace py = pybind11;
@@ -22,6 +24,22 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
 
   PyObject* getPyObject() override {
     return py_obj_.ptr();
+  }
+
+  InferredType tryToInferType() override {
+    pybind11::gil_scoped_acquire ag;
+    return torch::jit::tryToInferType(py_obj_);
+  }
+
+  IValue toIValue(const TypePtr& type, c10::optional<int32_t> N = c10::nullopt)
+      override {
+    pybind11::gil_scoped_acquire ag;
+    return torch::jit::toIValue(py_obj_, type, N);
+  }
+
+  std::string toStr() override {
+    pybind11::gil_scoped_acquire ag;
+    return py::str(py_obj_);
   }
 
   // Note [Destructing py::object]

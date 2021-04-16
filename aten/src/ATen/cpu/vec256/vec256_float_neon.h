@@ -25,8 +25,6 @@ namespace {
 //    https://bugs.llvm.org/show_bug.cgi?id=45824
 // Most likely we will do aarch32 support with inline asm.
 #if defined(__aarch64__)
-// See https://github.com/pytorch/pytorch/issues/47098
-#if defined(__clang__) || (__GNUC__ > 8 || (__GNUC__ == 8 && __GNUC_MINOR__ > 3))
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
@@ -364,6 +362,9 @@ public:
   Vec256<float> i0() const {
     return map(calc_i0);
   }
+  Vec256<float> i0e() const {
+    return map(calc_i0e);
+  }
   Vec256<float> igamma(const Vec256<float> &x) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_x[size()];
@@ -371,6 +372,16 @@ public:
     x.store(tmp_x);
     for (int64_t i = 0; i < size(); i++) {
       tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
+  }
+  Vec256<float> igammac(const Vec256<float> &x) const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);
   }
@@ -686,7 +697,6 @@ Vec256<float> inline fmadd(const Vec256<float>& a, const Vec256<float>& b, const
   return Vec256<float>(r0, r1);
 }
 
-#endif /* defined(__clang__) || (__GNUC__ > 8 || (__GNUC__ == 8 && __GNUC_MINOR__ > 3)) */
 #endif /* defined(aarch64) */
 
 }}}

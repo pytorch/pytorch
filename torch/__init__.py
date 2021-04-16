@@ -14,6 +14,7 @@ import sys
 import platform
 import textwrap
 import ctypes
+import warnings
 
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -21,7 +22,11 @@ if sys.version_info < (3,):
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
-from .version import __version__
+# TODO(torch_deploy) figure out how to freeze version.py in fbcode build
+if sys.executable == 'torch_deploy':
+    __version__ = "torch-deploy-1.8"
+else:
+    from .version import __version__ as __version__
 from ._six import string_classes as _string_classes
 
 from typing import Set, Type, TYPE_CHECKING
@@ -35,7 +40,9 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'set_deterministic', 'is_deterministic'
+    'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
+    'are_deterministic_algorithms_enabled', 'is_deterministic',
+    'set_warn_always', 'is_warn_always_enabled',
 ]
 
 ################################################################################
@@ -132,7 +139,7 @@ if sys.platform == 'win32':
 
 # See Note [Global dependencies]
 def _load_global_deps():
-    if platform.system() == 'Windows':
+    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
@@ -170,7 +177,7 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
             import torch._dl as _dl_flags  # type: ignore
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
-    from torch._C import *
+    from torch._C import *  # noqa: F403
     sys.setdlopenflags(old_flags)
     del old_flags
     del _dl_flags
@@ -187,7 +194,7 @@ else:
     # See Note [Global dependencies]
     if USE_GLOBAL_DEPS:
         _load_global_deps()
-    from torch._C import *
+    from torch._C import *  # noqa: F403
 
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
@@ -222,6 +229,19 @@ except ImportError:
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
             not name.endswith('Base')]
+
+if not TYPE_CHECKING:
+    # issue 38137 and python issue 43367. Submodules of a C extension are
+    # non-standard, and attributes of those submodules cannot be pickled since
+    # pickle expect to be able to import them as "from _C.sub import attr"
+    # which fails with "_C is not a package
+    for attr in dir(_C):
+        candidate = getattr(_C, attr)
+        if type(candidate) is type(_C):
+            # submodule
+            if f'torch._C.{attr}' not in sys.modules:
+                sys.modules[f'torch._C.{attr}'] = candidate
+
 
 ################################################################################
 # Define basic utilities
@@ -258,6 +278,12 @@ def is_tensor(obj):
 
     Args:
         obj (Object): Object to test
+    Example::
+
+        >>> x=torch.tensor([1,2,3])
+        >>> torch.is_tensor(x)
+        True
+
     """
     return isinstance(obj, torch.Tensor)
 
@@ -325,20 +351,20 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
-def set_deterministic(d):
+def use_deterministic_algorithms(mode):
     r""" Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
     run on the same software and hardware, always produce the same output.
-    When True, operations will use deterministic algorithms when available,
+    When enabled, operations will use deterministic algorithms when available,
     and if only nondeterministic algorithms are available they will throw a
-    :class:RuntimeError when called.
+    :class:`RuntimeError` when called.
 
     .. warning::
         This feature is in beta, and its design and implementation may change
         in the future.
 
     The following normally-nondeterministic operations will act
-    deterministically when `d=True`:
+    deterministically when ``mode=True``:
 
         * :class:`torch.nn.Conv1d` when called on CUDA tensor
         * :class:`torch.nn.Conv2d` when called on CUDA tensor
@@ -347,41 +373,60 @@ def set_deterministic(d):
         * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
+          and the index is a list of tensors
+        * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on a CPU
+          tensor
+        * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
+          tensor
+        * :func:`torch.gather` when ``input`` dimension is one and called
+          on a CUDA tensor that requires grad
 
     The following normally-nondeterministic operations will throw a
-    :class:`RuntimeError` when `d=True`:
+    :class:`RuntimeError` when ``mode=True``:
 
-        * :class:`torch.nn.AvgPool3d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.AdaptiveAvgPool2d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.AdaptiveAvgPool3d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.MaxPool3d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.AdaptiveMaxPool2d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.FractionalMaxPool2d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.FractionalMaxPool3d` when called on a CUDA tensor that requires grad
-        * :func:`torch.nn.functional.interpolate` when called on a CUDA tensor that requires grad
-            and one of the following modes is used:
-            - `linear`
-            - `bilinear`
-            - `bicubic`
-            - `trilinear`
-        * :class:`torch.nn.ReflectionPad1d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.ReflectionPad2d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.ReplicationPad1d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.ReplicationPad2d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.ReplicationPad3d` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.NLLLoss` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.CTCLoss` when called on a CUDA tensor that requires grad
-        * :class:`torch.nn.EmbeddingBag` when called on a CUDA tensor that requires grad
-        * :func:`torch.scatter_add_` when called on a CUDA tensor
-        * :func:`torch.index_add_` when called on a CUDA tensor
-        * :func:`torch.index_select` when called on a CUDA tensor that requires grad
-        * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.AvgPool3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.AdaptiveAvgPool2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.AdaptiveAvgPool3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.AdaptiveMaxPool2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.FractionalMaxPool2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.FractionalMaxPool3d` when attempting to differentiate a CUDA tensor
+        * :func:`torch.nn.functional.interpolate` when attempting to differentiate a CUDA tensor
+          and one of the following modes is used:
+
+          - ``linear``
+          - ``bilinear``
+          - ``bicubic``
+          - ``trilinear``
+
+        * :class:`torch.nn.ReflectionPad1d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.NLLLoss` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
+          ``mode='max'``
+        * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
+        * :func:`torch.Tensor.index_add_` when called on a CUDA tensor
+        * :func:`torch.Tensor.index_copy`
+        * :func:`torch.Tensor.index_put_` when ``accumulate=False``
+        * :func:`torch.Tensor.put_` when ``accumulate=False``
+        * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
+        * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
+        * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.kthvalue` with called on a CUDA tensor
+        * :func:`torch.median` with indices output when called on a CUDA tensor
+        * :func:`torch.gather` when ``input`` dimension is larger than one
+          and called on a CUDA tensor that requires grad
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
-    10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`
-    or `CUBLAS_WORKSPACE_CONFIG=:16:8` is set. See the CUDA documentation for more
+    10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
+    or ``CUBLAS_WORKSPACE_CONFIG=:16:8`` is set. See the CUDA documentation for more
     details: `<https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility>`_
     If one of these environment variable configurations is not set, a :class:`RuntimeError`
     will be raised from these operations when called with CUDA tensors:
@@ -391,25 +436,86 @@ def set_deterministic(d):
         * :func:`torch.bmm`
 
     Note that deterministic operations tend to have worse performance than
-    non-deterministic operations.
+    nondeterministic operations.
+
+    .. note::
+
+        This flag does not detect or prevent nondeterministic behavior caused
+        by calling an inplace operation on a tensor with an internal memory
+        overlap or by giving such a tensor as the :attr:`out` argument for an
+        operation. In these cases, multiple writes of different data may target
+        a single memory location, and the order of writes is not guaranteed.
 
     Args:
-        d (:class:`bool`): If True, force operations to be deterministic.
-                           If False, allow non-deterministic operations.
+        mode (:class:`bool`): If True, makes potentially nondeterministic
+            operations switch to a deterministic algorithm or throw a runtime
+            error. If False, allows nondeterministic operations.
+
+    Example::
+
+        >>> torch.use_deterministic_algorithms(True)
+
+        # Forward mode nondeterministic error
+        >>> torch.randn(10).index_copy(0, torch.tensor([0]), torch.randn(1))
+        ...
+        RuntimeError: index_copy does not have a deterministic implementation...
+
+        # Backward mode nondeterministic error
+        >>> torch.randn(10, requires_grad=True, device='cuda').index_select(0, torch.tensor([0], device='cuda')).backward()
+        ...
+        RuntimeError: index_add_cuda_ does not have a deterministic implementation...
     """
-    _C._set_deterministic(d)
+    _C._set_deterministic_algorithms(mode)
+
+def set_deterministic(d):
+    r"""This function is deprecated and will be removed in a future release.
+    Please use :func:`torch.use_deterministic_algorithms` instead.
+    """
+    warnings.warn((
+        "torch.set_deterministic is deprecated and will be removed in a future "
+        "release. Please use torch.use_deterministic_algorithms instead"))
+
+    use_deterministic_algorithms(d)
+
+def are_deterministic_algorithms_enabled():
+    r"""Returns True if the global deterministic flag is turned on. Refer to
+    :func:`torch.use_deterministic_algorithms` documentation for more details.
+    """
+    return _C._get_deterministic_algorithms()
 
 def is_deterministic():
-    r"""Returns True if the global deterministic flag is turned on. Refer to
-    :func:`torch.set_deterministic` documentation for more details.
+    r"""This function is deprecated and will be removed in a future release.
+    Please use :func:`torch.are_deterministic_algorithms_enabled` instead.
     """
-    return _C._get_deterministic()
+    warnings.warn((
+        "torch.is_deterministic is deprecated and will be removed in a future "
+        "release. Please use torch.are_deterministic_algorithms_enabled instead"))
+    return are_deterministic_algorithms_enabled()
+
+
+def set_warn_always(b):
+    r"""When this flag is False (default) then some PyTorch warnings may only
+    appear once per process. This helps avoid excessive warning information.
+    Setting it to True causes these warnings to always appear, which may be
+    helpful when debugging.
+
+    Args:
+        b (:class:`bool`): If True, force warnings to always be emitted
+                           If False, set to the default behaviour
+    """
+    _C._set_warnAlways(b)
+
+def is_warn_always_enabled():
+    r"""Returns True if the global warn_always flag is turned on. Refer to
+    :func:`torch.set_warn_always` documentation for more details.
+    """
+    return _C._get_warnAlways()
 
 ################################################################################
 # Define Storage and Tensor classes
 ################################################################################
 
-from .tensor import Tensor
+from ._tensor import Tensor
 from .storage import _StorageBase
 
 
@@ -489,7 +595,7 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 def manager_path():
-    if platform.system() == 'Windows':
+    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
@@ -510,7 +616,7 @@ if TYPE_CHECKING:
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
-    from torch._C._VariableFunctions import *  # type: ignore
+    from torch._C._VariableFunctions import *  # type: ignore # noqa: F403
 
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
@@ -523,7 +629,7 @@ for name in dir(_C._VariableFunctions):
 ################################################################################
 
 # needs to be after the above ATen bindings so we can overwrite from Python side
-from .functional import *
+from .functional import *  # noqa: F403
 
 
 ################################################################################
@@ -545,38 +651,63 @@ del ComplexFloatStorageBase
 del QUInt4x2StorageBase
 
 ################################################################################
+# Define _assert
+################################################################################
+
+# needs to be before the submodule imports to avoid circular dependencies
+def _assert(condition, message):
+    r"""A wrapper around Python's assert which is symbolically traceable.
+    """
+    from .overrides import has_torch_function, handle_torch_function
+
+    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
+        return handle_torch_function(_assert, (condition,), condition, message)
+    assert condition, message
+
+################################################################################
 # Import most common subpackages
 ################################################################################
 
-import torch.cuda
-import torch.autograd
-from torch.autograd import no_grad, enable_grad, set_grad_enabled
-# import torch.fft  # TODO: enable once torch.fft() is removed
-import torch.futures
-import torch.nn
+# Use the redundant form so that type checkers know that these are a part of
+# the public API. The "regular" import lines are there solely for the runtime
+# side effect of adding to the imported module's members for other users.
+
+from torch import cuda as cuda
+from torch import autograd as autograd
+from torch.autograd import (
+    no_grad as no_grad,
+    enable_grad as enable_grad,
+    set_grad_enabled as set_grad_enabled,
+)
+from torch import fft as fft
+from torch import futures as futures
+from torch import nn as nn
 import torch.nn.intrinsic
+import torch.nn.quantizable
 import torch.nn.quantized
-import torch.optim
+from torch import optim as optim
 import torch.optim._multi_tensor
-import torch.multiprocessing
-import torch.sparse
+from torch import multiprocessing as multiprocessing
+from torch import sparse as sparse
+from torch import special as special
 import torch.utils.backcompat
-import torch.onnx
-import torch.jit
-import torch.linalg
-import torch.hub
-import torch.random
-import torch.distributions
-import torch.testing
+from torch import onnx as onnx
+from torch import jit as jit
+from torch import linalg as linalg
+from torch import hub as hub
+from torch import random as random
+from torch import distributions as distributions
+from torch import testing as testing
 import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
-import torch.quantization
+from torch import quantization as quantization
 import torch.utils.data
-import torch.__config__
-import torch.__future__
+from torch import __config__ as __config__
+from torch import __future__ as __future__
+from torch import profiler as profiler
 
 _C._init_names(list(torch._storage_classes))
 
@@ -595,7 +726,7 @@ from torch._ops import ops
 from torch._classes import classes
 
 # Import the quasi random sampler
-import torch.quasirandom
+from torch import quasirandom as quasirandom
 
 # If you are seeing this, it means that this call site was not checked if
 # the memory format could be preserved, and it was switched to old default
@@ -609,22 +740,12 @@ del register_after_fork
 
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
-from ._lobpcg import lobpcg
+from ._lobpcg import lobpcg as lobpcg
 
-from ._vmap_internals import vmap
+from ._vmap_internals import vmap as vmap
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
-# class usage. We add these lines here to preserve backward compatbility.
+# class usage. We add these lines here to preserve backward compatibility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
-
-
-def Assert(condition, message):
-    r"""A wrapper around Python's assert which is symbolically traceable.
-    """
-    from .overrides import has_torch_function, handle_torch_function
-
-    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
-        return handle_torch_function(Assert, (condition,), condition, message)
-    assert condition, message

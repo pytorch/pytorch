@@ -1,5 +1,4 @@
 import torch
-from torch._six import int_classes as _int_classes
 from torch import Tensor
 
 from typing import Iterator, Optional, Sequence, List, TypeVar, Generic, Sized
@@ -55,7 +54,7 @@ class Sampler(Generic[T_co]):
 class SequentialSampler(Sampler[int]):
     r"""Samples elements sequentially, always in the same order.
 
-    Arguments:
+    Args:
         data_source (Dataset): dataset to sample from
     """
     data_source: Sized
@@ -74,7 +73,7 @@ class RandomSampler(Sampler[int]):
     r"""Samples elements randomly. If without replacement, then sample from a shuffled dataset.
     If with replacement, then user can specify :attr:`num_samples` to draw.
 
-    Arguments:
+    Args:
         data_source (Dataset): dataset to sample from
         replacement (bool): samples are drawn on-demand with replacement if ``True``, default=``False``
         num_samples (int): number of samples to draw, default=`len(dataset)`. This argument
@@ -122,7 +121,7 @@ class RandomSampler(Sampler[int]):
                 yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=generator).tolist()
             yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator).tolist()
         else:
-            yield from torch.randperm(n, generator=self.generator).tolist()
+            yield from torch.randperm(n, generator=generator).tolist()
 
     def __len__(self):
         return self.num_samples
@@ -131,7 +130,7 @@ class RandomSampler(Sampler[int]):
 class SubsetRandomSampler(Sampler[int]):
     r"""Samples elements randomly from a given list of indices, without replacement.
 
-    Arguments:
+    Args:
         indices (sequence): a sequence of indices
         generator (Generator): Generator used in sampling.
     """
@@ -171,7 +170,7 @@ class WeightedRandomSampler(Sampler[int]):
 
     def __init__(self, weights: Sequence[float], num_samples: int,
                  replacement: bool = True, generator=None) -> None:
-        if not isinstance(num_samples, _int_classes) or isinstance(num_samples, bool) or \
+        if not isinstance(num_samples, int) or isinstance(num_samples, bool) or \
                 num_samples <= 0:
             raise ValueError("num_samples should be a positive integer "
                              "value, but got num_samples={}".format(num_samples))
@@ -211,7 +210,7 @@ class BatchSampler(Sampler[List[int]]):
         # Since collections.abc.Iterable does not check for `__getitem__`, which
         # is one way for an object to be an iterable, we don't do an `isinstance`
         # check here.
-        if not isinstance(batch_size, _int_classes) or isinstance(batch_size, bool) or \
+        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or \
                 batch_size <= 0:
             raise ValueError("batch_size should be a positive integer value, "
                              "but got batch_size={}".format(batch_size))

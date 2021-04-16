@@ -32,7 +32,7 @@ static inline void cudaCheck(cudaError_t result, const char * file, int line) {
 #define TORCH_CUDA_CHECK(result) cudaCheck(result,__FILE__,__LINE__);
 
 struct CUDAMethods : public CUDAStubs {
-  void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) override {
+  void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const override {
     TORCH_CUDA_CHECK(cudaGetDevice(device));
     CUevent_st* cuda_event_ptr;
     TORCH_CUDA_CHECK(cudaEventCreate(&cuda_event_ptr));
@@ -43,23 +43,28 @@ struct CUDAMethods : public CUDAStubs {
     *cpu_ns = getTime();
     TORCH_CUDA_CHECK(cudaEventRecord(cuda_event_ptr, stream));
   }
-  float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) override {
+
+  float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) const override{
     TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
     float ms;
     TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event->get(), event2->get()));
     return ms*1000.0;
   }
-  void nvtxMarkA(const char* name) override {
+
+  void nvtxMarkA(const char* name) const override {
     ::nvtxMark(name);
   }
-  void nvtxRangePushA(const char* name) override {
+
+  void nvtxRangePushA(const char* name) const override {
     ::nvtxRangePushA(name);
   }
-  void nvtxRangePop() override {
+
+  void nvtxRangePop() const override {
     ::nvtxRangePop();
   }
-  void onEachDevice(std::function<void(int)> op) override {
+
+  void onEachDevice(std::function<void(int)> op) const override {
     at::cuda::OptionalCUDAGuard device_guard;
     int count = at::cuda::device_count();
     for(int i = 0; i < count; i++) {
@@ -67,13 +72,14 @@ struct CUDAMethods : public CUDAStubs {
       op(i);
     }
   }
-  void synchronize() override {
+
+  void synchronize() const override {
     cudaDeviceSynchronize();
   }
-  bool enabled() override {
+
+  bool enabled() const override {
     return true;
   }
-
 };
 
 struct RegisterCUDAMethods {

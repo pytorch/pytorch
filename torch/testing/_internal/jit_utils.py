@@ -15,17 +15,18 @@ import functools
 
 # Testing utils
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+from torch.testing._internal.common_utils import IS_WINDOWS, \
+    freeze_rng_state, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
 # Standard library
 from contextlib import contextmanager
 from functools import reduce
-from itertools import chain
-from torch._six import StringIO
+from io import StringIO
 from collections import defaultdict
 
+import importlib.util
 import inspect
 import io
 import math
@@ -34,6 +35,7 @@ import pickle
 import sys
 import tempfile
 import textwrap
+from importlib.abc import Loader
 from typing import Any, Dict, List
 
 RUN_CUDA = torch.cuda.is_available()
@@ -56,7 +58,7 @@ def do_input_map(fn, input):
 def clear_class_registry():
     torch._C._jit_clear_class_registry()
     torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
-    torch.jit._state._script_classes.clear()
+    torch.jit._state._clear_class_state()
 
 def get_execution_plan(graph_executor_state):
     execution_plans = list(graph_executor_state.execution_plans.values())
@@ -93,7 +95,7 @@ class _AssertRaisesRegexWithHighlightContext(object):
 
 FUSION_GROUP = "prim::TensorExprGroup"
 
-class JitTestCase(TestCase):
+class JitTestCase(JitCommonTestCase):
     _do_cuda_memory_leak_check = True
     _restored_warnings = False
 
@@ -111,6 +113,21 @@ class JitTestCase(TestCase):
             self.append(str(self.stringio.getvalue()))
             del self.stringio
             sys.stdout = self.sys_stdout
+
+    class capture_stderr(list):
+        """
+        Replace sys.stderr with a temporary StringIO
+        """
+        def __enter__(self):
+            self.sys_stderr = sys.stderr
+            self.stringio = StringIO()
+            sys.stderr = self.stringio
+            return self
+
+        def __exit__(self, *args):
+            self.append(str(self.stringio.getvalue()))
+            del self.stringio
+            sys.stderr = self.sys_stderr
 
     def setHooks(self):
         torch._C._jit_set_emit_hooks(self.emitModuleHook, self.emitFunctionHook)
@@ -146,14 +163,15 @@ class JitTestCase(TestCase):
                 elif node.kind() == 'prim::DifferentiableGraph':
                     get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
                 elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
-                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck'):
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or
+                                                    node.inputs().__next__().node().kind() == 'prim::RequiresGradCheck'):
                     get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
                 else:
                     for inner_block in node.blocks():
                         get_nodes_and_parents_recursively(inner_block, kind, acc)
 
         allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
-                         'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck'} | set(except_for)
+                         'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck', 'prim::RequiresGradCheck'} | set(except_for)
 
         fusion_groups : Dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
         get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
@@ -245,19 +263,6 @@ class JitTestCase(TestCase):
         self._compared_saved_loaded(module)
 
 
-    def getExportImportCopy(self, m, also_test_file=True, map_location=None):
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-        buffer.seek(0)
-        imported = torch.jit.load(buffer, map_location=map_location)
-
-        if not also_test_file:
-            return imported
-
-        with TemporaryFileName() as fname:
-            torch.jit.save(imported, fname)
-            return torch.jit.load(fname, map_location=map_location)
-
     def getExportImportCopyWithPacking(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
         m.apply(lambda s: s._pack() if s._c._has_method('_pack') else None)
@@ -333,22 +338,6 @@ class JitTestCase(TestCase):
         torch._C._jit_pass_lint(graph)
         self.assertExpected(str(graph), *args, **kwargs)
 
-    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
-        diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
-        diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
-
-        # For any non-fusible node, it must show up in one of the DifferentiableGraph.
-        found_all_nonfusible_nodes = (len(diff_subgraphs) == 0 and len(nonfusible_nodes) == 0)\
-            or all([any(g.findNode(n) is not None for g in diff_subgraphs) for n in nonfusible_nodes])
-
-        # For any fusible node, it must show up in one of the FusionGroup in the DifferentiableGraph.
-        fusion_nodes = list(chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))
-        fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]
-        found_all_fusible_nodes = (len(fusion_nodes) == 0 and len(fusible_nodes) == 0)\
-            or all([any(g.findNode(n) is not None for g in fusion_subgraphs) for n in fusible_nodes])
-
-        self.assertEqual(should_autodiff_node, found_all_nonfusible_nodes and found_all_fusible_nodes)
-
     def run_pass(self, name, trace):
         if isinstance(trace, torch._C.Graph):
             graph = trace
@@ -359,7 +348,7 @@ class JitTestCase(TestCase):
 
         torch._C._jit_pass_lint(graph)
         result = getattr(torch._C, '_jit_pass_' + name)(graph)
-        if result is not None:
+        if result is not None and not isinstance(result, bool):
             graph = result
         torch._C._jit_pass_lint(graph)
 
@@ -433,9 +422,12 @@ class JitTestCase(TestCase):
                     inputs_requires_grad=False,
                     capture_output=False,
                     frames_up=1,
-                    profiling=ProfilingMode.PROFILING):
+                    profiling=ProfilingMode.PROFILING,
+                    atol=None,
+                    rtol=None):
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode_for_profiling_tests():
+                extra_profile_runs = any(isinstance(x, torch.Tensor) and x.requires_grad for x in inputs)
                 if isinstance(script, str):
                     # Compile the string to a Script function
                     # with enable_profiling_mode():
@@ -483,17 +475,19 @@ class JitTestCase(TestCase):
                         python_outputs = python_fn(*inputs)
                     if not IS_WINDOWS:
                         self.assertExpected(script_stdout[0], subname='stdout')
-                    self.assertEqual(python_outputs, opt_script_outputs)
+                    self.assertEqual(python_outputs, opt_script_outputs, atol=atol, rtol=rtol)
                 else:
                     # profiling run
                     script_outputs = scripted_fn(*recording_inputs)
+                    if inputs_requires_grad or extra_profile_runs:
+                        opt_script_outputs = scripted_fn(*recording_inputs)
                     # optimized run
                     opt_script_outputs = scripted_fn(*recording_inputs)
                     if TEST_BAILOUTS:
                         self.checkBailouts(scripted_fn, inputs, opt_script_outputs)
                     python_outputs = python_fn(*inputs)
-                self.assertEqual(python_outputs, script_outputs)
-                self.assertEqual(script_outputs, opt_script_outputs)
+                self.assertEqual(python_outputs, script_outputs, atol=atol, rtol=rtol)
+                self.assertEqual(script_outputs, opt_script_outputs, atol=atol, rtol=rtol)
                 return scripted_fn
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
@@ -600,26 +594,6 @@ class JitTestCase(TestCase):
 
         return ge
 
-    def createFunctionFromGraph(self, trace):
-        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
-        return torch._C._create_function_from_graph("forward", graph)
-
-    def assertExportImport(self, trace, inputs):
-        m = self.createFunctionFromGraph(trace)
-        self.assertExportImportModule(m, inputs)
-
-    def assertExportImportModule(self, m, inputs):
-        m_import = self.getExportImportCopy(m)
-        a = self.runAndSaveRNG(m, inputs)
-        b = self.runAndSaveRNG(m_import, inputs)
-        self.assertEqual(a, b)
-
-    def runAndSaveRNG(self, func, inputs, kwargs=None):
-        kwargs = kwargs if kwargs else {}
-        with freeze_rng_state():
-            results = func(*inputs, **kwargs)
-        return results
-
     def checkModule(self, nn_module, args):
         """
         Check that a nn.Module's results in Script mode match eager and that it
@@ -691,10 +665,12 @@ def _trace(*args, **kwargs):
 def enable_cpu_fuser(fn):
     def wrapper(*args, **kwargs):
         torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
         try:
             fn(*args, **kwargs)
         finally:
             torch._C._jit_override_can_fuse_on_cpu(False)
+            torch._C._jit_set_te_must_use_llvm_cpu(True)
     return wrapper
 
 
@@ -722,7 +698,7 @@ def attrs_with_prefix(module, prefix):
             if x.startswith(prefix)]
 
 def warmup_backward(f, *args):
-    profiling_count = 2
+    profiling_count = 3
     results = []
     for i in range(profiling_count):
         if len(args) > 0:
@@ -732,3 +708,23 @@ def warmup_backward(f, *args):
             f.backward(retain_graph=True)
 
     return results
+
+# TODO: Remove me once https://bugs.python.org/issue42666 is resolved
+def make_global(*args):
+    for arg in args:
+        setattr(sys.modules[arg.__module__], arg.__name__, arg)
+
+# Helper function to eval Python3 code without causing a syntax error for
+# this file under py2
+def _get_py3_code(code, fn_name):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        script_path = os.path.join(tmp_dir, 'script.py')
+        with open(script_path, 'w') as f:
+            f.write(code)
+        spec = importlib.util.spec_from_file_location(fn_name, script_path)
+        module = importlib.util.module_from_spec(spec)
+        loader = spec.loader
+        assert isinstance(loader, Loader)  # Assert type to meet MyPy requriement
+        loader.exec_module(module)
+        fn = getattr(module, fn_name)
+        return fn

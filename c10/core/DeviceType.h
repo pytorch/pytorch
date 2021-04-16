@@ -12,7 +12,7 @@
 
 namespace c10 {
 
-enum class DeviceType : int16_t {
+enum class DeviceType : int8_t {
   CPU = 0,
   CUDA = 1, // CUDA.
   MKLDNN = 2, // Reserved for explicit MKLDNN
@@ -24,13 +24,15 @@ enum class DeviceType : int16_t {
   MSNPU = 8, // MSNPU
   XLA = 9, // XLA / TPU
   Vulkan = 10, // Vulkan
-  Metal = 11, //Metal
+  Metal = 11, // Metal
+  XPU = 12, // XPU
+  MLC = 13, // ML Compute / Apple
+  Meta = 14, // Meta (tensors with no data)
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 12,
-  ONLY_FOR_TEST = 20901, // This device type is only for test.
+  COMPILE_TIME_MAX_DEVICE_TYPES = 15,
 };
 
 constexpr DeviceType kCPU = DeviceType::CPU;
@@ -39,8 +41,11 @@ constexpr DeviceType kHIP = DeviceType::HIP;
 constexpr DeviceType kFPGA = DeviceType::FPGA;
 constexpr DeviceType kMSNPU = DeviceType::MSNPU;
 constexpr DeviceType kXLA = DeviceType::XLA;
+constexpr DeviceType kMLC = DeviceType::MLC;
+constexpr DeviceType kMeta = DeviceType::Meta;
 constexpr DeviceType kVulkan = DeviceType::Vulkan;
 constexpr DeviceType kMetal = DeviceType::Metal;
+constexpr DeviceType kXPU = DeviceType::XPU;
 
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =

@@ -2,6 +2,7 @@
 
 set -ex
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # CMAKE_ARGS are only passed to 'cmake' and the -Dfoo=bar does not work with
@@ -18,49 +19,6 @@ build_to_cmake () {
 
 
 SCCACHE="$(which sccache)"
-if [ "$(which gcc)" != "/root/sccache/gcc" ]; then
-  # Setup SCCACHE
-  ###############################################################################
-  # Setup sccache if SCCACHE_BUCKET is set
-  if [ -n "${SCCACHE_BUCKET}" ]; then
-    mkdir -p ./sccache
-
-    SCCACHE="$(which sccache)"
-    if [ -z "${SCCACHE}" ]; then
-      echo "Unable to find sccache..."
-      exit 1
-    fi
-
-    # Setup wrapper scripts
-    wrapped="cc c++ gcc g++ x86_64-linux-gnu-gcc"
-    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-        wrapped="$wrapped nvcc"
-    fi
-    for compiler in $wrapped; do
-      (
-        echo "#!/bin/sh"
-
-        # TODO: if/when sccache gains native support for an
-        # SCCACHE_DISABLE flag analogous to ccache's CCACHE_DISABLE,
-        # this can be removed. Alternatively, this can be removed when
-        # https://github.com/pytorch/pytorch/issues/13362 is fixed.
-        #
-        # NOTE: carefully quoted - we want `which compiler` to be
-        # resolved as we execute the script, but SCCACHE_DISABLE and
-        # $@ to be evaluated when we execute the script
-        echo 'test $SCCACHE_DISABLE && exec '"$(which $compiler)"' "$@"'
-
-        echo "exec $SCCACHE $(which $compiler) \"\$@\""
-      ) > "./sccache/$compiler"
-      chmod +x "./sccache/$compiler"
-    done
-
-    export CACHE_WRAPPER_DIR="$PWD/sccache"
-
-    # CMake must find these wrapper scripts
-    export PATH="$CACHE_WRAPPER_DIR:$PATH"
-  fi
-fi
 
 # Setup ccache if configured to use it (and not sccache)
 if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
@@ -253,7 +211,7 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  pip install --user dataclasses
+  pip install --user dataclasses typing_extensions
 
   $PYTHON setup.py install --user
 
@@ -265,6 +223,21 @@ fi
 ###############################################################################
 
 # Install ONNX into a local directory
-pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+pip install --user "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
 
 report_compile_cache_stats
+
+if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
+  # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
+  sudo rm -f /opt/cache/bin/cc
+  sudo rm -f /opt/cache/bin/c++
+  sudo rm -f /opt/cache/bin/gcc
+  sudo rm -f /opt/cache/bin/g++
+  pushd /opt/rocm/llvm/bin
+  if [[ -d original ]]; then
+    sudo mv original/clang .
+    sudo mv original/clang++ .
+  fi
+  sudo rm -rf original
+  popd
+fi

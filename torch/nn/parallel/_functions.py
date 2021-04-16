@@ -4,6 +4,7 @@ import torch
 from . import comm
 from torch.autograd import Function
 from torch._utils import _get_device_index
+from typing import List, Optional
 
 
 class Broadcast(Function):
@@ -39,9 +40,9 @@ class ReduceAddCoalesced(Function):
     def forward(ctx, destination, num_inputs, *grads):
         ctx.target_gpus = [grads[i].get_device() for i in range(0, len(grads), num_inputs)]
 
-        grads = [grads[i:i + num_inputs]
-                 for i in range(0, len(grads), num_inputs)]
-        return comm.reduce_add_coalesced(grads, destination)
+        grads_ = [grads[i:i + num_inputs]
+                  for i in range(0, len(grads), num_inputs)]
+        return comm.reduce_add_coalesced(grads_, destination)
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -55,8 +56,11 @@ class Gather(Function):
         assert all(i.device.type != 'cpu' for i in inputs), (
             'Gather function not implemented for CPU tensors'
         )
-        target_device = _get_device_index(target_device, True)
-        ctx.target_device = target_device
+        if (target_device == 'cpu'):
+            ctx.target_device = 'cpu'
+        else:
+            target_device = _get_device_index(target_device, True)
+            ctx.target_device = target_device
         ctx.dim = dim
         ctx.input_gpus = tuple(i.get_device() for i in inputs)
         if all(t.dim() == 0 for t in inputs) and dim == 0:
@@ -105,10 +109,10 @@ class Scatter(Function):
 
 
 # background streams used for copying
-_streams = None
+_streams: Optional[List[Optional[torch.cuda.Stream]]] = None
 
 
-def _get_stream(device):
+def _get_stream(device: int):
     """Gets a background stream for copying between CPU and GPU"""
     global _streams
     if device == -1:

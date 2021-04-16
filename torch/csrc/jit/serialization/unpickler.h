@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/ArrayRef.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -30,10 +31,11 @@ class TORCH_API Unpickler {
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
-      const std::vector<at::Tensor>* tensor_table)
-      : reader_(reader),
+      c10::ArrayRef<at::Tensor> tensor_table)
+      : reader_(std::move(reader)),
         tensor_table_(tensor_table),
         type_resolver_(std::move(type_resolver)),
+        use_storage_device_(false),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
   // tensors inside the pickle contain meta-data, the raw tensor
@@ -43,13 +45,15 @@ class TORCH_API Unpickler {
       TypeResolver type_resolver,
       ObjLoader obj_loader,
       std::function<at::DataPtr(const std::string&)> read_record,
-      c10::optional<at::Device> device)
-      : reader_(reader),
-        tensor_table_(nullptr),
+      c10::optional<at::Device> device,
+      bool use_storage_device = false)
+      : reader_(std::move(reader)),
+        tensor_table_(),
         type_resolver_(std::move(type_resolver)),
         obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),
         device_(std::move(device)),
+        use_storage_device_(use_storage_device),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
   // consume the pickle stream, producing an IValue from the contents.
@@ -124,7 +128,7 @@ class TORCH_API Unpickler {
   std::vector<std::function<void(void)>> globals_;
   std::vector<IValue> memo_table_;
   std::vector<size_t> marks_;
-  const std::vector<at::Tensor>* tensor_table_;
+  c10::ArrayRef<at::Tensor> tensor_table_;
 
   // When deserializing types on lists and dicts, cache the type here
   // so we don't have to parse the same type multiple times. Strings
@@ -139,6 +143,10 @@ class TORCH_API Unpickler {
 
   std::function<at::DataPtr(const std::string&)> read_record_;
   c10::optional<at::Device> device_;
+  // When set to true, Unpickler will ignore the pickled device and use the
+  // device of the DataPtr returned by the read_record_ function. The default
+  // value of this flag is false.
+  const bool use_storage_device_;
 
   // See [type tag serialization]
   uint64_t version_;

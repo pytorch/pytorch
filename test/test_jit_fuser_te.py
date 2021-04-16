@@ -28,6 +28,8 @@ from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_m
 
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
 
+from jit.test_fuser_common import TestFuserCommon  # noqa: F401
+
 FUSION_GROUP = 'prim::TensorExprGroup'
 LLVM_ENABLED = torch._C._llvm_enabled()
 
@@ -35,8 +37,7 @@ def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
 
-def warmup_forward(f, *args):
-    profiling_count = 2
+def warmup_forward(f, *args, profiling_count=2):
     for i in range(profiling_count):
         results = f(*args)
 
@@ -70,7 +71,28 @@ class TestTEFuser(JitTestCase):
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
 
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
+
+        # TODO: CPU fuser currently is disabled when multithreading.
+        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
+        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
+
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        self.int_dtypes = [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.bool,
+        ]
+        self.fp_dtypes = [
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
+            torch.float32,
+            torch.float64,
+        ]
+        self.dtypes = self.int_dtypes + self.fp_dtypes
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
@@ -82,6 +104,8 @@ class TestTEFuser(JitTestCase):
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -104,6 +128,26 @@ class TestTEFuser(JitTestCase):
         scripted = self.checkScript(func, (a,))
         self.assertLastGraphAllFused()
 
+    def test_typecheck(self):
+        a = torch.ones(1)
+
+        def fused_kernel(a, b):
+            return (a + b) * 2.
+
+        scripted = self.checkScript(fused_kernel, (a, a))
+        graph = scripted.graph_for(a, a)
+        # double check we fused
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        # we use a bigger tensor now (size 2)
+        # if we won't trigger a recompilation
+        # we will still create a tensor up to (size 1)
+        # if the type check fails
+        a = torch.ones(2)
+        # shape changed if we don't trigger recompilation
+        # we would compute the wrong result silently
+        self.assertEqual(scripted(a, a), fused_kernel(a, a))
+
     def test_sum_simple(self):
         def func(x):
             x2 = x * x
@@ -119,10 +163,15 @@ class TestTEFuser(JitTestCase):
         def func(x):
             return x.sum((0, )) * 2
 
+        def func_neg(x):
+            return x.sum((-2, )) * 2
+
         with texpr_reductions_enabled():
             a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
             a = a.reshape(5, 3)
             scripted = self.checkScript(func, (a,))
+            self.assertLastGraphAllFused()
+            scripted = self.checkScript(func_neg, (a,))
             self.assertLastGraphAllFused()
 
     def test_sum_keepdim_cast(self):
@@ -142,6 +191,21 @@ class TestTEFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_abs_cuda(self):
         self._test_fused_abs(device="cuda")
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_unsqueeze_size_calculation(self):
+
+        def foo(b, d):
+            x = d.unsqueeze(1)
+            y = x * 42.
+            z = b + y
+            r = z / 42.
+            return r
+
+        inputs = (torch.rand(20, 28, device='cuda', requires_grad=True), torch.rand(20, device='cuda'))
+
+        scripted = self.checkScript(foo, inputs)
+        self.assertAllFused(scripted.graph_for(*inputs))
 
     def _test_zero_element_tensors(self, device="cpu"):
         def decode(sin_t, cos_t):
@@ -400,6 +464,26 @@ class TestTEFuser(JitTestCase):
                 graph = backward_graph(s)
                 self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
 
+    def test_clamp_double(self):
+        for device in self.devices:
+            def clamp_double(x, eta: float):
+                return 1 - x.clamp(eta, 1 - eta)
+
+            x = torch.tensor([1.0, 1.0], dtype=torch.double, device=device)
+            eta = 1e-9
+            s = self.checkScript(clamp_double, (x, eta), profiling=ProfilingMode.PROFILING, atol=1e-10, rtol=1e-5)
+            self.assertAllFused(s.graph_for(x, eta))
+
+    def test_clamp_int(self):
+        for device in self.devices:
+            def clamp_int(x, eta: int):
+                return x.clamp(0, eta)
+
+            x = torch.tensor([1, 1], device=device)
+            eta = 1 << 32
+            s = self.checkScript(clamp_int, (x, eta), profiling=ProfilingMode.PROFILING)
+            self.assertAllFused(s.graph_for(x, eta))
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
     def test_dropout(self):
@@ -452,26 +536,19 @@ class TestTEFuser(JitTestCase):
             ge = self.checkTrace(f, (x, y, z), inputs_require_grads=False)
             self.assertAllFused(ge.graph_for(x, y, z))
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_bitwise_ops(self):
         def apply(fn):
             return lambda x, y, z: fn(fn(x, y), z)
 
-        dtypes = [
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.bool,
-        ]
         binary_ops = [
             operator.__and__,
             operator.__or__,
-            operator.__xor__
+            operator.__xor__,
+            operator.__lshift__,
+            operator.__rshift__,
         ]
         devices = self.devices
-        for dtype, op, device in product(dtypes, binary_ops, devices):
+        for dtype, op, device in product(self.int_dtypes, binary_ops, devices):
             try:
                 x = self.data_for(dtype, device)
                 y = self.data_for(dtype, device)
@@ -496,20 +573,12 @@ class TestTEFuser(JitTestCase):
         def apply(fn):
             return lambda x, y, z: fn(fn(x, y), z)
 
-        dtypes = [
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.bool,
-        ]
         binary_ops = [
             torch.min,
             torch.max
         ]
         devices = self.devices
-        for dtype, op, device in product(dtypes, binary_ops, devices):
+        for dtype, op, device in product(self.int_dtypes, binary_ops, devices):
             try:
                 x = self.data_for(dtype, device)
                 y = self.data_for(dtype, device)
@@ -650,9 +719,9 @@ class TestTEFuser(JitTestCase):
         scripted_f = torch.jit.script(test_fuse)
         x = torch.ones(1, requires_grad=True, device='cuda')
         y = torch.ones(1, requires_grad=True, device='cuda')
-        warmup_forward(scripted_f, x, y)
-        g = torch.jit.last_executed_optimized_graph()
-        diff_nodes = [n for n in g.nodes() if n.kind() == 'prim::DifferentiableGraph']
+        warmup_forward(scripted_f, x, y, profiling_count=3)
+        g = scripted_f.graph_for(x, y)
+        diff_nodes = g.findAllNodes('prim::DifferentiableGraph')
         self.assertEqual(len(diff_nodes), 1)
         g = diff_nodes[0].g('Subgraph')
         if_nodes = [n for n in g.nodes() if n.kind() == 'prim::If']
@@ -758,8 +827,7 @@ class TestTEFuser(JitTestCase):
 
     def test_scalar_arg(self):
         for device in self.devices:
-            def fn_test_scalar_arg(x, p):
-                # type: (Tensor, float) -> Tensor
+            def fn_test_scalar_arg(x: torch.Tensor, p: float) -> torch.Tensor:
                 return p * (x * x + x)
 
             x = torch.randn(4, 4, dtype=torch.float, device=device)
@@ -771,11 +839,12 @@ class TestTEFuser(JitTestCase):
 
             # use another function otherwise we will bailout
             # and won't be able to do fused checks
-            def fn_test_scalar_arg_requires_grad(x, p):
-                # type: (Tensor, float) -> Tensor
+            def fn_test_scalar_arg_requires_grad(x: torch.Tensor, p: float) -> torch.Tensor:
                 return p * (x * x + x)
 
             scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
+            out = scripted(x, p)
+            out = scripted(x, p)
             out = scripted(x, p)
             self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                       "aten::_size_if_not_equal"))
@@ -909,7 +978,7 @@ class TestTEFuser(JitTestCase):
         for device in self.devices:
             inputs = get_lstm_inputs(device, training=True)
             module = self.checkScript(LSTMCellS, inputs)
-            self.assertLastGraphAllFused()
+            self.assertAllFused(module.graph_for(inputs))
 
     def test_lstm_concat(self):
         # single fusion node causes error
@@ -961,7 +1030,7 @@ class TestTEFuser(JitTestCase):
             forward_graph = module.graph_for(*inputs)
             self.assertGraphContainsExactly(
                 forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
-            FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
+            FileCheck().check("DifferentiableGraph").check("TupleConstruct") \
                 .check_next("return").check(FUSION_GROUP).run(str(forward_graph))
             hy, cy = module(*inputs)
             warmup_backward((hy + cy).sum())
@@ -1011,10 +1080,10 @@ class TestTEFuser(JitTestCase):
                 return F.relu(torch.erf(x) - torch.erfc(x))
 
             x = torch.randn(4, 4, dtype=torch.float, device=device)
-            ge = self.checkTrace(fn_test_erf, (x,))
+            ge = self.checkScript(fn_test_erf, (x,), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(ge.graph_for(x))
             x.requires_grad_(True)
-            ge = self.checkTrace(fn_test_erf, (x,))
+            ge = self.checkScript(fn_test_erf, (x,), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes",
                                                              "aten::_size_if_not_equal"))
 
@@ -1207,29 +1276,158 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
-    def test_unary_ops(self):
-        def apply(fn):
-            return lambda x: fn(x)
+    def test_torch_to(self):
+        # test no op
+        @torch.jit.script
+        def foo(x):
+            return x.to(torch.float)
 
+        foo(torch.tensor([3.], dtype=torch.float))
+        foo(torch.tensor([3.], dtype=torch.float))
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        # test not fusing non-const inputs
+        @torch.jit.script
+        def foo(x, dtype: int):
+            return x.to(dtype)
+
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        # test not fusing to_pinned inputs
+        @torch.jit.script
+        def foo(x, dtype: int):
+            return x.to(pin_memory=True)
+
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+
+        # test across-device not supported
+        if torch.cuda.is_available():
+            @torch.jit.script
+            def foo(x):
+                return x.to(device="cuda")
+
+            foo(torch.tensor([3.], dtype=torch.float))
+            foo(torch.tensor([3.], dtype=torch.float))
+            FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        sizes = [(1, 4), (4, 4)]
+        # reuses cast impl, smaller dtype set for faster test
+        dtypes = [
+            torch.bool,
+            torch.int,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
+            torch.float32,
+            torch.float64,
+        ]
+
+        class MyMod(torch.nn.Module):
+            def __init__(self, dtype):
+                super(MyMod, self).__init__()
+                self.dtype = dtype
+
+            def forward(self, x):
+                return x.to(self.dtype)
+
+        bad_dtypes = []
+        for dtype, output_dtype, device, size in product(dtypes, dtypes, self.devices, sizes):
+            if dtype == output_dtype:
+                continue
+
+            x = self.data_for(dtype, device, size=size)
+            mod = MyMod(output_dtype)
+            ref = mod.forward(x)
+            # use freezing to make non-Tensor args to `to` constant
+            mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+            warmup_forward(mod.forward, x)
+            self.assertEqual(ref, mod.forward(x))
+            self.assertLastGraphAllFused()
+
+    @unittest.skip("Temporarily disabled")
+    def test_masked_fill(self):
         dtypes = [
             torch.int8,
-            torch.uint8,
             torch.int16,
             torch.int32,
             torch.int64,
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,
         ]
+        sizes = [(2,), (4, 4)]
+        for self_dtype, device, scalar_val, size in product(dtypes, self.devices, [0.4, 3], sizes):
+            input_v = self.data_for(self_dtype, device, size=size)
+            mask = self.data_for(torch.bool, device, size=size)
+
+            def fn(input_v, mask):
+                return torch.masked_fill(input_v, mask, scalar_val)
+            ref = fn(input_v, mask)
+            try:
+                t = torch.jit.trace(fn, (input_v, mask))
+                torch.testing.assert_allclose(ref, t(input_v, mask))
+                print(torch.jit.last_executed_optimized_graph())
+                self.assertLastGraphAllFused()
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(self_dtype), op.__name__, device, str(size)])
+                )
+
+    def test_isnan(self):
+        x = torch.rand([4])
+        x[0] = float('nan')
+        inputs = [
+            x,
+            torch.tensor([float('nan'), .5])
+        ]
+        dtypes = [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
+
+        for inp, device, dtype in product(inputs, self.devices, dtypes):
+            # TODO
+            if dtype == torch.float16 and not LLVM_ENABLED:
+                continue
+
+            inp = inp.to(device=device, dtype=dtype)
+            try:
+                f = torch.jit.trace(lambda x: x.isnan(), (inp,))
+                warmup_forward(f, inp)
+                self.assertEqual(f(inp), inp.isnan())
+                self.assertLastGraphAllFused()
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), 'isnan', device])
+                )
+
+    # @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
+    def test_unary_ops(self):
+        def apply(fn):
+            return lambda x: fn(x)
+
         unary_ops = [
+            torch.lgamma,
             torch.sigmoid,
             torch.reciprocal,
             torch.neg,
             torch.relu,
             torch.log,
             torch.log10,
+            torch.log1p,
             torch.log2,
             torch.exp,
             torch.expm1,
@@ -1244,6 +1442,7 @@ class TestTEFuser(JitTestCase):
             torch.sinh,
             torch.atan,
             torch.tanh,
+            F.hardtanh,
             torch.sqrt,
             torch.rsqrt,
             torch.abs,
@@ -1252,9 +1451,11 @@ class TestTEFuser(JitTestCase):
             torch.round,
             torch.trunc,
             torch.frac,
+            lambda x: torch.threshold(x, 0, -10),
+            lambda x: torch.clamp(x, -10, 10),
         ]
         sizes = [(1,), (2,), (4, 4)]
-        for dtype, op, device, size in product(dtypes, unary_ops, self.devices, sizes):
+        for dtype, op, device, size in product(self.dtypes, unary_ops, self.devices, sizes):
             try:
                 x = self.data_for(dtype, device, size=size)
                 fn = apply(op)
@@ -1273,12 +1474,351 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
                 )
 
+    def test_binary_ops(self):
+        def apply(fn):
+            return lambda x, y: fn(x, y)
+
+        binary_ops = [
+            operator.__and__,
+            operator.__or__,
+            operator.__xor__,
+            torch.add,
+            torch.sub,
+            torch.mul,
+            torch.min,
+            torch.max,
+            lambda x, y: torch.lerp(x, y, 0.5),
+            torch.atan2,
+            torch.div,
+            torch.eq,
+            torch.ne,
+            torch.ge,
+            torch.gt,
+            torch.lt,
+            torch.fmod,
+            torch.remainder,
+            lambda x, y: y.type_as(x),
+        ]
+        fp_only = [
+            torch.fmod,
+            torch.remainder,
+        ]
+        devices = self.devices
+        for dtype, op, device in product(self.dtypes, binary_ops, devices):
+            try:
+                x = self.data_for(dtype, device)
+                y = self.data_for(dtype, device)
+                fn = apply(op)
+                ref = fn(x, y)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y))
+                self.assertEqual(ref, t(x, y))
+                if op not in fp_only or dtype.is_floating_point:
+                    self.assertAllFused(t.graph_for(x, y))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    def test_matmul(self):
+        def fn(x, y):
+            return torch.matmul(x, y)
+
+        devices = ['cpu']  # No cuda support for ext calls yet
+        sizes = [[[128, 128], [128, 128]],
+                 [[10, 10], [10, 10]],
+                 [[1, 16], [16, 128]],
+                 [[128], [128]],
+                 [[128], [128, 128]],
+                 [[3], [3]],
+                 [[3, 4], [4]],
+                 [[10, 3, 4], [4]],
+                 [[10, 3, 4], [10, 4, 5]],
+                 [[10, 3, 4], [4, 5]],
+                 ]
+
+        # Only 2D x 2D matrix multiply is supported. For non-supported sizes we
+        # still want to run results verification to test that we didn't
+        # accidentally fuse it, but we skip the 'is-fused' check.
+        # TODO: add support for other shape combinations and make this set empty:
+        skip_is_fused_check_sizes = ["[[128], [128]]",
+                                     "[[128], [128, 128]]",
+                                     "[[3], [3]]",
+                                     "[[3, 4], [4]]",
+                                     "[[10, 3, 4], [4]]",
+                                     "[[10, 3, 4], [10, 4, 5]]",
+                                     "[[10, 3, 4], [4, 5]]",
+                                     ]
+        for dtype, size, device in product(self.dtypes, sizes, devices):
+            try:
+                size_x, size_y = size
+                x = self.data_for(dtype, device, size=size_x)
+                y = self.data_for(dtype, device, size=size_y)
+                ref = fn(x, y)
+            except Exception as e:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y))
+                t(x, y)
+                self.assertEqual(ref, t(x, y))
+                if not str(size) in skip_is_fused_check_sizes:
+                    self.assertAllFused(t.graph_for(x, y))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), device])
+                )
+
+    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
+    def test_binary_tensor_scalar_ops(self):
+        def apply_with_scalar(fn, scalar):
+            return lambda x: fn(x, scalar)
+
+        # FIXME: Fails in IR Eval: torch.int64 and_ cpu
+        binary_ops = [
+            operator.__and__,
+            operator.__or__,
+            operator.__xor__,
+            torch.add,
+            torch.sub,
+            torch.mul,
+            torch.eq,
+            torch.ne,
+            torch.ge,
+            torch.lt,
+            torch.gt,
+        ]
+        devices = self.devices
+        # Maybe we should split this into separate tests to speed it up by
+        # only using  scalar values relevant to particular ops
+        scalars = [1.5, 3, 0, -2.0, -1]
+        for dtype, op, device, scalar in product(self.dtypes, binary_ops, devices, scalars):
+            try:
+                x = self.data_for(dtype, device)
+                fn = apply_with_scalar(op, scalar)
+                ref = fn(x)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x))
+                self.assertEqual(ref, t(x))
+                self.assertAllFused(t.graph_for(x))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    def test_binary_div_ops(self):
+        def apply_with_scalar(fn, scalar):
+            return lambda x: fn(x, scalar)
+
+        binary_ops = [
+            torch.div,
+            torch.remainder,
+            torch.fmod,
+        ]
+        devices = self.devices
+        # Maybe we should split this into separate tests to speed it up by
+        # only using  scalar values relevant to particular ops
+        scalars = [1.5, 3, -2.0, -1]  # skip 0
+        for dtype, op, device, scalar in product(self.dtypes, binary_ops, devices, scalars):
+            try:
+                x = self.data_for(dtype, device)
+                fn = apply_with_scalar(op, scalar)
+                ref = fn(x)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x))
+                self.assertEqual(ref, t(x))
+            except Exception as e:
+                raise RuntimeError(
+                    "Failed: {} {} {} {}".format(dtype, op.__name__, device, scalar)
+                )
+
+    def test_binary_cuda_only_ops(self):
+        def apply_with_scalar(fn, scalar):
+            return lambda x: fn(x, scalar)
+
+        dtypes = [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            # FIXME: 'pow' fails with dtype=torch.float16/device=cuda/scalar=0
+            # torch.float16,
+            torch.float32,
+            torch.float64,
+            # torch.bool intentionally not included
+        ]
+        binary_ops = [
+            torch.pow,
+        ]
+        devices = ['cuda'] if torch.cuda.is_available() else []
+        # Maybe we should split this into separate tests to speed it up by
+        # only using  scalar values relevant to particular ops
+        scalars = [1.5, 3, 0, -2.0, -1]
+        for dtype, op, device, scalar in product(dtypes, binary_ops, devices, scalars):
+            try:
+                x = self.data_for(dtype, device)
+                fn = apply_with_scalar(op, scalar)
+                ref = fn(x)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x))
+                self.assertEqual(ref, t(x))
+                self.assertAllFused(t.graph_for(x))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    @unittest.skipIf(not LLVM_ENABLED, "TODO: enable in ir eval")
+    def test_ternary_ops(self):
+        def apply(fn):
+            return lambda x, y, z: fn(x, y, z)
+
+        ternary_ops = [
+            torch.lerp,
+            torch.addcmul,
+        ]
+        devices = self.devices
+        for dtype, op, device in product(self.dtypes, ternary_ops, devices):
+            try:
+                x = self.data_for(dtype, device)
+                y = self.data_for(dtype, device)
+                z = self.data_for(dtype, device)
+                fn = apply(op)
+                ref = fn(x, y, z)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y, z))
+                self.assertEqual(ref, t(x, y, z))
+                self.assertAllFused(t.graph_for(x, y, z))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    def test_ternary_norm_ops(self):
+        def apply(fn):
+            return lambda x, y, z: fn(x, y, z)
+
+        ternary_ops = [
+            F.batch_norm,
+        ]
+        devices = self.devices
+        for dtype, op, device in product(self.dtypes, ternary_ops, devices):
+            try:
+                x = self.data_for(dtype, device, size=[5, 3, 128, 128])
+                y = self.data_for(dtype, device, size=[3])
+                z = self.data_for(dtype, device, size=[3])
+                fn = apply(op)
+                ref = fn(x, y, z)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y, z))
+                self.assertEqual(ref, t(x, y, z))
+                self.assertAllFused(t.graph_for(x, y, z))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+
+    @unittest.skip("FIXME: fuser doesn't include ListConstruct nodes to the group causing a failure")
+    def test_list_ops(self):
+        def apply(fn):
+            return lambda x, y, z: fn([x * x, y * y, z * z])
+
+        devices = self.devices
+        list_ops = [
+            torch.cat,
+        ]
+        for dtype, op, device in product(self.dtypes, list_ops, devices):
+            try:
+                x = self.data_for(dtype, device, size=[5, 4, 1, 7])
+                y = self.data_for(dtype, device, size=[5, 4, 1, 7])
+                z = self.data_for(dtype, device, size=[5, 4, 1, 7])
+                fn = apply(op)
+                ref = fn(x, y, z)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y, z))
+                self.assertEqual(ref, t(x, y, z))
+                self.assertAllFused(t.graph_for(x, y, z))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    def test_where_ops(self):
+        def apply(fn):
+            return lambda cond, x, y: fn(cond, x, y)
+
+        ops = [
+            torch.where,
+            lambda cond, x, y: torch.where(cond, x, 3.1415),
+            lambda cond, x, y: torch.where(cond, 42, y),
+        ]
+        devices = self.devices
+        for dtype, op, device in product(self.dtypes, ops, devices):
+            try:
+                cond = self.data_for(torch.bool, device)
+                x = self.data_for(dtype, device)
+                y = self.data_for(dtype, device)
+                fn = apply(op)
+                ref = fn(cond, x, y)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (cond, x, y))
+                self.assertEqual(ref, t(cond, x, y))
+                self.assertAllFused(t.graph_for(cond, x, y))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_unsupported_dtypes(self):
         def fn(x):
             return x * x + x
 
         unsupported_dtypes = [
+            torch.uint8,
             torch.bfloat16,
             torch.complex32,
             torch.complex64,
@@ -1330,6 +1870,84 @@ class TestTEFuser(JitTestCase):
                 torch.testing.assert_allclose(test, ref)
         self.assertAllFused(script.graph_for(*inputs))
 
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_sub_gt_and(self):
+        def eager(t1, t2, t3, t4, t: float):
+            w = t1 - t2
+            h = t3 - t4
+            k = (w > t) & (h > t)
+            assert k.dtype == torch.bool
+            if t > 0.5:
+                # Putting a use of k in a never-executed conditional prevents
+                # profiling its type, which leaves it as "Tensor".  If we
+                # propagate Tensor back to the definition of k, we have to be
+                # careful not to create a fusion group containing it.
+                return k + 1
+            return w
+        t = torch.rand(8, dtype=torch.float, device='cuda')
+        scripted = self.checkScript(eager, (t, t, t, t, 0.1))
+
+    def test_chunk_mul_one(self):
+        for device in self.devices:
+            def eager(x):
+                z, y, w = torch.chunk(x, 3, -1)
+                return z * 3, y, w
+            x = torch.rand(64, 1, 3072, dtype=torch.float, device=device)
+            z, y, w = eager(x)
+            script = self.checkScript(eager, (x,))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_eq_unsqueeze_type_as(self):
+        def eager(a, b):
+            mask = b == 1
+            mask = torch.unsqueeze(mask, -1)
+            x = mask.type_as(a)
+            return x, mask
+        a = torch.rand(1, 64, 1024, device='cuda', dtype=torch.float)
+        b = torch.randint(-2, 2, (1, 64), device='cuda', dtype=torch.long)
+        script = self.checkScript(eager, (a, b))
+
+    def test_neg_pow(self):
+        def eager_tt(a: torch.Tensor, b: torch.Tensor):
+            return torch.neg(torch.pow(a, b))
+
+        def eager_ts(a: torch.Tensor, b: float):
+            return torch.neg(torch.pow(a, b))
+
+        def eager_st(a: float, b: torch.Tensor):
+            return torch.neg(torch.pow(a, b))
+
+        a = torch.rand(1, dtype=torch.float)
+        b = torch.rand(1, dtype=torch.float)
+        s = b.item()
+        script = self.checkScript(eager_tt, (a, b))
+        self.assertAllFused(script.graph_for(a, b))
+        script = self.checkScript(eager_ts, (a, s))
+        self.assertAllFused(script.graph_for(a, s))
+        script = self.checkScript(eager_st, (s, b))
+        self.assertAllFused(script.graph_for(s, b))
+
+    def test_conv2d_depthwise(self):
+        def eager(input, weight, bias):
+            return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=72)
+
+        input = torch.rand((1, 72, 56, 56), dtype=torch.float)
+        weight = torch.rand((72, 1, 3, 3), dtype=torch.float)
+        bias = torch.rand((72), dtype=torch.float)
+
+        script = self.checkScript(eager, (input, weight, bias))
+        self.assertAllFused(script.graph_for(input, weight, bias))
+
+    def test_conv2d(self):
+        def eager(input, weight, bias):
+            return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=1)
+
+        input = torch.rand((1, 64, 56, 56), dtype=torch.float)
+        weight = torch.rand((64, 64, 3, 3), dtype=torch.float)
+        bias = torch.rand((64), dtype=torch.float)
+
+        script = self.checkScript(eager, (input, weight, bias))
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
 
 if __name__ == '__main__':
     run_tests()
