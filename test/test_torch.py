@@ -7386,18 +7386,8 @@ tensor_op_tests = [
         lambda t, d: [2],
         1e-3, 1e-5, 1e-3, _signed_types, _cpu_types, False),
     # lapack tests
-    ('qr', 'square', _small_2d, lambda t, d: [],
-        1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
-    ('qr', 'skinny', _new_t((3, 4)), lambda t, d: [],
-        1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
-    ('qr', 'fat', _new_t((4, 3)), lambda t, d: [],
-        1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
-    ('qr', 'big', _large_2d, lambda t, d: [],
-        1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
     ('geqrf', '', _new_t((20, 20)), lambda t, d: [],
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, skipCPUIfNoLapack]),
-    ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
 ]
 
 # Creates and decorates a generic test and adds it to the class.
