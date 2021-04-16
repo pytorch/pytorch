@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/cpu/utils.h>
 
 namespace at {
 namespace native {
@@ -22,6 +23,7 @@ template <typename scalar_t>
 inline scalar_t* optional_data(const Tensor& source) {
   return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
 }
+
 
 template <typename scalar_t>
 static void nll_loss_out_frame(
@@ -82,42 +84,66 @@ static void nll_loss_out_frame(
   const scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
   const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
 
-  scalar_t output_val = 0;
-  scalar_t total_weight_val = 0;
+  const int64_t ndim = input.dim();
+  TORCH_CHECK(ndim <= 2);
+  const int64_t batch_size = ndim == 1 ? 1 : input.size(0);
+  TORCH_CHECK(target.size(0) == batch_size);
 
-  if (input.dim() == 1) {
-    const auto cur_target = target_data[0];
-    if (cur_target != ignore_index) {
-      TORCH_CHECK_INDEX(
-          cur_target >= 0 && cur_target < n_classes,
-          "Target ",
-          cur_target,
-          " is out of bounds.");
-      total_weight_val =
-          weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
-      output_val = -input_data[cur_target] * total_weight_val;
+  constexpr int64_t cascade_sum_num_levels = 8;
+  const int64_t level_power =
+      std::max(int64_t(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
+  const int64_t level_step = (1 << level_power);
+  const int64_t level_mask = level_step - 1;
+
+  int64_t num_ignored = 0;
+
+  scalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
+  scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
+  for (int64_t b = 0; b < batch_size; b++) {
+    const int64_t cur_target = target_data[b];
+    if (cur_target == ignore_index) {
+      ++num_ignored;
+      continue;
     }
-  } else if (input.dim() == 2) {
-    const auto batch_size = input.size(0);
-    TORCH_CHECK(target.size(0) == batch_size);
-    const auto n_target = input.size(1);
 
-    for (int64_t i = 0; i < batch_size; i++) {
-      const auto cur_target = target_data[i];
-      if (cur_target != ignore_index) {
-        TORCH_CHECK_INDEX(
-            cur_target >= 0 && cur_target < n_classes,
-            "Target ",
-            cur_target,
-            " is out of bounds.");
+    TORCH_CHECK_INDEX(
+        cur_target >= 0 && cur_target < n_classes,
+        "Target ",
+        cur_target,
+        " is out of bounds.");
 
-        scalar_t cur_weight =
-            weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
-        total_weight_val += cur_weight;
-        output_val -= input_data[i * n_target + cur_target] * cur_weight;
+    const auto data = input_data[b * n_classes + cur_target];
+    if (weight_data) {
+      const scalar_t weight_val = weight_data[cur_target];
+      loss_partial_sums[0] -= data * weight_val;
+      weight_partial_sums[0] += weight_val;
+    } else {
+      loss_partial_sums[0] -= data;
+    }
+
+    for (int64_t j = 0; j + 1 < cascade_sum_num_levels; ++j) {
+      const auto mask = (level_mask << (j * level_power));
+      if (C10_LIKELY((b & mask) != 0)) {
+        break;
       }
+
+      weight_partial_sums[j + 1] += weight_partial_sums[j];
+      loss_partial_sums[j + 1] += loss_partial_sums[j];
+
+      weight_partial_sums[j] = 0;
+      loss_partial_sums[j] = 0;
     }
   }
+
+  const scalar_t total_weight_val = !weight_data ?
+    static_cast<scalar_t>(batch_size - num_ignored) :
+    std::accumulate(std::begin(weight_partial_sums),
+                    std::end(weight_partial_sums),
+                    scalar_t{0});
+
+  scalar_t output_val = std::accumulate(std::begin(loss_partial_sums),
+                                        std::end(loss_partial_sums),
+                                        scalar_t{0});
 
   if (reduction == Reduction::Mean &&
       (total_weight_val != 0 || input.numel() == 0)) {
