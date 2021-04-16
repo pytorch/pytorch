@@ -9194,7 +9194,9 @@ class TestNN(NNTestCase):
               ]]
         )
         #  ChannelsFirst
-        y = F.channel_shuffle(x, 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2)
+            self.assertEqual(len(w), 0)
         self.assertEqual(y, y_ref)
         #  ChannelsLast not supported for 3dim
 
@@ -9222,10 +9224,14 @@ class TestNN(NNTestCase):
               ]]
         )
         #  ChannelsFirst NCHW
-        y = F.channel_shuffle(x, 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2)
+            self.assertEqual(len(w), 0)
         self.assertEqual(y, y_ref)
         #  ChannelsLast NHWC
-        y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last), 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last), 2)
+            self.assertEqual(len(w), 0)
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
@@ -9253,10 +9259,14 @@ class TestNN(NNTestCase):
               ]]
         )
         #  ChannelsFirst NCHW
-        y = F.channel_shuffle(x, 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2)
+            self.assertEqual(len(w), 0)
         self.assertEqual(y, y_ref)
         #  ChannelsLast NHWC
-        y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last_3d), 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last_3d), 2)
+            self.assertEqual(len(w), 0)
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
@@ -10131,6 +10141,17 @@ class TestNN(NNTestCase):
         self.assertEqual(input.grad.dtype, dtype)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(input.grad, inputf.grad, atol=1e-1, rtol=0)
+
+    def test_cross_entropy_loss_precision(self):
+        # Regression test for #55657
+        loss_cpu = nn.CrossEntropyLoss().cpu()
+        inputf = torch.randn(128, 2, 768, 768, device="cpu", dtype=torch.float)
+        inputd = inputf.double()
+        target = torch.randint(2, (128, 768, 768), dtype=torch.long)
+
+        outf = loss_cpu(inputf, target)
+        outd = loss_cpu(inputd, target)
+        self.assertEqual(outf, outd, exact_dtype=False)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):

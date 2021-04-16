@@ -967,6 +967,8 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
   }
 
   all_ops_same_shape_ = true;
+  bool has_scalars = false;
+  bool has_tensors = false;
   for (auto& op : operands_) {
     if (!op.tensor.defined()) continue;
 
@@ -977,6 +979,14 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
     // pick it up later in the operands.
     if (config.resize_outputs_ && op.is_output) continue;
     auto shape = op.tensor.sizes();
+    if (shape.size() == 0) {
+      has_scalars = true;
+    } else {
+      has_tensors = true;
+    }
+    if (has_scalars && has_tensors) {
+      all_ops_same_shape_ = false;
+    }
     if (shape_.empty()) {
       shape_ = shape;
     } else if (!shape.equals(shape_)) {
