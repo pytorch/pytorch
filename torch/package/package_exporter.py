@@ -22,7 +22,7 @@ import torch
 from torch.serialization import location_tag, normalize_storage_type
 
 from ._file_structure_representation import Folder, _create_folder_from_file_list
-from ._glob_group import GlobPattern, _GlobGroup
+from .glob_group import GlobPattern, GlobGroup
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._package_pickler import create_pickler
@@ -476,7 +476,7 @@ node [shape=box];
 
         """
         self.patterns.append(
-            (_GlobGroup(include, exclude), self.save_mock_module, allow_empty)
+            (GlobGroup(include, exclude=exclude), self.save_mock_module, allow_empty)
         )
 
     def extern(
@@ -504,7 +504,7 @@ node [shape=box];
 
         """
         self.patterns.append(
-            (_GlobGroup(include, exclude), self.save_extern_module, allow_empty)
+            (GlobGroup(include, exclude=exclude), self.save_extern_module, allow_empty)
         )
 
     def deny(self, include: "GlobPattern", *, exclude: "GlobPattern" = ()):
@@ -518,7 +518,7 @@ node [shape=box];
             exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
         """
         self.patterns.append(
-            (_GlobGroup(include, exclude), self._reject_denied_module, True)
+            (GlobGroup(include, exclude=exclude), self._reject_denied_module, True)
         )
 
     def save_extern_module(self, module_name: str):

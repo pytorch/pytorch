@@ -184,41 +184,6 @@ class TestDependencyAPI(PackageTestCase):
                 exporter.mock(include=["package_b.*"], allow_empty=False)
                 exporter.save_module("package_a.subpackage")
 
-    def test_module_glob(self):
-        from torch.package.package_exporter import _GlobGroup
-
-        def check(include, exclude, should_match, should_not_match):
-            x = _GlobGroup(include, exclude)
-            for e in should_match:
-                self.assertTrue(x.matches(e))
-            for e in should_not_match:
-                self.assertFalse(x.matches(e))
-
-        check(
-            "torch.*",
-            [],
-            ["torch.foo", "torch.bar"],
-            ["tor.foo", "torch.foo.bar", "torch"],
-        )
-        check(
-            "torch.**",
-            [],
-            ["torch.foo", "torch.bar", "torch.foo.bar", "torch"],
-            ["what.torch", "torchvision"],
-        )
-        check("torch.*.foo", [], ["torch.w.foo"], ["torch.hi.bar.baz"])
-        check(
-            "torch.**.foo", [], ["torch.w.foo", "torch.hi.bar.foo"], ["torch.f.foo.z"]
-        )
-        check("torch*", [], ["torch", "torchvision"], ["torch.f"])
-        check(
-            "torch.**",
-            ["torch.**.foo"],
-            ["torch", "torch.bar", "torch.barfoo"],
-            ["torch.foo", "torch.some.foo"],
-        )
-        check("**.torch", [], ["torch", "bar.torch"], ["visiontorch"])
-
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_pickle_mocked(self):
         import package_a.subpackage
