@@ -68,6 +68,24 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
+    def test_save_module_with_module_object(self):
+        """
+        Test that save_module works with a module object
+        instead of a module name.
+        """
+        buffer = BytesIO()
+
+        with PackageExporter(buffer, verbose=False) as he:
+            import module_a
+
+            he.save_module(module_a)
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        module_a_i = hi.import_module("module_a")
+        self.assertEqual(module_a_i.result, "module_a")
+        self.assertIsNot(module_a, module_a_i)
+
     def test_save_module_binary(self):
         f = BytesIO()
         with PackageExporter(f, verbose=False) as he:
