@@ -7464,6 +7464,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool3d_out_cpu
     CUDA: adaptive_max_pool3d_out_cuda
@@ -7471,9 +7472,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d(Tensor self, int[3] output_size) -> (Tensor, Tensor)
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool3d_cpu
-    CUDA: adaptive_max_pool3d_cuda
+  structured_delegate: adaptive_max_pool3d.out
 
 - func: adaptive_max_pool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
