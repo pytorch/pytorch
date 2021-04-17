@@ -2556,22 +2556,18 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
     return samples
 
 def sample_inputs_tensordot(self, device, dtype, requires_grad, **kwargs):
-    return (
-        SampleInput(
-            make_tensor((S, S, S), device, dtype, requires_grad=requires_grad),
-            args=(
-                make_tensor((S, S, S), device, dtype, requires_grad=requires_grad),
-            ),
-            kwargs=dict(dims=2,),
-        ),
-        SampleInput(
-            make_tensor((S, S, 1), device, dtype, requires_grad=requires_grad),
-            args=(
-                make_tensor((S, 1, S), device, dtype, requires_grad=requires_grad),
-            ),
-            kwargs=dict(dims=([1, 2], [0, 1]),),
-        ),
+    cases = (
+        ((2, 2, 2), (2, 2, 2), (2)),
+        ((2, 2, 1), (2, 1, 2), ([0, 1], [2, 0])),
     )
+    samples = []
+    for first_shape, second_shape, dims in cases:
+        samples.append(SampleInput(make_tensor(first_shape, device, dtype, 
+                                   requires_grad=requires_grad),
+                       args=(make_tensor(second_shape, device, dtype, 
+                             requires_grad=requires_grad),),
+                       kwargs=dict(dims=dims,)))
+    return tuple(samples)
 
 def sample_inputs_kron(op_info, device, dtype, requires_grad):
     test_cases = (
