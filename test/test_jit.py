@@ -10309,6 +10309,44 @@ dedent """
 
         self.checkScript(t, (torch.zeros(3, 2, 3),))
 
+    def test_torch_ignore_conversion_to_none(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            @torch.jit.ignore
+            def ignored(self, a: int) -> None:
+                l: int = len([2 for i in range(a) if i > 2])
+                return
+
+            def forward(self) -> int:
+                a: int = 4
+                b: int = 5
+                self.ignored(a)
+                return a + b
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+
+            @torch.jit.ignore
+            def ignored(self, a: int):
+                l: int = len([2 for i in range(a) if i > 2])
+                return
+
+            def forward(self) -> int:
+                a: int = 4
+                b: int = 5
+                self.ignored(a)
+                return a + b
+
+        modelA = torch.jit.script(A())
+        self.assertEqual(modelA(), 9)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "expected value of type Tensor", "self.ignored"):
+            modelB = torch.jit.script(B())
+            modelB()
+
     def test_addmm_grad(self):
         """ This test checks several things:
             1. An expand node was inserted before the addmm operating on the
@@ -13959,6 +13997,24 @@ dedent """
         with self.assertRaisesRegex(Exception, "Parameters not specified"):
             torch.jit.script(test)
 
+    def test_script_method_torch_function_overload(self):
+        class MyCustomTensor(torch.Tensor):
+            pass
+
+        class MyCustomModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        scripted_mod = torch.jit.script(MyCustomModule())
+        t = torch.tensor([3.0])
+        ref_out = scripted_mod(t)
+
+        t_custom = MyCustomTensor([3.0])
+        out1 = scripted_mod(t_custom)
+        self.assertEqual(out1, ref_out)
+
+        out2 = scripted_mod.forward(t_custom)
+        self.assertEqual(out2, ref_out)
 
     def test_function_overloading_isinstance(self):
         @torch.jit._overload  # noqa: F811
@@ -14571,6 +14627,16 @@ dedent """
         self.checkScript(fn, ("",))
         self.checkScript(fn, ("h",))
         self.checkScript(fn, ("hello",))
+
+    def test_multiline_optional_future_refinement(self):
+        @torch.jit.script
+        def fun() -> int:
+            future: Optional[
+                torch.jit.Future[Tuple[torch.Tensor]]
+            ] = None
+
+            return 1
+        self.assertEqual(fun(), 1)
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_attribute_unpickling(self):

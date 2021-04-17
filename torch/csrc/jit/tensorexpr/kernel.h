@@ -12,6 +12,8 @@ namespace tensorexpr {
 
 // Returns true if the TE fuser supports this conv2d.
 bool conv2dIsSupported(const Node* node);
+// Returns true if the TE fuser supports this matmul.
+bool matmulIsSupported(const Node* node);
 
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
@@ -146,6 +148,8 @@ class TORCH_API TensorExprKernel {
   Tensor* computeCatWoConditionals(const torch::jit::Value* v);
 
   Tensor* computeConv2d(const torch::jit::Value* v);
+
+  Tensor* computeMatmul(const torch::jit::Value* v);
 
   Tensor* computeValue(const torch::jit::Value* v);
 
