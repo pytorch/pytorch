@@ -10,11 +10,13 @@ using std::set;
 using std::string;
 using std::vector;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, TestEnforceTrue) {
   // This should just work.
   CAFFE_ENFORCE(true, "Isn't it?");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, TestEnforceFalse) {
   bool kFalse = false;
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kFalse);
@@ -27,8 +29,10 @@ TEST(LoggingTest, TestEnforceFalse) {
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kFalse);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, TestEnforceEquals) {
   int x = 4;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int y = 5;
   int z = 0;
   try {
@@ -56,6 +60,7 @@ struct EnforceEqWithCaller {
 };
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, TestEnforceMessageVariables) {
   const char *const x = "hello";
   CAFFE_ENFORCE_EQ(1, 1, "variable: ", x, " is a variable");
@@ -64,6 +69,7 @@ TEST(LoggingTest, TestEnforceMessageVariables) {
   e.test(x);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, EnforceEqualsObjectWithReferenceToTemporaryWithoutUseOutOfScope) {
   std::vector<int> x = {1, 2, 3, 4};
   // This case is a little tricky. We have a temporary
@@ -98,10 +104,12 @@ std::ostream& operator<<(std::ostream& out, const Noncopyable& nc) {
 }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, DoesntCopyComparedObjects) {
   CAFFE_ENFORCE_EQ(Noncopyable(123), Noncopyable(123));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, EnforceShowcase) {
   // It's not really a test but rather a convenient thing that you can run and
   // see all messages
@@ -127,6 +135,7 @@ TEST(LoggingTest, EnforceShowcase) {
   WRAP_AND_PRINT(CAFFE_ENFORCE_THAT(std::equal_to<void>(), ==, one * two + three, three * two));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, Join) {
   auto s = c10::Join(", ", vector<int>({1, 2, 3}));
   EXPECT_EQ(s, "1, 2, 3");
@@ -136,6 +145,7 @@ TEST(LoggingTest, Join) {
   EXPECT_EQ(s, "1, 2, 3");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, TestDanglingElse) {
   if (true)
     DCHECK_EQ(1, 1);
@@ -144,9 +154,11 @@ TEST(LoggingTest, TestDanglingElse) {
 }
 
 #if GTEST_HAS_DEATH_TEST
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   bool kTrue = true;
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_DEATH(CAFFE_ENFORCE(false, "This goes fatal."), "");
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
 }
