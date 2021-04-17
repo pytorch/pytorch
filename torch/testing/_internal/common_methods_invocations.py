@@ -2562,9 +2562,9 @@ def sample_inputs_tensordot(self, device, dtype, requires_grad, **kwargs):
     )
     samples = []
     for first_shape, second_shape, dims in cases:
-        samples.append(SampleInput(make_tensor(first_shape, device, dtype, 
+        samples.append(SampleInput(make_tensor(first_shape, device, dtype,
                                    requires_grad=requires_grad),
-                       args=(make_tensor(second_shape, device, dtype, 
+                       args=(make_tensor(second_shape, device, dtype,
                              requires_grad=requires_grad),),
                        kwargs=dict(dims=dims,)))
     return tuple(samples)
