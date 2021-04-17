@@ -11,13 +11,8 @@
 
 namespace tensorpipe {
 class Message;
-#ifdef TP_NEW_API
 class Allocation;
 class Descriptor;
-#else
-using Allocation = Message;
-using Descriptor = Message;
-#endif // TP_NEW_API
 } // namespace tensorpipe
 
 namespace torch {
