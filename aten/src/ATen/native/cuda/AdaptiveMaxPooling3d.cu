@@ -385,7 +385,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
  const Tensor& indices) {
   TensorArg output_arg{output, "output", 1};
   TensorArg indices_arg{indices, "indices", 2};
-  TensorArg input_arg{input_, "input_", 3};
+  TensorArg input_arg{input, "input", 3};
 
   checkAllSameGPU(
       "adaptive_max_pool3d_cuda", {output_arg, indices_arg, input_arg});
@@ -398,38 +398,38 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
   int64_t istrideD, istrideT, istrideH, istrideW;
   int64_t totalZ;
 
-  const Tensor& input = input_.ndimension() == 4 ? input_ : input_.contiguous();
+  const Tensor& input_ = input.ndimension() == 4 ? input : input.contiguous();
 
-  if (input.ndimension() == 4) {
-    sizeD = input.size(0);
-    isizeT = input.size(1);
-    isizeH = input.size(2);
-    isizeW = input.size(3);
+  if (input_.ndimension() == 4) {
+    sizeD = input_.size(0);
+    isizeT = input_.size(1);
+    isizeH = input_.size(2);
+    isizeW = input_.size(3);
 
-    istrideD = input.stride(0);
-    istrideT = input.stride(1);
-    istrideH = input.stride(2);
-    istrideW = input.stride(3);
+    istrideD = input_.stride(0);
+    istrideT = input_.stride(1);
+    istrideH = input_.stride(2);
+    istrideW = input_.stride(3);
 
     totalZ = sizeD * osizeT;
   } else {
-    int64_t sizeB = input.size(0);
-    sizeD = input.size(1);
-    isizeT = input.size(2);
-    isizeH = input.size(3);
-    isizeW = input.size(4);
+    int64_t sizeB = input_.size(0);
+    sizeD = input_.size(1);
+    isizeT = input_.size(2);
+    isizeH = input_.size(3);
+    isizeW = input_.size(4);
 
-    istrideD = input.stride(1);
-    istrideT = input.stride(2);
-    istrideH = input.stride(3);
-    istrideW = input.stride(4);
+    istrideD = input_.stride(1);
+    istrideT = input_.stride(2);
+    istrideH = input_.stride(3);
+    istrideW = input_.stride(4);
 
     totalZ = sizeB * sizeD * osizeT;
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf, kBFloat16, input.scalar_type(), "adaptive_max_pool3d_cuda", [&] {
-        scalar_t* input_data = input.data_ptr<scalar_t>();
+      kHalf, kBFloat16, input_.scalar_type(), "adaptive_max_pool3d_cuda", [&] {
+        scalar_t* input_data = input_.data_ptr<scalar_t>();
         scalar_t* output_data = output.data_ptr<scalar_t>();
         int64_t* indices_data = indices.data_ptr<int64_t>();
 
