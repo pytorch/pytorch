@@ -49,12 +49,6 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // mul(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
-static Tensor wrapped_scalar_tensor(const Scalar& s) {
-  auto tensor = scalar_to_tensor(s);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
 SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
@@ -1623,6 +1617,9 @@ Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor&
 }
 
 Tensor conj_sparse(const Tensor& input) {
+  if (!input.is_complex()) {
+    return input;
+  }
   Tensor result = at::native::empty_like(input);
   return conj_out_sparse(input, result);
 }
@@ -1635,8 +1632,11 @@ Tensor& conj_out_sparse(const Tensor& input, Tensor& result) {
   if (!is_same_tensor(result, input)) {
     copy_sparse_to_sparse_(result, input);
   }
-  Tensor conj_values = at::conj(input._values());
-  result._values().copy_(conj_values);
+  if (!input.is_complex()) {
+    return result;
+  }
+  Tensor result_values = result._values();
+  at::conj_out(result_values, input._values());
   return result;
 }
 
