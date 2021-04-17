@@ -177,7 +177,7 @@ void _th_sort_key_value_inplace(Tensor & keys, Tensor & values, int64_t dim, boo
     auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, ScalarType::Long);
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
-           THCudaByteTensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
+            THCudaByteTensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
             break;
         }
         case ScalarType::Char: {
