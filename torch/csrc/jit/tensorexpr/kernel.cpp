@@ -2459,6 +2459,36 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
       });
 }
 
+void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    // Only Tensor constants need to be bound, scalar constants will be turned
+    // into immediates in TE IR
+    return;
+  }
+  auto n = v->node();
+  auto const_tensor = toIValue(v)->toTensor();
+
+  const auto& tt = v->type()->expect<TensorType>();
+  const auto sizes = *tt->sizes().concrete_sizes();
+  std::vector<ExprHandle> te_sizes;
+  for (auto s : sizes) {
+    te_sizes.push_back(IntImm::make(s));
+  }
+
+  const Buf* buf = new Buf(
+      "const_" + v->debugName(),
+      ExprHandleVectorToExprVector(te_sizes),
+      ToDtype(static_cast<ScalarType>(*tt->scalarType())));
+
+  if (!const_tensor.is_contiguous()) {
+    const_tensor = const_tensor.clone().contiguous();
+    unpacked_constant_tensors_.push_back(const_tensor);
+  }
+
+  constants_.push_back({buf, const_tensor.data_ptr()});
+  bufs_[v] = buf;
+}
+
 void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
@@ -2478,7 +2508,10 @@ void TensorExprKernel::compile() {
 
   // Bind nodes to tensor compute expressions.
   for (auto const& n : graph_->nodes()) {
-    if (n->kind() == prim::Constant || n->kind() == prim::ListConstruct) {
+    if (n->kind() == prim::ListConstruct) {
+      continue;
+    } else if (n->kind() == prim::Constant) {
+      bindConstant(n->output());
       continue;
     } else {
       for (auto const& output : n->outputs()) {
@@ -2530,6 +2563,10 @@ void TensorExprKernel::compile() {
     bufs_.erase(output);
   }
 
+  for (auto c : constants_) {
+    bufferArgs_.emplace_back(BufHandle(c.buf));
+  }
+
   BackendType backendType = inferBackendTypeFromDevice(device_);
   Stmt* stmt = transformLoops(backendType, block);
 
@@ -2579,6 +2616,8 @@ void TensorExprKernel::run(Stack& stack) {
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
+  // TODO: preallocate `runArgs` during compilation and fill in values where
+  // possible (e.g. for constant tensors)
   std::vector<CodeGen::CallArg> runArgs;
   runArgs.reserve(inputs.size() + bufOutputs_.size());
 
@@ -2603,6 +2642,11 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
         opts.pinned_memory));
     runArgs.emplace_back(outputs.back().data_ptr());
   }
+
+  for (auto c : constants_) {
+    runArgs.emplace_back(c.ptr);
+  }
+
   return runArgs;
 }
 

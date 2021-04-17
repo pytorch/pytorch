@@ -14,6 +14,11 @@ namespace tensorexpr {
 bool conv2dIsSupported(const Node* node);
 
 class TORCH_API TensorExprKernel {
+  struct ConstantDescr {
+    const Buf* buf;
+    void* ptr;
+  };
+
  public:
   explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
 
@@ -144,6 +149,8 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeValue(const torch::jit::Value* v);
 
+  void bindConstant(const torch::jit::Value* v);
+
   Stmt* transformLoops(BackendType backendType, Stmt* st);
 
   std::string getCodeGenName(BackendType backendType);
@@ -207,6 +214,9 @@ class TORCH_API TensorExprKernel {
   bool hasBroadcast_{false};
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
       known_sizes_;
+
+  std::vector<at::Tensor> unpacked_constant_tensors_;
+  std::vector<ConstantDescr> constants_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();
