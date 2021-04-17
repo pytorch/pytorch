@@ -997,10 +997,8 @@ class DistributedTest:
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode causes hang")
         def test_send_recv_torch_profiler(self):
-            cpu_act = torch.profiler.ProfilerActivity.CPU
-            cuda_act = torch.profiler.ProfilerActivity.CUDA
             torch_profiler_ctx = torch.profiler.profile(
-                activities=[cpu_act, cuda_act],
+                activities=[torch.profiler.ProfilerActivity.CPU],
                 record_shapes=True
             )
             return self._test_send_recv(profiler_cls=torch_profiler_ctx)
@@ -1081,10 +1079,8 @@ class DistributedTest:
         )
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
         def test_send_recv_any_source_torch_profiler(self):
-            cpu_act = torch.profiler.ProfilerActivity.CPU
-            cuda_act = torch.profiler.ProfilerActivity.CUDA
             torch_profiler_ctx = torch.profiler.profile(
-                activities=[cpu_act, cuda_act],
+                activities=[torch.profiler.ProfilerActivity.CPU],
                 record_shapes=True
             )
             return self._test_send_recv_any_source(profiler_cls=torch_profiler_ctx)
@@ -1131,10 +1127,8 @@ class DistributedTest:
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
         def test_send_recv_with_tag_torch_profiler(self):
-            cpu_act = torch.profiler.ProfilerActivity.CPU
-            cuda_act = torch.profiler.ProfilerActivity.CUDA
             torch_profiler_ctx = torch.profiler.profile(
-                activities=[cpu_act, cuda_act],
+                activities=[torch.profiler.ProfilerActivity.CPU],
                 record_shapes=True
             )
             return self._test_send_recv_with_tag(profiler_cls=torch_profiler_ctx)
@@ -1188,10 +1182,8 @@ class DistributedTest:
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
         def test_isend_torch_profiler(self):
-            cpu_act = torch.profiler.ProfilerActivity.CPU
-            cuda_act = torch.profiler.ProfilerActivity.CUDA
             torch_profiler_ctx = torch.profiler.profile(
-                activities=[cpu_act, cuda_act],
+                activities=[torch.profiler.ProfilerActivity.CPU],
                 record_shapes=True
             )
             self._test_isend(profiler_cls=torch_profiler_ctx)
