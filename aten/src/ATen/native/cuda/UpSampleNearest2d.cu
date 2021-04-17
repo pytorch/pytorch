@@ -82,7 +82,7 @@ __global__ void upsample_nearest2d_nhwc_out_frame(
 
     const size_t h1 = height1 == height2 ? h2 : nearest_neighbor_compute_source_index(height_scale, h2, height1);
     const size_t w1 = width1 == width2 ? w2 : nearest_neighbor_compute_source_index(width_scale, w2, width1);
-    
+
     odata[index] = idata[idx_cl(n, h1, w1, c, height1, width1, channels)];
   }
 }
@@ -151,12 +151,12 @@ __global__ void upsample_nearest2d_backward_nhwc_out_frame(
     const size_t width2,
     const size_t channels,
     const float height_scale,
-    const float width_scale, 
+    const float width_scale,
     const size_t gi_numel) {
-  
+
   // 1 is for grad_output (src)
   // 2 is for grad_input (dst)
-  
+
   CUDA_KERNEL_LOOP(index, gi_numel) {
     const int c = index % channels;
     const int w2 = (index / channels) % width2;
@@ -371,7 +371,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
           input_width,
           channels,
           height_scale,
-          width_scale, 
+          width_scale,
           grad_input.numel()
       );
       C10_CUDA_KERNEL_LAUNCH_CHECK();
