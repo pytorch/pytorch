@@ -2532,12 +2532,12 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
     // into immediates in TE IR
     return;
   }
-  auto n = v->node();
   auto const_tensor = toIValue(v)->toTensor();
 
   const auto& tt = v->type()->expect<TensorType>();
   const auto sizes = *tt->sizes().concrete_sizes();
   std::vector<ExprHandle> te_sizes;
+  te_sizes.reserve(sizes.size());
   for (auto s : sizes) {
     te_sizes.push_back(IntImm::make(s));
   }

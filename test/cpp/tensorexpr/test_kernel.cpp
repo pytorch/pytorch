@@ -1141,10 +1141,8 @@ TEST_F(Kernel, ConstantTensors) {
   // IRParser doesn't support tensor constants, so we insert a call to
   // aten::ones and then const-prop it
   ConstantPropagation(graph);
+
   TensorExprKernel k(graph);
-  auto stmt = k.getCodeGenStmt();
-  std::ostringstream oss;
-  oss << *stmt;
 
   auto x = at::rand({16, 16}, TensorOptions(kCPU).dtype(at::kFloat));
   std::vector<at::Tensor> inputs = {x};
@@ -1176,10 +1174,8 @@ TEST_F(Kernel, ConstantTensorsNonContiguous) {
   // IRParser doesn't support tensor constants, so we generate several aten
   // calls to produce non-contiguos constant tensor and then const-prop it
   ConstantPropagation(graph);
+
   TensorExprKernel k(graph);
-  auto stmt = k.getCodeGenStmt();
-  std::ostringstream oss;
-  oss << *stmt;
 
   auto x = at::rand({16, 16}, TensorOptions(kCPU).dtype(at::kFloat));
   std::vector<at::Tensor> inputs = {x};
