@@ -126,6 +126,15 @@ c10::optional<std::vector<int64_t>> tensorSizes(torch::jit::Value* v) {
   return it->sizes().concrete_sizes();
 }
 
+bool isFloatTensor(const torch::jit::Value* v) {
+  auto const& tt = v->type()->cast<TensorType>();
+  if (!tt) {
+    return false;
+  }
+  auto const& st = tt->scalarType();
+  return st && *st == c10::ScalarType::Float;
+}
+
 // The fuser only supports conv2d with very specific properties:
 // - Static shapes: 4-d input and filter, 1-d bias.
 // - Constant strides/padding/dilation/groups
@@ -144,6 +153,13 @@ bool conv2dIsSupported(const torch::jit::Node* node) {
   // Everything should be statically known.
   if (!input || !weight || !bias || !stride || !pad || !dilation || !groups) {
     GRAPH_DEBUG("some params aren't static");
+    return false;
+  }
+
+  // Inputs should be float32.  Other dtypes need more testing.
+  if (!isFloatTensor(node->input(0)) || !isFloatTensor(node->input(1)) ||
+      !isFloatTensor(node->input(2))) {
+    GRAPH_DEBUG("only float32 allowed");
     return false;
   }
 
