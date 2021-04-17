@@ -76,7 +76,18 @@ class ShapeUtil {
   }
 
   static Shape ChangeElementType(const Shape& original, PrimitiveType type) {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    if (original.IsTuple()) {
+      std::vector<Shape> new_operands;
+      new_operands.reserve(original.tuple_shapes_size());
+      for (const Shape& operand : original.tuple_shapes()) {
+        new_operands.push_back(ChangeElementType(operand, type));
+      }
+      return MakeTupleShape(new_operands);
+    } else {
+      Shape new_shape = original;
+      new_shape.set_element_type(type);
+      return new_shape;
+    }
   }
 
   static Shape MakeTupleShape(lazy_tensors::Span<const Shape> shapes) {
