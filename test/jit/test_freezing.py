@@ -1847,8 +1847,19 @@ class TestFrozenOptimizations(JitTestCase):
             N, C, H, W, = 10, 3, 224, 224
             inp = torch.randn(N, C, H, W)
             self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
-            print(mod.graph)
             self.assertTrue(torch.allclose(model(inp), mod(inp)))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_adaptive_avgpool2d(self):
+        with set_default_dtype(torch.float):
+
+            sub_model = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 2, 2), torch.nn.AdaptiveAvgPool2d(4), torch.nn.Hardswish())
+            sub_model.eval()
+            mod = torch.jit.freeze(torch.jit.script(sub_model))
+            N, C, H, W, = 10, 3, 224, 224
+            inp = torch.randn(N, C, H, W)
+            self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+            self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     @skipIfNoTorchVision

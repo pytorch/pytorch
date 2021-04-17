@@ -816,6 +816,7 @@ class MKLDNNSubgraphSlicer {
       // conversions. from initial testing including it speeds up models
       case aten::max_pool2d:
       case aten::max_pool3d:
+      case aten::adaptive_avg_pool2d:
         return true;
     }
 
