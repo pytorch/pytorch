@@ -4502,7 +4502,7 @@ op_db: List[OpInfo] = [
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_tensordot,
            skips=(
-               # Doesn't raise a runtime error when the input & output tensors are on different devices
+               # Reference: https://github.com/pytorch/pytorch/issues/56314
                SkipInfo("TestCommon", "test_variant_consistency_jit", dtypes=[torch.float32]),
            )
            ),
