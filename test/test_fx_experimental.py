@@ -26,6 +26,7 @@ from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.fx.passes.shape_prop import extract_tensor_metadata
 
 try:
     from torchvision.models import resnet18
@@ -42,7 +43,6 @@ def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> Graph
         root if isinstance(root, torch.nn.Module) else torch.nn.Module(),
         RewritingTracer().trace(root),
     )
-
 
 class TestFXExperimental(JitTestCase):
     def test_serialize_graph(self):
@@ -75,19 +75,14 @@ class TestFXExperimental(JitTestCase):
         # Fix for now to add type/shape to output
         for node in traced.graph.nodes:
             if node.op == "output":
-                node.meta['shape'] = a.shape
-                node.meta['dtype'] = a.dtype
-                node.meta['is_quantized'] = a.is_quantized
+                node.meta['tensor_meta'] = extract_tensor_metadata(a)
         for mod in module_with_submodules.modules():
             if isinstance(mod, GraphModule):
                 for node in mod.graph.nodes:
-                    node.meta['shape'] = a.shape
-                    node.meta['dtype'] = a.dtype
-                    node.meta['is_quantized'] = a.is_quantized
+                    node.meta['tensor_meta'] = extract_tensor_metadata(a)
         for node in module_with_submodules.graph.nodes:
-            node.meta['shape'] = a.shape
-            node.meta['dtype'] = a.dtype
-            node.meta['is_quantized'] = a.is_quantized
+            node.meta['tensor_meta'] = extract_tensor_metadata(a)
+
 
         weights1 = {}
         weights2 = {}
@@ -731,6 +726,11 @@ terrible spacing
         partition_counter = 0
         NPARTITIONS = 3
 
+        # Add some random meta info to make sure it is kept around.
+        for node in my_module_traced.graph.nodes:
+            if node.op != "output":
+                node.meta["test_meta_info"] = True
+
         def mod_partition(node: Node):
             nonlocal partition_counter
             partition = partition_counter % NPARTITIONS
@@ -739,6 +739,17 @@ terrible spacing
 
         # split module in module with submodules
         module_with_submodules = split_module(my_module_traced, my_module, mod_partition)
+
+        # Check that test_meta_info was still on all nodes.
+        submodules = dict(module_with_submodules.named_modules())
+        for node in module_with_submodules.graph.nodes:
+            if node.op == "call_module":
+                submod = submodules[node.target]
+                self.assertTrue(isinstance(submod, torch.fx.GraphModule))
+                for submod_node in submod.graph.nodes:
+                    if submod_node.op != "output":
+                        stored_op = submod_node.meta.get("test_meta_info")
+                        self.assertTrue(stored_op is not None and stored_op)
 
         x = torch.rand(3, 4)
         y = torch.rand(3, 4)
