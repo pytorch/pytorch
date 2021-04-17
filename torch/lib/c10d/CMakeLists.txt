@@ -45,6 +45,7 @@ endfunction()
 
 set(C10D_SRCS
   FileStore.cpp
+  ParamCommsUtils.cpp
   PrefixStore.cpp
   ProcessGroup.cpp
   sequence_num.cpp
@@ -122,6 +123,7 @@ if(USE_C10D_GLOO)
 endif()
 
 copy_header(FileStore.hpp)
+copy_header(ParamCommsUtils.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)
