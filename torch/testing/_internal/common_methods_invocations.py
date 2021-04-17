@@ -4716,41 +4716,12 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.complex64])
                    )),
-    OpInfo('rsub',
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
-           variant_test_name='rsub_tensor',
-           supports_out=False,
-           supports_inplace_autograd=False,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/53797
-               # JIT doesn't understand complex literals
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=[torch.cfloat, torch.cdouble]),
-           ),
-           sample_inputs_func=partial(sample_inputs_rsub, variant='tensor'),),
-    OpInfo('rsub',
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
-           variant_test_name='rsub_scalar',
-           supports_out=False,
-           supports_inplace_autograd=False,
-           sample_inputs_func=partial(sample_inputs_rsub, variant='scalar'),
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/53797
-               # JIT doesn't understand complex literals
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
-           assert_autodiffed=True,),
-    OpInfo('rpow',
-           op=torch.Tensor.__rpow__,
+    OpInfo('radd',
+           op=torch.Tensor.__radd__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/54774
-               # "log2" "_vml_cpu" not implemented for Half
-               SkipInfo('TestOpInfo', 'test_supported_backward', device_type='cpu',
-                        dtypes=(torch.float16,)),
-
                # Reference: https://github.com/pytorch/pytorch/issues/53797
                # JIT doesn't understand complex literals
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
@@ -4778,11 +4749,40 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
            assert_autodiffed=True,),
-    OpInfo('radd',
-           op=torch.Tensor.__radd__,
+    OpInfo('rpow',
+           op=torch.Tensor.__rpow__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/54774
+               # "log2" "_vml_cpu" not implemented for Half
+               SkipInfo('TestOpInfo', 'test_supported_backward', device_type='cpu',
+                        dtypes=(torch.float16,)),
+
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
+           assert_autodiffed=True,),
+    OpInfo('rsub',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+           variant_test_name='rsub_tensor',
+           supports_out=False,
+           supports_inplace_autograd=False,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.cfloat, torch.cdouble]),
+           ),
+           sample_inputs_func=partial(sample_inputs_rsub, variant='tensor'),),
+    OpInfo('rsub',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+           variant_test_name='rsub_scalar',
+           supports_out=False,
+           supports_inplace_autograd=False,
+           sample_inputs_func=partial(sample_inputs_rsub, variant='scalar'),
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
                # JIT doesn't understand complex literals
