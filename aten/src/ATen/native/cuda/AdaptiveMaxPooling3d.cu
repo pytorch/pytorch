@@ -378,7 +378,7 @@ void adaptive_max_pool3d_backward_out_cuda_template(
 
 // 5d tensor B x D x T x H x W
 
-TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda)
+TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
 (const Tensor& input,
  IntArrayRef output_size,
  const Tensor& output,
