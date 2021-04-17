@@ -1,5 +1,6 @@
 #include <torch/csrc/fx/fx_init.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace fx {
@@ -154,6 +155,24 @@ bool isPythonTensor(at::Tensor tensor) {
 PythonTensorImpl* getPythonImpl(at::Tensor tensor) {
   return static_cast<PythonTensorImpl*>(tensor.unsafeGetTensorImpl());
 }
+
+PyObject* pyIdentity(py::object x) {
+  return x.ptr();
+}
+template<class T>
+py::tuple vectorToPyTuple(const std::vector<T> &data, std::function<PyObject*(T)> converter) {
+	PyObject* tuple = PyTuple_New( data.size() );
+	if (!tuple) throw std::runtime_error("Unable to allocate memory for Python tuple");
+	for (unsigned int i = 0; i < data.size(); i++) {
+		PyObject *num = converter(data[i]);
+		if (!num) {
+			Py_DECREF(tuple);
+			throw std::runtime_error("Unable to allocate memory for Python tuple");
+		}
+		PyTuple_SET_ITEM(tuple, i, num);
+	}
+	return py::reinterpret_borrow<py::tuple>(tuple);
+}
 void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
@@ -161,30 +180,37 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto num_arguments = schema.arguments().size();
   const auto arguments = torch::jit::last(stack, num_arguments);
   torch::jit::drop(stack, num_arguments);
-  for (int idx = 0; idx< arguments.size(); idx++) {
+
+  py::gil_scoped_acquire g;
+  std::vector<py::object> pyArgs;
+  std::vector<py::object> pyTensorArgs;
+  for (int idx = 0; idx < arguments.size(); idx++) {
     const auto& ivalue = arguments[idx];
-    if (!ivalue.isTensor()) {
-      continue;
+    if (ivalue.isTensor() && isPythonTensor(ivalue.toTensor())) {
+      auto pyTensor = getPythonImpl(ivalue.toTensor());
+      pyArgs.push_back(pyTensor->value_);
+      pyTensorArgs.push_back(pyTensor->value_);
+    } else {
+      pyArgs.push_back(torch::jit::toPyObject(ivalue));
     }
-    const auto& tensor = ivalue.toTensor();
-    if (!isPythonTensor(tensor)) {
-      continue;
-    }
-    const auto* pyTensor = getPythonImpl(tensor);
-
-    py::gil_scoped_acquire g;
-    py::object torch_function = PyObject_FastGetAttrString(pyTensor->value_.ptr(), "__torch_function__");
-
-    std::string func_name = "mul";
-    py::object torch_api_function = PyObject_FastGetAttrString(
-    THPVariableClass, (char*)func_name.c_str());
-
-    py::tuple py_types = py::make_tuple(py::handle(PyObject_Type(pyTensor->value_.ptr())));
-    py::dict kwargs;
-    auto out = PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), 0, kwargs.ptr());
-
   }
-  torch::jit::push(stack, 5);
+
+  py::object torch_function = PyObject_FastGetAttrString(pyTensorArgs[0].ptr(), "__torch_function__");
+
+
+  py::tuple py_types = py::cast<py::tuple>(vectorToPyTuple<py::object>(pyArgs, [](py::object x) -> PyObject* { return PyObject_Type(x.ptr()); }));
+  py::dict kwargs ={};
+
+  py::object torch_api_function = py::str(op.operator_name().name);
+  try {
+    std::string func_name = op.operator_name().name;
+    std::string delimiter = "aten::";
+    func_name = func_name.substr(func_name.find(delimiter)+delimiter.size());
+    torch_api_function = PyObject_FastGetAttrString(THPVariableClass, (char*)func_name.c_str());
+  } catch(int e) {}
+  auto pyTupleArgs = vectorToPyTuple<py::object>(pyArgs, pyIdentity);
+  auto out = PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), pyTupleArgs.ptr(), kwargs.ptr(), 0);
+  torch::jit::push(stack, addKey(py::cast<py::object>(out)));
   return;
 }
 TORCH_LIBRARY_IMPL(_, PythonKey, m) {

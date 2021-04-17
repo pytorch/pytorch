@@ -8,10 +8,6 @@ namespace torch {
 namespace fx {
 struct TORCH_API PythonTensorImpl : public c10::TensorImpl {
   explicit PythonTensorImpl(py::object value): TensorImpl(c10::DispatchKeySet(c10::DispatchKey::PythonKey), caffe2::TypeMeta::Make<float>(),c10::Device(at::kCPU)), value_(value) {
-
-    // asm("int $0x3\n");
-    py::object torch_function = PyObject_FastGetAttrString(value.ptr(), "__torch_function__");
-    // PyObject_CallFunctionObjArgs(torch_function.ptr(), 0, 0, 0, 0, 0);
   }
 
 
