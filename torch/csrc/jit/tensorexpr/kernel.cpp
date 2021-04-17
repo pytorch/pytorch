@@ -1689,6 +1689,59 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   }
 }
 
+// Return the (lower, upper) loop bounds if they are constants, else nullopt.
+c10::optional<std::pair<int64_t, int64_t>> loopBounds(const For* loop) {
+  auto start = IRSimplifier::simplify(loop->start());
+  auto stop = IRSimplifier::simplify(loop->stop());
+  if (!start->isConstant() || !stop->isConstant()) {
+    return c10::nullopt;
+  }
+  return c10::make_optional(
+      std::make_pair(immediateAs<int64_t>(start), immediateAs<int64_t>(stop)));
+}
+
+// True if all the loops in this vector have equal bounds.
+bool loopBoundsAllEqual(const std::vector<For*>& loops) {
+  auto bounds = loopBounds(loops[0]);
+  if (!bounds) {
+    return false;
+  }
+  for (auto const& loop : loops) {
+    auto next = loopBounds(loop);
+    if (!next) {
+      return false;
+    }
+    if (bounds->first != next->first || bounds->second != next->second) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Recursively fuse all the loops with matching bounds in `st`.  Stops fusing
+// at any level containing non-loops or non-matching bounds.  The restriction
+// on matching bounds exists to avoid inserting conditionals on the loop
+// indices where none would be needed, which would significantly complicate
+// vectorization.
+void fuseAllLoops(Stmt* st) {
+  if (auto block = dynamic_cast<tensorexpr::Block*>(st)) {
+    std::vector<For*> loopsToFuse;
+    for (auto stmt : *block) {
+      auto loop = dynamic_cast<For*>(stmt);
+      if (!loop) {
+        // Block contains something that's not a loop.  Quit.
+        return;
+      }
+      loopsToFuse.push_back(loop);
+    }
+    if (!loopBoundsAllEqual(loopsToFuse)) {
+      return;
+    }
+    auto fusedLoop = LoopNest::fuseLoops(loopsToFuse);
+    fuseAllLoops(fusedLoop->body());
+  }
+}
+
 Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
@@ -1705,12 +1758,18 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
     root_stmt->accept(block_analysis.get());
   }
 
-  // inlining output & intermediate buffers can duplicate computation.
-  // it slows down cpu code generation but is enabled on gpu because it avoids
-  // difficult synchronization logic across blocks.
-  bool allow_duplicated_work =
-      (backendType == kCudaCodeGen || backendType == kBlockCodeGen);
-  l.inlineIntermediateBufs(allow_duplicated_work);
+  // Inlining output & intermediate buffers can duplicate computation.
+  // Duplicating work can slow down the program if it's not ameliorated in some
+  // way, but we've empirically found that:
+  // - On CPU, LLVM's CSE does a good job as long as you horizontally fuse
+  //   output loops.
+  // - On GPU, there's enough compute to hide the extra work, and inlining
+  //   avoids synchronizing between kernels.
+  l.inlineIntermediateBufs(/*allow_duplicated_work=*/true);
+
+  // Fuse loops "horizontally".  This pass allows us to combine loops that
+  // write to different output buffers, as long as they have the same bounds.
+  fuseAllLoops(l.root_stmt());
 
   if (backendType == kCudaCodeGen) {
     for (auto buf : bufOutputs_) {
