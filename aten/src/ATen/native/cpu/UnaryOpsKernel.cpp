@@ -35,7 +35,7 @@ namespace {
 using namespace vec256;
 
 static void sigmoid_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "sigmoid_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "sigmoid_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return (static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp((-a)))); },
