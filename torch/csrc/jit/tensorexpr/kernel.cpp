@@ -2091,8 +2091,8 @@ Tensor* TensorExprKernel::computeMatmul(const torch::jit::Value* v) {
     dtype = Dtype(*maybe_stype);
   }
   BufHandle ResultBuf("matmul", shape, dtype);
-  const Buf* a = tensors_.at(n->input(0))->buf();
-  const Buf* b = tensors_.at(n->input(1))->buf();
+  const Buf* a = bufs_.at(n->input(0));
+  const Buf* b = bufs_.at(n->input(1));
 
   auto size_a = ExprVectorToExprHandleVector(a->dims());
   auto size_b = ExprVectorToExprHandleVector(b->dims());
