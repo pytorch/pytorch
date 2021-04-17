@@ -47,8 +47,6 @@ def clamp(g, self, min, max):
     elif sym_help._is_none(max):
         return clamp_min(g, self, min)
     else:
-        min = sym_help._parse_arg(min, 'v')
-        max = sym_help._parse_arg(max, 'v')
         if sym_help._get_tensor_rank(min) == 0 and sym_help._get_tensor_rank(max) == 0:
             return g.op("Clip", self, min, max)
         else:
