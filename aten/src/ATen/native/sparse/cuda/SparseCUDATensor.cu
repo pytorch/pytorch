@@ -33,18 +33,15 @@ using at::cuda::detail::getTensorInfo;
 namespace {
 
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
+C10_LAUNCH_BOUNDS_1(1024)
 __global__ void _sparse_mask_copy_kernel(
-  int64_t total_threads,
-  int64_t t_nnz,
-  const TensorInfo<int64_t, int64_t> t_indices_ti,
-  const TensorInfo<int64_t, int64_t> mask_indices_ti,
-  const TensorInfo<int64_t, int64_t> t_indices_pos_ti,
-  const TensorInfo<scalar_t, int64_t> t_values_ti,
-  TensorInfo<scalar_t, int64_t> r_values_ti
-) {
+    int64_t total_threads,
+    int64_t t_nnz,
+    const TensorInfo<int64_t, int64_t> t_indices_ti,
+    const TensorInfo<int64_t, int64_t> mask_indices_ti,
+    const TensorInfo<int64_t, int64_t> t_indices_pos_ti,
+    const TensorInfo<scalar_t, int64_t> t_values_ti,
+    TensorInfo<scalar_t, int64_t> r_values_ti) {
   const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= total_threads) return;
   const int64_t j = t_indices_pos_ti.data[i];

@@ -24,6 +24,8 @@ TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();
 TORCH_API bool setTexprReductionsEnabled(bool value);
 TORCH_API bool texprReductionsEnabled();
+TORCH_API bool texprParallelCPUEnabled();
+TORCH_API void setTexprParallelCPUEnabled(bool val);
 
 TORCH_API void RemoveProfileNodesAndSpecializeTypes(
     std::shared_ptr<Graph>& graph);
