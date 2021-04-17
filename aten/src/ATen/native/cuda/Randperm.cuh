@@ -53,7 +53,7 @@ void randperm_handle_duplicate_keys(T *keys, scalar_t *data, int bits, int64_t n
   T mask = static_cast<T>((1UL << bits) - 1);
   std::cout << "bits: " << bits << ", seeds: " << rng_engine_inputs.seed_ << ", " << rng_engine_inputs.offset_.val << std::endl;
   randperm_handle_duplicate_keys_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
-    keys, data, mask, n/*, rng_engine_inputs*/);
+    keys, data, mask, n, rng_engine_inputs);
 }
 
 }
