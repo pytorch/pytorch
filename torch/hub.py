@@ -115,17 +115,21 @@ def _parse_repo_info(github):
 
 def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
     # Use urlopen to avoid depending on local git.
-    page = 1
-    while True:
-        url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/branches?per_page=100&page=' + str(page)
+    for url_prefix in (
+            f'https://api.github.com/repos/{repo_owner}/{repo_name}/branches',
+            f'https://api.github.com/repos/{repo_owner}/{repo_name}/tags'):
+        page = 1
+        while True:
+            url = url_prefix + '?per_page=100&page=' + str(page)
+            with urlopen(url) as r:
+                response = json.loads(r.read().decode(r.headers.get_content_charset('utf-8')))
+                if not response:
+                    continue
+                for br in response:
+                    if br['name'] == branch or br['commit']['sha'].startswith(branch):
+                        return
+
         page += 1
-        with urlopen(url) as r:
-            response = json.loads(r.read().decode(r.headers.get_content_charset('utf-8')))
-            if not response:
-                break
-            for br in response:
-                if br['name'] == branch or br['commit']['sha'].startswith(branch):
-                    return
     raise ValueError(f'Cannot find {branch} in https://github.com/{repo_owner}/{repo_name}. '
                      'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
 
@@ -154,6 +158,9 @@ def _get_cache_or_reload(github, force_reload, verbose=True):
         if verbose:
             sys.stderr.write('Using cache found in {}\n'.format(repo_dir))
     else:
+        # Validate the tag/branch is from the original repo instead of a forked repo
+        _validate_not_a_forked_repo(repo_owner, repo_name, branch)
+
         cached_file = os.path.join(hub_dir, normalized_br + '.zip')
         _remove_if_exists(cached_file)
 
