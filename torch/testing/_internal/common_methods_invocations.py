@@ -2911,13 +2911,15 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', 
 
     return samples
 
-def sample_inputs_radd_rmul(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
+def sample_inputs_rbinops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
     samples = [
         SampleInput(_make_tensor_helper((S, S, S)), args=(3.14,)),
+        SampleInput(_make_tensor_helper((S, S, S)), args=(3.14j,)),
         SampleInput(_make_tensor_helper(()), args=(3.14,)),
+        SampleInput(_make_tensor_helper(()), args=(3.14j,)),
     ]
 
     return samples
@@ -4738,10 +4740,26 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
            assert_autodiffed=True,),
+    OpInfo('rpow',
+           op=torch.Tensor.__rpow__,
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_rbinops,
+           supports_out=False,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/54774
+               # "log2" "_vml_cpu" not implemented for Half
+               SkipInfo('TestOpInfo', 'test_supported_backward', device_type='cpu',
+                        dtypes=(torch.float16,)),
+
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
+           assert_autodiffed=True,),
     OpInfo('rdiv',
            op=torch.Tensor.__rdiv__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-           sample_inputs_func=sample_inputs_rdiv,
+           sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
@@ -4752,7 +4770,7 @@ op_db: List[OpInfo] = [
     OpInfo('rmul',
            op=torch.Tensor.__rmul__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-           sample_inputs_func=sample_inputs_radd_rmul,
+           sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
@@ -4763,7 +4781,7 @@ op_db: List[OpInfo] = [
     OpInfo('radd',
            op=torch.Tensor.__radd__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-           sample_inputs_func=sample_inputs_radd_rmul,
+           sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
@@ -5752,8 +5770,6 @@ def method_tests():
         ('div', (), (uniform_scalar(0.1j),), 'complex_scalar_broadcast_lhs', (True,)),
         ('div', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-1, (3.14j,), 'complex_constant', (True,)),
         ('div', uniform_scalar(1e-1j, requires_grad=True), (3.14j,), 'complex_scalar_constant', (True,)),
-        ('__rpow__', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant', (True, 'aten::pow')),
-        ('__rpow__', uniform_scalar(1e-3, requires_grad=True), (3.14,), 'scalar_constant', (True, 'aten::pow')),
         ('float_power', torch.rand(S, S, S) + 1e-3, (torch.rand(S, S, S) + 0.1,), ''),
         ('float_power', torch.rand(S, S, S) + 1e-3, (torch.rand(1,) + 0.1,), 'broadcast_rhs'),
         ('float_power', torch.rand(1,) + 1e-3, (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs'),
