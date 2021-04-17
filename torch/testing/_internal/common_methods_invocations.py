@@ -2911,15 +2911,29 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', 
 
     return samples
 
-def sample_inputs_reverse_binops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
+def sample_inputs_radd_rmul(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
-    return [
+    samples = [
         SampleInput(_make_tensor_helper((S, S, S)), args=(3.14,)),
         SampleInput(_make_tensor_helper(()), args=(3.14,)),
     ]
 
+    return samples
+
+def sample_inputs_rdiv(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = [
+        SampleInput(_make_tensor_helper((S, S, S)), args=(3.14,)),
+        SampleInput(_make_tensor_helper(()), args=(3.14,)),
+        SampleInput(_make_tensor_helper((S, S, S)), args=(3.14j,)),
+        SampleInput(_make_tensor_helper(()), args=(3.14j,)),
+    ]
+
+    return samples
 
 def sample_inputs_cumulative_ops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
@@ -4724,10 +4738,21 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
            assert_autodiffed=True,),
+    OpInfo('rdiv',
+           op=torch.Tensor.__rdiv__,
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_rdiv,
+           supports_out=False,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
+           assert_autodiffed=True,),
     OpInfo('rmul',
            op=torch.Tensor.__rmul__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-           sample_inputs_func=sample_inputs_reverse_binops,
+           sample_inputs_func=sample_inputs_radd_rmul,
            supports_out=False,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
@@ -4738,7 +4763,7 @@ op_db: List[OpInfo] = [
     OpInfo('radd',
            op=torch.Tensor.__radd__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-           sample_inputs_func=sample_inputs_reverse_binops,
+           sample_inputs_func=sample_inputs_radd_rmul,
            supports_out=False,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
@@ -5718,14 +5743,6 @@ def method_tests():
         ('true_divide', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
         ('true_divide', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
         ('true_divide', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
-        ('__rdiv__', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant',
-            (True, [], ['aten::mul', 'aten::reciprocal'])),
-        ('__rdiv__', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant',
-            (True, [], ['aten::mul', 'aten::reciprocal'])),
-        ('__rdiv__', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-1, (3.14j,), 'complex_constant',
-            (True, [], ['aten::mul', 'aten::reciprocal'])),
-        ('__rdiv__', uniform_scalar(1e-1 * (1 + 1j), requires_grad=True), (3.14j,), 'complex_scalar_constant',
-            (True, [], ['aten::mul', 'aten::reciprocal'])),
         ('div', (S, S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex', (True,)),
         ('div', (S, S, S), (torch.rand(S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_rhs', (True,)),
         ('div', (S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_lhs', (True,)),
