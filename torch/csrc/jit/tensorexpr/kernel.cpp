@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -17,11 +18,17 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int te_cuda_pointwise_loop_levels = -1;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int te_cuda_pointwise_block_count = -1;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int te_cuda_pointwise_block_size = -1;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool fallback_allowed = false;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool te_generate_block_code = false;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool te_must_use_llvm_on_cpu = true;
 static bool cat_wo_conditionals = false; // NOLINT
 
@@ -107,6 +114,99 @@ c10::optional<at::Device> pickDeviceType(
   return device;
 }
 
+// If v is a Tensor with concretely-known sizes, return them, else nullopt.
+c10::optional<std::vector<int64_t>> tensorSizes(torch::jit::Value* v) {
+  auto const& it = v->type()->cast<TensorType>();
+  if (!it) {
+    return c10::nullopt;
+  }
+  if (!it->isComplete()) {
+    return c10::nullopt;
+  }
+  return it->sizes().concrete_sizes();
+}
+
+// The fuser only supports conv2d with very specific properties:
+// - Static shapes: 4-d input and filter, 1-d bias.
+// - Constant strides/padding/dilation/groups
+// - Equal padding and strides, dilation == 1.
+// - Depthwise (groups == in_channels == out_channels)
+// - 3x3 kernel
+bool conv2dIsSupported(const torch::jit::Node* node) {
+  auto const& input = tensorSizes(node->input(0));
+  auto const& weight = tensorSizes(node->input(1));
+  auto const& bias = tensorSizes(node->input(2));
+  auto const& stride = constant_as<c10::List<int64_t>>(node->input(3));
+  auto const& pad = constant_as<c10::List<int64_t>>(node->input(4));
+  auto const& dilation = constant_as<c10::List<int64_t>>(node->input(5));
+  auto const& groups = constant_as<int64_t>(node->input(6));
+
+  // Everything should be statically known.
+  if (!input || !weight || !bias || !stride || !pad || !dilation || !groups) {
+    GRAPH_DEBUG("some params aren't static");
+    return false;
+  }
+
+  // Proper ndim for tensor inputs.
+  if (input->size() != 4 || weight->size() != 4 || bias->size() != 1) {
+    GRAPH_DEBUG("inputs are the wrong size");
+    return false;
+  }
+
+  // Depthwise.
+  auto Cin = (*input)[1];
+  auto Cout = (*weight)[0];
+  auto CperG = (*weight)[1];
+  if (Cin != Cout || Cin != *groups || CperG != 1) {
+    GRAPH_DEBUG("not depthwise");
+    return false;
+  }
+
+  // 3x3 kernel.
+  auto KH = (*weight)[2];
+  auto KW = (*weight)[3];
+  if (KH != 3 || KW != 3) {
+    GRAPH_DEBUG("not 3x3");
+    return false;
+  }
+
+  // Stride, pad, and dilation checks.
+  if (stride->size() != 2 || (*stride)[0] != (*stride)[1]) {
+    GRAPH_DEBUG("unsupported stride");
+    return false;
+  }
+  if (pad->size() != 2 || (*pad)[0] != (*pad)[1]) {
+    GRAPH_DEBUG("unsupported pad");
+    return false;
+  }
+  if (dilation->size() != 2 || (*dilation)[0] != 1 || (*dilation)[1] != 1) {
+    GRAPH_DEBUG("unsupported dilation");
+    return false;
+  }
+
+  return true;
+}
+
+// The fuser currently only supports matmul of 2D x 2D matrices
+bool matmulIsSupported(const torch::jit::Node* node) {
+  auto const& input0 = tensorSizes(node->input(0));
+  auto const& input1 = tensorSizes(node->input(1));
+
+  // Everything should be statically known.
+  if (!input0 || !input1) {
+    GRAPH_DEBUG("matmulIsSupported: Input shapes aren't static");
+    return false;
+  }
+
+  // Proper ndim for tensor inputs.
+  if (input0->size() != 2 || input1->size() != 2) {
+    GRAPH_DEBUG("matmulIsSupported: Unsupported input sizes");
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -153,7 +253,7 @@ static std::vector<ExprHandle> computeIndicesToBroadcast(
 ExprHandle TensorExprKernel::broadcast(
     Tensor* t,
     const std::vector<ExprHandle>& axes) {
-  return t->call(computeIndicesToBroadcast(
+  return t->load(computeIndicesToBroadcast(
       axes, ExprVectorToExprHandleVector(t->buf()->dims())));
 }
 
@@ -176,7 +276,7 @@ ExprHandle TensorExprKernel::chunk(
     }
   }
 
-  return t->call(indices);
+  return t->load(indices);
 }
 
 ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
@@ -367,6 +467,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       if (dim < 0) {
         dim = dim + shape.size() + 1;
       }
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (dim < 0 || dim > shape.size()) {
         throw std::runtime_error("Invalid 'dim' input in aten::unsqueeze");
       }
@@ -1098,6 +1199,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
                 tensorOrConstant(n->input(0), indices), // input
                 tensorOrConstant(n->input(3), {c}), // mean
                 tensorOrConstant(n->input(4), {c}), // var
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 constant(n->input(7)) // eps
             };
             if (hasWeight) {
@@ -1119,6 +1221,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
               weight = inputs[4];
             }
             if (hasBias) {
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               bias = inputs[5];
             }
 
@@ -1600,6 +1703,10 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       return computeConv2d(v);
     }
 
+    case aten::matmul: {
+      return computeMatmul(v);
+    }
+
     default: {
       throw std::runtime_error("Unhandled node kind");
     }
@@ -1644,7 +1751,9 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
       int blockSize = getTECudaPointwiseBlockSize();
 
       if (loopLevels == 2) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* outer;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner;
         const int kDefaultBlockSize = 512;
         if (blockSize < 0) {
@@ -1654,9 +1763,13 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
         l.setGPUBlockIndex(outer, 0);
         l.setGPUThreadIndex(inner, 0);
       } else if (loopLevels == 3) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* outer;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner1;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner2;
         // TODO: change the number of microprocessors
         const int kDefaultBlockCount = 1280;
@@ -1782,6 +1895,7 @@ void TensorExprKernel::genInputDebugNames() {
     std::string sanitized_name = sanitizeName(input->debugName());
     // we could get fancier here, but name conflict is extremely unlikely
     while (name_set.count(sanitized_name)) {
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       sanitized_name = sanitized_name + "_";
     }
     value_to_name[input] = sanitized_name;
@@ -1912,6 +2026,7 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   BufHandle w = BufHandle(tensors_.at(n->input(1))->buf());
   BufHandle b = BufHandle(tensors_.at(n->input(2))->buf());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int sH, sW;
   auto strides_iv = *toIValue(n->input(3));
   if (strides_iv.isIntList()) {
@@ -1920,6 +2035,7 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   } else {
     sH = sW = strides_iv.toInt();
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int pH, pW;
   auto padding_iv = *toIValue(n->input(4));
   if (padding_iv.isIntList()) {
@@ -1928,7 +2044,9 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   } else {
     pH = pW = padding_iv.toInt();
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int dH, dW;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto dil_iv = *toIValue(n->input(5));
   if (dil_iv.isIntList()) {
     dH = dil_iv.toIntList()[0];
@@ -1936,7 +2054,13 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   } else {
     dH = dW = dil_iv.toInt();
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int groups = toIValue(n->input(6))->toInt();
+
+  // Generate TE for depthwise convolutions.
+  if (conv2dIsSupported(n)) {
+    return conv2d_depthwise(inp, w, b, sH, pH, groups);
+  }
 
   // Once we have a performant TE representation for conv2d, we could use it
   // here instead of the external call!
@@ -1946,6 +2070,49 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
       {inp, w, b},
       {sH, sW, pH, pW, dH, dW, groups});
   return new Tensor(ResultBuf.node(), s);
+}
+
+Tensor* TensorExprKernel::computeMatmul(const torch::jit::Value* v) {
+  const Node* n = v->node();
+  auto const& shape = sizesForValue(v);
+  Dtype dtype = kFloat;
+  auto maybe_stype = findDtypeForValue(v);
+  if (maybe_stype) {
+    dtype = Dtype(*maybe_stype);
+  }
+  BufHandle ResultBuf("matmul", shape, dtype);
+  const Buf* a = tensors_.at(n->input(0))->buf();
+  const Buf* b = tensors_.at(n->input(1))->buf();
+
+  auto size_a = ExprVectorToExprHandleVector(a->dims());
+  auto size_b = ExprVectorToExprHandleVector(b->dims());
+  const IntImm* total_size = dynamic_cast<const IntImm*>(
+      IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
+
+  // For small sizes, where N*M*K < 1000, lower matmul to a naive 3-level
+  // loopnest. The number is not tuned very carefully, and in future we should
+  // fine-tune it as well as we should add more advanced native TE lowerings for
+  // matmuls. For bigger sizes we generate a TE ExternalCall, which would call
+  // an aten::matmul.
+  // Native, even naive, lowering is beneficial when the sizes are small because
+  // it allows to eliminate dispatch overhead.
+  if (total_size && total_size->value() < 1000) {
+    return Reduce(
+        "nnc_matmul",
+        {{size_a[0], "M"}, {size_b[1], "N"}},
+        Sum(),
+        [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+          BufHandle ah(a);
+          BufHandle bh(b);
+          return Load::make(ah, {m, k}) * Load::make(bh, {k, n});
+        },
+        {{size_a[1], "K"}});
+  } else {
+    return new Tensor(
+        ResultBuf.node(),
+        ExternalCall::make(
+            ResultBuf, "nnc_aten_matmul", {BufHandle(a), BufHandle(b)}, {}));
+  }
 }
 
 Tensor* TensorExprKernel::computeSoftmax(
@@ -2054,21 +2221,21 @@ Tensor* TensorExprKernel::computeSoftmax(
       Compute("aten_softmax_exp", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             v->node()->input(0), convert_indices_to_expr_handle(indices));
-        return exp(inp - max->call(remove_softmax_dim_index(indices)));
+        return exp(inp - max->load(remove_softmax_dim_index(indices)));
       });
   auto sum = Reduce(
       "aten_softmax_sum",
       non_softmax_dims,
       Sum(),
       [&](ParameterList& indices) {
-        return e->call(move_softmax_dim_index_to_pos(indices));
+        return e->load(move_softmax_dim_index_to_pos(indices));
       },
       {output_dims[softmax_dim]});
   if (!log_softmax) {
     auto result =
         Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
-          return e->call(indices) /
-              sum->call(remove_softmax_dim_index(indices));
+          return e->load(indices) /
+              sum->load(remove_softmax_dim_index(indices));
         });
     return new Tensor(
         result->buf(),
@@ -2077,15 +2244,15 @@ Tensor* TensorExprKernel::computeSoftmax(
 
   auto log_sum = Compute(
       "aten_softmax_log_sum", non_softmax_dims, [&](ParameterList& indices) {
-        return log(sum->call(indices));
+        return log(sum->load(indices));
       });
   auto result =
       Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             v->node()->input(0), convert_indices_to_expr_handle(indices));
         auto non_softmax_indices = remove_softmax_dim_index(indices);
-        return inp - max->call(non_softmax_indices) -
-            log_sum->call(non_softmax_indices);
+        return inp - max->load(non_softmax_indices) -
+            log_sum->load(non_softmax_indices);
       });
   return new Tensor(
       result->buf(),
@@ -2173,10 +2340,9 @@ Tensor* TensorExprKernel::computeCatWoConditionals(const torch::jit::Value* v) {
       }
     }
     auto inp_buf = tensors_.at(inp)->buf();
-    auto load_expr = new Load(inp_buf, load_indices, new IntImm(1));
+    auto load_expr = new Load(inp_buf, load_indices);
     auto load_promoted = promoteToDtype(ExprHandle(load_expr), highType);
-    Stmt* st = new Store(
-        output_buf, store_indices, load_promoted.node(), new IntImm(1));
+    Stmt* st = new Store(output_buf, store_indices, load_promoted.node());
     for (size_t i = dims.size(); i > 0; --i) {
       st = new For(for_vars[i - 1], new IntImm(0), dims[i - 1].node(), st);
     }
@@ -2346,7 +2512,7 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
               Mod::make(absolute_position, IntImm::make(stride));
           new_axes[stride_index] = index;
         }
-        return tensor->call(new_axes);
+        return tensor->load(new_axes);
       });
 }
 

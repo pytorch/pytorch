@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <c10/util/Optional.h>
 
 namespace c10d {
 const int kUnsetSeqNum = 0;
@@ -51,8 +52,7 @@ class SequenceNum {
   SequenceNum(const SequenceNum& other);
 
  private:
-  uint64_t num_;
-  bool set_;
+  c10::optional<uint64_t> num_;
   mutable std::mutex lock_;
 };
 

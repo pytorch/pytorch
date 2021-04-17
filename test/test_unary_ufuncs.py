@@ -315,7 +315,7 @@ class TestUnaryUfuncs(TestCase):
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on a range of tensors, including empty tensors, scalar tensors,
     #   1D tensors and a large 2D tensor with interesting and extremal values
-    #   and discontiguities.
+    #   and noncontiguities.
     @suppress_warnings
     @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
@@ -352,7 +352,7 @@ class TestUnaryUfuncs(TestCase):
 
         self._test_reference_numerics(dtype, op, tensors, equal_nan)
 
-    # Tests for testing (dis)contiguity consistency
+    # Tests for testing (non)contiguity consistency
 
     @ops(unary_ufuncs)
     def test_contig_vs_every_other(self, device, dtype, op):
@@ -593,7 +593,7 @@ class TestUnaryUfuncs(TestCase):
         input = make_tensor((50, 50), device, dtype)
         outputs = (
             (torch.empty_like(input), torch.empty_like(input, dtype=torch.int)),
-            (torch.empty_like(input).transpose(0, 1), make_tensor((50, 50), device, torch.int, discontiguous=True)),
+            (torch.empty_like(input).transpose(0, 1), make_tensor((50, 50), device, torch.int, noncontiguous=True)),
         )
         for mantissa, exponent in outputs:
             torch.frexp(input, out=(mantissa, exponent))
@@ -1047,7 +1047,7 @@ class TestUnaryUfuncs(TestCase):
             (vec1, vec1),  # for large number, it should approach 0.5
             (vec1, 0.5 * vec1),  # test for considerable ratio
             (vec1, 2.0 * vec1),
-            (vec1[::2, :], vec1[::2, :]),  # contiguous/discontiguous tests
+            (vec1[::2, :], vec1[::2, :]),  # contiguous/noncontiguous tests
             (vec1[::2, :], vec1[:vec1.shape[0] // 2, :]),
             (vec1[:vec1.shape[0] // 2, :], vec1[::2, :]),
         ]
@@ -1194,6 +1194,38 @@ class TestUnaryUfuncs(TestCase):
 
         t = torch.tensor([inf, -inf, nan], device=device, dtype=dtype)
         self.assertTrue(torch.i0(t).isnan().all())
+
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
+    @dtypes(torch.bfloat16, torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_special_i0e_vs_scipy(self, device, dtype):
+        def check_equal(t):
+            # Test by comparing to scipy
+            actual = torch.special.i0e(t)
+            if dtype is torch.bfloat16:
+                t = t.to(torch.float32)
+            expected = scipy.special.i0e(t.cpu().numpy())
+
+            # Casting down for dtype float16 is required since scipy upcasts to float32
+            if dtype is torch.bfloat16 or dtype is torch.float16:
+                expected = torch.from_numpy(expected).to(dtype)
+            self.assertEqual(actual, expected)
+
+        t = torch.tensor([], device=device, dtype=dtype)
+        check_equal(t)
+
+        range = (-1e7, 1e7)
+        if dtype == torch.half:
+            range = (-65000, 65000)
+
+        t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
+        check_equal(t)
+
+        # NaN, inf, -inf are tested in reference_numerics tests.
+        info = torch.finfo(dtype)
+        min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
+        t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
+        check_equal(t)
 
     # TODO: allow large opinfo values to be opted-into via metadata
     @dtypes(torch.long)
@@ -1564,7 +1596,7 @@ def _generate_gamma_input(dtype, device, test_poles=True):
 
 # this class contains information needed to generate tests for torch math functions
 # the generated tests compare torch implementation with the reference numpy/scipy implementation,
-# and also check proper behavior for contiguous/discontiguous/inplace outputs.
+# and also check proper behavior for contiguous/noncontiguous/inplace outputs.
 class _TorchMathTestMeta(object):
     def __init__(self,
                  opstr,
