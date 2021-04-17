@@ -68,6 +68,47 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(memcmp(the_file.c_str() + off2, data2.data(), data2.size()), 0);
 }
 
+TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
+  std::ostringstream oss;
+  // write records through writers
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
+  std::array<char, 127> data1;
+
+  for (int i = 0; i < data1.size(); ++i) {
+    data1[i] = data1.size() - i;
+  }
+  writer.writeRecord("key1", data1.data(), data1.size());
+
+  std::array<char, 64> data2;
+  for (int i = 0; i < data2.size(); ++i) {
+    data2[i] = data2.size() - i;
+  }
+  writer.writeRecord("key2", data2.data(), data2.size());
+
+  const std::vector<std::string>& written_records = writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records[0], "key1");
+  ASSERT_EQ(written_records[1], "key2");
+
+  writer.writeEndOfFile();
+
+  std::string the_file = oss.str();
+  std::ofstream foo("output2.zip");
+  foo.write(the_file.c_str(), the_file.size());
+  foo.close();
+
+  std::istringstream iss(the_file);
+
+  // read records through readers
+  PyTorchStreamReader reader(&iss);
+  EXPECT_THROW(reader.getRecord("key3"), c10::Error);
+
+  // Reader should still work after throwing
+  EXPECT_TRUE(reader.hasRecord("key1"));
+}
+
 } // namespace
 } // namespace serialize
 } // namespace caffe2

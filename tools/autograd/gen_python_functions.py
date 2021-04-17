@@ -39,12 +39,24 @@ from .gen_trace_type import should_trace
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.api import cpp
-from tools.codegen.api.types import *
-from tools.codegen.api.python import *
+from tools.codegen.api.types import CppSignatureGroup
+from tools.codegen.api.python import (PythonArgument, PythonSignature,
+                                      PythonSignatureDeprecated,
+                                      PythonSignatureGroup,
+                                      PythonSignatureNativeFunctionPair,
+                                      arg_parser_output_exprs,
+                                      argument_type_str, cpp_dispatch_exprs,
+                                      cpp_dispatch_target,
+                                      dispatch_lambda_args,
+                                      dispatch_lambda_exprs,
+                                      dispatch_lambda_return_str,
+                                      has_tensor_options,
+                                      namedtuple_fieldnames, signature)
 from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
 from tools.codegen.context import with_native_function
-from tools.codegen.model import *
-from tools.codegen.utils import *
+from tools.codegen.model import (Argument, BaseOperatorName, NativeFunction,
+                                 Type, Variant)
+from tools.codegen.utils import split_name_params
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
@@ -64,9 +76,10 @@ except ImportError:
 
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
-    'alias', 'contiguous', 'is_cuda', 'is_sparse', 'size', 'stride',
+    'alias', 'contiguous', 'is_cuda', 'is_sparse', 'is_sparse_csr', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
+    '_?sparse_csr_tensor.*',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*', '_sparse_dense_add_out',
     'index', 'unique_dim_consecutive',
@@ -472,7 +485,7 @@ def method_impl(
     method_header = ['HANDLE_TH_ERRORS']
     method_header += namedtuple_inits
     method_header += [
-        "Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
+        "const Tensor& self = THPVariable_Unpack(self_);"
     ] if method else []
 
     method_footer = ([] if noarg else ['Py_RETURN_NONE;']) + ['END_HANDLE_TH_ERRORS']
