@@ -105,7 +105,7 @@ class TCPStoreWorkerDaemon : public BackgroundThread {
           void(c10::optional<std::string>, c10::optional<std::string>)> cb);
   std::mutex mtx;
   std::condition_variable cv;
-  bool callbackRegistered;
+  bool callbackRegistered = false;
 
  protected:
   void run();
