@@ -12,8 +12,8 @@ from execution.work import WorkOrder
 
 
 REPEATS = 5
-TIMEOUT = 600  # Seconds
-RETRIES = 2
+TIMEOUT = 300  # Seconds
+RETRIES = 5
 
 VERSION = 0
 MD5 = "4d55e8abf881ad38bb617a96714c1296"
@@ -38,6 +38,7 @@ def main(argv: List[str]) -> None:
     work_orders = tuple(
         WorkOrder(label, autolabels, timer_args, timeout=TIMEOUT, retries=RETRIES)
         for label, autolabels, timer_args in benchmarks * REPEATS
+        if "Math" in label and "add" in label
     )
 
     keys = tuple({str(work_order): None for work_order in work_orders}.keys())
