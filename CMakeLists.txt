@@ -22,6 +22,8 @@ endif()
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
 
+set(CMAKE_REQUIRED_QUIET ON)
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()

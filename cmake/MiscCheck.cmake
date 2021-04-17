@@ -2,6 +2,10 @@ if(UNIX)
   # prevent Unknown CMake command "check_function_exists".
   include(CheckFunctionExists)
 endif()
+
+set(CMAKE_REQUIRED_QUIET ON)
+
+
 include(CheckIncludeFile)
 include(CheckCSourceCompiles)
 include(CheckCSourceRuns)

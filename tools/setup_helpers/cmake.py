@@ -332,7 +332,7 @@ class CMake:
         # 1. https://cmake.org/cmake/help/latest/manual/cmake.1.html#synopsis
         # 2. https://stackoverflow.com/a/27169347
         args.append(base_dir)
-        self.run(args, env=my_env)
+        self.run(["--log-level=ERROR", "-Wno-deprecated", "-Wno-dev", "-DCMAKE_INSTALL_MESSAGE=Never"] + args, env=my_env)
 
     def build(self, my_env):
         "Runs cmake to build binaries."
@@ -340,7 +340,7 @@ class CMake:
         from .env import build_type
 
         max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
-        build_args = ['--build', '.', '--target', 'install', '--config', build_type.build_type_string]
+        build_args = ['--build', '.', '--target', 'install', '--config', build_type.build_type_string, "-DCMAKE_INSTALL_MESSAGE=Never"]
         # This ``if-else'' clause would be unnecessary when cmake 3.12 becomes
         # minimum, which provides a '-j' option: build_args += ['-j', max_jobs]
         # would be sufficient by then.
