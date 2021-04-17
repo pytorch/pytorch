@@ -2569,7 +2569,7 @@ def sample_inputs_tensordot(self, device, dtype, requires_grad, **kwargs):
             args=(
                 make_tensor((S, 1, S), device, dtype, requires_grad=requires_grad),
             ),
-            kwargs=dict(dims=([1, 0], [2, 1]),),
+            kwargs=dict(dims=([1, 2], [0, 1]),),
         ),
     )
 
