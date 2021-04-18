@@ -51,14 +51,7 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
 namespace at {
 namespace native {
 
-Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps, Tensor& result) {
-  if (!optional_steps.has_value()) {
-    TORCH_WARN_ONCE(
-      "Not providing a value for linspace's steps is deprecated and will "
-      "throw a runtime error in a future release. This warning will appear "
-      "only once per process.");
-  }
-
+Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, const int64_t steps, Tensor& result) {
   if (result.numel() != steps) {
     result.resize_({steps});
   }
@@ -107,15 +100,7 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
   return result;
 }
 
-Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps, double base, Tensor& result) {
-
-  if (!optional_steps.has_value()) {
-    TORCH_WARN_ONCE(
-      "Not providing a value for logspace's steps is deprecated and will "
-      "throw a runtime error in a future release. This warning will appear "
-      "only once per process.");
-  }
-
+Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, const int64_t steps, double base, Tensor& result) {
   if (result.numel() != steps) {
     result.resize_({steps});
   }
