@@ -52,8 +52,6 @@ namespace at {
 namespace native {
 
 Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps, Tensor& result) {
-  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
-
   if (!optional_steps.has_value()) {
     TORCH_WARN_ONCE(
       "Not providing a value for linspace's steps is deprecated and will "
@@ -110,7 +108,6 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
 }
 
 Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps, double base, Tensor& result) {
-  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
   if (!optional_steps.has_value()) {
     TORCH_WARN_ONCE(
