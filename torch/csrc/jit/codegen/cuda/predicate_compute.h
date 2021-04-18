@@ -42,11 +42,14 @@ class PredicateCompute {
       const std::vector<kir::Val*>& indices,
       bool buffer_init);
 
+  // ignore_internal_syncthread_ops will prevent creation of predicates on
+  // block/grid broadcast/reduce as these have syncthread calls within them
+  // so all threads need to execute the function.
   static kir::Bool* getInlinePredicate(
       const kir::Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
       kir::Bool* thread_pred,
-      bool ignore_block_grid_external_ops = true,
+      bool ignore_internal_syncthread_ops = true,
       bool misaligned_vectorization = false);
 };
 

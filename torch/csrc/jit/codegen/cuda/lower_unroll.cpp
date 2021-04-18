@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
@@ -372,8 +373,33 @@ void UnrollPass::handle(kir::Expr* expr) {
     const auto thread_pred = isReductionInitExpr(expr)
         ? ir_builder.create<kir::Bool>(true)
         : getThreadPredicate(out_tv);
-    const auto pred =
-        PredicateCompute::getInlinePredicate(expr, for_loops_, thread_pred);
+
+    // Vectorized expressions should never use inline predicates
+    kir::Bool* vectorized_pred = nullptr;
+    if (std::any_of(
+            for_loops_.begin(), for_loops_.end(), [](const kir::ForLoop* fl) {
+              return fl->iter_domain()->parallelType() ==
+                  ParallelType::Vectorize;
+            })) {
+      std::vector<kir::ForLoop*> outer_loops;
+      kir::ForLoop* vectorized_loop = nullptr;
+      for (auto loop : for_loops_) {
+        if (loop->iter_domain()->parallelType() == ParallelType::Vectorize) {
+          vectorized_loop = loop;
+          break;
+        } else {
+          outer_loops.emplace_back(loop);
+        }
+      }
+      TORCH_INTERNAL_ASSERT(
+          vectorized_loop != nullptr, "Should be unreachable.");
+      vectorized_pred =
+          UnswitchPredicate::get(outer_loops, vectorized_loop, p2c_root_map_);
+    }
+
+    const auto pred = vectorized_pred == nullptr
+        ? PredicateCompute::getInlinePredicate(expr, for_loops_, thread_pred)
+        : vectorized_pred;
 
     TORCH_INTERNAL_ASSERT(pred != nullptr);
 

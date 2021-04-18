@@ -777,10 +777,16 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
   const auto& ref_2_producer = replay_producer_as_ref.getReplay();
 
   // Forward vectorized IDs to index into producer correctly
+  // We want p_id to be vectorized like consumer just for the indexing, then we
+  // need to switch it back later. Store previous state here when changing. We
+  // need to do this as replaying producer as consumer can use replay best
+  // effort which means some domains may be the originals.
+  std::vector<std::pair<IterDomain*, ParallelType>> p_id_backup;
   for (auto entry : ref_2_producer) {
     auto ref_id = entry.first;
     auto p_id = entry.second;
     if (ref_id->getParallelType() == ParallelType::Vectorize) {
+      p_id_backup.emplace_back(std::make_pair(p_id, p_id->getParallelType()));
       p_id->parallelize(ParallelType::Vectorize);
     }
     if (ref_id->getParallelType() == ParallelType::MisalignedVectorize) {
@@ -793,6 +799,11 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
       producer_tv->domain(),
       ref_2_producer,
       producer_tv->domain()->contiguity());
+
+  // Revert p_ids
+  for (auto entry : p_id_backup) {
+    entry.first->parallelize(entry.second);
+  }
 
   // Indices should now be mapped onto IterDomains in producer, so just grab
   // and use them.
@@ -1077,10 +1088,16 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   const auto& ref_2_producer = replay_producer_as_ref.getReplay();
 
   // Forward vectorized IDs to index into producer correctly
+  // We want p_id to be vectorized like consumer just for the indexing, then we
+  // need to switch it back later. Store previous state here when changing. We
+  // need to do this as replaying producer as consumer can use replay best
+  // effort which means some domains may be the originals.
+  std::vector<std::pair<IterDomain*, ParallelType>> p_id_backup;
   for (auto entry : ref_2_producer) {
     auto ref_id = entry.first;
     auto p_id = entry.second;
     if (ref_id->getParallelType() == ParallelType::Vectorize) {
+      p_id_backup.emplace_back(std::make_pair(p_id, p_id->getParallelType()));
       p_id->parallelize(ParallelType::Vectorize);
     }
     if (ref_id->getParallelType() == ParallelType::MisalignedVectorize) {
@@ -1093,6 +1110,11 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
       producer_tv->domain(),
       ref_2_producer,
       producer_tv->domain()->contiguity());
+
+  // Revert p_ids
+  for (auto entry : p_id_backup) {
+    entry.first->parallelize(entry.second);
+  }
 
   IndexSwizzle index_swizzle(
       producer_tv,

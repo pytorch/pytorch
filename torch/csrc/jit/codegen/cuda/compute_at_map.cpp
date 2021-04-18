@@ -362,7 +362,10 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
         auto parallel_map_it = parallel_type_map_.find(set);
         // Parallelize all IterDomains to simplify lowering and codegen
         if (parallel_map_it != parallel_type_map_.end()) {
-          id->parallelize(parallel_map_it->second);
+          // Don't propogate vectorize like other parallel types
+          if (parallel_map_it->second != ParallelType::Vectorize) {
+            id->parallelize(parallel_map_it->second);
+          }
         }
       }
     }

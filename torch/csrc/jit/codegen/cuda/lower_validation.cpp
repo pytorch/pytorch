@@ -36,6 +36,18 @@ class ValidateParallelType : public IterVisitor {
     const auto ptype0 = id0->getParallelType();
     const auto ptype1 = id1->getParallelType();
 
+    if (ptype0 == ParallelType::Vectorize ||
+        ptype1 == ParallelType::Vectorize) {
+      auto other_type = ptype0 == ParallelType::Vectorize ? ptype1 : ptype0;
+      TORCH_INTERNAL_ASSERT(
+          other_type == ParallelType::Vectorize ||
+              (!isParallelTypeThreadDim(other_type) &&
+               !isParallelTypeBlockDim(other_type)),
+          "Vectorize type was parallelized inconsistently in. ",
+          "Detected during promoting parallel types.");
+      return;
+    }
+
     if (ptype0 != ptype1) {
       TORCH_CHECK(
           ptype0 == ParallelType::Serial || ptype1 == ParallelType::Serial,
@@ -233,7 +245,7 @@ class VectorizeValidator : public OptInDispatch {
         vector_size_optional.value();
 
     // Allow half2, float2, float4 and same sized vtypes.
-    std::array<int64_t, 3> allowed_vector_sizes = {4, 8, 16}; // NOLINT
+    std::array<int64_t, 4> allowed_vector_sizes = {2, 4, 8, 16}; // NOLINT
 
     TORCH_CHECK(
         std::find(
@@ -258,7 +270,8 @@ class VectorizeValidator : public OptInDispatch {
         validator.is_valid,
         "Invalid vectorized pattern found, vectorization iter domains must be descendants of inner-most dimension.",
         "Issue found in, ",
-        tv);
+        tv,
+        "\n");
 
     if (misaligned_vectorize) {
       if (tv->getMemoryType() == MemoryType::Global) {
@@ -300,7 +313,9 @@ class VectorizeValidator : public OptInDispatch {
     TORCH_CHECK(
         last_root_dim == validator.vectorized_id_ &&
             tv->domain()->contiguity()[last_root_dim_pos],
-        "Vectorized dim has to be from a contiguous inner most position.");
+        "Vectorized dim has to be from a contiguous inner most position: ",
+        tv,
+        "\n");
   }
 };
 
@@ -330,7 +345,9 @@ void validateVectorize(Fusion* fusion) {
       IterDomain* concrete_id =
           GpuLower::current()->caParallelMap().getConcreteMappedID(id);
 
-      if (concrete_id->getParallelType() == ParallelType::Vectorize) {
+      auto ptype = concrete_id->getParallelType();
+
+      if (ptype == ParallelType::Vectorize) {
         // If we want to do this check up front we would have to do 2 things:
         // (1) Check that the tensor view with vectorize being set on it is
         // getting set outside the local compute at position
@@ -339,7 +356,9 @@ void validateVectorize(Fusion* fusion) {
         // the vectorize dim.
         TORCH_INTERNAL_ASSERT(
             i >= tv->getComputeAtPosition(),
-            "IterDomains to the left of the compute at point cannot be vectorized.");
+            "IterDomains to the left of the compute at point cannot be vectorized: ",
+            tv,
+            "\n");
         has_vectorize_dim = true;
       }
 
@@ -361,7 +380,9 @@ void validateVectorize(Fusion* fusion) {
               (tv->definition()->isA<UnaryOp>() &&
                tv->definition()->as<UnaryOp>()->getUnaryOpType() ==
                    UnaryOpType::Set),
-          "Vectorized accesses cannot be inline with computation, they are only supported with a Set operation.");
+          "Vectorized accesses cannot be inline with computation, they are only supported with a Set operation.",
+          "TensorView: ",
+          tv);
     }
     if (has_vectorize_dim || has_misaligned_vectorize_dim) {
       VectorizeValidator::validate(tv);
