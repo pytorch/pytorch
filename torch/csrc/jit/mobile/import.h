@@ -55,6 +55,10 @@ TORCH_API mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device = c10::nullopt);
 
+TORCH_API mobile::Module _backport_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files);
 /**
  * Load only the contents of the "extra/" files whose names are
  * passed in the map (extra_files). Populate the corresponding values

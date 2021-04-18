@@ -579,11 +579,19 @@ TEST(LiteInterpreterTest, BackPortByteCodeModel) {
   // Load check in model: sequence.ptl
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("test_backport_v4.ptl");
+  testModelFile.append("test_backport_v5.ptl");
   Module m = load(testModelFile);
-  m._backport_for_mobile("output.ptl");
-//  _backport_for_mobile(testModelFile, "output_backport.ptl");
+  m._backport_for_mobile(testModelFile, "output_5.ptl");
 //  mobile::Module bc = _load_for_mobile(testModelFile);
+
+
+  //  Module m = load("/Users/chenlai/Documents/pytorch/models/265868112-4d43a58c-a960-4381-ae02-8c80a514f0d6-model.ptl");
+//  std::vector<IValue> inputs;
+//  inputs.push_back(at::ones(-0.1));
+//  inputs.push_back(at::ones(-0.1));
+//  auto tup = at::ivalue::Tuple::create({at::ones(1), at::ones(1)});
+//  IValue iv(tup);
+//  m.forward(std::vector<c10::IValue>{iv});
 }
 
 TEST(LiteInterpreterTest, SequentialModuleInfo) {

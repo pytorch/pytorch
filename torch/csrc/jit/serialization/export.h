@@ -90,6 +90,7 @@ TORCH_API void ExportModule(
 TORCH_API void BackPortByteCode(
     const Module& module,
     const std::string& filename,
+    const uint64_t input_bytecode_version,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = true,
     bool save_mobile_debug_info = false);

@@ -1658,7 +1658,7 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         Module module = torch::jit::load(input_filename);
-        return module._backport_for_mobile(output_filename);
+        return module._backport_for_mobile(input_filename, output_filename);
       });
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));

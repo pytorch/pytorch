@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/method.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -31,6 +32,8 @@ namespace torch {
 namespace jit {
 
 static constexpr const char* kArchiveNameConstants = "constants";
+static constexpr const char* kArchiveNameBytecode = "bytecode";
+static constexpr uint64_t kBytecodeVersionV4 = 0x4L;
 
 char const* toString(OpCode op);
 
@@ -411,6 +414,10 @@ class ScriptModuleSerializer {
     }
   }
 
+  void useTensorsArchiveTable(bool enable) {
+    use_tensors_archive_table_ = enable;
+  }
+
  private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
@@ -434,21 +441,23 @@ class ScriptModuleSerializer {
     size_t i = 0;
     std::string prefix = archive_name + "/";
 
-    // Store all tensors from constant archive to tensors_archive_table_
-    // In the future, if other tensors would like to adapt to the storage
-    // format {archive_name}/{index}, just expand the if statement here.
-    if (archive_name == kArchiveNameConstants) {
-      const auto tensor_from_jit = data_pickle.tensorData();
-      for (size_t tensor_index = 0; tensor_index < tensor_from_jit.size();
+    // Store all tensors from archives in the tensors_archive_table_resources_ list
+    // to tensors_archive_table_
+    if (tensors_archive_table_resources_.find(archive_name) != tensors_archive_table_resources_.end()) {
+      const auto tensor_candidates = data_pickle.tensorData();
+      for (size_t tensor_index = 0; tensor_index < tensor_candidates.size();
            tensor_index++) {
-        tensors_archive_table_[tensor_from_jit[tensor_index]] =
+        tensors_archive_table_[tensor_candidates[tensor_index]] =
             std::make_pair(kArchiveNameConstants, tensor_index);
       }
     }
+    bool can_use_tensors_archive_table =
+        (use_tensors_archive_table_
+         && tensors_archive_table_users_.find(archive_name) != tensors_archive_table_users_.end());
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
-      if (use_tensors_archive_table_) {
+      if (can_use_tensors_archive_table) {
         const auto found = tensors_archive_table_.find(td);
         if (found == tensors_archive_table_.end()) {
           writer_.writeRecord(
@@ -554,7 +563,6 @@ class ScriptModuleSerializer {
   }
 
   void writeByteCode(const Module& module, bool save_mobile_debug_info) {
-    use_tensors_archive_table_ = true;
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -606,8 +614,12 @@ class ScriptModuleSerializer {
 
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
+
   bool use_tensors_archive_table_ = false;
   TensorIndexMap tensors_archive_table_;
+  std::unordered_set<std::string> tensors_archive_table_resources_ = {kArchiveNameConstants};
+  std::unordered_set<std::string> tensors_archive_table_users_ = {kArchiveNameBytecode};
+
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
   TypeNameUniquer type_name_uniquer_;
@@ -657,11 +669,21 @@ void ExportModule(
 void BackPortByteCode(
     const Module& module,
     const std::string& filename,
+    const uint64_t input_bytecode_version,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
-
+  const uint64_t output_bytecode_version = input_bytecode_version - 1;
   ScriptModuleSerializer serializer(filename);
+
+  if(output_bytecode_version == kBytecodeVersionV4) {
+    serializer.useTensorsArchiveTable(false);
+  } else {
+    TORCH_WARN(
+        "The input bytecode model version is ",
+        input_bytecode_version, ". Currently only support backporting to version ",
+        kBytecodeVersionV4);
+  }
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
 }
