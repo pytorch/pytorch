@@ -1360,14 +1360,9 @@ For* LoopNest::fuseLoops(const std::vector<For*>& loops) {
   auto first_loop = loops.front();
 
   // Check if bounds are the same for all the loops.
-  // TODO: The following check does not consider different expressions that
-  // evaluate to the same value as the same. Improve this by performing
-  // expression equality.
   auto are_bounds_equal = [](const Expr* bound1, const Expr* bound2) {
-    if (bound1->isConstant() && bound2->isConstant()) {
-      return immediateAs<int>(bound1) == immediateAs<int>(bound2);
-    }
-    return bound1 == bound2;
+    auto diff = IRSimplifier::simplify(new Sub(bound1, bound2));
+    return diff->isConstant() && (immediateAs<int>(diff) == 0);
   };
   auto first_loop_start = IRSimplifier::simplify(first_loop->start());
   auto first_loop_stop = IRSimplifier::simplify(first_loop->stop());
