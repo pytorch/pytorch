@@ -16,7 +16,10 @@ import tempfile
 import time
 from typing import Optional, TextIO, Union
 
-import etcd  # type: ignore[import]
+try:
+    import etcd  # type: ignore[import]
+except ModuleNotFoundError:
+    pass
 
 
 log = logging.getLogger(__name__)
@@ -151,7 +154,10 @@ class EtcdServer:
         return f"{self._host}:{self._port}"
 
     def start(
-        self, timeout: int = 60, num_retries: int = 3, stderr: Union[int, TextIO, None] = None
+        self,
+        timeout: int = 60,
+        num_retries: int = 3,
+        stderr: Union[int, TextIO, None] = None,
     ) -> None:
         """
         Starts the server, and waits for it to be ready. When this function
@@ -219,7 +225,7 @@ class EtcdServer:
         self._etcd_proc = subprocess.Popen(etcd_cmd, close_fds=True, stderr=stderr)
         self._wait_for_ready(timeout)
 
-    def get_client(self) -> etcd.Client:
+    def get_client(self):  # type: ignore
         """
         Returns:
            An etcd client object that can be used to make requests to
