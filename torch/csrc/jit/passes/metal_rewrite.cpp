@@ -176,12 +176,12 @@ void metalInsertCopyOps(script::Module& module) {
   rewriter.runOnGraph(graph);
 }
 
-void removeMutation(script::Module& module) {
+void metalRemoveMutation(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   RemoveTensorMutation(graph);
 }
 
-void runCanonicalOptimizations(script::Module& module) {
+void metalRunCanonicalOptimizations(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   runOptimization(graph, false /* no loop unrolling */);
 }
@@ -197,9 +197,9 @@ script::Module metalOptimizeForMobile(
   metalFusePrePackedConvWithClamp(cloned_module);
   metalFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);
-  removeMutation(cloned_module);
+  metalRemoveMutation(cloned_module);
   // remove duplicated constants
-  runCanonicalOptimizations(cloned_module);
+  metalRunCanonicalOptimizations(cloned_module);
   cloned_module.register_attribute(
       "optimized_for_metal", BoolType::get(), true);
   return cloned_module;

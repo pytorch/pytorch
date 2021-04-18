@@ -1181,6 +1181,13 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   return return_string;
 }
 
+bool ClassType::isUnresolvedClassAttribute(const std::string& name) const {
+  return std::find(
+      unresolved_class_attributes_.begin(),
+      unresolved_class_attributes_.end(),
+      name) != unresolved_class_attributes_.end();
+}
+
 void checkForwardHookInputArguments(
     const FunctionSchema& forward_schema,
     const FunctionSchema& hook_schema,
@@ -1582,20 +1589,27 @@ ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
-    std::string doc_string) {
-  return ClassTypePtr(
-      new ClassType(std::move(qualifiedName), std::move(cu), is_module, std::move(doc_string)));
+    std::string doc_string,
+    std::vector<std::string> unresolved_class_attributes) {
+  return ClassTypePtr(new ClassType(
+      std::move(qualifiedName),
+      std::move(cu),
+      is_module,
+      std::move(doc_string),
+      std::move(unresolved_class_attributes)));
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module = false,
-    std::string doc_string = "")
+    bool is_module,
+    std::string doc_string,
+    std::vector<std::string> unresolved_class_attributes)
     : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)),
       isModule_(is_module),
-      doc_string_(std::move(doc_string)) {}
+      doc_string_(std::move(doc_string)),
+      unresolved_class_attributes_(std::move(unresolved_class_attributes)) {}
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;

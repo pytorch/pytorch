@@ -208,7 +208,7 @@ void vulkanFoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
-void removeMutation(script::Module& module) {
+void vulkanRemoveMutation(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   RemoveTensorMutation(graph);
 }
@@ -224,7 +224,7 @@ script::Module vulkanOptimizeForMobile(
   vulkanFusePrePackedConvWithClamp(cloned_module);
   vulkanFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);
-  removeMutation(cloned_module);
+  vulkanRemoveMutation(cloned_module);
   return cloned_module;
 }
 

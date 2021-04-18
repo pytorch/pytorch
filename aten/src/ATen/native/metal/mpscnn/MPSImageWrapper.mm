@@ -64,8 +64,10 @@ void MPSImageWrapper::copyDataFromHost(const float* inputData) {
 }
 
 void MPSImageWrapper::copyDataToHost(float* hostData) {
-  synchronize();
-  TORCH_CHECK(_image && ![_image isTemporaryImage]);
+  TORCH_CHECK(_image);
+  if(_image.isTemporaryImage){
+    synchronize();
+  }
   copyToHost(hostData, _image);
 }
 
