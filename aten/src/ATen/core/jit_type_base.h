@@ -170,25 +170,25 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   template <typename T>
   std::shared_ptr<T> expect() {
     auto r = cast<T>();
-    AT_ASSERT(r);
+    TORCH_INTERNAL_ASSERT(r);
     return r;
   }
   template <typename T>
   std::shared_ptr<const T> expect() const {
     auto r = cast<const T>();
-    AT_ASSERT(r);
+    TORCH_INTERNAL_ASSERT(r);
     return r;
   }
   template <typename T>
   T& expectRef() {
     auto* r = castRaw<T>();
-    AT_ASSERT(r);
+    TORCH_INTERNAL_ASSERT(r);
     return *r;
   }
   template <typename T>
   const T& expectRef() const {
     auto* r = castRaw<const T>();
-    AT_ASSERT(r);
+    TORCH_INTERNAL_ASSERT(r);
     return *r;
   }
   virtual ~Type() = default;
@@ -204,7 +204,7 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   // contained_types
   TypePtr withContained(std::vector<TypePtr> contained_types) {
     auto current_contained = containedTypes();
-    AT_ASSERT(current_contained.size() == contained_types.size());
+    TORCH_INTERNAL_ASSERT(current_contained.size() == contained_types.size());
     if (current_contained.equals(contained_types)) {
       return shared_from_this();
     }

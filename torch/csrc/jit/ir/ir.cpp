@@ -470,7 +470,7 @@ void Graph::lint() const {
   // - Params and return do NOT occur in nodes
   // - next_unique_ is greater than all uniques in graph
   // - uniques in all_nodes are unique
-  // - every use will occur later in the topsort
+  // - every use will occur later in the toposort
 
   struct LintScope {
     LintScope() = default;
@@ -969,6 +969,16 @@ bool Node::matches(
 }
 
 bool Node::mustBeNone() const {
+  // Gate this as lambda so we can perform some other checks beforehand
+  auto is_optional = [this]() {
+    if (output()->type()->kind() == OptionalType::Kind) {
+      return true;
+    }
+    if (auto union_type = output()->type()->cast<UnionType>()) {
+      return union_type->to_optional() != c10::nullopt;
+    }
+    return false;
+  };
   // We can statically deduce this Node has returning None if:
   return
       // It's an AutogradZero node, or ...
@@ -976,8 +986,7 @@ bool Node::mustBeNone() const {
       // It has only one output and that output is NoneType, or ...
       (outputs().size() == 1 && output()->type() == NoneType::get()) ||
       // It's a constant optional with no value in the attributes.
-      (kind_ == prim::Constant && !this->hasAttributes() &&
-       output()->type()->cast<OptionalType>());
+      (kind_ == prim::Constant && !this->hasAttributes() && is_optional());
 }
 
 void Node::dump() const {
@@ -1415,7 +1424,8 @@ Node* Node::insertBefore(Node* n) {
 }
 
 Node* Node::insertAfter(Node* n) {
-  AT_ASSERT(!inBlockList() && n->inBlockList());
+  AT_ASSERT(!inBlockList());
+  AT_ASSERT(n->inBlockList());
   AT_ASSERT(n->owningBlock());
   AT_ASSERTM(
       n->kind() != prim::Return,
@@ -1692,20 +1702,23 @@ Node* Graph::createEnumValue(Value* e) {
   return n;
 }
 
-Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
+Node* Graph::createList(
+    const TypePtr& contained_type,
+    at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
     TORCH_CHECK(
-        v->type()->isSubtypeOf(elem_type),
+        v->type()->isSubtypeOf(contained_type),
         "Expected a list element that subtypes '",
-        elem_type->repr_str(),
+        contained_type->repr_str(),
         "' but got an element of type '",
         v->type()->repr_str(),
         "'");
   }
-  n->output()->setType(ListType::create(elem_type));
+  n->output()->setType(ListType::create(contained_type));
   return n;
 }
+
 Node* Graph::createListUnpack(Value* v, size_t size) {
   ListTypePtr list_type = v->type()->expect<ListType>();
   TypePtr elem_type = list_type->getElementType();

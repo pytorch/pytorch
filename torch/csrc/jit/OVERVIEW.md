@@ -1308,7 +1308,7 @@ def foo(a: Tensor, b: Tensor):
 ```
 Will produce a graph like this:
 
-![MemoryDAG graph](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/MemoryDAG_graph.png)
+![MemoryDAG graph](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/aliastracker_graph.png)
 
 A few things to note:
 - "Graph Input Element" is an example of an `Element` that isn't a first-class `Value`. Alias analysis happens on a per-function level, so we don't necessarily know the aliasing relationships of the inputs. The only safe assumption is that `a` and `b` may alias each other, so they point to a special `Element` that describes "the world outside of this function".

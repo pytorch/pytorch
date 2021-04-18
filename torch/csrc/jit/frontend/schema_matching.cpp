@@ -54,9 +54,14 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
 Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,
-    const TypePtr& concrete_type,
+    TypePtr concrete_type,
     Value* value,
     bool allow_conversions) {
+  if (UnionTypePtr union_type = concrete_type->cast<UnionType>()) {
+    if (auto tmp = union_type->to_optional()) {
+      concrete_type = *tmp;
+    }
+  }
   // treat conversion to Optional[T] as conversions to T
   if (OptionalTypePtr op = concrete_type->cast<OptionalType>()) {
     if (value->type()->kind() != OptionalType::Kind &&

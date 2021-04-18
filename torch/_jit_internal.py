@@ -22,7 +22,7 @@ import torch.distributed.rpc
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
 import torch.package._mangling as package_mangling
-from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable, get_args  # noqa: F401
+from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable    # noqa: F401
 
 if sys.version_info[:2] > (3, 7):
     from typing import Final
@@ -820,7 +820,14 @@ def is_optional(ann):
             ann.__module__ == 'typing' and
             (getattr(ann, '__origin__', None) is Optional))
 
-    return _is_optional(ann) or (is_union(ann) and None in get_args(ann))
+    # TODO: @ansley Tranform Optionals into Unions as part of follow-up
+    #def args_contains_None(ann):
+    #    if sys.version_info >= (3, 8):
+    #        from typing import get_args
+    #        return None in get_args(ann)
+    #    return "None" in str(ann)
+
+    return _is_optional(ann)
 
 def is_future(ann):
     if ann is Future:

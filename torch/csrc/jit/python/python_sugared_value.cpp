@@ -85,6 +85,35 @@ FunctionSchema PythonValue::getSchema(
     std::tie(arg_types, ret_type) =
         py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
 
+    auto is_optional_as_union = [](const TypePtr& t) -> bool {
+      if (t->kind() != UnionType::Kind) {
+        return false;
+      }
+      auto union_type = t->expect<UnionType>();
+      if (union_type->types().size() != 2) {
+        return false;
+      }
+      return (union_type->types()[0]->kind() == NoneType::Kind) ^
+          (union_type->types()[1]->kind() == NoneType::Kind);
+    };
+
+    auto get_replacement = [](const TypePtr& t) -> TypePtr {
+      auto union_type = t->expect<UnionType>();
+      return union_type->types()[0]->kind() != NoneType::Kind
+          ? union_type->types()[0]
+          : union_type->types()[1];
+    };
+
+    for (auto i = 0; i < arg_types.size(); ++i) {
+      if (is_optional_as_union(arg_types[i])) {
+        arg_types[i] = get_replacement(arg_types[i]);
+      }
+    }
+
+    if (is_optional_as_union(ret_type)) {
+      ret_type = get_replacement(ret_type);
+    }
+
     // arg_types does not include self but param_names does, so adjust for that
     // if needed
     TORCH_INTERNAL_ASSERT(

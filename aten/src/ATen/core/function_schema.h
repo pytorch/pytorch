@@ -34,6 +34,17 @@ struct Argument {
         default_value_(std::move(default_value)),
         kwarg_only_(kwarg_only),
         alias_info_(std::move(alias_info)) {
+    // Python automatically transforms all variables annotated
+    // `Optional[T]` to `Union[T, None]`. See source at
+    // fburl.com/ozn7av7k. This logic is a temporary workaround for all
+    // our schema matching logic that expects `Optional`.
+    // TODO: Delete this in follow-up project @ansley
+    if (type_->kind() == UnionType::Kind) {
+      auto optional_type = type_->castRaw<UnionType>()->to_optional();
+      if (optional_type) {
+        type_ = *optional_type;
+      }
+    }
   }
   const std::string& name() const {
     return name_;

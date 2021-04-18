@@ -242,6 +242,8 @@ def split_type_line(type_line):
 def try_real_annotations(fn, loc):
     """Tries to use the Py3.5+ annotation syntax to get the type."""
     try:
+        # Note: anything annotated as `Optional[T]` will automatically
+        # be returned as `Union[T, None]` per fburl.com/ozn7av7k
         sig = inspect.signature(fn)
     except ValueError:
         return None
@@ -250,8 +252,8 @@ def try_real_annotations(fn, loc):
     if all(ann is sig.empty for ann in all_annots):
         return None
 
+    # Convert `sig.empty` to `None`
     def as_ann(ann):
-        # sig.empty is really annoying so convert it to None
         return ann if ann is not sig.empty else None
 
     arg_types = [ann_to_type(as_ann(p.annotation), loc)

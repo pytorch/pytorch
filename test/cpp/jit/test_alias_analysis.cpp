@@ -636,8 +636,6 @@ TEST(ContainerAliasingTest, UnionAliasing) {
   auto b = graph->outputs().at(1);
   auto c = graph->outputs().at(2);
 
-  aliasDb.dump();
-
   EXPECT_TRUE(aliasDb.mayAlias(a, c));
   EXPECT_TRUE(aliasDb.mayAlias(b, c));
   EXPECT_TRUE(aliasDb.mayAlias(c, c));

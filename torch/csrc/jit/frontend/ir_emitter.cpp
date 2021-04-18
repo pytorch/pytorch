@@ -1007,9 +1007,18 @@ struct to_ir {
   }
 
   void emitReturn(const Return& stmt) {
-    Value* actual_return = emitExpr(stmt.expr());
+    TypePtr declared_return_type =
+        def_stack_.back().declared_return_type_; // nullptr if not annotated
+    TypePtr type_hint = nullptr;
+    if (declared_return_type &&
+        (declared_return_type == AnyType::get() ||
+         declared_return_type->kind() == UnionType::Kind ||
+         declared_return_type->kind() == OptionalType::Kind)) {
+      type_hint = declared_return_type;
+    }
+    Value* actual_return =
+        emitExpr(stmt.expr(), type_hint);
     TypePtr actual_return_type = actual_return->type();
-    TypePtr declared_return_type = def_stack_.back().declared_return_type_;
     // result type is annotated, every return must convert to that type
     if (declared_return_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
@@ -1148,8 +1157,8 @@ struct to_ir {
     // statement must be var {is, is not} None
     const std::string& name = Var(lhs).name().name();
     // While it should in theory be possible to specialize
-    // the `x is None` to know x has type NoneType, we have previously not
-    // done this. Unfortunately, doing this will make the type None
+    // the `x is None` to know x has type NoneType, we have previously
+    // not done this. Unfortunately, doing this will make the type None
     // propagate further in all loaded models. The handling of
     // unwrap_optional will fail in these cases since export did
     // not expect that the input would be none and an unannotated None.
@@ -1778,11 +1787,11 @@ struct to_ir {
 
         if (new_union_types.size() == 1) {
           Refinement not_isinstance(std::move(ident), new_union_types.at(0));
-          refinement = RefinementSet({isinstance}, {not_isinstance});
+          refinement = RefinementSet(isinstance, not_isinstance);
         } else {
           auto new_union = UnionType::create(std::move(new_union_types));
           Refinement not_isinstance(std::move(ident), new_union);
-          refinement = RefinementSet({isinstance}, {not_isinstance});
+          refinement = RefinementSet(isinstance, not_isinstance);
         }
       } else {
         refinement = RefinementSet({isinstance}, {});
@@ -3547,6 +3556,99 @@ struct to_ir {
             ->call(tree->range(), method, named_values, {}, 0));
   }
 
+  Value* emitListLiteral(ListLiteral ll, TypePtr type_hint = nullptr) {
+    auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
+
+    // determine the element type of the list
+    // if we have a type hint of List[T], use T
+    // if the list is non-empty use type_of(list[0])
+    // otherwise assume it is List[Tensor]
+    TypePtr elem_type = TensorType::get();
+    if (type_hint) {
+      if (type_hint->kind() == TypeKind::ListType) {
+        elem_type = type_hint->expectRef<ListType>().getElementType();
+      } else {
+        // If the type hint was not a List[T] throw an error
+        throw ErrorReport(ll) << "Expected a List type hint but instead got "
+                              << type_hint->repr_str();
+      }
+    } else if (!values.empty()) {
+      std::stringstream ss;
+      auto types = fmap(values, [](const Value* v) { return v->type(); });
+      auto maybe_elem_type = unifyTypeList(types, ss);
+      if (!maybe_elem_type) {
+        throw ErrorReport(ll) << "Lists must contain only a single type\n"
+                              << ss.str();
+      }
+      elem_type = maybe_elem_type.value();
+    }
+
+    for (auto v : values) {
+      std::stringstream ss;
+      if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
+        throw ErrorReport(ll)
+            << "Lists must contain only a single type, expected: "
+            << elem_type->repr_str() << " but found " << v->type()->repr_str()
+            << " instead.\n"
+            << ss.str();
+      }
+    }
+    Value* result =
+        graph->insertNode(graph->createList(elem_type, values))->output();
+    return result;
+  }
+
+  Value* emitDictLiteral(DictLiteral dl, const TypePtr& type_hint = nullptr) {
+    auto key_trees = dl.key_inputs().tree()->trees();
+    auto value_trees = dl.value_inputs().tree()->trees();
+    AT_ASSERT(key_trees.size() == value_trees.size());
+    std::vector<Value*> keys, values;
+
+    for (size_t i = 0; i < key_trees.size(); ++i) {
+      keys.push_back(emitExpr(Expr(key_trees[i])));
+      values.push_back(emitExpr(Expr(value_trees[i])));
+    }
+
+    TypePtr key_type = nullptr;
+    TypePtr value_type = nullptr;
+
+    if (type_hint && type_hint->kind() == TypeKind::DictType) {
+      auto dict_type = type_hint->expect<DictType>();
+      key_type = dict_type->getKeyType();
+      value_type = dict_type->getValueType();
+    } else if (keys.empty()) {
+      key_type = StringType::get();
+      value_type = TensorType::get();
+    } else {
+      key_type = keys.at(0)->type();
+      value_type = values.at(0)->type();
+    }
+    AT_ASSERT(key_type != nullptr && value_type != nullptr);
+
+    auto checkTypeOfValues = [](const TypePtr& type,
+                                const char* what,
+                                const std::vector<Value*>& values,
+                                TreeList trees) {
+      for (size_t i = 0, N = values.size(); i < N; ++i) {
+        std::stringstream ss;
+        if (!values[i]->type()->isSubtypeOfExt(type, &ss)) {
+          throw ErrorReport(trees[i])
+              << "Dict " << what
+              << " must contain only a single type, expected: "
+              << type->repr_str() << " but found "
+              << values[i]->type()->repr_str() << " instead.\n"
+              << ss.str();
+        }
+      }
+    };
+    checkTypeOfValues(key_type, "keys", keys, key_trees);
+    checkTypeOfValues(value_type, "values", values, value_trees);
+
+    return graph
+        ->insertNode(graph->createDict(key_type, value_type, keys, values))
+        ->output();
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
@@ -3628,47 +3730,7 @@ struct to_ir {
         return emitStringLiteral(StringLiteral(tree));
       } break;
       case TK_LIST_LITERAL: {
-        auto ll = ListLiteral(tree);
-        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
-
-        // determine the element type of the list
-        // if we have a type hint of List[T], use T
-        // if the list is non-empty use type_of(list[0])
-        // otherwise assume it is List[Tensor]
-        TypePtr elem_type = TensorType::get();
-        if (type_hint) {
-          if (type_hint->kind() == TypeKind::ListType) {
-            elem_type = type_hint->expectRef<ListType>().getElementType();
-          } else {
-            // If the type hint was not a List[T] throw an error
-            throw ErrorReport(tree)
-                << "Expected a List type hint but instead got "
-                << type_hint->repr_str();
-          }
-        } else if (!values.empty()) {
-          std::stringstream ss;
-          auto types = fmap(values, [](const Value* v) { return v->type(); });
-          auto maybe_elem_type = unifyTypeList(types, ss);
-          if (!maybe_elem_type) {
-            throw ErrorReport(tree) << "Lists must contain only a single type\n"
-                                    << ss.str();
-          }
-          elem_type = maybe_elem_type.value();
-        }
-
-        for (auto v : values) {
-          std::stringstream ss;
-          if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
-            throw ErrorReport(tree)
-                << "Lists must contain only a single type, expected: "
-                << elem_type->repr_str() << " but found "
-                << v->type()->repr_str() << " instead.\n"
-                << ss.str();
-          }
-        }
-        Value* result =
-            graph->insertNode(graph->createList(elem_type, values))->output();
-        return result;
+        return emitListLiteral(ListLiteral(tree), type_hint);
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
@@ -3676,55 +3738,7 @@ struct to_ir {
         return graph->insertNode(graph->createTuple(values))->output();
       } break;
       case TK_DICT_LITERAL: {
-        auto dl = DictLiteral(tree);
-        auto key_trees = dl.key_inputs().tree()->trees();
-        auto value_trees = dl.value_inputs().tree()->trees();
-        AT_ASSERT(key_trees.size() == value_trees.size());
-        std::vector<Value*> keys, values;
-
-        for (size_t i = 0; i < key_trees.size(); ++i) {
-          keys.push_back(emitExpr(Expr(key_trees[i])));
-          values.push_back(emitExpr(Expr(value_trees[i])));
-        }
-
-        TypePtr key_type = nullptr;
-        TypePtr value_type = nullptr;
-
-        if (type_hint && type_hint->kind() == TypeKind::DictType) {
-          auto dict_type = type_hint->expect<DictType>();
-          key_type = dict_type->getKeyType();
-          value_type = dict_type->getValueType();
-        } else if (keys.empty()) {
-          key_type = StringType::get();
-          value_type = TensorType::get();
-        } else {
-          key_type = keys.at(0)->type();
-          value_type = values.at(0)->type();
-        }
-        AT_ASSERT(key_type != nullptr && value_type != nullptr);
-
-        auto checkTypeOfValues = [](const TypePtr& type,
-                                    const char* what,
-                                    const std::vector<Value*>& values,
-                                    TreeList trees) {
-          for (size_t i = 0, N = values.size(); i < N; ++i) {
-            std::stringstream ss;
-            if (!values[i]->type()->isSubtypeOfExt(type, &ss)) {
-              throw ErrorReport(trees[i])
-                  << "Dict " << what
-                  << " must contain only a single type, expected: "
-                  << type->repr_str() << " but found "
-                  << values[i]->type()->repr_str() << " instead.\n"
-                  << ss.str();
-            }
-          }
-        };
-        checkTypeOfValues(key_type, "keys", keys, key_trees);
-        checkTypeOfValues(value_type, "values", values, value_trees);
-
-        return graph
-            ->insertNode(graph->createDict(key_type, value_type, keys, values))
-            ->output();
+        return emitDictLiteral(DictLiteral(tree), type_hint);
       } break;
       case TK_LIST_COMP: {
         auto lc = ListComp(tree);

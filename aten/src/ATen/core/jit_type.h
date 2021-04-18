@@ -97,19 +97,57 @@ struct SingleElementType : public Type {
   TypePtr elem;
 };
 
+struct NoneType;
+using NoneTypePtr = std::shared_ptr<NoneType>;
+// This type represents a Python None
+struct TORCH_API NoneType : public Type {
+  static NoneTypePtr create() {
+    return NoneTypePtr(new NoneType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "None";
+  }
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const override;
+
+  static const TypeKind Kind = TypeKind::NoneType;
+  // global singleton
+  static NoneTypePtr get();
+
+ private:
+  NoneType() : Type(TypeKind::NoneType) {}
+};
+
+
+template <TypeKind K>
+// This represents any type that we can dynamically specialize at
+// runtime. Currently only `Optional` and `Union` inherit from
+// `DynamicType`
+struct DynamicType : public Type {
+
+  static const TypeKind Kind = K;
+
+  bool hasFreeVariables() const override {
+    return has_free_variables_;
+  }
+
+ protected:
+  DynamicType() : Type(Kind) {}
+  bool has_free_variables_;
+};
+
+
 struct UnionType;
 using UnionTypePtr = std::shared_ptr<UnionType>;
-struct TORCH_API UnionType : public Type {
+struct TORCH_API UnionType : public DynamicType<TypeKind::UnionType> {
 
   friend struct Type;
-
-  static const TypeKind Kind = TypeKind::UnionType;
 
   bool isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const;
 
   std::string str() const;
-
-  std::vector<TypePtr> present_types() const;
 
   static UnionTypePtr create(
       std::vector<TypePtr> types) {
@@ -117,32 +155,29 @@ struct TORCH_API UnionType : public Type {
         std::move(types)));
   }
 
-  bool operator==(const Type& rhs) const override {
-    if (auto union_rhs = rhs.cast<UnionType>()) {
-      return types_ == union_rhs->types_;
-    }
-    return false;
-  }
+  bool operator==(const Type& rhs) const override;
 
   at::ArrayRef<TypePtr> types() const {
     return types_;
   }
 
   at::ArrayRef<TypePtr> containedTypes() const override {
-    return types();
+    return types_;
   }
 
   // Check if a given TypePtr is an allowable member of this Union
-  bool can_hold_type(TypePtr& type) const;
   bool can_hold_type(const TypePtr& type) const;
 
   bool can_hold_none() const {
     return can_hold_none_;
   }
 
+  c10::optional<TypePtr> to_optional() const;
+
  private:
-  // Possible types that could be held in this Union
   UnionType(std::vector<TypePtr> types);
+  std::vector<TypePtr> types_;
+  bool can_hold_none_;
 
   std::string annotation_str_impl(TypePrinter printer) const {
     std::stringstream ss;
@@ -156,29 +191,47 @@ struct TORCH_API UnionType : public Type {
     return ss.str();
   }
 
-  std::vector<TypePtr> types_;
-  bool can_hold_none_;
 };
+
 
 struct OptionalType;
 using OptionalTypePtr = std::shared_ptr<OptionalType>;
-// This type represents an optional type, for each element type.
-// Optional[T] can accept both T and None(nullopt in C++)
+// This type represents an optional type. There is one `Optional` for
+// each element type. `Optional[T]` can accept both `T` and
+// `None`(`c10::nullopt` in C++)
 // Subtype hierarchy for Optional:
-// 1. Optional[T] <: Optional[R] iff T <: R
-// 2. T <: Optional[R] if T <: R
-// 3. None <: Optional[T] for all T
-struct TORCH_API OptionalType
-    : public SingleElementType<TypeKind::OptionalType, OptionalType> {
-  static OptionalTypePtr create(TypePtr element) {
-    TORCH_INTERNAL_ASSERT(element, "OptionalType requires valid TypePtr");
-    // Optional is a union of [None, T], so Optional[[Optional[T]]] ->
-    // Optional[T]
-    if (auto opt_ptr = element->cast<OptionalType>()) {
-      return opt_ptr;
+//     - Optional[T] <: Optional[R] iff T <: R
+//     - T <: Optional[R] if T <: R
+//     - None <: Optional[T] for all T
+//     - Optional[T] == Union[T, None]
+struct TORCH_API OptionalType : public DynamicType<TypeKind::OptionalType> {
+  static OptionalTypePtr create(TypePtr contained) {
+    TORCH_INTERNAL_ASSERT(contained, "OptionalType requires a valid TypePtr");
+    return OptionalTypePtr(new OptionalType(std::move(contained)));
+  }
+
+  friend struct Type;
+
+  bool operator==(const Type& rhs) const override {
+    if (auto union_rhs = rhs.cast<UnionType>()) {
+      auto optional_rhs = union_rhs->to_optional();
+      if (optional_rhs) {
+        return *this == *((optional_rhs.value())->cast<OptionalType>());
+      }
+      return false;
     }
-    return OptionalTypePtr(
-        new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
+    if (auto optional_rhs = rhs.cast<OptionalType>()) {
+      return *this->getElementType() == *optional_rhs->getElementType();
+    }
+    return false;
+  }
+
+  TypePtr getElementType() const {
+    return contained_;
+  }
+
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return contained_;
   }
 
   std::string str() const override {
@@ -205,11 +258,14 @@ struct TORCH_API OptionalType
     }
     return false;
   }
+
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
 
  private:
-  OptionalType(TypePtr elem) : SingleElementType(elem) {}
+  OptionalType(TypePtr contained);
+
+  TypePtr contained_;
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
@@ -1379,33 +1435,6 @@ struct TORCH_API FunctionType : public NamedType {
   torch::jit::Function* function_;
 };
 
-struct NoneType;
-using NoneTypePtr = std::shared_ptr<NoneType>;
-// This type represents a Python None
-struct TORCH_API NoneType : public Type {
-  static NoneTypePtr create() {
-    return NoneTypePtr(new NoneType()); // NOLINT(modernize-make-shared)
-  }
-  bool operator==(const Type& rhs) const override {
-    return rhs.kind() == kind();
-  }
-  std::string str() const override {
-    return "None";
-  }
-  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const override {
-    if (rhs->kind() == OptionalType::Kind) {
-      return true;
-    }
-    return Type::isSubtypeOfExt(rhs, why_not);
-  }
-  static const TypeKind Kind = TypeKind::NoneType;
-  // global singleton
-  static NoneTypePtr get();
-
- private:
-  NoneType() : Type(TypeKind::NoneType) {}
-};
-
 struct GeneratorType;
 using GeneratorTypePtr = std::shared_ptr<GeneratorType>;
 // This type represents a Generator
@@ -1607,12 +1636,13 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const Stride& s);
 // what is the type, ignoring extra size/shape information?
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
-// `unshapedType` is used to remove Tensor subtypes to provide more
-// accurate aliasing information. For example, a Tensor of dimension
-// 4 could alias a Tensor of dimension 1 (via views, reshaping, etc.).
-// We need to treat all Tensor subtypes as simply "Tensor"; we also need
-// to create a new version of any container types in which internal
-// Tensors have undergone the same operation.
+// `unshapedType` is used to remove Tensor subtypes. We treat all Tensor
+// subtypes as simply "Tensor"; we also create a new version of any
+// container types in which internal Tensors have undergone the same
+// operation. This is used for type comparisons between two Tensor types
+// (`unshapedType` means that we don't falsely return `false` for e.g.
+// Tensors of different dimensions). It's also used in the alias
+// analysis pass.
 inline TypePtr unshapedType(const TypePtr& type) {
   if (type->isSubtypeOf(TensorType::get())) {
     return TensorType::get();
@@ -1664,11 +1694,12 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 TORCH_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2,
-    bool default_to_union = false);
+    bool default_to_union=false);
 
 TORCH_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
-    std::ostream& why_not);
+    std::ostream& why_not,
+    bool default_to_union=false);
 
 namespace detail {
 template <typename T>

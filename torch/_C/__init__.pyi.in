@@ -908,6 +908,9 @@ class DictType(JitType):
 class TupleType(JitType):
     def __init__(self, a: List[JitType]) -> None: ...
 
+class UnionType(JitType):
+    def __init__(self, a: List[JitType]) -> None: ...
+
 class ClassType(JitType):
     def __init__(self, qualified_name: str) -> None: ...
 

@@ -643,7 +643,7 @@ RegisterOperators reg(
      Operator(
          "aten::_unwrap_optional(t(a)? optional) -> t(a)",
          [](Stack* stack) {
-           auto val = pop(stack);
+           IValue val = pop(stack);
            TORCH_CHECK(!val.isNone(), "Unwrapping null optional");
            push(stack, std::move(val));
          },
