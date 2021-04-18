@@ -418,6 +418,10 @@ class ScriptModuleSerializer {
     use_tensors_archive_table_ = enable;
   }
 
+  void overwriteBytecodeVersion(const uint64_t bytecode_version) {
+    overwrite_bytecode_version_ = bytecode_version;
+  }
+
  private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
@@ -441,9 +445,10 @@ class ScriptModuleSerializer {
     size_t i = 0;
     std::string prefix = archive_name + "/";
 
-    // Store all tensors from archives in the tensors_archive_table_resources_ list
-    // to tensors_archive_table_
-    if (tensors_archive_table_resources_.find(archive_name) != tensors_archive_table_resources_.end()) {
+    // Store all tensors from archives in the tensors_archive_table_resources_
+    // list to tensors_archive_table_
+    if (tensors_archive_table_resources_.find(archive_name) !=
+        tensors_archive_table_resources_.end()) {
       const auto tensor_candidates = data_pickle.tensorData();
       for (size_t tensor_index = 0; tensor_index < tensor_candidates.size();
            tensor_index++) {
@@ -452,8 +457,9 @@ class ScriptModuleSerializer {
       }
     }
     bool can_use_tensors_archive_table =
-        (use_tensors_archive_table_
-         && tensors_archive_table_users_.find(archive_name) != tensors_archive_table_users_.end());
+        (use_tensors_archive_table_ &&
+         tensors_archive_table_users_.find(archive_name) !=
+             tensors_archive_table_users_.end());
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
@@ -564,13 +570,14 @@ class ScriptModuleSerializer {
 
   void writeByteCode(const Module& module, bool save_mobile_debug_info) {
     std::vector<c10::IValue> elements;
-    elements.emplace_back(
-        static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+    const uint64_t bytecode_version = overwrite_bytecode_version_.has_value()
+        ? overwrite_bytecode_version_.value()
+        : caffe2::serialize::kProducedBytecodeVersion;
+    elements.emplace_back(static_cast<int64_t>(bytecode_version));
     c10::optional<std::vector<c10::IValue>> debug_info_elements;
     if (save_mobile_debug_info) {
       debug_info_elements = std::vector<c10::IValue>();
-      debug_info_elements->emplace_back(
-          static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+      debug_info_elements->emplace_back(static_cast<int64_t>(bytecode_version));
     }
 
     moduleMethodsTuple(
@@ -615,10 +622,13 @@ class ScriptModuleSerializer {
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
 
-  bool use_tensors_archive_table_ = false;
+  bool use_tensors_archive_table_ = true;
   TensorIndexMap tensors_archive_table_;
-  std::unordered_set<std::string> tensors_archive_table_resources_ = {kArchiveNameConstants};
-  std::unordered_set<std::string> tensors_archive_table_users_ = {kArchiveNameBytecode};
+  std::unordered_set<std::string> tensors_archive_table_resources_ = {
+      kArchiveNameConstants};
+  std::unordered_set<std::string> tensors_archive_table_users_ = {
+      kArchiveNameBytecode};
+  at::optional<uint64_t> overwrite_bytecode_version_;
 
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
@@ -676,12 +686,14 @@ void BackPortByteCode(
   const uint64_t output_bytecode_version = input_bytecode_version - 1;
   ScriptModuleSerializer serializer(filename);
 
-  if(output_bytecode_version == kBytecodeVersionV4) {
+  if (output_bytecode_version == kBytecodeVersionV4) {
     serializer.useTensorsArchiveTable(false);
+    serializer.overwriteBytecodeVersion(kBytecodeVersionV4);
   } else {
     TORCH_WARN(
         "The input bytecode model version is ",
-        input_bytecode_version, ". Currently only support backporting to version ",
+        input_bytecode_version,
+        ". Currently only support backporting to version ",
         kBytecodeVersionV4);
   }
   serializer.serialize(

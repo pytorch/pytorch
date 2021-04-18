@@ -1650,7 +1650,9 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def(
       "_backport_for_lite_interpreter",
-      [](const std::string& input_filename, const std::string& output_filename, py::object map_location) {
+      [](const std::string& input_filename,
+         const std::string& output_filename,
+         py::object map_location) {
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));

@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/serialization/export.h>
-#include <caffe2/serialize/inline_container.h>
 #include <caffe2/serialize/file_adapter.h>
+#include <caffe2/serialize/inline_container.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
 namespace c10 {
@@ -46,7 +46,9 @@ void Module::_save_for_mobile(
       save_mobile_debug_info);
 }
 
-TypePtr resolveTypeName(const c10::QualifiedName& qn, std::shared_ptr<CompilationUnit> compilation_unit) {
+TypePtr resolveTypeName(
+    const c10::QualifiedName& qn,
+    std::shared_ptr<CompilationUnit> compilation_unit) {
   // HACK: first we check whether the name starts with special prefix to
   // tell if it's a supported pytorch class type. There are two special
   // prefixes. "__torch__" for nn module, and "torch.jit" from to_backend.
@@ -75,7 +77,8 @@ c10::IValue readArchive(
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
   size_t pickle_size;
-  std::tie(pickle_ptr, pickle_size) = stream_reader->getRecord(picklename.str());
+  std::tie(pickle_ptr, pickle_size) =
+      stream_reader->getRecord(picklename.str());
 
   size_t bytes_read = 0;
   auto data = reinterpret_cast<const char*>(pickle_ptr.get());
@@ -176,16 +179,18 @@ void Module::_backport_for_mobile(
     const std::string& output_filename,
     const ExtraFilesMap& extra_files,
     bool save_mobile_debug_info) const {
-//  mobile::Module m = _load_for_mobile(input_filename);
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(input_filename);
-  auto reader = torch::make_unique<caffe2::serialize::PyTorchStreamReader>(std::move(rai));
+  std::unique_ptr<FileAdapter> rai =
+      std::make_unique<FileAdapter>(input_filename);
+  auto reader = torch::make_unique<caffe2::serialize::PyTorchStreamReader>(
+      std::move(rai));
   c10::optional<std::vector<IValue>> bvals;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
   if (reader->hasRecord("bytecode.pkl")) {
     bvals = readArchive("bytecode", mcu, reader).toTuple()->elements();
   }
-  if(bvals.has_value() && bvals.value().size() > 0 && bvals.value()[0].isInt()) {
+  if (bvals.has_value() && bvals.value().size() > 0 &&
+      bvals.value()[0].isInt()) {
     uint64_t input_bytecode_version = bvals.value()[0].toInt();
     BackPortByteCode(
         *this,
@@ -195,9 +200,9 @@ void Module::_backport_for_mobile(
         true /* bytecode_format */,
         save_mobile_debug_info);
   } else {
-    TORCH_WARN("Fail to export bytecode model. Likely due to bytecode reading failure.");
+    TORCH_WARN(
+        "Fail to export bytecode model. Likely due to bytecode reading failure.");
   }
-
 }
 
 } // namespace jit
