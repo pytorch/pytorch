@@ -52,6 +52,7 @@ namespace at {
 namespace native {
 
 Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, const int64_t steps, Tensor& result) {
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   if (result.numel() != steps) {
     result.resize_({steps});
   }
@@ -101,6 +102,7 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, const int64_t 
 }
 
 Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, const int64_t steps, double base, Tensor& result) {
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   if (result.numel() != steps) {
     result.resize_({steps});
   }
