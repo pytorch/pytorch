@@ -6,8 +6,29 @@
 
 namespace torch {
 namespace fx {
+
+
+inline at::Tensor getValueFromPyTensor(const py::object& pyTensor) {
+  auto out = pyTensor.attr("value").cast<at::Tensor>();
+  return out;
+}
+
+
 struct TORCH_API PythonTensorImpl : public c10::TensorImpl {
   explicit PythonTensorImpl(py::object value): TensorImpl(c10::DispatchKeySet(c10::DispatchKey::PythonKey), caffe2::TypeMeta::Make<float>(),c10::Device(at::kCPU)), value_(value) {
+    set_storage_access_should_throw();
+    // asm("int $0x3\n");
+    auto tensor = getValueFromPyTensor(value_);
+
+    const auto value_sizes = tensor.sizes();
+    const auto value_strides = tensor.strides();
+    sizes_and_strides_.resize(tensor.dim());
+    for (int64_t dim = 0; dim < tensor.dim(); dim++) {
+        sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(dim);
+        sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(dim);
+    }
+    refresh_numel();
+    refresh_contiguous();
   }
 
 
