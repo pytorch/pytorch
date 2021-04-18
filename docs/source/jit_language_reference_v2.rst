@@ -35,49 +35,57 @@ TorchScript Language Reference
 Type System
 ~~~~~~~~~~~
 
-This section summarizes TorchScript type system.
-
 Terminology
 ^^^^^^^^^^^
 
 This document uses the following terminologies:
 
-::
+.. list-table::
+   :widths: 25 25
+   :header-rows: 1
 
-    " " represents real keywords and delimiters that are part of the syntax
-    A | B indicates either A or B
-    ( ) indicates grouping
-    [ ] indicates optional
-    A+ indicates a regular expression where term A is repeated at least once
-    A* indicates a regular expression where term A is repeated zero or more times
+   * - Pattern
+     - Notes
+   * - ``" "``
+     - represents real keywords and delimiters that are part of the syntax
+   * - ``A | B``
+     - indicates either A or B
+   * - ``( )``
+     - indicates grouping
+   * - ``[]``
+     - indicates optional
+   * - ``A+``
+     - indicates a regular expression where term A is repeated at least once
+   * - ``A*``
+     - indicates a regular expression where term A is repeated zero or more times
 
 TorchScript Type System Definition
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
-    TSAllType ::= TSType | TSModuleType
-    TSType ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
+    TSAllType       ::= TSType | TSModuleType
+    TSType          ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
 
-    TSMetaType ::= "Any"
+    TSMetaType      ::= "Any"
     TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
 
     TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
-                        TSOptional | TSFuture | TSRRef
-    TSTuple ::= "Tuple" "[" (TSType ",")* TSType "]"
-    TSNamedTuple ::= "namedtuple" "(" (TSType ",")* TSType ")"
-    TSList ::= "List" "[" TSType "]"
-    TSOptional ::= "Optional" "[" TSType "]"
-    TSFuture ::= "Future" "[" TSType "]"
-    TSRRef ::= "RRef" "[" TSType "]"
-    TSDict ::= "Dict" "[" KeyType "," TSType "]"
-    KeyType ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
+                         TSOptional | TSFuture | TSRRef
+    TSTuple         ::= "Tuple" "[" (TSType ",")* TSType "]"
+    TSNamedTuple    ::= "namedtuple" "(" (TSType ",")* TSType ")"
+    TSList          ::= "List" "[" TSType "]"
+    TSOptional      ::= "Optional" "[" TSType "]"
+    TSFuture        ::= "Future" "[" TSType "]"
+    TSRRef          ::= "RRef" "[" TSType "]"
+    TSDict          ::= "Dict" "[" KeyType "," TSType "]"
+    KeyType         ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
 
-    TSNominalType ::= TSBuiltinClasses | TSCustomClass | TSEnum
-    TSBuiltinClass ::= TSTensor | "torch.device" | "torch.stream"|
-                    "torch.dtype" | "torch.nn.ModuleList" |
-                    "torch.nn.ModuleDict" | ...
-    TSTensor ::= "torch.tensor" and subclasses
+    TSNominalType   ::= TSBuiltinClasses | TSCustomClass | TSEnum
+    TSBuiltinClass  ::= TSTensor | "torch.device" | "torch.stream"|
+                        "torch.dtype" | "torch.nn.ModuleList" |
+                        "torch.nn.ModuleDict" | ...
+    TSTensor        ::= "torch.tensor" and subclasses
 
 TorchScript Types
 ^^^^^^^^^^^^^^^^^
@@ -87,15 +95,15 @@ The TorchScript type system consists of ``TSType`` and ``TSModuleType`` as defin
 ::
 
     TSAllType ::= TSType | TSModuleType
-    TSType ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
+    TSType    ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
 
 ``TSType`` represents the majority of TorchScript types that are composable and can be used in TorchScript type annotation.
 ``TSType`` can be further classified into:
 
-* meta types, e.g., ``Any``
-* primitive types, e.g., ``int``, ``float``, ``str``
-* structural types, e.g., ``Optional[int]`` or ``List[MyClass]``
-* nominal types (Python classes), e.g., ``MyClass`` (user-defined), ``torch.tensor`` (builtin)
+* Meta Types, e.g., ``Any``
+* Primitive Types, e.g., ``int``, ``float``, ``str``
+* Structural Types, e.g., ``Optional[int]`` or ``List[MyClass]``
+* Nominal Types (Python classes), e.g., ``MyClass`` (user-defined), ``torch.tensor`` (builtin)
 
 ``TSModuleType`` represents ``torch.nn.Module`` and its subclasses. It is treated differently from ``TSType`` because its type schema is inferred partly from the object instance and partly from the class definition.
 As such, instances of a ``TSModuleType`` may not follow the same static type schema. ``TSModuleType`` cannot be used as a TorchScript type annotation or be composed with ``TSType`` for type safety considerations.
@@ -118,8 +126,8 @@ As such it can be bound to any Python or TorchScript data types (e.g., int, Torc
 
 where
 
-    * ``Any`` is the Python class name from the typing module, therefore usage of the ``Any`` type requires from ``typing import Any``
-    * Since ``Any`` can represent any type, the set of operators allowed to operate on values of this type on Any is limited.
+* ``Any`` is the Python class name from the typing module, therefore usage of the ``Any`` type requires from ``typing import Any``
+* Since ``Any`` can represent any type, the set of operators allowed to operate on values of this type on Any is limited.
 
 Operators supported for ``Any`` type
 """"""""""""""""""""""""""""""""""""
@@ -144,7 +152,7 @@ When we script a PyTorch module, we may encounter data that are not involved in 
 by a type schema. It is not only cumbersome to describe static types for unused data (in the context of the script) but also may lead to unnecessary
 scripting failures. ``Any`` is introduced to describe the type of the data where precise static types are not necessary for compilation.
 
-**Example**:
+**Example**
 
 This example illustrates how ``Any`` can be used to allow the second element of the tuple parameter to be of ``any`` type. This is possible,
 because ``x[1]`` is not involved in any computation that requires knowing its precise type.
@@ -173,7 +181,7 @@ whereas ``(1, (100, 200))`` binds a tuple to ``Any`` in the second invocation.
     (2, 2.0)
     (2, (100, 200))
 
-**Example**:
+**Example**
 
 We can use ``isinstance`` to dynamically check the type of the data annotated as ``Any`` type.
 
@@ -220,14 +228,14 @@ such as ``Future[int]``. Structural types are composable with any ``TSType``.
     TSStructuralType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
                         TSOptional | TSFuture | TSRRef
 
-    TSTuple ::= "Tuple" "[" (TSType ",")* TSType "]"
-    TSNamedTuple ::= "namedtuple" "(" (TSType ",")* TSType ")"
-    TSList ::= "List" "[" TSType "]"
-    TSOptional ::= "Optional" "[" TSType "]"
-    TSFuture ::= "Future" "[" TSType "]"
-    TSRRef ::= "RRef" "[" TSType "]"
-    TSDict ::= "Dict" "[" KeyType "," TSType "]"
-    KeyType ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
+    TSTuple          ::= "Tuple" "[" (TSType ",")* TSType "]"
+    TSNamedTuple     ::= "namedtuple" "(" (TSType ",")* TSType ")"
+    TSList           ::= "List" "[" TSType "]"
+    TSOptional       ::= "Optional" "[" TSType "]"
+    TSFuture         ::= "Future" "[" TSType "]"
+    TSRRef           ::= "RRef" "[" TSType "]"
+    TSDict           ::= "Dict" "[" KeyType "," TSType "]"
+    KeyType          ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
 
 where
 
@@ -240,7 +248,7 @@ where
 
 * Apart from being composable with TorchScript types, these TorchScript structural types often support a common subset of the operators and methods of their Python counterparts.
 
-**Example**:
+**Example**
 
 This example uses ``typing.NamedTuple`` syntax:
 
@@ -287,7 +295,7 @@ This example uses ``collections.namedtuple`` syntax:
 
     (2, 3)
 
-**Example**:
+**Example**
 
 This example illustrates a common mistake of annotating structural types, i.e., not importing the composite type
 classes from the ``typing`` module.
@@ -304,7 +312,7 @@ classes from the ``typing`` module.
     m = torch.jit.script(inc)
     print(m((1,2)))
 
-Running the above codes yields the following scripting error. The remedy is to add from ``typing import Tuple``.
+Running the above codes yields the following scripting error. The remedy is to add ``from typing import Tuple``.
 
 ::
 
@@ -334,9 +342,9 @@ attributes of its Python class definition.
 ::
 
     TSBuiltinClass ::= TSTensor | "torch.device" | "torch.Stream" | "torch.dtype" |
-                    "torch.nn.ModuleList" | "torch.nn.ModuleDict" | ...
-    TSTensor ::= "torch.Tensor" | "common.SubTensor" | "common.SubWithTorchFunction" |
-                "torch.nn.parameter.Parameter" | and subclasses of torch.Tensor
+                       "torch.nn.ModuleList" | "torch.nn.ModuleDict" | ...
+    TSTensor       ::= "torch.Tensor" | "common.SubTensor" | "common.SubWithTorchFunction" |
+                       "torch.nn.parameter.Parameter" | and subclasses of torch.Tensor
 
 
 Special note on torch.nn.ModuleList and torch.nn.ModuleDict
@@ -348,7 +356,7 @@ they behave more like tuples in TorchScript.
 * In TorchScript, instances of ``torch.nn.ModuleList``  or ``torch.nn.ModuleDict`` are immutable.
 * Code that iterates over ``torch.nn.ModuleList`` or ``torch.nn.ModuleDict`` is completely unrolled so that elements of ``torch.nn.ModuleList`` or keys of ``torch.nn.ModuleDict`` can be of different subclasses of ``torch.nn.Module``.
 
-**Example**:
+**Example**
 
 ::
 
@@ -377,7 +385,7 @@ Unlike built-in classes, semantics of custom classes are user-defined and the en
 ::
 
     TSClassDef ::= [ "@torch.jit.script" ]
-                "class" ClassName [ "(object)" ]  ":"
+                     "class" ClassName [ "(object)" ]  ":"
                         MethodDefinition |
                     [ "@torch.jit.ignore" ] | [ "@torch.jit.unused" ]
                         MethodDefinition
@@ -401,7 +409,7 @@ TorchScript custom classes are quite limited compared to their Python counterpar
 * must initialize all its instance attributes in  ``__init__()``; this is because TorchScript constructs a static schema of the class by inferring attribute types in ``__init__()``
 * must contain only methods that satisfy TorchScript type-checking rules and are compilable to TorchScript IRs
 
-**Example**:
+**Example**
 
 Python classes can be used in TorchScript if they are annotated with ``@torch.jit.script``, similar to how a TorchScript function would be declared:
 
@@ -416,7 +424,7 @@ Python classes can be used in TorchScript if they are annotated with ``@torch.ji
             self.x += val
 
 
-**Example**:
+**Example**
 
 A TorchScript custom class type must "declare" all its instance attributes by assignments in ``__init__()``. If an instance attribute is not defined in ``__init__()`` but accessed in other methods of the class, the class cannot be compiled as a TorchScript class, as shown in the following example:
 
@@ -443,7 +451,7 @@ The above class will fail to compile and issue the following error:
         self.x = torch.rand(2, 3)
         ~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
 
-**Example**:
+**Example**
 
 In this example, a TorchScript custom class defines a class variable name, which is not allowed.
 
@@ -465,7 +473,7 @@ It leads to the following compile-time error:
 ::
 
     RuntimeError:
-    Tried to access nonexistent attribute or method 'name' of type '__torch__.MyClass'. Did you forget to initialize an attribute in __init__()?:
+    '__torch__.MyClass' object has no attribute or method 'name'. Did you forget to initialize an attribute in __init__()?:
         File "test-class2.py", line 10
     def fn(a: MyClass):
         return a.name
@@ -479,8 +487,8 @@ Like custom classes, semantics of enum type are user-defined and the entire clas
 ::
 
     TSEnumDef ::= "class" Identifier "(enum.Enum | TSEnumType)" ":"
-                ( MemberIdentifier "=" Value )+
-                ( MethodDefinition )*
+                   ( MemberIdentifier "=" Value )+
+                   ( MethodDefinition )*
 
 where
 
@@ -494,7 +502,7 @@ where
 * Values of TorchScript enum members must be of the same type and can only be of ``int``, ``float``, or ``str`` type, whereas Python enum members can be of any type
 * Enums containing methods are ignored in TorchScript.
 
-**Example**:
+**Example**
 
 ::
 
@@ -515,7 +523,7 @@ where
     print("Eager: ", enum_fn(Color.RED, Color.GREEN))
     print("TorchScript: ", m(Color.RED, Color.GREEN))
 
-**Example**:
+**Example**
 
 The following example shows the case of restricted enum subclassing, where ``BaseColor`` does not define any member, thus can be subclassed by ``Color``.
 
@@ -567,7 +575,7 @@ where
 
 Unlike custom classes, only the forward method and other methods decorated with ``@torch.jit.export``  of the module type need to be compilable. Most notably, ``__init__()`` is not considered a TorchScript method. Consequently, module type constructors cannot be invoked within the scope of TorchScript. Instead, TorchScript module objects are always constructed outside and passed into ``torch.jit.script(ModuleObj)``.
 
-**Example**:
+**Example**
 
 .. testcode::
 
@@ -599,7 +607,7 @@ This example illustrates a few features of module types:
 * TorchScript automatically compiles other methods (e.g., ``mul()``) invoked by methods annotated via ``@torch.jit.export`` or ``forward()`` methods
 * Entry-points to a TorchScript program are either ``forward()`` of a module type or functions annotated as ``torch.jit.script`` or methods annotated as ``torch.jit.export``
 
-**Example**:
+**Example**
 
 The following shows an incorrect usage of module type. Specifically, this example invokes the constructor of ``TestModule`` inside the scope of TorchScript.
 
@@ -659,10 +667,10 @@ TorchScript supports two styles for method and function signature type annotatio
 
 ::
 
-    Python3Annotation := "def" Identifier [ "(" ParamAnnot* ")" ] [ReturnAnnot] ":"
-                         FuncOrMethodBody
-    ParamAnnot := Identifier [ ":" TSType ] ","
-    ReturnAnnot := "->" TSType
+    Python3Annotation ::= "def" Identifier [ "(" ParamAnnot* ")" ] [ReturnAnnot] ":"
+                                FuncOrMethodBody
+    ParamAnnot        ::= Identifier [ ":" TSType ] ","
+    ReturnAnnot       ::= "->" TSType
 
 Note that using Python3 style, the type of ``self`` is automatically inferred and should not be annotated.
 
@@ -671,9 +679,9 @@ Note that using Python3 style, the type of ``self`` is automatically inferred an
 
 ::
 
-    MyPyAnnotation := "# type:" "(" ParamAnnot* ")" [ ReturnAnnot ]
-    ParamAnnot := TSType ","
-    ReturnAnnot := "->" TSType
+    MyPyAnnotation ::= "# type:" "(" ParamAnnot* ")" [ ReturnAnnot ]
+    ParamAnnot     ::= TSType ","
+    ReturnAnnot    ::= "->" TSType
 
 **Example 1**
 
@@ -719,7 +727,7 @@ Local variables can be annotated according to Python3 typing module annotation r
 
 ::
 
-    LocalVarAnnotation := Identifier [":" TSType] "=" Expr
+    LocalVarAnnotation ::= Identifier [":" TSType] "=" Expr
 
 In general, types of local variables can be automatically inferred. In some cases, however, programmers may need to annotate a multi-type for local variables
 that may be associated with different concrete types. Typical multi-types include ``Optional[T]`` and ``Any``.
@@ -1141,7 +1149,7 @@ Expression statements:
 
 ::
 
-    expression_stmt ::=  starred_expression
+    expression_stmt    ::=  starred_expression
     starred_expression ::=  expression | (starred_item ",")* [starred_item]
     starred_item       ::=  assignment_expression | "*" or_expr
 
@@ -1153,30 +1161,30 @@ Assignment Statements:
     assignment_stmt ::=  (target_list "=")+ (starred_expression)
     target_list     ::=  target ("," target)* [","]
     target          ::=  identifier
-                     | "(" [target_list] ")"
-                     | "[" [target_list] "]"
-                     | attributeref
-                     | subscription
-                     | slicing
-                     | "*" target
+                         | "(" [target_list] ")"
+                         | "[" [target_list] "]"
+                         | attributeref
+                         | subscription
+                         | slicing
+                         | "*" target
 
 Augmented assignment statements:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
-    augmented_assignment_stmt ::=  augtarget augop (expression_list)
-    augtarget ::=  identifier | attributeref | subscription
-    augop ::=  "+=" | "-=" | "*=" | "/=" | "//=" | "%=" |
-                "**="| ">>=" | "<<=" | "&=" | "^=" | "|="
+    augmented_assignment_stmt ::= augtarget augop (expression_list)
+    augtarget                 ::= identifier | attributeref | subscription
+    augop                     ::= "+=" | "-=" | "*=" | "/=" | "//=" | "%=" |
+                                  "**="| ">>=" | "<<=" | "&=" | "^=" | "|="
 
 
 Annotated assignment statements:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ::
 
-    annotated_assignment_stmt ::=  augtarget ":" expression
-                               ["=" (starred_expression)]
+    annotated_assignment_stmt ::= augtarget ":" expression
+                                  ["=" (starred_expression)]
 
 The ``raise`` statement:
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1256,9 +1264,9 @@ Basic ``if/else`` statement:
 
 ::
 
-    if_stmt ::=  "if" assignment_expression ":" suite
-             ("elif" assignment_expression ":" suite)
-             ["else" ":" suite]
+    if_stmt ::= "if" assignment_expression ":" suite
+                ("elif" assignment_expression ":" suite)
+                ["else" ":" suite]
 
 * ``elif`` statement can repeat for arbitrary number of times, but it needs to be before ``else`` statement.
 
@@ -1267,7 +1275,7 @@ Ternary ``if/else`` statement:
 
 ::
 
-    if_stmt ::=  return [expression_list] "if" assignment_expression "else" [expression_list]
+    if_stmt ::= return [expression_list] "if" assignment_expression "else" [expression_list]
 
 **Example**
 
@@ -1544,7 +1552,7 @@ When given a Python value, TorchScript attempts to resolve it in following five 
 * Python Object Identity Match:
     * For a limited set of ``torch.*`` API calls (in the form of Python values) that TorchScript supports, TorchScript attempts to match a Python value against each item in the set.
     * When matched, TorchScript generates a corresponding ``SugaredValue`` instance that contains lowering logic for these values.
-    * Example: ``torch.jit.isinstance``
+    * Example: ``torch.jit.isinstance()``
 * Name Match:
     * For Python built-in functions and constants, TorchScript identifies them by name, and creates a corresponding SugaredValue instance that implements their functionality.
     * Example: ``all()``
@@ -1657,7 +1665,7 @@ Python Builtin Functions Support
      -
    * - ``hash()``
      - Full
-     - `Tensor`'s hash is based on identity not numeric value
+     - ``Tensor``'s hash is based on identity not numeric value
    * - ``hex()``
      - Partial
      - Only supports ``Int``-type input
@@ -1776,8 +1784,8 @@ Python Builtin Values Support
 
 .. _torch_apis_in_torchscript:
 
-``torch.*`` APIs Support in TorchScript
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``torch.*`` APIs
+~~~~~~~~~~~~~~~~
 
 .. _torch_apis_in_torchscript_rpc:
 
@@ -1798,7 +1806,7 @@ Specifically, following APIs are fully supported:
     - More deatils about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_async`.
 - ``torch.distributed.rpc.remote()``
     - Executing a remote call on worker and getting a Remote Reference ``RRef`` as return value.
-    - More deatils about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_async`.
+    - More details about its usage and examples can be found in :meth:`~torch.distributed.rpc.remote`.
 
 .. _torch_apis_in_torchscript_async:
 
@@ -1811,11 +1819,11 @@ only usable within TorchScript:
 
 - ``torch.jit.fork()``
     - Creates an asynchronous task executing func and a reference to the value of the result of this execution. fork will return immediately.
-    - Synonymous to ``torch.jit._fork``, which is only kept for backward compatibility reasons.
+    - Synonymous to ``torch.jit._fork()``, which is only kept for backward compatibility reasons.
     - More deatils about its usage and examples can be found in :meth:`~torch.jit.fork`.
 - ``torch.jit.wait()``
     - Forces completion of a ``torch.jit.Future[T]`` asynchronous task, returning the result of the task.
-    - Synonymous to ``torch.jit._wait``, which is only kept for backward compatibility reasons.
+    - Synonymous to ``torch.jit._wait()``, which is only kept for backward compatibility reasons.
     - More deatils about its usage and examples can be found in :meth:`~torch.jit.wait`.
 
 
