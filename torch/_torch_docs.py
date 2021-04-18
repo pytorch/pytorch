@@ -1505,23 +1505,23 @@ add_docstr(torch.cov,
            r"""
 cov(input, other=None, rowvar=True, bias=None, ddof=None, fweights=None, aweights=None) -> Tensor
 
-Estimates a covariance matrix, given input tensor data and weights (optional). The unbiased sample covariance 
+Estimates a covariance matrix, given input tensor data and weights (optional). The unbiased sample covariance
 of the variables :math:`x` and :math:`y` is given by
 
 .. math::
     \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}(x_{i} - \bar{x})(y_{i} - \bar{y})}{N~-~1}
 
-where :math:`x` and :math:`y` are rows of :attr:`input`, :math:`\bar{x}` and :math:`\bar{y}` are 
-the simple means of the variables respectively. 
-If :attr:`fweights` and/or :attr:`aweights` are provided, the unbiased weighted covariance 
+where :math:`x` and :math:`y` are rows of :attr:`input`, :math:`\bar{x}` and :math:`\bar{y}` are
+the simple means of the variables respectively.
+If :attr:`fweights` and/or :attr:`aweights` are provided, the unbiased weighted covariance
 is calculated, which is given by
 
 .. math::
     \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}w_i(x_{i} - \mu_x^*)(y_{i} - \mu_y^*)}{\sum^{N}_{i = 1}w_i~-~1}
 
-where, :math:`w` denotes :attr:`fweights` or :attr:`aweights` based on whichever is provided as an input (:math:`w = fweights \times aweights` 
-if both are provided) and :math:`\mu_x^* = = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}` 
-is the weighted mean of the variable. 
+where, :math:`w` denotes :attr:`fweights` or :attr:`aweights` based on whichever is provided as an input (:math:`w = fweights \times aweights`
+if both are provided) and :math:`\mu_x^* = = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}`
+is the weighted mean of the variable.
 
 
 Args:
@@ -1548,7 +1548,7 @@ Args:
     fweights (tensor, optional): 1-D tensor of integer frequency weights;
         the number of times each observation vector should be repeated.
     aweights (tensor, optional): 1-D array of observation vector weights.
-        These relative weights are typically large for observations considered “important” and smaller for 
+        These relative weights are typically large for observations considered “important” and smaller for
         observations considered less “important”.
 
 Example::
@@ -1573,7 +1573,7 @@ Example::
     >>> f = torch.arange(3) * 2
     >>> torch.cov(x, y, fweights = f)
     tensor([[ 7.4907, -1.3851],
-            [-1.3851,  0.2561]])        
+            [-1.3851,  0.2561]])
     >>> x = torch.rand(3,10)
     >>> f = torch.arange(10) * 2
     >>> a = torch.arange(10) ** 2
