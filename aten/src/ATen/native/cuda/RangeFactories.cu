@@ -51,8 +51,7 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
 namespace at {
 namespace native {
 
-Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, Tensor& result) {
-  const auto steps = optional_steps.value_or(100);
+Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps, Tensor& result) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
   if (!optional_steps.has_value()) {
@@ -110,8 +109,7 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, c10::optional<
   return result;
 }
 
-Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base, Tensor& result) {
-  const auto steps = optional_steps.value_or(100);
+Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps, double base, Tensor& result) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
   if (!optional_steps.has_value()) {
