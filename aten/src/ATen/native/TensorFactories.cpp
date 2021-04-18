@@ -540,7 +540,7 @@ TensorOptions linspace_logspace_infer_options(
 Tensor linspace(
     const Scalar& start,
     const Scalar& end,
-    int64_t steps,
+    const int64_t steps,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -558,7 +558,7 @@ Tensor linspace(
 Tensor logspace(
     const Scalar& start,
     const Scalar& end,
-    int64_t steps,
+    const int64_t steps,
     double base,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
