@@ -4675,6 +4675,78 @@ TEST(LoopNest, fuseLoopsWithVariableBounds) {
   ASSERT_EQ(fused_loop, forJ);
 }
 
+TEST(LoopNest, fuseLoopsWithExprBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int j = 0; j < M + N; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  //   for (int k = 0; k < M + N; k++) {
+  //     B[k] = 20 * k;
+  //   }
+  BufHandle a_buf("A", {20}, kInt);
+  BufHandle b_buf("B", {20}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  VarHandle M("M", kInt);
+  VarHandle N("N", kInt);
+  auto forJ = For::make(j, 0, M + N, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forK = For::make(k, 0, M + N, Store::make(b_buf, {j}, Mul::make(20, k)));
+  auto par = Block::make({forJ, forK});
+  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int j
+# CHECK-NEXT: A[j] =
+# CHECK-NEXT: B[j] =
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The fused loop must be the same as the first loop.
+  ASSERT_EQ(fused_loop, forJ);
+}
+
+TEST(LoopNest, fuseLoopsWithDifferentExprBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int j = M; j < N * 2; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  //   for (int k = M; k < N + N; k++) {
+  //     B[k] = 20 * k;
+  //   }
+  BufHandle a_buf("A", {20}, kInt);
+  BufHandle b_buf("B", {20}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  VarHandle M("M", kInt);
+  VarHandle N("N", kInt);
+  auto forJ = For::make(j, M, N * 2, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forK = For::make(k, M, N + N, Store::make(b_buf, {j}, Mul::make(20, k)));
+  auto par = Block::make({forJ, forK});
+  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int j
+# CHECK-NEXT: A[j] =
+# CHECK-NEXT: B[j] =
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The fused loop must be the same as the first loop.
+  ASSERT_EQ(fused_loop, forJ);
+}
+
 TEST(LoopNest, fuseLoopsWithNonOverlappingBufferAccesses) {
   KernelScope kernel_scope;
 
