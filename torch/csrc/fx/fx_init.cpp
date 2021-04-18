@@ -200,11 +200,9 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       pyArgs.push_back(pyTensor->value_);
       pyTensorArgs.push_back(pyTensor->value_);
       unwrappedArgs.push_back(getValueFromPyTensor(pyTensor->value_));
-      // torch::jit::push(stack,
     } else {
       pyArgs.push_back(torch::jit::toPyObject(ivalue));
       unwrappedArgs.push_back(ivalue);
-      // torch::jit::push(stack, ivalue);
     }
   }
 
