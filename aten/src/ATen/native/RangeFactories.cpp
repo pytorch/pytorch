@@ -13,6 +13,7 @@ DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, const Sc
 DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, int64_t), linspace_stub);
 
 Tensor& linspace_cpu_out(const Scalar& start, const Scalar& end, const int64_t steps, Tensor& result) {
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   if (result.numel() != steps) {
     result.resize_({steps});
   }
@@ -33,6 +34,7 @@ Tensor& linspace_cpu_out(const Scalar& start, const Scalar& end, const int64_t s
 }
 
 Tensor& logspace_cpu_out(const Scalar& start, const Scalar& end, const int64_t steps, double base, Tensor& result) {
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   if (result.numel() != steps) {
     result.resize_({steps});
   }
