@@ -739,6 +739,22 @@ def sample_inputs_xlogy(self, device, dtype, requires_grad, **kwargs):
         ),
     )
 
+def sample_inputs_logsumexp(self, device, dtype, requires_grad):
+    inputs = (
+        ((), (0,), True),
+        ((S, S), (1,), True),
+        ((S, S), (1,), False)
+    )
+    samples = []
+
+    for shape, dim, keepdim in inputs:
+        t = make_tensor(shape, device, dtype,
+                        low=None, high=None,
+                        requires_grad=requires_grad)
+        samples.append(SampleInput(t, args=(dim, keepdim)))
+
+    return tuple(samples)
+
 def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
     return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
@@ -4532,6 +4548,12 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=True,
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_xlogy),
+    OpInfo('logsumexp',
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
+           supports_complex_autograd=False,
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
@@ -5040,8 +5062,6 @@ def method_tests():
         ('mvlgamma', torch.empty(S, S).uniform_(2.5, 5), [5], "p=5"),
         ('zero_', (S, S, S), NO_ARGS),
         ('zero_', (), NO_ARGS, 'scalar'),
-        ('logsumexp', (S, S), (1,), '', (True,)),
-        ('logsumexp', (), (0,), 'scalar', (True,)),
         ('norm', (S, S), (), 'default'),
         ('norm', (S, S), (2,), '2'),
         ('norm', (S, S), (0,), '0'),
