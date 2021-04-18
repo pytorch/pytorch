@@ -650,13 +650,13 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   // check if the input & output tensors are on the same device.
   TORCH_CHECK(
     output_device == input_device,
-    "tensordot_out: Expected the output and input tensors to be on the "
+    "tensordot: Expected the output and input tensors to be on the "
     "same device, but got output on ", output_device, " and inputs on ",
     input_device);
   // check if the computed result can be safely copied to the output tensor.
   bool can_cast = c10::canCast(result_dtype, output_tensor_dtype);
   TORCH_CHECK(
-    can_cast, "tensordot_out",
+    can_cast, "tensordot",
     ": Expected the output tensor to be safely castable from ", result_dtype,
     " dtype, but got output tensor with dtype ", output_tensor_dtype);
   at::native::resize_output(result, result_tmp.sizes());
