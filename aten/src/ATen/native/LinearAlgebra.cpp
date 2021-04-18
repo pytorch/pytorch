@@ -1227,6 +1227,7 @@ Tensor& bmm_out_cpu(const Tensor& batch1, const Tensor& batch2, Tensor &result) 
 }
 
 Tensor& dot_out(const Tensor& self, const Tensor& tensor, Tensor& result) {
+  checkSameDevice("dot_out", result, self);
   at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
            "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
@@ -1234,6 +1235,7 @@ Tensor& dot_out(const Tensor& self, const Tensor& tensor, Tensor& result) {
 }
 
 Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  checkSameDevice("vdot_out", result, self);
   at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
            "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
