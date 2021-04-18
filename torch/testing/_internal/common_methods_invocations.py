@@ -2055,11 +2055,10 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
 def sample_inputs_cov(op_info, device, dtype, requires_grad=False):
-    inp_dims = [(1,), (S,),
-                (1, S), (S, 1), (S, S)]
+    inp_dims = [ (S,), (1, S), (S, 2), (S, S)]  # (S, 1) produces nan outputs
     biases = [True, False]
     rowvars = [True, False]
-    ddofs = [None, 0, 1]
+    ddofs = [None, S]
     inputs = []
     for inp, bias, rowvar, ddof in product(inp_dims, biases, rowvars, ddofs):
         if np.size(inp) == 1:
@@ -2071,10 +2070,9 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad=False):
         fwt = torch.randint(1, 10, (t_size,), device=device) * 2 + 1  # '+1' to avoid zero sum weights
         awt = torch.randint(1, 10, (t_size,), device=device)**2 + 1
         tens = make_tensor(inp, device=device, dtype=dtype,
-                            low=None, high=None, requires_grad=requires_grad)
-        tens2 = make_tensor(inp, device=device, dtype=dtype,
-                            low=None, high=None, requires_grad=requires_grad)
-      
+                            low=-50, high=50, requires_grad=requires_grad)
+        tens2 = tens + make_tensor(inp, device=device, dtype=dtype,
+                            low=None, high=None, requires_grad=requires_grad)      
         inputs.append(SampleInput(tens))
         inputs.append(SampleInput(tens, args=(tens2, rowvar, bias, ddof, fwt, awt)))
     return inputs
@@ -3567,11 +3565,8 @@ op_db: List[OpInfo] = [
     OpInfo('cov',
            dtypes=all_types_and_complex(),
            sample_inputs_func=sample_inputs_cov,
-           skips=(
-           # "cov" not implemented for 'BFloat16'
-              SkipInfo('TestOpInfo', 'test_supported_dtypes',
-                        dtypes=(torch.bfloat16,)),
-           )),
+           supports_out=False,
+           ),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),

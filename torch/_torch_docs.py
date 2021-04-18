@@ -1511,25 +1511,28 @@ of the variables :math:`x` and :math:`y` is given by
 .. math::
     \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}(x_{i} - \bar{x})(y_{i} - \bar{y})}{N~-~1}
 
-where, :math:`\bar{x}` and :math:`\bar{y}` are the simple means of the variables respectively. 
-If :attr:`fweights` and/or :attr:`aweights` are provided, the unbaised weighted covariance 
+where :math:`x` and :math:`y` are rows of :attr:`input`, :math:`\bar{x}` and :math:`\bar{y}` are 
+the simple means of the variables respectively. 
+If :attr:`fweights` and/or :attr:`aweights` are provided, the unbiased weighted covariance 
 is calculated, which is given by
 
 .. math::
     \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}w_i(x_{i} - \mu_x^*)(y_{i} - \mu_y^*)}{\sum^{N}_{i = 1}w_i~-~1}
 
-where :math:`\mu_x^* = = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}` 
+where, :math:`w` denotes :attr:`fweights` or :attr:`aweights` based on whichever is provided as an input (:math:`w = fweights \times aweights` 
+if both are provided) and :math:`\mu_x^* = = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}` 
 is the weighted mean of the variable. 
 
 
 Args:
     input (Tensor): A 1-D or 2-D tensor containing multiple variables and observations.
-        Each row of :attr:`input` represents a variable, and each column a
+        Each row of :attr:`input` represents a variable, and each column, a
         single observation of all those variables. Also see :attr:`rowvar` below.
     other (Tensor, optional): An additional set of variables and observations.
         :attr:`other` has the same form as that of :attr:`input` and can be used to provide
         additional variables for each of the observations which would be considered along with those provided in
-        :attr:`input`. 
+        :attr:`input`. For example, if :attr:`input` is a tensor of shape :math:`(m \times n)`, :attr:`other would
+        be of the shape :math:`(g \times n)` and the output would have the shape :math:`( (m+g) \times (m+g))`.
     rowvar (bool, optional): If :attr:`rowvar` is `True` (default), then each row represents a variable,
         with observations in the columns.
         Otherwise, the relationship is transposed: each column represents a variable,
@@ -1546,8 +1549,7 @@ Args:
         the number of times each observation vector should be repeated.
     aweights (tensor, optional): 1-D array of observation vector weights.
         These relative weights are typically large for observations considered “important” and smaller for 
-        observations considered less “important”. If :attr:`ddof`:math:`=0` the tensor of weights can be used to
-        assign probabilities to observation vectors.
+        observations considered less “important”.
 
 Example::
     >>> x =  torch.tensor([[0, 2], [1, 1], [2, 0]]).T
@@ -1568,6 +1570,10 @@ Example::
             [-4.2860,  2.1441]])
     >>> torch.cov(x)
     tensor(11.7100)
+    >>> f = torch.arange(3) * 2
+    >>> torch.cov(x, y, fweights = f)
+    tensor([[ 7.4907, -1.3851],
+            [-1.3851,  0.2561]])        
     >>> x = torch.rand(3,10)
     >>> f = torch.arange(10) * 2
     >>> a = torch.arange(10) ** 2
