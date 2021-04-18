@@ -85,8 +85,7 @@ id<MTLBuffer>makeMTLBuffer(const std::vector<T>& src) {
     return buffer;
 }
 
-template<typename T>
-id<MTLBuffer>makeMTLBuffer(int64_t bytes) {
+static inline id<MTLBuffer>makeMTLBuffer(int64_t bytes) {
     id<MTLBuffer> buffer = [[MPSCNNContext sharedInstance].device
           newBufferWithLength:bytes
                       options:MTLResourceOptionCPUCacheModeWriteCombined];
