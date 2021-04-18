@@ -21,7 +21,8 @@ private:
   __m256 values;
 public:
   using value_type = float;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 8;
   }
   Vec256() {}
@@ -146,6 +147,9 @@ public:
   }
   Vec256<float> atan2(const Vec256<float> &b) const {
     return Vec256<float>(Sleef_atan2f8_u10(values, b));
+  }
+  Vec256<float> copysign(const Vec256<float> &sign) const {
+    return Vec256<float>(Sleef_copysignf8(values, sign));
   }
   Vec256<float> erf() const {
     return Vec256<float>(Sleef_erff8_u10(values));
