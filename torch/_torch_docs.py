@@ -3365,29 +3365,24 @@ add_docstr(torch.geqrf,
            r"""
 geqrf(input, *, out=None) -> (Tensor, Tensor)
 
-This is a low-level function for calling LAPACK directly. This function
+This is a low-level function for calling LAPACK's geqrf directly. This function
 returns a namedtuple (a, tau) as defined in `LAPACK documentation for geqrf`_ .
 
 Computes a QR decomposition of :attr:`input`.
-Both `Q` and `R` matrices are stored in the same tensor `a`.
+Both `Q` and `R` matrices are stored in the same output tensor `a`.
 The elements of `R` are stored on and above the diagonal.
 Elementary reflectors (or Householder vectors) implicitly defining matrix `Q`
 are stored below the diagonal.
-Result of this function can be used together with :func:`torch.linalg.householder_product`
+The results of this function can be used together with :func:`torch.linalg.householder_product`
 to obtain the `Q` matrix or
-with :func:`torch.ormqr` that uses implicit representation of matrix `Q` for efficient matrix-matrix multiplication.
-
-This function directly calls the underlying LAPACK function `geqrf`
-which produces a sequence of 'elementary reflectors'.
+with :func:`torch.ormqr`, which uses an implicit representation of the `Q` matrix,
+for an efficient matrix-matrix multiplication.
 
 See `LAPACK documentation for geqrf`_ for further details.
 
 .. note::
-    To obtain explicit Q and R matrices it is recommended to use :func:`torch.linalg.qr`.
-
-.. note::
-    Solving matrix equations using QR decomposition is available with ``driver="gels"`` option
-    of :func:`torch.linalg.lstsq`.
+    See also :func:`torch.linalg.qr`, which computes Q and R matrices, and :func:`torch.linalg.lstsq`
+    with the ``driver="gels"`` option for a function that can solve matrix equations using a QR decomposition.
 
 Args:
     input (Tensor): the input matrix
