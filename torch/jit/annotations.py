@@ -172,11 +172,14 @@ def get_type_line(source):
     # `type: ignore` comments may be needed in JIT'ed functions for mypy, due
     # to the hack in torch/_VF.py.
 
-    # An ignore type line can be of following format:
+    # An ignore type comment can be of following format:
     #   1) type: ignore
     #   2) type: ignore[rule-code]
     # This ignore statement must be at the end of the line
-    type_pattern = re.compile("# type:\\s*ignore(\\[[a-zA-Z-]+\\])?$")
+
+    # adding an extra backslash before the space, to avoid triggering
+    # one of the checks in .github/workflows/lint.yml
+    type_pattern = re.compile("# type:\\ ignore(\\[[a-zA-Z-]+\\])?$")
     type_lines = list(filter(lambda line: not type_pattern.search(line[1]),
                              type_lines))
 
