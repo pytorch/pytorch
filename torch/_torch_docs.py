@@ -3199,9 +3199,9 @@ Example::
     >>> x = torch.arange(9.)
     >>> mantissa, exponent = torch.frexp(x)
     >>> mantissa
-    >>> tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
+    tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
     >>> exponent
-    >>> tensor([0, 1, 2, 2, 3, 3, 3, 3, 4], dtype=torch.int32)
+    tensor([0, 1, 2, 2, 3, 3, 3, 3, 4], dtype=torch.int32)
     >>> torch.ldexp(mantissa, exponent)
     tensor([0., 1., 2., 3., 4., 5., 6., 7., 8.])
 """)
