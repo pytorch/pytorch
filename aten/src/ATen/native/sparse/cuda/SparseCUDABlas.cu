@@ -270,7 +270,7 @@ void adjustLd(char transb, int64_t m, int64_t n, int64_t k, int64_t *ldb, int64_
   }
 }
 
-void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, float *alpha, float *csrvala, int *csrrowptra, int *csrcolinda, float *b, int64_t ldb, float *beta, float *c, int64_t ldc)
+void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const float *alpha, const float *csrvala, int *csrrowptra, int *csrcolinda, const float *b, int64_t ldb, const float *beta, float *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -292,7 +292,7 @@ void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
-void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double *alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double *beta, double *c, int64_t ldc)
+void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const double *alpha, const double *csrvala, int *csrrowptra, int *csrcolinda, const double *b, int64_t ldb, const double *beta, double *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -316,7 +316,7 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   // TODO: Proper fix is to create real descriptor classes
 }
 
-void Ccsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, cuComplex *alpha, cuComplex *csrvala, int *csrrowptra, int *csrcolinda, cuComplex *b, int64_t ldb, cuComplex *beta, cuComplex *c, int64_t ldc)
+void Ccsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const cuComplex *alpha, const cuComplex *csrvala, int *csrrowptra, int *csrcolinda, const cuComplex *b, int64_t ldb, const cuComplex *beta, cuComplex *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -338,7 +338,7 @@ void Ccsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
-void Zcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, cuDoubleComplex *alpha, cuDoubleComplex *csrvala, int *csrrowptra, int *csrcolinda, cuDoubleComplex *b, int64_t ldb, cuDoubleComplex *beta, cuDoubleComplex *c, int64_t ldc)
+void Zcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const cuDoubleComplex *alpha, const cuDoubleComplex *csrvala, int *csrrowptra, int *csrcolinda, const cuDoubleComplex *b, int64_t ldb, const cuDoubleComplex *beta, cuDoubleComplex *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -397,13 +397,13 @@ template<> void csrmm2<c10::complex<float>>(
   c10::complex<float> *b, int64_t ldb, c10::complex<float> beta, c10::complex<float> *c, int64_t ldc)
 {
   Ccsrmm2(transa, transb, m, n, k, nnz,
-    reinterpret_cast<cuComplex*>(&alpha),
-    reinterpret_cast<cuComplex*>(csrvala),
+    reinterpret_cast<const cuComplex*>(&alpha),
+    reinterpret_cast<const cuComplex*>(csrvala),
     csrrowptra,
     csrcolinda,
-    reinterpret_cast<cuComplex*>(b),
+    reinterpret_cast<const cuComplex*>(b),
     ldb,
-    reinterpret_cast<cuComplex*>(&beta),
+    reinterpret_cast<const cuComplex*>(&beta),
     reinterpret_cast<cuComplex*>(c), ldc);
 }
 
@@ -414,13 +414,13 @@ template<> void csrmm2<c10::complex<double>>(
   c10::complex<double> *b, int64_t ldb, c10::complex<double> beta, c10::complex<double> *c, int64_t ldc)
 {
   Zcsrmm2(transa, transb, m, n, k, nnz,
-    reinterpret_cast<cuDoubleComplex*>(&alpha),
-    reinterpret_cast<cuDoubleComplex*>(csrvala),
+    reinterpret_cast<const cuDoubleComplex*>(&alpha),
+    reinterpret_cast<const cuDoubleComplex*>(csrvala),
     csrrowptra,
     csrcolinda,
-    reinterpret_cast<cuDoubleComplex*>(b),
+    reinterpret_cast<const cuDoubleComplex*>(b),
     ldb,
-    reinterpret_cast<cuDoubleComplex*>(&beta),
+    reinterpret_cast<const cuDoubleComplex*>(&beta),
     reinterpret_cast<cuDoubleComplex*>(c), ldc);
 }
 
