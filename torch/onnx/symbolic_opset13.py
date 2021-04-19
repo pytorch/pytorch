@@ -70,7 +70,8 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         return g.op("Split", self, split_size_or_sizes, axis_i=dim, outputs=_outputs)
     split_size = sym_help._get_const(split_size_or_sizes, 'i', 'split_size')
 
-    if self.type().sizes() is not None and self.type().sizes()[dim] is not None:
+    sizes = self.type().sizes()
+    if sizes is not None and sizes[dim] is not None:
         size = self.type().sizes()[dim]
     else:
         if _outputs is not None:
