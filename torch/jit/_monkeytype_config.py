@@ -73,7 +73,14 @@ if _IS_MONKEYTYPE_INSTALLED:
             for arg, types in all_args.items():
                 _all_type = " "
                 for _type in types:
-                    _all_type += _type.__name__ + ','
+                    # If the type is a type imported from typing
+                    # like Tuple, List, Dict then only the type part
+                    # is extracted and appended to _all_type.
+                    # TODO: use builtin function in typing to extract the typename.
+                    if "typing" in str(_type):
+                        _all_type += str(_type).split(".")[1] + ","
+                    else:
+                        _all_type += _type.__name__ + ','
                 _all_type = _all_type.lstrip(" ")  # Remove any trailing spaces
 
                 if len(types) > 1:
