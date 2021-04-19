@@ -6,11 +6,11 @@ from collections import defaultdict
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
-    import monkeytype  # type: [import]
-    from monkeytype import trace as monkeytype_trace  # type: [import]
-    from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: [import]
-    from monkeytype.config import default_code_filter  # type: [import]
-    from monkeytype.tracing import CallTrace, CodeFilter  # type: [import]
+    import monkeytype  # type: ignore[import]
+    from monkeytype import trace as monkeytype_trace  # type: ignore[import]
+    from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: ignore[import]
+    from monkeytype.config import default_code_filter  # type: ignore[import]
+    from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore[import]
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
     print("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType"
@@ -118,7 +118,7 @@ else:
 
     class JitTypeTraceStore:  # type:  ignore[no-redef]
         def __init__(self):
-            pass
+            self.trace_records = None
 
     class JitTypeTraceConfig:  # type:  ignore[no-redef]
         def __init__(self):
