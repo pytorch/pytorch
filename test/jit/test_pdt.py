@@ -2,11 +2,16 @@ import os
 import sys
 import torch
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.jit._monkeytype_config import _IS_MONKEYTYPE_INSTALLED
 from typing import List, Dict, Tuple  # noqa F401
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+
+if not _IS_MONKEYTYPE_INSTALLED:
+    print("monkeytype is not installed. Skipping tests for Profile-Directed Typing ", file=sys.stderr)
+    JitTestCase = object  # type: ignore[misc, assignment] # noqa: F811
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -47,6 +52,14 @@ def test_dict(a):
 
 def test_dict_int_list(a):
     return a[1]
+
+def test_multiple_types(a):
+    assert not isinstance(a, bool)
+    return a
+
+def test_multiple_types_2(a):
+    assert a is not None
+    return a
 
 class TestPDT(JitTestCase):
     """
@@ -105,3 +118,19 @@ class TestPDT(JitTestCase):
         scripted_fn = torch.jit._script_pdt(test_dict_int_list, example_inputs=[(_input,)])
         self.assertEqual(scripted_fn({0 : [False, False], 1: [True, True]}, ),
                          test_dict_int_list({0 : [False, False], 1: [True, True]}, ))
+
+    def test_any(self):
+        scripted_fn = torch.jit._script_pdt(test_multiple_types, example_inputs=[(1,), ("abc", ), (8.9,), ([3, 4, 5], )])
+        self.assertEqual(scripted_fn(10), test_multiple_types(10))
+        self.assertEqual(scripted_fn("def"), test_multiple_types("def"))
+        self.assertEqual(scripted_fn(7.89999), test_multiple_types(7.89999))
+        self.assertEqual(scripted_fn([10, 11, 14]), test_multiple_types([10, 11, 14]))
+
+        scripted_fn_2 = torch.jit._script_pdt(test_multiple_types_2, example_inputs=[(1,), ("abc", ), (8.9,),
+                                              ([3, 4, 5],), (True, ), ({"a": True}, ), ])
+        self.assertEqual(scripted_fn_2(10), test_multiple_types_2(10))
+        self.assertEqual(scripted_fn_2("def"), test_multiple_types_2("def"))
+        self.assertEqual(scripted_fn_2(7.89999), test_multiple_types_2(7.89999))
+        self.assertEqual(scripted_fn_2([10, 11, 14]), test_multiple_types_2([10, 11, 14]))
+        self.assertEqual(scripted_fn_2(False), test_multiple_types_2(False))
+        self.assertEqual(scripted_fn_2({"abc" : True, "def": False}), test_multiple_types_2({"abc" : True, "def": False}))
