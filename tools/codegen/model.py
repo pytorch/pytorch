@@ -169,7 +169,7 @@ class NativeFunction:
     func: 'FunctionSchema'
 
     # Whether or not to omit automatic generation of a DeviceGuard
-    device_guard: bool
+    common_device_guard: bool
 
     # What python module to put the function in
     python_module: Optional[str]
@@ -280,8 +280,8 @@ class NativeFunction:
         manual_cpp_binding = e.pop('manual_cpp_binding', False)
         assert isinstance(manual_cpp_binding, bool), f'not a bool: {manual_cpp_binding}'
 
-        device_guard = e.pop('device_guard', True)
-        assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
+        common_device_guard = e.pop('common_device_guard', True)
+        assert isinstance(common_device_guard, bool), f'not a bool: {common_device_guard}'
 
         structured = e.pop('structured', False)
         assert isinstance(structured, bool), f'not a bool: {structured}'
@@ -349,7 +349,7 @@ class NativeFunction:
             python_module=python_module,
             category_override=category_override,
             dispatch=dispatch,
-            device_guard=device_guard,
+            common_device_guard=common_device_guard,
             loc=loc,
             cpp_no_default_args=cpp_no_default_args,
         )
@@ -378,11 +378,11 @@ class NativeFunction:
         if self.structured:
             assert self.func.kind() == SchemaKind.out, "Put structured field on the out= " \
                 "variant of a function; did you mean structured_delegate?"
-            assert self.device_guard, "device_guard: False is not respected by structured kernels"
+            assert self.common_device_guard, "common_device_guard: False is not respected by structured kernels"
         if self.structured_delegate:
             assert self.func.kind() != SchemaKind.out, "structured_delegate field not allowed " \
                 "on out= functions; did you mean structured?"
-            assert self.device_guard, "device_guard: False is not respected by structured kernels"
+            assert self.common_device_guard, "common_device_guard: False is not respected by structured kernels"
         # Technically, with the asserts above, this assert is impossible to
         # happen
         assert not (self.structured and self.structured_delegate), \

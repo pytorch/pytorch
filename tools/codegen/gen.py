@@ -639,7 +639,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('inplace', f.func.name.name.inplace),
         ('is_factory_method', is_factory_method),
         ('abstract', f.is_abstract),
-        ('device_guard', f.device_guard),
+        ('common_device_guard', f.common_device_guard),
         ('with_gil', False),
         ('deprecated', False),
         ('has_math_kernel', DispatchKey.CompositeImplicitAutograd in f.dispatch),

@@ -157,7 +157,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             device_guard = "// DeviceGuard omitted"  # default
 
-            if f.device_guard and is_cuda_dispatch_key(self.dispatch_key):
+            if f.common_device_guard and is_cuda_dispatch_key(self.dispatch_key):
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                 if has_tensor_options:
                     # kernel is creating a tensor
@@ -180,7 +180,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     for arg in candidate_args:
                         if arg.type.is_tensor_like():
                             device_guard += f"""
-  c10::impl::check_or_update_common_device(common_device, {arg.name}, "{name}:{arg.name}");"""
+  c10::impl::check_or_update_common_device(common_device, {arg.name}, "{name}", "{arg.name}");"""
                     device_guard += "\n  const OptionalDeviceGuard device_guard(common_device);\n"
 
             return f"""\

@@ -129,12 +129,12 @@
   variants: method
 
 - func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CUDA: _use_cudnn_ctc_loss
 
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CUDA: _cudnn_ctc_loss
 
@@ -560,11 +560,11 @@
   dispatch:
     CPU, CUDA, Meta: as_strided_tensorimpl
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
-  device_guard: False
+  common_device_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: as_strided_
 
@@ -851,7 +851,7 @@
     SparseCUDA: _bmm_out_sparse_cuda
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
 
 - func: broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
   variants: function, method
@@ -894,11 +894,11 @@
 
 - func: unsafe_chunk(Tensor self, int chunks, int dim=0) -> Tensor[]
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: tensor_split.sections(Tensor(a) self, int sections, int dim=0) -> Tensor(a)[]
   variants: function, method
@@ -962,7 +962,7 @@
 - func: clip.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
-  device_guard: False
+  common_device_guard: False
 
 - func: complex(Tensor real, Tensor imag) -> Tensor
   variants: function
@@ -1041,7 +1041,7 @@
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     MkldnnCPU: copy_mkldnn_
     CompositeExplicitAutograd: copy_
@@ -1216,7 +1216,7 @@
 
 - func: cummaxmin_backward(Tensor grad, Tensor input, Tensor indices, int dim) -> Tensor
   variants: function
-  device_guard: False
+  common_device_guard: False
 
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
@@ -1242,7 +1242,7 @@
 
 - func: cumprod_backward(Tensor grad, Tensor input, int dim, Tensor output) -> Tensor
   variants: function
-  device_guard: False
+  common_device_guard: False
 
 - func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
@@ -1297,7 +1297,7 @@
 
 - func: diagonal_backward(Tensor grad, int[] input_sizes, int offset, int dim1, int dim2) -> Tensor
   variants: function
-  device_guard: False
+  common_device_guard: False
 
 - func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
   variants: method
@@ -1496,7 +1496,7 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
 - func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  device_guard: False
+  common_device_guard: False
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
@@ -1534,7 +1534,7 @@
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CPU, Meta: resize_
     CUDA: resize_cuda_
@@ -1546,10 +1546,10 @@
     QuantizedCPU, QuantizedCUDA: empty_quantized
 
 - func: empty.out(int[] size, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
-  device_guard: False
+  common_device_guard: False
 
 - func: empty_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  device_guard: False
+  common_device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -1629,13 +1629,13 @@
 
 - func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: expand
 
 - func: expand_as(Tensor(a) self, Tensor other) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
-  device_guard: False
+  common_device_guard: False
 
 - func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -1733,7 +1733,7 @@
     CPU, CUDA: frac_out
 
 - func: full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_guard: False
+  common_device_guard: False
 
 - func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -1926,7 +1926,7 @@
 
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
   variants: function
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CPU, CUDA: _index_put_impl_
 
@@ -1953,23 +1953,23 @@
 
 - func: isnan(Tensor self) -> Tensor
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CPU, CUDA: isnan
     SparseCPU, SparseCUDA: isnan_sparse
 
 - func: is_distributed(Tensor self) -> bool
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: is_floating_point(Tensor self) -> bool
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   manual_cpp_binding: True
 
 - func: is_complex(Tensor self) -> bool
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   manual_cpp_binding: True
 
 - func: isreal(Tensor self) -> Tensor
@@ -1977,15 +1977,15 @@
 
 - func: is_nonzero(Tensor self) -> bool
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: is_same_size(Tensor self, Tensor other) -> bool
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: is_signed(Tensor self) -> bool
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   manual_cpp_binding: True
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
@@ -2342,7 +2342,7 @@
 
 - func: value_selecting_reduction_backward(Tensor grad, int dim, Tensor indices, int[] sizes, bool keepdim) -> Tensor
   variants: function
-  device_guard: False
+  common_device_guard: False
 
 - func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
@@ -2679,11 +2679,11 @@
 
 - func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, int length) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -2754,7 +2754,7 @@
   variants: function
 
 - func: ones.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_guard: False
+  common_device_guard: False
 
 - func: ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2871,10 +2871,10 @@
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_guard: False
+  common_device_guard: False
 
 - func: rand.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_guard: False
+  common_device_guard: False
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2911,10 +2911,10 @@
 - func: randn.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: randn.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_guard: False
+  common_device_guard: False
 
 - func: randn.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_guard: False
+  common_device_guard: False
 
 - func: randn.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -3003,16 +3003,16 @@
 
 - func: reshape(Tensor(a) self, int[] shape) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
-  device_guard: False
+  common_device_guard: False
   dispatch:
     MkldnnCPU: mkldnn_reshape
 
 - func: reshape_as(Tensor(a) self, Tensor other) -> Tensor(a)
   variants: method
-  device_guard: False
+  common_device_guard: False
 
 - func: round(Tensor self) -> Tensor
   variants: function, method
@@ -3080,7 +3080,7 @@
 - func: infinitely_differentiable_gelu_backward(Tensor grad, Tensor self) -> Tensor
   variants: function
   python_module: nn
-  device_guard: False
+  common_device_guard: False
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   variants: function, method
@@ -3108,17 +3108,17 @@
 
 - func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: select
 
 - func: select_backward(Tensor grad, int[] input_sizes, int dim, int index) -> Tensor
   variants: function
-  device_guard: False
+  common_device_guard: False
 
 - func: selu(Tensor self) -> Tensor
 
@@ -3254,22 +3254,22 @@
 
 - func: size.int(Tensor self, int dim) -> int
   variants: function
-  device_guard: False
+  common_device_guard: False
   manual_cpp_binding: True
 
 - func: size.Dimname(Tensor self, Dimname dim) -> int
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: slice
 
 - func: slice_backward(Tensor grad, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
   variants: function
-  device_guard: False
+  common_device_guard: False
 
 - func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   variants: function, method
@@ -3299,59 +3299,59 @@
 
 - func: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: unsafe_split
 
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: split
 
 - func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: unsafe_split_with_sizes
 
 - func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: squeeze
 
 - func: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: squeeze
 
 - func: squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: squeeze_(Tensor(a!) self) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: squeeze_
 
 - func: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: squeeze_
 
 - func: squeeze_.dimname(Tensor(a!) self, Dimname dim) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -3405,12 +3405,12 @@
 
 - func: stride.int(Tensor self, int dim) -> int
   variants: function
-  device_guard: False
+  common_device_guard: False
   manual_cpp_binding: True
 
 - func: stride.Dimname(Tensor self, Dimname dim) -> int
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
@@ -3447,7 +3447,7 @@
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   variants: method
-  device_guard: False
+  common_device_guard: False
 
 - func: sqrt(Tensor self) -> Tensor
   structured_delegate: sqrt.out
@@ -3528,13 +3528,13 @@
 - func: prod.Dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: t(Tensor(a) self) -> Tensor(a)
-  device_guard: False
+  common_device_guard: False
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: t
 
 - func: t_(Tensor(a!) self) -> Tensor(a!)
-  device_guard: False
+  common_device_guard: False
   variants: method
   dispatch:
     CompositeExplicitAutograd: t_
@@ -3610,27 +3610,27 @@
 
 - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: transpose
 
 - func: transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: _mkldnn_transpose(Tensor self, int dim0, int dim1) -> Tensor
-  device_guard: False
+  common_device_guard: False
   dispatch:
     MkldnnCPU: mkldnn_transpose
 
 - func: transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: transpose_
 
 - func: _mkldnn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
-  device_guard: False
+  common_device_guard: False
   dispatch:
     MkldnnCPU: mkldnn_transpose_
 
@@ -3742,13 +3742,13 @@
 
 - func: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: unsqueeze
 
 - func: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: unsqueeze_
 
@@ -3788,7 +3788,7 @@
 
 - func: view_as(Tensor(a) self, Tensor other) -> Tensor(a)
   variants: method
-  device_guard: False
+  common_device_guard: False
 
 # we define both of these because 'where' does the broadcast and '_s_where' doesn't;
 # this allows us to implicitly calculate the broadcast derivative, while only dealing with the
@@ -3835,7 +3835,7 @@
   variants: function
 
 - func: zeros.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_guard: False
+  common_device_guard: False
 
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -4292,34 +4292,34 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_dim_sparse
-  device_guard: False
+  common_device_guard: False
 
 # legacy method
 - func: _dimI(Tensor self) -> int
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_dim_sparse
-  device_guard: False
+  common_device_guard: False
 
 - func: dense_dim(Tensor self) -> int
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: dense_dim_sparse
-  device_guard: False
+  common_device_guard: False
 
 # legacy method
 - func: _dimV(Tensor self) -> int
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: dense_dim_sparse
-  device_guard: False
+  common_device_guard: False
 
 - func: _nnz(Tensor self) -> int
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _nnz_sparse
     SparseCsrCPU: _nnz_sparse_csr
-  device_guard: False
+  common_device_guard: False
 
 # NOTE: [ coalesce autograd ]
 # coalesce returns self directly for already coalesced sparse tensors.
@@ -4338,19 +4338,19 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: is_coalesced_sparse
-  device_guard: False
+  common_device_guard: False
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _indices_sparse
-  device_guard: False
+  common_device_guard: False
 
 - func: _values(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _values_sparse
-  device_guard: False
+  common_device_guard: False
 
 # This method doesn't do any check but only directly sets the flag. So it can be
 # a bit unsafe. Similar to _indices and _values, this is useful for implementing
@@ -4359,32 +4359,32 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _coalesced_sparse_
-  device_guard: False
+  common_device_guard: False
 
 - func: indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: indices_sparse
-  device_guard: False
+  common_device_guard: False
 
 - func: values(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: values_sparse
     SparseCsrCPU: values_sparse_csr
-  device_guard: False
+  common_device_guard: False
 
 - func: crow_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
     SparseCsrCPU: crow_indices_sparse_csr
-  device_guard: False
+  common_device_guard: False
 
 - func: col_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
     SparseCsrCPU: col_indices_sparse_csr
-  device_guard: False
+  common_device_guard: False
 
 - func: hspmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -4397,7 +4397,7 @@
     SparseCUDA: hspmm_sparse_cuda
 
 - func: copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     SparseCPU, SparseCUDA: copy_sparse_
@@ -4562,19 +4562,19 @@
 # See NOTE [ TensorOptions Constructors ].
 - func: to.dtype_layout(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
-  device_guard: False
+  common_device_guard: False
 
 - func: to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
-  device_guard: False
+  common_device_guard: False
 
 - func: to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
-  device_guard: False
+  common_device_guard: False
 
 - func: to.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
-  device_guard: False
+  common_device_guard: False
 
 - func: meshgrid(Tensor[] tensors) -> Tensor[]
 
@@ -4696,13 +4696,13 @@
 
 - func: set_.source_Storage(Tensor(a!) self, Storage source) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CPU, CUDA: set_
 
 - func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CPU: set_storage_cpu_
     CUDA: set_storage_cuda_
@@ -4710,7 +4710,7 @@
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CPU, CUDA: set_tensor_
 
@@ -4722,7 +4722,7 @@
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CPU, CUDA: is_set_to
 
@@ -4755,7 +4755,7 @@
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: view
     MkldnnCPU: mkldnn_view
@@ -4768,7 +4768,7 @@
 # https://github.com/pytorch/pytorch/issues/47964
 - func: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CompositeExplicitAutograd: view_dtype
 
@@ -5156,7 +5156,7 @@
 
 - func: diag_backward(Tensor grad, int[] input_sizes, int diagonal) -> Tensor
   variants: function
-  device_guard: False
+  common_device_guard: False
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5205,7 +5205,7 @@
 
 - func: trace_backward(Tensor grad, int[] sizes) -> Tensor
   variants: function
-  device_guard: False
+  common_device_guard: False
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5508,7 +5508,7 @@
 
 - func: index_select_backward(Tensor grad, int[] self_sizes, int dim, Tensor index) -> Tensor
   variants: function
-  device_guard: False
+  common_device_guard: False
 
 - func: masked_select.out(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5523,7 +5523,7 @@
 
 - func: masked_select_backward(Tensor grad, Tensor input, Tensor mask) -> Tensor
   variants: function
-  device_guard: False
+  common_device_guard: False
 
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5551,7 +5551,7 @@
 
 - func: gather_backward(Tensor grad, Tensor self, int dim, Tensor index, bool sparse_grad) -> Tensor
   variants: function
-  device_guard: False
+  common_device_guard: False
 
 - func: gather.dimname_out(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
 
@@ -5644,20 +5644,20 @@
 # swapaxes, alias for transpose
 - func: swapaxes(Tensor(a) self, int axis0, int axis1) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: swapaxes_(Tensor(a!) self, int axis0, int axis1) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
 
 # swapdims, alias for transpose
 - func: swapdims(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: swapdims_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   variants: method
-  device_guard: False
+  common_device_guard: False
 
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -6187,7 +6187,7 @@
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   variants: method
-  device_guard: False
+  common_device_guard: False
   dispatch:
     CPU, CUDA: unfold
     QuantizedCPU, QuantizedCUDA: unfold
@@ -6358,14 +6358,14 @@
     QuantizedCPU: cat_out_quantized_cpu
 
 - func: _foreach_add.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalar_kernel_slow
     CUDA: foreach_tensor_add_scalar_kernel_cuda
 
 - func: _foreach_add_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalar_kernel_slow_
@@ -6384,42 +6384,42 @@
     CUDA: foreach_tensor_sub_scalar_kernel_cuda_
 
 - func: _foreach_mul.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalar_kernel_slow
     CUDA: foreach_tensor_mul_scalar_kernel_cuda
 
 - func: _foreach_mul_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalar_kernel_slow_
     CUDA: foreach_tensor_mul_scalar_kernel_cuda_
 
 - func: _foreach_div.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalar_kernel_slow
     CUDA: foreach_tensor_div_scalar_kernel_cuda
 
 - func: _foreach_div_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalar_kernel_slow_
     CUDA: foreach_tensor_div_scalar_kernel_cuda_
 
 - func: _foreach_add.List(Tensor[] tensors1, Tensor[] tensors2, *, Scalar alpha=1) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_list_kernel_slow
     CUDA: foreach_tensor_add_list_kernel_cuda
 
 - func: _foreach_add_.List(Tensor(a!)[] self, Tensor[] other, *, Scalar alpha=1) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_list_kernel_slow_
@@ -6438,28 +6438,28 @@
     CUDA: foreach_tensor_sub_list_kernel_cuda_
 
 - func: _foreach_mul.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_list_kernel_slow
     CUDA: foreach_tensor_mul_list_kernel_cuda
 
 - func: _foreach_mul_.List(Tensor(a!)[] self, Tensor[] other) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_list_kernel_slow_
     CUDA: foreach_tensor_mul_list_kernel_cuda_
 
 - func: _foreach_div.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_list_kernel_slow
     CUDA: foreach_tensor_div_list_kernel_cuda
 
 - func: _foreach_div_.List(Tensor(a!)[] self, Tensor[] other) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_list_kernel_slow_
@@ -6490,28 +6490,28 @@
     CUDA: foreach_tensor_sub_scalarlist_kernel_cuda_
 
 - func: _foreach_div.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalarlist_kernel_slow
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda
 
 - func: _foreach_div_.ScalarList(Tensor(a!)[] self, Scalar[] scalars) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalarlist_kernel_slow_
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda_
 
 - func: _foreach_mul.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalarlist_kernel_slow
     CUDA: foreach_tensor_mul_scalarlist_kernel_cuda
 
 - func: _foreach_mul_.ScalarList(Tensor(a!)[] self, Scalar[] scalars) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalarlist_kernel_slow_
@@ -6536,14 +6536,14 @@
     CUDA: foreach_tensor_exp_cuda_
 
 - func: _foreach_sqrt(Tensor[] tensors) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sqrt_slow
     CUDA: foreach_tensor_sqrt_cuda
 
 - func: _foreach_sqrt_(Tensor(a!)[] self) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sqrt_slow_
@@ -6862,21 +6862,21 @@
     CUDA: foreach_tensor_trunc_cuda_
 
 - func: _foreach_addcdiv_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalar_slow_
     CUDA: foreach_tensor_addcdiv_scalar_cuda_
 
 - func: _foreach_addcmul_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalar_slow_
     CUDA: foreach_tensor_addcmul_scalar_cuda_
 
 - func: _foreach_addcdiv_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> ()
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow_
@@ -6889,42 +6889,42 @@
     CUDA: foreach_tensor_addcmul_scalarlist_cuda_
 
 - func: _foreach_addcdiv.Scalar(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalar_slow
     CUDA: foreach_tensor_addcdiv_scalar_cuda
 
 - func: _foreach_addcmul.Scalar(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalar_slow
     CUDA: foreach_tensor_addcmul_scalar_cuda
 
 - func: _foreach_addcdiv.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow
     CUDA: foreach_tensor_addcdiv_scalarlist_cuda
 
 - func: _foreach_addcmul.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalarlist_slow
     CUDA: foreach_tensor_addcmul_scalarlist_cuda
 
 - func: _foreach_maximum.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_maximum_slow
     CUDA: foreach_tensor_maximum_cuda
 
 - func: _foreach_minimum.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_minimum_slow
@@ -8350,11 +8350,11 @@
 
 - func: isfinite(Tensor self) -> Tensor
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: isinf(Tensor self) -> Tensor
   variants: function, method
-  device_guard: False
+  common_device_guard: False
 
 - func: record_stream(Tensor(a!) self, Stream s) -> ()
   variants: method
@@ -8669,7 +8669,7 @@
     CompositeExplicitAutograd: linalg_lstsq
 
 - func: _lstsq_helper_(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float cond, str driver_name) -> Tensor(a!)
-  device_guard: False
+  common_device_guard: False
   variants: function
   dispatch:
     CPU: _lstsq_helper_cpu
