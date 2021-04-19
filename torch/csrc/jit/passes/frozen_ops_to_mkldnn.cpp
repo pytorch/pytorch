@@ -1,5 +1,5 @@
-#include <ATen/Utils.h>
 #include <ATen/Config.h>
+#include <ATen/Utils.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -276,29 +276,75 @@ Operation BroadOp(const Node* node) {
     auto b_size = b.sizes();
     auto a_size = a.sizes();
     if (a_size.equals(b_size)) {
+      // TODO: follow up with MKLDNN what the best way is
+      // to handle perf incompatible formats
       push(stack, a, b);
+      return;
     } else {
       auto out_size = at::infer_size(a_size, b_size);
-      size_t out_numel = out_size[0];
+      int64_t out_numel = out_size[0];
       for (size_t i = 1, end = out_size.size(); i < end; ++i) {
         out_numel = out_numel * out_size[i];
       }
+
+      auto exp_a = a;
+      auto exp_b = b;
       // mkldnn tensors only support reshape, not expand or view operators
       if (a_size.equals(out_size)) {
         push(stack, a);
       } else if (out_numel == a.numel()) {
-        push(stack, a.reshape(out_size));
+        exp_a = a.reshape(out_size);
       } else {
-        push(stack, a.to_dense().expand(out_size).to_mkldnn());
+        // TODO: consider to initializing to a blocked layout
+        // directly if needed
+        exp_a = a.to_dense().expand(out_size).to_mkldnn();
       }
 
       if (b_size.equals(out_size)) {
         push(stack, b);
       } else if (out_numel == b.numel()) {
-        push(stack, b.reshape(out_size).to_mkldnn());
+        exp_b = b.reshape(out_size);
       } else {
-        push(stack, b.to_dense().expand(out_size).to_mkldnn());
+        exp_b = b.to_dense().expand(out_size).to_mkldnn();
       }
+
+      {
+        // If one of the inputs was expanded and converted to nchw/nhwc
+        // we might end up in a very bad spot if the second argument
+        // is in a blocked format. In this case, MKLDNN uses its
+        // reference implementation for a binary operation that follows
+        // these broadcasts and it could be up to ~100x slower.
+        // We use a very simple heuristic to convert an arg in nchw
+        // to the blocked format of the other argument.
+        c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+        auto a_it = at::native::itensor_from_mkldnn(exp_a);
+        auto b_it = at::native::itensor_from_mkldnn(exp_b);
+
+        // `is_public_format` means a tensor's physical layout isn't in MKLDNN
+        // blocked layout e.g. nchw or nhwc but not nChw8c
+        if (!a_it.is_public_format()) {
+          if (b_it.is_public_format()) {
+            b_it = b_it.reorder_if_differ_in(a_it.get_desc());
+          }
+        } else if (!b_it.is_public_format()) {
+          if (a_it.is_public_format()) {
+            a_it = a_it.reorder_if_differ_in(b_it.get_desc());
+          }
+        }
+
+        auto a_options = exp_a.options();
+        auto a_out = at::native::new_with_itensor_mkldnn(
+            std::move(a_it),
+            optTypeMetaToScalarType(a_options.dtype_opt()),
+            a_options.device_opt());
+        push(stack, a_out);
+        auto b_options = exp_b.options();
+        auto b_out = at::native::new_with_itensor_mkldnn(
+            std::move(b_it),
+            optTypeMetaToScalarType(b_options.dtype_opt()),
+            b_options.device_opt());
+        push(stack, b_out);
+      };
     }
   };
 }
@@ -770,6 +816,7 @@ class MKLDNNSubgraphSlicer {
       // conversions. from initial testing including it speeds up models
       case aten::max_pool2d:
       case aten::max_pool3d:
+      case aten::adaptive_avg_pool2d:
         return true;
     }
 
