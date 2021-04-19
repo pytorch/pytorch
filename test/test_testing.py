@@ -1050,23 +1050,23 @@ class TestAsserts(TestCase, _TestAssertsMixin):
     def test_msg_str(self):
         msg = "Custom error message!"
 
-        a = torch.tensor(1)
-        b = torch.tensor(2)
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
 
-        for fn in self.assert_fns_with_inputs(a, b):
+        for fn in self.assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
                 fn(msg=msg)
 
     def test_msg_callable(self):
         msg = "Custom error message!"
 
-        def make_msg(a, b, info):
+        def make_msg(actual, expected, trace):
             return msg
 
-        a = torch.tensor(1)
-        b = torch.tensor(2)
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
 
-        for fn in self.assert_fns_with_inputs(a, b):
+        for fn in self.assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
                 fn(msg=make_msg)
 
