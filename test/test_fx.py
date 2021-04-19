@@ -2328,6 +2328,9 @@ class TestFX(JitTestCase):
         def f_custom_dict(x):
             return f_sum_dict(x.a) + x.b
 
+        def f_return_custom(x):
+            return Foo(x.b, x.a)
+
         tests = [
             (f_sum, [PH, PH, PH]),
             (f_sum, []),
@@ -2339,6 +2342,7 @@ class TestFX(JitTestCase):
             (f_custom, Foo(PH, PH)),
             (f_custom, Foo(PH, 3)),
             (f_custom_dict, Foo({'a': PH, 'b': PH}, PH)),
+            # (f_return_custom, Foo(PH, PH)), # Don't currently support output pytrees
         ]
         val = {'a': PH, 'z': []}
         # spec = pytree.tree_flatten(val)[1]

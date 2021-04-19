@@ -69,26 +69,26 @@ def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: Unfla
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
-def _dict_flatten_spec(d: Dict[Any, Any], spec: TreeSpec) -> Tuple[List[Any], Context]:
-    return list([d[k] for k in spec.context])
+def _dict_flatten_spec(d: Dict[Any, Any], context: Context) -> Tuple[List[Any], Context]:
+    return list([d[k] for k in context])
 
 def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
     return {key: value for key, value in zip(context, values)}
 
 def _list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
-    return d, None
+    return d, len(d)
 
-def _list_flatten_spec(d: List[Any], spec: TreeSpec) -> List[Any]:
-    return [d[i] for i in range(len(spec.children_specs))]
+def _list_flatten_spec(d: List[Any], context: Context) -> List[Any]:
+    return [d[i] for i in range(context)]
 
 def _list_unflatten(values: List[Any], context: Context) -> List[Any]:
     return list(values)
 
 def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
-    return list(d), None
+    return list(d), len(d)
 
-def _tuple_flatten_spec(d: Tuple[Any], spec: TreeSpec) -> List[Any]:
-    return [d[i] for i in range(len(spec.children_specs))]
+def _tuple_flatten_spec(d: Tuple[Any], context: Context) -> List[Any]:
+    return [d[i] for i in range(context)]
 
 def _tuple_unflatten(values: List[Any], context: Context) -> Tuple[Any, ...]:
     return tuple(values)
@@ -118,7 +118,7 @@ def tree_flatten_spec(pytree: PyTree, spec: TreeSpec):
     if isinstance(spec, LeafSpec):
         return [pytree]
     flatten_fn_spec = SUPPORTED_NODES[spec.type].flatten_fn_spec
-    child_pytrees = flatten_fn_spec(pytree, spec)
+    child_pytrees = flatten_fn_spec(pytree, spec.context)
     result = []
     for child, child_spec in zip(child_pytrees, spec.children_specs):
         flat = tree_flatten_spec(child, child_spec)
