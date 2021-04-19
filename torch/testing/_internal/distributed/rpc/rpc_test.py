@@ -5641,7 +5641,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         options = self.rpc_backend_options
         options.set_device_map(dst, {local_device: remote_device})
 
-        input_src = worker_name((self.rank -1 + self.world_size) % self.world_size)
+        input_src = worker_name((self.rank - 1 + self.world_size) % self.world_size)
         options.set_device_map(input_src, {remote_device: local_device})
 
         if devicesOptions is not None:
