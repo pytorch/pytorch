@@ -38,7 +38,10 @@
 
 #include <torch/custom_class.h>
 
+namespace {
+
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
+// TODO: move this somewhere more generally useful
 template <typename T>
 class IntrusivePtrNoGilDestructor {
   c10::intrusive_ptr<T> impl_;
@@ -48,10 +51,10 @@ public:
   IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) = default;
   IntrusivePtrNoGilDestructor& operator=(const IntrusivePtrNoGilDestructor&) = default;
   IntrusivePtrNoGilDestructor& operator=(IntrusivePtrNoGilDestructor&&) = default;
-  IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl) : impl_(std::move(impl)) {}
+  explicit IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl) : impl_(std::move(impl)) {}
   // This ctor is very important; see
   // https://github.com/pybind/pybind11/issues/2957
-  IntrusivePtrNoGilDestructor(T* impl) : impl_(c10::intrusive_ptr<T>::reclaim(impl)) {
+  explicit IntrusivePtrNoGilDestructor(T* impl) : impl_(c10::intrusive_ptr<T>::reclaim(impl)) {
     c10::raw::intrusive_ptr::incref(impl);
   }
   ~IntrusivePtrNoGilDestructor() {
@@ -66,12 +69,15 @@ public:
   }
   T& operator*() const noexcept { return *impl_; }
   T* operator->() const noexcept { return impl_.get(); }
-  T* get() const noexcept { return impl_.get(); }
+  C10_NODISCARD T* get() const noexcept { return impl_.get(); }
   void reset() noexcept { impl_.reset(); }
   operator bool() const noexcept {
     return impl_;
   }
 };
+
+} // anonymous namespace
+
 PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true);
 
 namespace torch {
