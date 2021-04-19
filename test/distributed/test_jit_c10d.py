@@ -4,10 +4,8 @@ import sys
 import torch
 import torch.distributed as c10d
 import time
-from datetime import timedelta
 from typing import List
 
-import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_distributed import requires_nccl, create_tcp_store
 from torch.testing._internal.common_utils import load_tests, TEST_WITH_TSAN, run_tests, IS_WINDOWS
 from torch.testing._internal.jit_utils import JitTestCase
