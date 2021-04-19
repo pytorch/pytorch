@@ -21,9 +21,6 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
   // find the size of islands
   int island_size = 0;
   while ((keys[tid + ++island_size] & mask) == (keys[tid] & mask));
-  if (island_size > 2) {
-    island_size = 2;
-  }
 
   // printf("tid = %d, island_size = %d\n", tid, island_size);
 
