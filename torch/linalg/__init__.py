@@ -1137,9 +1137,6 @@ Differences with `numpy.linalg.svd`:
           On CUDA, it uses cuSOLVER's `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later,
           and MAGMA's `gesdd` on earlier versions of CUDA.
 
-.. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
-          be represented as a column-major matrix (i.e. Fortran-contiguous).
-
 .. warning:: The singular vectors of a matrix are not unique. Any pair of singular
              vectors :math:`u_k, v_k` may be multiplied by `-1` when `U` and `V` are real-valued or
              by :math:`e^{i \phi}` for any :math:`\phi \in \mathbb{R}` when `U` and `V` are complex,
