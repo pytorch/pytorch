@@ -79,6 +79,62 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
   return deviceIndices;
 }
 
+std::shared_ptr<LazyStreamContext> createCalleeStreamContext(
+    std::vector<c10::DeviceIndex> devices) {
+  auto ctx = createLazyStreamContext();
+  for (const auto& device : devices) {
+    ctx->getStream(device);
+  }
+  return ctx;
+}
+
+// Retrieve local devices (i.e., device keys) from the given map.
+std::unordered_set<c10::DeviceIndex> getLocalDevices(
+    const std::unordered_map<std::string, tensorpipe::DeviceMap>& deviceMap) {
+  std::unordered_set<c10::DeviceIndex> deviceSet;
+  for (const auto& entry : deviceMap) {
+    for (const auto& device : entry.second) {
+      deviceSet.insert(device.first);
+    }
+  }
+  return deviceSet;
+}
+
+void checkValidDevicesOption(
+    const std::unordered_set<c10::DeviceIndex>& deviceSet,
+    const std::vector<c10::DeviceIndex>& deviceOpt) {
+  std::unordered_set<c10::DeviceIndex> optsDeviceSet(
+      deviceOpt.begin(),
+      deviceOpt.end());
+
+  // no duplications are allowed in opts_.devices
+  TORCH_CHECK(
+      deviceOpt.size() == optsDeviceSet.size(),
+      "Detected duplication in TensorPipeRpcBackendOptions devices field.");
+
+  // opts_.devices must be a superset of local devices in reverseDeviceMaps_
+  std::vector<c10::DeviceIndex> cut;
+  std::set_difference(
+      deviceSet.begin(), deviceSet.end(),
+      optsDeviceSet.begin(), optsDeviceSet.end(),
+      std::back_inserter(cut));
+
+  if (!cut.empty()) {
+    std::ostringstream oss;
+    std::copy(
+        cut.begin(),
+        cut.end(),
+        std::ostream_iterator<int32_t>(oss, ", "));
+    TORCH_CHECK(
+      false,
+      "The devices field in TensorPipeRpcBackendOptions must either be "
+      "None or contain all local devices use by its agent. However, "
+      "local devices ",
+      oss.str(),
+      "are used in (peer) device_maps but not included the devices field.");
+  }
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -460,6 +516,19 @@ TensorPipeAgent::TensorPipeAgent(
       processGroup_(std::move(processGroup)) {
   prepareNames();
 
+  {
+    // If devices was not specified in the options, use local devices in the
+    // deviceMap to initialize devices. Later, when setting reverseDeviceMaps_,
+    // the devices_ will be updated again using local devices in reverseDeviceMaps_.
+    auto deviceSet = getLocalDevices(opts_.deviceMaps);
+    if (opts_.devices.empty()) {
+      std::copy(deviceSet.begin(), deviceSet.end(), std::back_inserter(devices_));
+    } else {
+      checkValidDevicesOption(deviceSet, opts_.devices);
+      devices_ = opts_.devices;
+    }
+  }
+
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
 }
@@ -467,6 +536,26 @@ TensorPipeAgent::TensorPipeAgent(
 TensorPipeAgent::~TensorPipeAgent() {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is being destroyed";
   shutdown();
+}
+
+void TensorPipeAgent::setReverseDeviceMaps(
+    const std::unordered_map<std::string, tensorpipe::DeviceMap>&
+        reverseDeviceMaps) {
+  reverseDeviceMaps_ = reverseDeviceMaps;
+
+  // If devices wasn't specified in the options, update devices_ with local
+  // devices in reverseDeviceMaps_.
+  auto deviceSet = getLocalDevices(reverseDeviceMaps_);
+  if (opts_.devices.empty()) {
+    std::copy(
+        devices_.begin(),
+        devices_.end(),
+        std::inserter(deviceSet, deviceSet.begin()));
+    devices_.clear();
+    std::copy(deviceSet.begin(), deviceSet.end(), std::back_inserter(devices_));
+  } else {
+    checkValidDevicesOption(deviceSet, opts_.devices);
+  }
 }
 
 void TensorPipeAgent::startImpl() {
@@ -609,7 +698,7 @@ void TensorPipeAgent::pipeRead(
         const tensorpipe::Error&,
         Message&&,
         std::shared_ptr<LazyStreamContext>)> fn) noexcept {
-  pipe->readDescriptor([fn{std::move(fn)}, pipe](
+  pipe->readDescriptor([this, fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
                            tensorpipe::Descriptor tpDescriptor) mutable {
     if (error) {
@@ -617,7 +706,7 @@ void TensorPipeAgent::pipeRead(
       return;
     }
 
-    auto ctx = createLazyStreamContext();
+    auto ctx = createCalleeStreamContext(devices_);
     tensorpipe::Allocation tpAllocation;
     TensorpipeReadBuffers tpBuffers;
     std::tie(tpAllocation, tpBuffers) = tensorpipeAllocate(tpDescriptor, ctx);
@@ -1368,6 +1457,7 @@ std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForRemote(
 
   const auto& iter = deviceMaps.find(remoteName);
   if (iter == deviceMaps.end()) {
+
     for (const auto& t : message.tensors()) {
       TORCH_CHECK(
           t.device().is_cpu(),

@@ -601,14 +601,16 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               optional<std::vector<std::string>>,
               float,
               std::string,
-              std::unordered_map<std::string, tensorpipe::DeviceMap>>(),
+              std::unordered_map<std::string, tensorpipe::DeviceMap>,
+              std::vector<c10::DeviceIndex>>(),
           py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
           py::arg("_transports") = optional<std::vector<std::string>>(),
           py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
           py::arg("init_method") = kDefaultInitMethod,
           py::arg("device_maps") =
-              std::unordered_map<std::string, tensorpipe::DeviceMap>())
+              std::unordered_map<std::string, tensorpipe::DeviceMap>(),
+          py::arg("devices") = std::vector<c10::DeviceIndex>())
       .def_readwrite(
           "num_worker_threads",
           &TensorPipeRpcBackendOptions::numWorkerThreads,
@@ -621,6 +623,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "device_maps",
           &TensorPipeRpcBackendOptions::deviceMaps,
           R"(The device map locations.)")
+      .def_readwrite(
+          "devices",
+          &TensorPipeRpcBackendOptions::devices,
+          R"(All devices used the local agent.)")
       .def("set_device_map", &TensorPipeRpcBackendOptions::setDeviceMap);
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =

@@ -27,11 +27,17 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             store used for rendezvous. It takes any value accepted for the
             same argument of :meth:`~torch.distributed.init_process_group`
             (default: ``env://``).
-        device_maps (Dict[str, Dict]): Device placement mappings from this
-            worker to the callee. Key is the callee worker name and value the
-            dictionary (``Dict`` of ``int``, ``str``, or ``torch.device``) that
-            maps this worker's devices to the callee worker's devices.
+        device_maps (Dict[str, Dict], optional): Device placement mappings from
+            this worker to the callee. Key is the callee worker name and value
+            the dictionary (``Dict`` of ``int``, ``str``, or ``torch.device``)
+            that maps this worker's devices to the callee worker's devices.
             (default: ``None``)
+        devices (List[int, str, or ``torch.device``], optional): all local
+            CUDA devices used by RPC agent. By Default, it will be initialized
+            to all local devices from its own ``device_maps`` and corresponding
+            devices from its peers' ``device_maps``. When processing CUDA RPC
+            requests, the agent will properly synchronize CUDA streams for
+            all devices in this ``List``.
     """
     def __init__(
         self,
@@ -40,6 +46,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
         device_maps: Dict = None,
+        devices: List = None,
         _transports: List = None,
         _channels: List = None,
     ):
@@ -49,7 +56,8 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             _channels,
             rpc_timeout,
             init_method,
-            device_maps if device_maps else {}
+            device_maps if device_maps else {},
+            devices if devices else [],
         )
 
     def set_device_map(self, to: str, device_map: Dict):
@@ -116,3 +124,21 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
                     )
             device_index_map[k.index] = v.index
         super().set_device_map(to, device_index_map)
+
+    def set_devices(self, devices: List):
+        r"""
+        Set local devices used by the TensorPipe RPC agent. When processing
+        CUDA RPC requests, the TensorPipe RPC agent will properly synchronize
+        CUDA streams for all devices in this ``List``.
+
+        Args:
+            devices (List of int, str, or torch.device): local devices used by
+                the TensorPipe RPC agent.
+        """
+        def to_device_index(d):
+            d = torch.device(d)
+            if d.type == "cpu":
+                return -1
+            else:
+                return d.index
+        self.devices = list(map(to_device_index, devices))
