@@ -414,9 +414,8 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "normalize",
           [](For* f) {
-            For* normalized = nullptr;
-            LoopNest::normalize(f, &normalized);
-            return normalized;
+            LoopNest::normalize(f);
+            return f;
           },
           py::return_value_policy::reference)
       .def_static(
