@@ -64,7 +64,8 @@ private:
   __m256i values;
 public:
   using value_type = uint16_t;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 16;
   }
   Vec256() {}
@@ -256,6 +257,15 @@ public:
     auto o1 = Sleef_atan2f8_u10(lo, b1);
     auto o2 = Sleef_atan2f8_u10(hi, b2);
     return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> copysign(const Vec256<BFloat16> &sign) const {
+    // copy sign bit (0x8000) from sign and remaining bits from values
+    __m256i mask_value = _mm256_set1_epi32(~0x80008000);
+    __m256i mask_signbit = _mm256_set1_epi32(0x80008000);
+    return Vec256<BFloat16>(
+      _mm256_or_si256(
+        _mm256_and_si256(values, mask_value),
+        _mm256_and_si256(sign, mask_signbit)));
   }
   Vec256<BFloat16> erf() const {
     return map(Sleef_erff8_u10);
