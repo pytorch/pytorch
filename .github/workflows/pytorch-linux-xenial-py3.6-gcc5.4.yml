@@ -61,6 +61,9 @@ jobs:
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
           MEMORY_LIMIT_MAX_JOBS=8 # our "linux.2xlarge" runner has 16 vCPUs, if we use all of them we'll OOM
           export MAX_JOBS=$(( SCCACHE_MAX_JOBS > MEMORY_LIMIT_MAX_JOBS ? MEMORY_LIMIT_MAX_JOBS : SCCACHE_MAX_JOBS ))
+          # Why the two volume mounts here? So test binaries are put in the correct spot
+          # See CUSTOM_OP_BUILD, JIT_HOOK_BUILD, CUSTOM_BACKEND_BUILD
+          # TODO: Stop building test binaries as part of the build phase
           docker run \
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS \
@@ -73,6 +76,7 @@ jobs:
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
+            -v "${GITHUB_WORKSPACE}/../:/var/lib/jenkins" \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Chown workspace
@@ -81,7 +85,6 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
       - name: Archive artifacts into zip
         run: |
-          # TODO: only build test artifacts in the test phase
           (cd "${GITHUB_WORKSPACE}/../" && zip -r pytorch/artifacts.zip pytorch/dist pytorch/build custom-op-build/ custom-backend-build/ jit-hook-build/)
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Build Artifacts
