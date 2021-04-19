@@ -230,7 +230,8 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       "set_device",
       "device_index",
       "device_count",
-      "set_stream"};
+      "set_stream",
+      "synchronize"};
 
   if (cuda_ops.find(field) != cuda_ops.end()) {
     // Both current_device and set_device API's are a part of c10::cuda
