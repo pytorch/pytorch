@@ -653,12 +653,12 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
     "tensordot: Expected the output and input tensors to be on the "
     "same device, but got output on ", output_device, " and inputs on ",
     input_device);
-  // check if the computed result can be safely copied to the output tensor.
-  bool can_cast = c10::canCast(result_dtype, output_tensor_dtype);
+  // check if the computed result has the same dtype as the out tensor
+  //   (because tensordot does not support type promotion)
   TORCH_CHECK(
-    can_cast, "tensordot",
-    ": Expected the output tensor to be safely castable from ", result_dtype,
-    " dtype, but got output tensor with dtype ", output_tensor_dtype);
+    result_dtype == output_tensor_dtype, "tensordot",
+    ": Expected the output tensor to have dtype ", result_dtype,
+    ", but got an output tensor with dtype ", output_tensor_dtype);
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
   return result;
