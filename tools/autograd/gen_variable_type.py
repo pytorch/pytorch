@@ -231,7 +231,7 @@ CALL_REDISPATCH = CodeTemplate("""\
 at::redispatch::${api_name}(${unpacked_args})""")
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
-# `at::AutoNonVariableTypeMode` guard block.
+# `at::AutoDispatchBelowAutograd` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate("""\
 auto ${tmp_var} = ([&]() {
   ${guard}
@@ -672,7 +672,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         return call
 
     def emit_call(f: NativeFunction, unpacked_bindings: List[Binding]) -> str:
-        # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
+        # We only care about adding `at::AutoDispatchBelowAutograd` guard for non-variable dispatch
         # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
         # the baseType operations still dispatch to non-Variable type, even if the arguments passed
         # in are now Variables.
@@ -681,7 +681,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
         if get_view_info(fn) is not None or modifies_arguments(f):
-            guard = 'at::AutoNonVariableTypeMode guard;'
+            guard = 'at::AutoDispatchBelowAutograd guard;'
         else:
             guard = 'at::AutoDispatchBelowInplaceOrView guard;'
 
