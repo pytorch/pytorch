@@ -331,6 +331,13 @@ def _build_multidim_tensor(dim, dim_size, value=None, dtype=torch.float):
         value = size
     return torch.empty(size=[dim_size for _ in range(dim)], dtype=dtype).fill_(value)
 
+def _create_autograd_profiler(enable_profiling):
+    return (
+        torch.autograd.profiler.profile(record_shapes=True)
+        if enable_profiling else
+        suppress()
+    )
+
 
 class Barrier(object):
     barrier_id = 0
@@ -946,11 +953,7 @@ class DistributedTest:
             rank = dist.get_rank()
             send_size = rank + 1
             tensor = _build_tensor(send_size)
-            profile_ctx = (
-                torch.autograd.profiler.profile(record_shapes=True)
-                if enable_profiling else
-                suppress()
-            )
+            profile_ctx = _create_autograd_profiler(enable_profiling)
             with profile_ctx as prof:
                 for src in range(0, dist.get_world_size()):
                     if src == rank:
@@ -1002,11 +1005,7 @@ class DistributedTest:
             recv_ranks = list()
             irecv_ranks = list()
 
-            profile_ctx = (
-                torch.autograd.profiler.profile(record_shapes=True)
-                if enable_profiling else
-                suppress()
-            )
+            profiler_ctx = _create_autograd_profiler(enable_profiling)
             with profile_ctx as prof:
                 for dst in range(0, dist.get_world_size()):
                     if dst == rank:
@@ -1080,11 +1079,7 @@ class DistributedTest:
             world_size = dist.get_world_size()
             send_recv_size = 10
             tensor = _build_tensor(send_recv_size, value=rank)
-            profiler_ctx = (
-                torch.autograd.profiler.profile(record_shapes=True)
-                if enable_profiling else
-                suppress()
-            )
+            profiler_ctx = _create_autograd_profiler(enable_profiling)
             with profiler_ctx as prof:
                 for dst in range(0, world_size):
                     if dst == rank:
@@ -1124,11 +1119,7 @@ class DistributedTest:
         def _test_isend(self, enable_profiling):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
-            profiler_ctx = (
-                torch.autograd.profiler.profile(record_shapes=True)
-                if enable_profiling else
-                suppress()
-            )
+            profiler_ctx = _create_autograd_profiler(enable_profiling)
             with profiler_ctx as prof:
                 if rank == 0:
                     requests = [
