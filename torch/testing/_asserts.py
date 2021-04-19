@@ -1,9 +1,8 @@
 import collections.abc
-import contextlib
 import functools
 import sys
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type, TypeVar, Union
 
 import torch
 from torch import Tensor
@@ -31,17 +30,6 @@ except (KeyError, AttributeError):
         pass
 
 
-# 'numpy' is not a hard requirement of 'torch'. If it is available, we can import the underlying data directly with
-# 'torch.from_numpy()'. Otherwise we treat 'numpy.ndarray's the same as any other unknown object.
-try:
-    import numpy as np
-
-    _NUMPY_AVAILABLE = True
-except ImportError:
-    np = None  # type: ignore[assignment]
-    _NUMPY_AVAILABLE = False
-
-
 # This is copy-pasted from torch.testing._internal.common_utils.TestCase.dtype_precisions. With this we avoid a
 # dependency on torch.testing._internal at import. See
 # https://github.com/pytorch/pytorch/pull/54769#issuecomment-813174256 for details.
@@ -62,26 +50,21 @@ def _get_default_rtol_and_atol(actual: Tensor, expected: Tensor) -> Tuple[float,
     return _DTYPE_PRECISIONS.get(dtype, (0.0, 0.0))
 
 
-def _check_supported_tensors(
-    actual: Tensor,
-    expected: Tensor,
+def _check_supported_tensor(
+    input: Tensor,
 ) -> Optional[UsageError]:  # type: ignore[valid-type]
     """Checks if the tensors are supported by the current infrastructure.
 
     All checks are temporary and will be relaxed in the future.
 
-    Args:
-        actual (Tensor): Actual tensor.
-        expected (Tensor): Expected tensor.
-
     Returns:
         (Optional[UsageError]): If check did not pass.
     """
-    if any(t.dtype in (torch.complex32, torch.complex64, torch.complex128) for t in (actual, expected)):
+    if input.dtype in (torch.complex32, torch.complex64, torch.complex128):
         return UsageError("Comparison for complex tensors is not supported yet.")
-    if any(t.is_quantized for t in (actual, expected)):
+    if input.is_quantized:
         return UsageError("Comparison for quantized tensors is not supported yet.")
-    if any(t.is_sparse for t in (actual, expected)):
+    if input.is_sparse:
         return UsageError("Comparison for sparse tensors is not supported yet.")
 
     return None
@@ -196,7 +179,7 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> S
 
     return SimpleNamespace(
         total_elements=total_elements,
-        total_mismatches=total_mismatches,
+        total_mismatches=cast(int, total_mismatches),
         mismatch_ratio=mismatch_ratio,
         max_abs_diff=max_abs_diff.item(),
         max_abs_diff_idx=_unravel_index(max_abs_diff_flat_idx.item(), mismatches.shape),
@@ -209,15 +192,16 @@ def _check_values_equal(
     actual: Tensor,
     expected: Tensor,
     *,
-    msg: Optional[Union[str, Callable[[Any, Any, SimpleNamespace], str]]] = None,
+    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> Optional[AssertionError]:
     """Checks if the values of two tensors are bitwise equal.
 
     Args:
         actual (Tensor): Actual tensor.
         expected (Tensor): Expected tensor.
-        msg (Optional[Union[str, Callable[[Any, Any, SimpleNamespace], str]]]): Optional error message. Can be passed
-            as callable in which case it will be called with the inputs and the result of :func:`_trace_mismatches`.
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]]): Optional error message. Can be
+            passed as callable in which case it will be called with the inputs and the result of
+            :func:`_trace_mismatches`.
 
     Returns:
         (Optional[AssertionError]): If check did not pass.
@@ -247,7 +231,7 @@ def _check_values_close(
     rtol: float,
     atol: float,
     equal_nan: bool,
-    msg: Optional[Union[str, Callable[[Any, Any, SimpleNamespace], str]]],
+    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]],
 ) -> Optional[AssertionError]:
     """Checks if the values of two tensors are close up to a desired tolerance.
 
@@ -257,8 +241,9 @@ def _check_values_close(
         rtol (float): Relative tolerance.
         atol (float): Absolute tolerance.
         equal_nan (bool): If ``True``, two ``NaN`` values will be considered equal.
-        msg (Optional[Union[str, Callable[[Any, Any, SimpleNamespace], str]]]): Optional error message. Can be passed
-            as callable in which case it will be called with the inputs and the result of :func:`_trace_mismatches`.
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]]): Optional error message. Can be
+            passed as callable in which case it will be called with the inputs and the result of
+            :func:`_trace_mismatches`.
 
     Returns:
         (Optional[AssertionError]): If check did not pass.
@@ -288,7 +273,7 @@ def _check_tensors_equal(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
-    msg: Optional[Union[str, Callable[[Any, Any, SimpleNamespace], str]]] = None,
+    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> Optional[Exception]:
     """Checks that the values of two tensors are bitwise equal.
 
@@ -299,11 +284,7 @@ def _check_tensors_equal(
     Returns:
         Optional[Exception]: If checks did not pass.
     """
-    exc: Optional[Exception] = _check_supported_tensors(actual, expected)
-    if exc:
-        return exc
-
-    exc = _check_attributes_equal(
+    exc: Optional[Exception] = _check_attributes_equal(
         actual, expected, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
     )
     if exc:
@@ -327,7 +308,7 @@ def _check_tensors_close(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
-    msg: Optional[Union[str, Callable[[Any, Any, SimpleNamespace], str]]] = None,
+    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> Optional[Exception]:
     r"""Checks that the values of two tensors are close.
 
@@ -347,10 +328,6 @@ def _check_tensors_close(
     Returns:
         Optional[Exception]: If checks did not pass.
     """
-    exc: Optional[Exception] = _check_supported_tensors(actual, expected)
-    if exc:
-        return exc
-
     if (rtol is None) ^ (atol is None):
         # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
         # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
@@ -360,7 +337,7 @@ def _check_tensors_close(
     elif rtol is None or atol is None:
         rtol, atol = _get_default_rtol_and_atol(actual, expected)
 
-    exc = _check_attributes_equal(
+    exc: Optional[Exception] = _check_attributes_equal(
         actual, expected, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
     )
     if exc:
@@ -375,32 +352,6 @@ def _check_tensors_close(
         return exc
 
     return None
-
-
-def _check_by_type(
-    actual: Any,
-    expected: Any,
-    check_data: Callable[[Any, Any], Optional[Exception]],
-) -> Optional[Exception]:
-    """Delegates tensor checking based on the inputs types.
-
-    :class:`~collections.abc.Sequence`'s and :class:`~collections.abc.Mapping`'s are checked elementwise.
-
-    Args:
-        actual (Any): Actual input.
-        expected (Any): Expected input.
-        check_data (Callable[[Any, Any], Optional[Exception]]): Callable used to check if a data pair matches.
-            In case it mismatches should return an :class:`Exception` with an expressive error message.
-
-    Returns:
-        (Optional[Exception]): Return value of :attr:`check_tensors`.
-    """
-    if isinstance(actual, collections.abc.Sequence) and isinstance(expected, collections.abc.Sequence):
-        return _check_sequence(actual, expected, check_data)
-    elif isinstance(actual, collections.abc.Mapping) and isinstance(expected, collections.abc.Mapping):
-        return _check_mapping(actual, expected, check_data)
-    else:
-        return check_data(actual, expected)
 
 
 E = TypeVar("E", bound=Exception)
@@ -420,119 +371,193 @@ def _amend_error_message(exc: E, msg_fmtstr: str) -> E:
 
 
 _SEQUENCE_MSG_FMTSTR = "The failure occurred at index {} of the sequences."
-
-
-def _check_sequence(
-    actual: Sequence, expected: Sequence, check_data: Callable[[Any, Any], Optional[Exception]]
-) -> Optional[Exception]:
-    """Checks if the data in two sequences matches.
-
-    Args:
-        actual (Sequence): Actual sequence.
-        expected (Sequence): Expected sequence.
-        check_data (Callable[[Any, Any], Optional[Exception]]): Callable used to check if a data pair matches.
-            In case it mismatches should return an :class:`Exception` with an expressive error message.
-
-    Returns:
-        Optional[Exception]: :class:`AssertionError` if the sequences do not have the same length. Additionally, any
-            exception returned by :attr:`check_data`. In this case, the error message is amended to include the
-            first offending index.
-    """
-    actual_len = len(actual)
-    expected_len = len(expected)
-    if actual_len != expected_len:
-        return AssertionError(f"The length of the sequences mismatch: {actual_len} != {expected_len}")
-    for idx, (actual_t, expected_t) in enumerate(zip(actual, expected)):
-        exc = check_data(actual_t, expected_t)
-        if exc:
-            return _amend_error_message(exc, f"{{}}\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
-
-    return None
-
-
 _MAPPING_MSG_FMTSTR = "The failure occurred for key '{}' of the mappings."
 
 
-def _check_mapping(
-    actual: Mapping, expected: Mapping, check_data: Callable[[Any, Any], Optional[Exception]]
+def _check_inputs(
+    actual: Union[Tensor, List[Tensor], Dict[Any, Tensor]],
+    expected: Union[Tensor, List[Tensor], Dict[Any, Tensor]],
+    check_tensors: Callable[[Tensor, Tensor], Optional[Exception]],
 ) -> Optional[Exception]:
-    """Checks if the data of two mappings matches.
+    """Checks inputs.
+
+    :class:`~collections.abc.Sequence`'s and :class:`~collections.abc.Mapping`'s are checked elementwise.
 
     Args:
-        actual (Mapping): Actual mapping.
-        expected (Mapping): Expected mapping.
-        check_data (Callable[[Any, Any], Optional[Exception]]): Callable used to check if a data pair matches.
+        actual (Union[Tensor, List[Tensor], Dict[Any, Tensor]]): Actual input.
+        expected (Union[Tensor, List[Tensor], Dict[Any, Tensor]]): Expected input.
+        check_tensors (Callable[[Any, Any], Optional[Exception]]): Callable used to check if a tensor pair matches.
             In case it mismatches should return an :class:`Exception` with an expressive error message.
 
     Returns:
-        Optional[Exception]: :class:`AssertionError` if the sequences do not have the same set of keys. Additionally,
-            any exception returned by :attr:`check_data`. In this case, the error message is amended to include the
-            first offending key.
+        (Optional[Exception]): Return value of :attr:`check_tensors`.
     """
+    if isinstance(actual, collections.abc.Sequence) and isinstance(expected, collections.abc.Sequence):
+        for idx, (actual_t, expected_t) in enumerate(zip(actual, expected)):
+            exc = check_tensors(actual_t, expected_t)
+            if exc:
+                return _amend_error_message(exc, f"{{}}\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
+        else:
+            return None
+    elif isinstance(actual, collections.abc.Mapping) and isinstance(expected, collections.abc.Mapping):
+        for key in sorted(actual.keys()):
+            exc = check_tensors(actual[key], expected[key])
+            if exc:
+                return _amend_error_message(exc, f"{{}}\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
+        else:
+            return None
+    else:
+        return check_tensors(cast(Tensor, actual), cast(Tensor, expected))
+
+
+class _ParsedInputs(NamedTuple):
+    actual: Union[Tensor, List[Tensor], Dict[Any, Tensor]]
+    expected: Union[Tensor, List[Tensor], Dict[Any, Tensor]]
+
+
+def _parse_inputs(
+    actual: Any,
+    expected: Any,
+) -> Tuple[Optional[Exception], Optional[_ParsedInputs]]:
+    """Parses inputs by constructing tensors from array-or-scalar-likes.
+
+    :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s are parsed elementwise.
+
+    Args:
+        actual (Any): Actual input.
+        expected (Any): Expected input.
+
+    Returns:
+        (Optional[Exception], Optional[_ParsedInputs]): The two elements are orthogonal, i.e. if the first ``is None``
+            the second will not and vice versa. Check :func:`_parse_array_or_scalar_like_pair`,
+            :func:`_parse_sequences`, and :func:`_parse_mappings` for possible exceptions.
+    """
+    if isinstance(actual, collections.abc.Sequence) and isinstance(expected, collections.abc.Sequence):
+        return _parse_sequences(actual, expected)
+    elif isinstance(actual, collections.abc.Mapping) and isinstance(expected, collections.abc.Mapping):
+        return _parse_mappings(actual, expected)
+    else:
+        return _parse_array_or_scalar_like_pair(actual, expected)
+
+
+def _parse_array_or_scalar_like_pair(actual: Any, expected: Any) -> Tuple[Optional[Exception], Optional[_ParsedInputs]]:
+    """Parses an scalar-or-array-like pair.
+
+    Args:
+        actual: Actual array-or-scalar-like.
+        expected: Expected array-or-scalar-like.
+
+    Returns:
+        (Optional[Exception], Optional[_ParsedInputs]): The two elements are orthogonal, i.e. if the first ``is None``
+            the second will not and vice versa. Returns a :class:`UsageError` if :attr:`actual` and :attr:`expected` do
+            not have the same type or no :class:`~torch.Tensor` can be constructed from them.
+    """
+    exc: Optional[Exception]
+
+    if type(actual) is not type(expected):
+        exc = UsageError(
+            f"Apart from a containers type equality is required, but got {type(actual)} and {type(expected)} instead."
+        )
+        return exc, None
+
+    tensors = []
+    for array_or_scalar_like in (actual, expected):
+        try:
+            tensor = torch.as_tensor(array_or_scalar_like)
+        except Exception:
+            exc = UsageError(f"No tensor can be constructed from type {type(array_or_scalar_like)}.")
+            return exc, None
+
+        exc = _check_supported_tensor(tensor)
+        if exc:
+            return exc, None
+
+        tensors.append(tensor)
+
+    actual_tensor, expected_tensor = tensors
+    return None, _ParsedInputs(actual_tensor, expected_tensor)
+
+
+def _parse_sequences(actual: Sequence, expected: Sequence) -> Tuple[Optional[Exception], Optional[_ParsedInputs]]:
+    """Parses sequences of scalar-or-array-like pairs.
+
+    Regardless of the input types, the sequences are returned as :class:`list`.
+
+    Args:
+        actual: Actual sequence array-or-scalar-likes.
+        expected: Expected sequence array-or-scalar-likes.
+
+    Returns:
+        (Optional[Exception], Optional[_ParsedInputs]): The two elements are orthogonal, i.e. if the first ``is None``
+            the second will not and vice versa. Returns a :class:`AssertionError` if the length of :attr:`actual` and
+            :attr:`expected` does not match. Additionally, returns any exception from
+            :func:`_parse_array_or_scalar_like_pair`.
+    """
+    exc: Optional[Exception]
+
+    actual_len = len(actual)
+    expected_len = len(expected)
+    if actual_len != expected_len:
+        exc = AssertionError(f"The length of the sequences mismatch: {actual_len} != {expected_len}")
+        return exc, None
+
+    actual_lst = []
+    expected_lst = []
+    for idx in range(actual_len):
+        exc, result = _parse_array_or_scalar_like_pair(actual[idx], expected[idx])
+        if exc:
+            exc = _amend_error_message(exc, f"{{}}\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
+            return exc, None
+
+        result = cast(_ParsedInputs, result)
+        actual_lst.append(cast(Tensor, result.actual))
+        expected_lst.append(cast(Tensor, result.expected))
+
+    return None, _ParsedInputs(actual_lst, expected_lst)
+
+
+def _parse_mappings(actual: Mapping, expected: Mapping) -> Tuple[Optional[Exception], Optional[_ParsedInputs]]:
+    """Parses sequences of scalar-or-array-like pairs.
+
+    Regardless of the input types, the sequences are returned as :class:`dict`.
+
+    Args:
+        actual: Actual mapping array-or-scalar-likes.
+        expected: Expected mapping array-or-scalar-likes.
+
+    Returns:
+        (Optional[Exception], Optional[_ParsedInputs]): The two elements are orthogonal, i.e. if the first ``is None``
+            the second will not and vice versa. Returns a :class:`AssertionError` if the keys of :attr:`actual` and
+            :attr:`expected` do not match. Additionally, returns any exception from
+            :func:`_parse_array_or_scalar_like_pair`.
+    """
+    exc: Optional[Exception]
+
     actual_keys = set(actual.keys())
     expected_keys = set(expected.keys())
     if actual_keys != expected_keys:
         missing_keys = expected_keys - actual_keys
         additional_keys = actual_keys - expected_keys
-        return AssertionError(
+        exc = AssertionError(
             f"The keys of the mappings do not match:\n\n"
             f"Missing keys in the actual mapping: {sorted(missing_keys)}\n"
             f"Additional keys in the actual mapping: {sorted(additional_keys)}\n"
         )
+        return exc, None
 
+    actual_dct = {}
+    expected_dct = {}
     for key in sorted(actual_keys):
-        actual_t = actual[key]
-        expected_t = expected[key]
-
-        exc = check_data(actual_t, expected_t)
+        exc, result = _parse_array_or_scalar_like_pair(actual[key], expected[key])
         if exc:
-            return _amend_error_message(exc, f"{{}}\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
+            exc = _amend_error_message(exc, f"{{}}\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
+            return exc, None
 
-    return None
+        result = cast(_ParsedInputs, result)
+        actual_dct[key] = cast(Tensor, result.actual)
+        expected_dct[key] = cast(Tensor, result.expected)
 
-
-def _maybe_to_tensor(input: Any) -> Optional[Tensor]:
-    """Maybe casts the input to a tensor.
-
-    :class:`~torch.Tensor`'s are returned without modification. If :mod:`numpy` is available, :class:`numpy.ndarray`'s
-    are cast with :func:`torch.from_numpy`. Everything else is casted with :func:`torch.tensor`.
-
-    Args:
-        input (Any): Input to be cast.
-
-    Returns:
-        Optional[Tensor]: :class:`~torch.Tensor` if it :attr:`input` is castable and ``None`` otherwise.
-    """
-    if isinstance(input, torch.Tensor):
-        return input
-    elif _NUMPY_AVAILABLE and isinstance(input, np.ndarray):
-        return torch.from_numpy(input)
-
-    with contextlib.suppress(Exception):
-        return torch.tensor(input)
-
-    return None
-
-
-def _cast_inputs(check_tensors):
-    """Decorator that casts the two first positional inputs to :class:`~torch.Tensor`'s.
-
-    Casting is performed by :func:`_maybe_to_tensor`. If the casting of any input failed, returns a :class:`UsageError`
-    instead of executing the decorated function.
-    """
-
-    def wrapper(actual: Any, expected: Any, **kwargs):
-        a_t = _maybe_to_tensor(actual)
-        b_t = _maybe_to_tensor(expected)
-        if a_t is None or b_t is None:
-            return UsageError(
-                f"Both inputs have to be tensors or something that can be cast to one, "
-                f"but got {type(actual)} and {type(expected)} instead."
-            )
-
-        return check_tensors(a_t, b_t, **kwargs)
-
-    return wrapper
+    return None, _ParsedInputs(actual_dct, expected_dct)
 
 
 def assert_equal(
@@ -542,42 +567,47 @@ def assert_equal(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
-    msg: Optional[Union[str, Callable[[Any, Any, SimpleNamespace], str]]] = None,
+    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> None:
-    """Asserts that the values of tensors are bitwise equal.
+    """Asserts that the values of tensor pairs are bitwise equal.
 
-    Optionally, checks that some attributes of tensors are equal.
+    Optionally, checks that some attributes of tensor pairs are equal.
 
-    Also supports inputs that can be cast to :class:`torch.Tensor`'s as well as :class:`~collections.abc.Sequence`'s
-    and :class:`~collections.abc.Mapping`'s of any valid input type.
+    Also supports array-or-scalar-like inputs from which a :class:`torch.Tensor` can be constructed with
+    :func:`torch.as_tensor`. Still, requires type equality, i.e. comparing a :class:`torch.Tensor` and a
+    :class:`numpy.ndarray` is not supported.
+
+    In case both inputs are :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s the checks are
+    performed elementwise.
 
     Args:
         actual (Any): Actual input.
         expected (Any): Expected input.
-        check_device (bool): If ``True`` (default), asserts that tensors live in the same :attr:`~torch.Tensor.device`
-            memory. If this check is disabled **and** they do not live in the same memory :attr:`~torch.Tensor.device`,
-            they are moved CPU memory before their values are compared.
-        check_dtype (bool): If ``True`` (default), asserts that tensors have the same :attr:`~torch.Tensor.dtype`. If
-            this check is disabled they do not have the same :attr:`~torch.Tensor.dtype`, they are copied to the
-            :class:`~torch.dtype` returned by :func:`torch.promote_types` before their values are compared.
-        check_stride (bool): If ``True`` (default), asserts that the tensors have the same stride.
-        msg (Optional[Union[str, Callable[[Any, Any, SimpleNamespace], str]]]): Optional error message to use if the
-            values of tensors mismatch. Can be passed as callable in which case it will be called with the tensors and
-            a namespace of diagnostic info about the mismatches. See below for details.
+        check_device (bool): If ``True`` (default), asserts that each tensor pair is on the same
+            :attr:`~torch.Tensor.device` memory. If this check is disabled **and** it is not on the same
+            :attr:`~torch.Tensor.device` memory, it is moved CPU memory before the values are compared.
+        check_dtype (bool): If ``True`` (default), asserts that each tensor pair has the same
+            :attr:`~torch.Tensor.dtype`. If this check is disabled it does not have the same
+            :attr:`~torch.Tensor.dtype`, it is copied to the :class:`~torch.dtype` returned by
+            :func:`torch.promote_types` before the values are compared.
+        check_stride (bool): If ``True`` (default), asserts that each tensor pair has the same stride.
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]]): Optional error message to use if
+            the values of a tensor pair mismatch. Can be passed as callable in which case it will be called with the
+            tensor pair and a namespace of diagnostic info about the mismatches. See below for details.
 
     Raises:
-        UsageError: If the input pair has an unsupported type.
+        UsageError: If an array-or-scalar-like pair has different types.
+        UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
         UsageError: If any tensor is complex, quantized, or sparse. This is a temporary restriction and
             will be relaxed in the future.
-        AssertionError: If any corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
-        AssertionError: If :attr:`check_device`, but any corresponding tensors do not live in the same
-            :attr:`~torch.Tensor.device` memory.
-        AssertionError: If :attr:`check_dtype`, but any corresponding tensors do not have the same
-            :attr:`~torch.Tensor.dtype`.
-        AssertionError: If :attr:`check_stride`, but any corresponding tensors do not have the same stride.
-        AssertionError: If the values of any corresponding tensors are not bitwise equal.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
-        AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys mismatch.
+        AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
+        AssertionError: If a tensor pair does not have the same :attr:`~torch.Tensor.shape`.
+        AssertionError: If :attr:`check_device`, but a tensor pair is not on the same :attr:`~torch.Tensor.device`
+            memory.
+        AssertionError: If :attr:`check_dtype`, but a tensor pair does not have the same :attr:`~torch.Tensor.dtype`.
+        AssertionError: If :attr:`check_stride`, but a tensor pair does not have the same stride.
+        AssertionError: If the values of a tensor pair are not bitwise equal.
 
     The namespace that will be passed to :attr:`msg` if its a callable comprises the following attributes:
 
@@ -593,17 +623,22 @@ def assert_equal(
 
     .. seealso::
 
-        To assert that the values in tensors are close but are not required to be bitwise equal, use
+        To assert that the values of a tensor pair are close but are not required to be bitwise equal, use
         :func:`assert_close` instead.
     """
+    exc, parse_result = _parse_inputs(actual, expected)
+    if exc:
+        raise exc
+    actual, expected = cast(_ParsedInputs, parse_result)
+
     check_tensors = functools.partial(
-        _cast_inputs(_check_tensors_equal),
+        _check_tensors_equal,
         check_device=check_device,
         check_dtype=check_dtype,
         check_stride=check_stride,
         msg=msg,
     )
-    exc = _check_by_type(actual, expected, check_tensors)
+    exc = _check_inputs(actual, expected, check_tensors)
     if exc:
         raise exc
 
@@ -618,9 +653,9 @@ def assert_close(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
-    msg: Optional[Union[str, Callable[[Any, Any, SimpleNamespace], str]]] = None,
+    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> None:
-    r"""Asserts that the values of tensors are close.
+    r"""Asserts that the values of tensor pairs are bitwise close.
 
     Closeness is defined by
 
@@ -628,13 +663,14 @@ def assert_close(
 
         \lvert a - b \rvert \le \texttt{atol} + \texttt{rtol} \cdot \lvert b \rvert
 
-    If both tolerances, :attr:`rtol` and :attr:`rtol`, are ``0``, asserts that :attr:`actual` and :attr:`expected` are
-    bitwise equal.
+    Optionally, checks that some attributes of tensor pairs are equal.
 
-    Optionally, checks that some attributes of tensors are equal.
+    Also supports array-or-scalar-like inputs from which a :class:`torch.Tensor` can be constructed with
+    :func:`torch.as_tensor`. Still, requires type equality, i.e. comparing a :class:`torch.Tensor` and a
+    :class:`numpy.ndarray` is not supported.
 
-    Also supports inputs that can be cast to :class:`torch.Tensor`'s as well as :class:`~collections.abc.Sequence`'s
-    and :class:`~collections.abc.Mapping`'s of any valid input type.
+    In case both inputs are :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s the checks are
+    performed elementwise.
 
     Args:
         actual (Any): Actual input.
@@ -644,33 +680,32 @@ def assert_close(
         atol (Optional[float]): Absolute tolerance. If specified :attr:`rtol` must also be specified. If omitted,
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
         equal_nan (bool): If ``True``, two ``NaN`` values will be considered equal.
-        check_device (bool): If ``True`` (default), asserts that both :attr:`actual` and :attr:`expected` are on the
-            same :attr:`~torch.Tensor.device` memory. If this check is disabled **and** :attr:`actual` and
-            :attr:`expected` are not on the same memory :attr:`~torch.Tensor.device`, they are moved CPU memory before
-            their values are compared.
-        check_dtype (bool): If ``True`` (default), asserts that both :attr:`actual` and :attr:`expected` have the same
-            :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`actual` and :attr:`expected` do not
-            have the same :attr:`~torch.Tensor.dtype`, they are copied to the :class:`~torch.dtype` returned by
-            :func:`torch.promote_types` before their values are compared.
-        check_stride (bool): If ``True`` (default), asserts that both :attr:`actual` and :attr:`expected` have the same
-            stride.
-        msg (Optional[Union[str, Callable[[Any, Any, SimpleNamespace], str]]]): Optional error message to use if the
-            values of tensors mismatch. Can be passed as callable in which case it will be called with the tensors and
-            a namespace of diagnostic info about the mismatches. See below for details.
+        check_device (bool): If ``True`` (default), asserts that each tensor pair is on the same
+            :attr:`~torch.Tensor.device` memory. If this check is disabled **and** it is not on the same
+            :attr:`~torch.Tensor.device` memory, it is moved CPU memory before the values are compared.
+        check_dtype (bool): If ``True`` (default), asserts that each tensor pair has the same
+            :attr:`~torch.Tensor.dtype`. If this check is disabled it does not have the same
+            :attr:`~torch.Tensor.dtype`, it is copied to the :class:`~torch.dtype` returned by
+            :func:`torch.promote_types` before the values are compared.
+        check_stride (bool): If ``True`` (default), asserts that each tensor pair has the same stride.
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]]): Optional error message to use if
+            the values of a tensor pair mismatch. Can be passed as callable in which case it will be called with the
+            tensor pair and a namespace of diagnostic info about the mismatches. See below for details.
 
     Raises:
-        UsageError: If the input pair has an unsupported type.
-        UsageError: If :attr:`actual` or :attr:`expected` is complex, quantized, or sparse. This is a temporary
-            restriction and will be relaxed in the future.
-        AssertionError: If :attr:`actual` and :attr:`expected` do not have the same :attr:`~torch.Tensor.shape`.
-        AssertionError: If :attr:`check_device`, but :attr:`actual` and :attr:`expected` are not on the same
-            :attr:`~torch.Tensor.device` memory.
-        AssertionError: If :attr:`check_dtype`, but :attr:`actual` and :attr:`expected` do not have the same
-            :attr:`~torch.Tensor.dtype`.
-        AssertionError: If :attr:`check_stride`, but :attr:`actual` and :attr:`expected` do not have the same stride.
-        AssertionError: If the values of :attr:`actual` and :attr:`expected` are close up to a desired tolerance.
+        UsageError: If an array-or-scalar-like pair has different types.
+        UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
+        UsageError: If any tensor is complex, quantized, or sparse. This is a temporary restriction and
+            will be relaxed in the future.
+        UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
-        AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys mismatch.
+        AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
+        AssertionError: If a tensor pair does not have the same :attr:`~torch.Tensor.shape`.
+        AssertionError: If :attr:`check_device`, but a tensor pair is not on the same :attr:`~torch.Tensor.device`
+            memory.
+        AssertionError: If :attr:`check_dtype`, but a tensor pair does not have the same :attr:`~torch.Tensor.dtype`.
+        AssertionError: If :attr:`check_stride`, but a tensor pair does not have the same stride.
+        AssertionError: If the values of a tensor pair are not bitwise equal.
 
     The following table displays the default ``rtol``'s and ``atol``'s. Note that the :class:`~torch.dtype` refers to
     the promoted type in case :attr:`actual` and :attr:`expected` do not have the same :attr:`~torch.Tensor.dtype`.
@@ -709,10 +744,15 @@ def assert_close(
 
     .. seealso::
 
-        To assert that the values in tensors are bitwise equal, use :func:`assert_equal` instead.
+        To assert that the values of a tensor pair are bitwise equal, use :func:`assert_equal` instead.
     """
+    exc, parse_result = _parse_inputs(actual, expected)
+    if exc:
+        raise exc
+    actual, expected = cast(_ParsedInputs, parse_result)
+
     check_tensors = functools.partial(
-        _cast_inputs(_check_tensors_close),
+        _check_tensors_close,
         rtol=rtol,
         atol=atol,
         equal_nan=equal_nan,
@@ -721,6 +761,6 @@ def assert_close(
         check_stride=check_stride,
         msg=msg,
     )
-    exc = _check_by_type(actual, expected, check_tensors)
+    exc = _check_inputs(actual, expected, check_tensors)
     if exc:
         raise exc

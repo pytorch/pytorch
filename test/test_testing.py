@@ -3,19 +3,20 @@ import contextlib
 import functools
 import itertools
 import math
+import os
 import random
 import re
+import unittest
 from typing import Any, Callable, Iterator, List, Tuple, Type
-
-import numpy as np
 
 import torch
 
 from torch.testing._internal.common_utils import \
-    (TestCase, make_tensor, run_tests, slowTest)
+    (IS_SANDCASTLE, IS_WINDOWS, TestCase, make_tensor, run_tests, skipIfRocm, slowTest)
 from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCUDA, onlyCPU, onlyOnCPUAndCUDA, dtypes)
+    (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyOnCPUAndCUDA)
 from torch.testing._asserts import UsageError
 
 # For testing TestCase methods and torch.testing functions
@@ -691,6 +692,58 @@ class TestFrameworkUtils(TestCase):
                 # All the tests should be represented by some shard
                 self.assertEqual(sorted_tests, sorted_shard_tests)
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+    @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+    def test_filtering_env_var(self):
+        # Test environment variable selected device type test generator.
+        test_filter_file_template = """\
+#!/usr/bin/env python
+
+import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
+class TestEnvironmentVariable(TestCase):
+
+    def test_trivial_passing_test(self, device):
+        x1 = torch.tensor([0., 1.], device=device)
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
+
+instantiate_device_type_tests(
+    TestEnvironmentVariable,
+    globals(),
+)
+
+if __name__ == '__main__':
+    run_tests()
+"""
+        test_bases_count = len(get_device_type_test_bases())
+        # Test without setting env var should run everything.
+        env = dict(os.environ)
+        for k in ['IN_CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
+            if k in env.keys():
+                del env[k]
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn(f'Ran {test_bases_count} test', stderr.decode('ascii'))
+
+        # Test with setting only_for should only run 1 test.
+        env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn('Ran 1 test', stderr.decode('ascii'))
+
+        # Test with setting except_for should run 1 less device type from default.
+        del env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY]
+        env[PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn(f'Ran {test_bases_count-1} test', stderr.decode('ascii'))
+
+        # Test with setting both should throw exception
+        env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertNotIn('OK', stderr.decode('ascii'))
+
 
 class TestAsserts(TestCase):
     def get_assert_fns(self) -> List[Callable]:
@@ -720,7 +773,7 @@ class TestAsserts(TestCase):
             (collections.OrderedDict([("t", actual)]), collections.OrderedDict([("t", expected)])),
         ]
 
-    def assert_fns_with_inputs(self, actual: torch.Tensor, expected: torch.Tensor) -> Iterator[Callable]:
+    def assert_fns_with_inputs(self, actual: Any, expected: Any) -> Iterator[Callable]:
         """Yields assert functions with with included positional inputs based on two examples.
 
         .. note::
@@ -1003,28 +1056,36 @@ class TestAsserts(TestCase):
                 fn(actual, expected)
 
     @onlyCPU
-    def test_unknown_type(self, device):
-        actual = torch.empty((), device=device)
-        expected = {actual.clone()}
+    def test_type_inequality(self, device):
+        actual = torch.empty(2, device=device)
+        expected = actual.tolist()
 
-        for fn in self.get_assert_fns():
+        for fn in self.assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegexs(UsageError, str(type(actual)), str(type(expected))):
-                fn(actual, expected)
+                fn()
 
     @onlyCPU
-    def test_scalars(self, device):
-        number = 1
-        array = np.array(number, dtype=np.int32)
-        tensor = torch.tensor(number, dtype=torch.int32, device=device)
+    def test_unknown_type(self, device):
+        actual = "0"
+        expected = "0"
 
-        for actual, expected in itertools.permutations((number, array, tensor), 2):
-            for fn in self.assert_fns_with_inputs(actual, expected):
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegexs(UsageError, str(type(actual))):
                 fn()
 
     @onlyCPU
     def test_numpy(self, device):
-        actual = torch.rand(2, 2, device=device)
-        expected = actual.clone().numpy()
+        tensor = torch.rand(2, 2, dtype=torch.float32, device=device)
+        actual = tensor.numpy()
+        expected = actual.copy()
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            fn()
+
+    @onlyCPU
+    def test_scalar(self, device):
+        tensor = torch.rand(1, device=device)
+        actual = expected = tensor.item()
 
         for fn in self.assert_fns_with_inputs(actual, expected):
             fn()

@@ -418,8 +418,7 @@ TEST(LoopNest, ExprSliceAndNormalize) {
   // head: [0, 2)
   // tail: [2, 10)
 
-  For* normalized_tail;
-  LoopNest::normalize(tail, &normalized_tail);
+  LoopNest::normalize(tail);
   // normalized_tail: [0, 8)
 
   Block* body = getSimplifiedBody(l);
@@ -2819,10 +2818,9 @@ TEST(LoopNest, NormalizeStartPositive) {
   auto for_stmt = For::make(x, 50, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2852,10 +2850,9 @@ TEST(LoopNest, NormalizeStartNegative) {
   auto for_stmt = For::make(x, -50, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2887,10 +2884,9 @@ TEST(LoopNest, NormalizeStartZero) {
   auto for_stmt = For::make(x, 0, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2922,10 +2918,9 @@ TEST(LoopNest, NormalizeStartVariable) {
   auto for_stmt = For::make(x, y, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2957,10 +2952,9 @@ TEST(LoopNest, NormalizeOnNestedOuterLoop) {
   auto for_stmt = For::make(x, 50, 100, inner_for);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2992,8 +2986,7 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
   auto for_stmt = For::make(x, 50, 100, inner_for);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(inner_for, &normalized);
+  LoopNest::normalize(inner_for);
 
   auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
@@ -3027,13 +3020,12 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
   auto for_stmt = For::make(x, 5, 10, Store::make(a_buf, {x}, x * 2));
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
   For* x_outer;
   For* x_inner;
   For* x_tail;
-  l.splitWithTail(normalized, 10, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(for_stmt, 10, &x_outer, &x_inner, &x_tail);
 
   auto x_outer_result = IRSimplifier::simplify(x_outer);
   std::ostringstream oss_outer;
@@ -4011,7 +4003,7 @@ TEST(LoopNest, DISABLED_ColReduceSplitMaskUnevenReorder) {
   checkColReduce(s, *p.first, p.second);
 }
 
-TEST(LoopNest, DISABLED_VectorizeUse) {
+TEST(LoopNest, VectorizeUse) {
   KernelScope kernel_scope;
   constexpr int N = 8;
   Placeholder a("a", kFloat, {N});
@@ -4019,7 +4011,7 @@ TEST(LoopNest, DISABLED_VectorizeUse) {
       "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
   Tensor* c = Compute(
       "c", {{N, "n"}}, [&](const VarHandle& n) { return b->load(n) + 2.0f; });
-  LoopNest nest({c});
+  LoopNest nest({c}, {b, c});
   auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
   nest.vectorize(loops[0]);
   loops = nest.getAllLoopNestsWritingToBuf(c->buf())[0];
@@ -4657,6 +4649,78 @@ TEST(LoopNest, fuseLoopsWithVariableBounds) {
   VarHandle N("N", kInt);
   auto forJ = For::make(j, 0, N, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(k, 0, N, Store::make(b_buf, {j}, Mul::make(20, k)));
+  auto par = Block::make({forJ, forK});
+  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int j
+# CHECK-NEXT: A[j] =
+# CHECK-NEXT: B[j] =
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The fused loop must be the same as the first loop.
+  ASSERT_EQ(fused_loop, forJ);
+}
+
+TEST(LoopNest, fuseLoopsWithExprBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int j = 0; j < M + N; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  //   for (int k = 0; k < M + N; k++) {
+  //     B[k] = 20 * k;
+  //   }
+  BufHandle a_buf("A", {20}, kInt);
+  BufHandle b_buf("B", {20}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  VarHandle M("M", kInt);
+  VarHandle N("N", kInt);
+  auto forJ = For::make(j, 0, M + N, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forK = For::make(k, 0, M + N, Store::make(b_buf, {j}, Mul::make(20, k)));
+  auto par = Block::make({forJ, forK});
+  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int j
+# CHECK-NEXT: A[j] =
+# CHECK-NEXT: B[j] =
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The fused loop must be the same as the first loop.
+  ASSERT_EQ(fused_loop, forJ);
+}
+
+TEST(LoopNest, fuseLoopsWithDifferentExprBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int j = M; j < N * 2; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  //   for (int k = M; k < N + N; k++) {
+  //     B[k] = 20 * k;
+  //   }
+  BufHandle a_buf("A", {20}, kInt);
+  BufHandle b_buf("B", {20}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  VarHandle M("M", kInt);
+  VarHandle N("N", kInt);
+  auto forJ = For::make(j, M, N * 2, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forK = For::make(k, M, N + N, Store::make(b_buf, {j}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
   auto fused_loop = LoopNest::fuseLoops({forJ, forK});
 
