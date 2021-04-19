@@ -1220,6 +1220,7 @@ void checkMagmaInternalError(magma_int_t info, const std::string& magma_function
   TORCH_CHECK(info >= 0,
       "MAGMA error: ",
       magma_strerror(info),
+      ", info = ", info,
       ", when calling ", magma_function_name);
 }
 
