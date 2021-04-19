@@ -3536,10 +3536,12 @@ std(dim=None, *, correction=1, keepdim=False) -> Tensor
 See :func:`torch.std`
 
 .. function:: std(dim, unbiased=True, keepdim=False) -> Tensor
+   :noindex:
 
 See :func:`torch.std`
 
 .. function:: std(unbiased=True) -> Tensor
+   :noindex:
 
 See :func:`torch.std`
 """)
@@ -4201,10 +4203,12 @@ var(dim=None, *, correction=1, keepdim=False) -> Tensor
 See :func:`torch.var`
 
 .. function:: var(dim, unbiased=True, keepdim=False) -> Tensor
+   :noindex:
 
 See :func:`torch.var`
 
 .. function:: var(unbiased=True) -> Tensor
+   :noindex:
 
 See :func:`torch.var`
 """)
