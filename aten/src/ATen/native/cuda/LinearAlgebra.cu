@@ -48,19 +48,16 @@ TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Te
   IntArrayRef self__sizes;
   c10::MaybeOwned<Tensor> self_;
   auto betaval = beta.toComplexDouble();
+
   if (&result != &self) {
     self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
-    self__sizes = self_->sizes();
   } else {
     self_ = c10::MaybeOwned<Tensor>::borrowed(self);
-    self__sizes = self_->sizes();
   }
 
-
-  if ((&result != &self) && (betaval != 0.0)) {
+  if ((&result != &self) && (beta.toComplexDouble() != 0.0)) {
       at::native::copy_(const_cast<Tensor&>(result), *self_);
   }
-
 
   IntArrayRef result_sizes = result.sizes();
   if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
