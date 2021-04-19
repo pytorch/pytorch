@@ -196,7 +196,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     "No implementation found for dtype combination: {}"
                     "for op {} with is_reference={} despite it being listed as supported"
                     "this should not happen".format(dtypes, self.binary_op, is_reference))
-                AssertionError()
+                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
         elif not is_reference and self.binary_op in binary_op_supported_dtypes and \
                 dtypes in binary_op_supported_dtypes[self.binary_op]:
             if dtypes in [(torch.quint8, torch.qint8, None)]:
