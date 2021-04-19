@@ -1,7 +1,4 @@
 import torch
-
-torch.set_default_dtype(torch.double)
-
 import functools
 import random
 import operator

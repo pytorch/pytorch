@@ -1,9 +1,4 @@
 import torch
-
-# TODO: remove this global setting
-# Sparse tests use double as the default dtype
-torch.set_default_dtype(torch.double)
-
 import itertools
 import functools
 import operator
@@ -95,7 +90,6 @@ class TestSparse(TestCase):
             ((10, 0, 3), 0, 3),
             ((10, 0, 3), 0, 0),
         ]
-
         printed = []
         for shape, sparse_dim, nnz in shape_sparse_dim_nnz:
             indices_shape = torch.Size((sparse_dim, nnz))
@@ -777,7 +771,7 @@ class TestSparse(TestCase):
     def test_coalesce_transpose_mm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [dj, di], dtype, device, coalesced)
-            y = torch.randn(dj, dk, device=device)
+            y = torch.randn(dj, dk, dtype=dtype, device=device)
 
             x_coalesced = x.coalesce()
             self.assertTrue(x_coalesced.is_coalesced())
@@ -1549,7 +1543,7 @@ class TestSparse(TestCase):
 
         y = x1.clone()
         y.zero_()
-        expected = torch.zeros(x1.size())
+        expected = torch.zeros(x1.size(), dtype=dtype, device=device)
         self.assertEqual(self.safeToDense(y), expected)
 
         self.assertEqual(x1.is_coalesced(), coalesced)
