@@ -353,7 +353,10 @@ void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos
 template <typename scalar_t>
 static void apply_geqrf(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
 #ifndef USE_LAPACK
-  AT_ERROR("geqrf: LAPACK library not found in compilation");
+  TORCH_CHECK(
+      false,
+      "Calling torch.geqrf on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto input_data = input.data_ptr<scalar_t>();
