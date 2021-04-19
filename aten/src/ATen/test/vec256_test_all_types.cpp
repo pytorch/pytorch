@@ -12,6 +12,8 @@ namespace {
     template <typename T>
     class MinMax : public ::testing::Test {};
     template <typename T>
+    class Nan : public ::testing::Test {};
+    template <typename T>
     class Interleave : public ::testing::Test {};
     template <typename T>
     class SignManipulation : public ::testing::Test {};
@@ -67,6 +69,7 @@ namespace {
     TYPED_TEST_CASE(Comparison, RealFloatIntTestedTypes);
     TYPED_TEST_CASE(Bitwise, FloatIntTestedTypes);
     TYPED_TEST_CASE(MinMax, RealFloatIntTestedTypes);
+    TYPED_TEST_CASE(Nan, RealFloatTestedTypes);
     TYPED_TEST_CASE(Interleave, RealFloatIntTestedTypes);
     TYPED_TEST_CASE(SignManipulation, FloatIntTestedTypes);
     TYPED_TEST_CASE(Rounding, RealFloatTestedTypes);
@@ -435,9 +438,29 @@ namespace {
             [](const vec& v) { return v.erfinv(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
-
-
-
+    TYPED_TEST(Nan, IsNan) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        CACHE_ALIGN VT test_vals[vec::size()];
+        CACHE_ALIGN VT expected_vals[vec::size()];
+        auto vals = 1 << (vec::size());
+        for (int val = 0; val < vals; ++val) {
+          for (int i = 0; i < vec::size(); ++i) {
+            if (val & (1 << i)) {
+              test_vals[i] = std::numeric_limits<VT>::quiet_NaN();
+              // All bits are set to 1 if true, otherwise 0.
+              // same rule as at::Vec256<T>::binary_pred.
+              std::memset(static_cast<void*>(&expected_vals[i]), 0xFF, sizeof(VT));
+            } else {
+              test_vals[i] = (VT)0.123;
+              std::memset(static_cast<void*>(&expected_vals[i]), 0, sizeof(VT));
+            }
+          }
+          vec actual = vec::loadu(test_vals).isnan();
+          vec expected = vec::loadu(expected_vals);
+          AssertVec256<vec>(NAME_INFO(isnan), expected, actual).check();
+        }
+    }
     TYPED_TEST(LGamma, LGamma) {
         using vec = TypeParam;
         using UVT = UvalueType<vec>;
