@@ -418,8 +418,7 @@ TEST(LoopNest, ExprSliceAndNormalize) {
   // head: [0, 2)
   // tail: [2, 10)
 
-  For* normalized_tail;
-  LoopNest::normalize(tail, &normalized_tail);
+  LoopNest::normalize(tail);
   // normalized_tail: [0, 8)
 
   Block* body = getSimplifiedBody(l);
@@ -2819,10 +2818,9 @@ TEST(LoopNest, NormalizeStartPositive) {
   auto for_stmt = For::make(x, 50, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2852,10 +2850,9 @@ TEST(LoopNest, NormalizeStartNegative) {
   auto for_stmt = For::make(x, -50, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2887,10 +2884,9 @@ TEST(LoopNest, NormalizeStartZero) {
   auto for_stmt = For::make(x, 0, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2922,10 +2918,9 @@ TEST(LoopNest, NormalizeStartVariable) {
   auto for_stmt = For::make(x, y, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2957,10 +2952,9 @@ TEST(LoopNest, NormalizeOnNestedOuterLoop) {
   auto for_stmt = For::make(x, 50, 100, inner_for);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2992,8 +2986,7 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
   auto for_stmt = For::make(x, 50, 100, inner_for);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(inner_for, &normalized);
+  LoopNest::normalize(inner_for);
 
   auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
@@ -3027,13 +3020,12 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
   auto for_stmt = For::make(x, 5, 10, Store::make(a_buf, {x}, x * 2));
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
   For* x_outer;
   For* x_inner;
   For* x_tail;
-  l.splitWithTail(normalized, 10, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(for_stmt, 10, &x_outer, &x_inner, &x_tail);
 
   auto x_outer_result = IRSimplifier::simplify(x_outer);
   std::ostringstream oss_outer;

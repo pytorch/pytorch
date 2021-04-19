@@ -684,6 +684,16 @@ class TORCH_API For : public StmtNode<For> {
     return body_;
   }
 
+  const Expr* setStart(const Expr* start) {
+    start_ = start;
+    return start_;
+  }
+
+  const Expr* setStop(const Expr* stop) {
+    stop_ = stop;
+    return stop_;
+  }
+
  private:
   const Var* var_;
   const Expr* start_;
