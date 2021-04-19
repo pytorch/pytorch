@@ -45,7 +45,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest, expectedFailureMeta
+    deviceCountAtLeast, largeTensorTest, expectedFailureMeta
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -13415,24 +13415,6 @@ class TestNNDeviceType(NNTestCase):
             result.backward(torch.ones_like(result))
             torch.cuda.synchronize()
         issue_24823_2()
-
-    @onlyCUDA
-    @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', fn_has_device_arg=False)
-    def test_grid_sample_2d_alert_nondeterministic(self, device):
-        input = torch.empty(1, 1, 2, 2, device=device)
-        grid = torch.empty(1, 1, 1, 2, device=device)
-        input.requires_grad = True
-        output = F.grid_sample(input, grid, align_corners=False)
-        output.sum().backward()
-
-    @onlyCUDA
-    @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', fn_has_device_arg=False)
-    def test_grid_sample_3d_alert_nondeterministic(self, device):
-        input = torch.empty(1, 1, 2, 2, 2, device=device)
-        grid = torch.empty(1, 1, 1, 2, 3, device=device)
-        input.requires_grad = True
-        output = F.grid_sample(input, grid, align_corners=False)
-        output.sum().backward()
 
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:

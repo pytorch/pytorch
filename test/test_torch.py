@@ -16,6 +16,8 @@ import warnings
 import types
 import pickle
 import textwrap
+import subprocess
+import sys
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._six import inf, nan, string_classes
 from itertools import product, combinations, permutations
@@ -3632,6 +3634,77 @@ class TestTorchDeviceType(TestCase):
                 _test_in_place_broadcastable(small2, small_expanded, large_expanded)
                 _test_in_place_broadcastable(small2, small, large)
 
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @onlyCUDA
+    @wrapDeterministicFlagAPITest
+    def test_cublas_config_nondeterministic_alert(self, device):
+        test_cases = [
+            # (function, (tensor sizes))
+            ('mm', ((2, 2), (2, 2),)),
+            ('mv', ((2, 2), (2,),)),
+            ('bmm', ((1, 2, 2), (1, 2, 2),))]
+
+        test_configs = [
+            # (CuBLAS workspace config, is deterministic)
+            ('garbage', False),
+            (None, False),
+            (':4096:8', True),
+            (':16:8', True)]
+
+        cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
+        is_cuda10_2_or_higher = (
+            (torch.version.cuda is not None)
+            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+
+        def test_case_info(fn_name, config):
+            return f'function "{fn_name}" with config "{"" if config is None else config}"'
+
+        # Create processes to test each combination of test cases and config settings
+        processes = []
+        for fn_name, arg_sizes in test_cases:
+            for config, is_config_deterministic in test_configs:
+                env = os.environ.copy()
+                if config is None:
+                    if env.get(cublas_var_name) is not None:
+                        del env[cublas_var_name]
+                else:
+                    env[cublas_var_name] = config
+                should_throw_error = is_cuda10_2_or_higher and not is_config_deterministic
+                script = f"""
+import torch
+torch.use_deterministic_algorithms(True)
+fn = torch.{fn_name}
+arg_sizes = {arg_sizes}
+device = '{device}'
+should_throw_error = {should_throw_error}
+args = []
+for arg_size in arg_sizes:
+    args.append(torch.randn(*arg_size, device=device))
+try:
+    fn(*args)
+except RuntimeError as e:
+    if not should_throw_error:
+        raise RuntimeError('Did not expect any error to be raised')
+    elif 'Deterministic behavior was enabled with either' not in str(e):
+        raise RuntimeError('Expected a CuBLAS nondeterministic error, but got a different error')
+else:
+    if should_throw_error:
+        raise RuntimeError('Expected a CuBLAS nondeterministic error, but it was not raised')
+
+"""
+                try:
+                    subprocess.check_output(
+                        [sys.executable, '-c', script],
+                        stderr=subprocess.STDOUT,
+                        # On Windows, opening the subprocess with the default CWD makes `import torch`
+                        # fail, so just set CWD to this script's directory
+                        cwd=os.path.dirname(os.path.realpath(__file__)),
+                        env=env)
+                except subprocess.CalledProcessError as e:
+                    self.fail(msg=(
+                        f'Subprocess exception while attempting to run {test_case_info(fn_name, config)}:\n'
+                        + e.output.decode("utf-8")))
+
     def test_nondeterministic_alert_AvgPool3d(self, device):
         module = torch.nn.AvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -4060,6 +4133,32 @@ class TestTorchDeviceType(TestCase):
 
         test_func(torch.gather)
         test_func(torch.Tensor.gather)
+
+    # TODO: This operation is not documented as nondeterministic. Need
+    #       to fix that in this PR
+    def test_nondeterministic_alert_grid_sample_2d(self, device):
+        input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
+        grid = torch.empty(1, 1, 1, 2, device=device)
+        res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
+        grad = torch.ones_like(res)
+
+        @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', 'cuda')
+        def backward_func(slf, device):
+            res.backward(grad)
+
+        backward_func(self, device)
+
+    def test_nondeterministic_alert_grid_sample_3d(self, device):
+        input = torch.empty(1, 1, 2, 2, 2, device=device, requires_grad=True)
+        grid = torch.empty(1, 1, 1, 2, 3, device=device)
+        res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
+        grad = torch.ones_like(res)
+
+        @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', 'cuda')
+        def backward_func(slf, device):
+            res.backward(grad)
+
+        backward_func(self, device)
 
     def test_embedding_scalar_weight_error(self, device):
         indices = torch.rand(2, 2, device=device).long()

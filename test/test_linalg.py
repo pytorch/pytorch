@@ -2,9 +2,6 @@
 import torch
 import numpy as np
 
-import sys
-import subprocess
-import os
 import unittest
 import itertools
 import warnings
@@ -18,7 +15,7 @@ from functools import reduce
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, make_tensor, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
-     wrapDeterministicFlagAPITest, iter_indices, gradcheck, gradgradcheck, skipIfRocm)
+     iter_indices, gradcheck, gradgradcheck, skipIfRocm)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -5868,77 +5865,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cpu()))
                     self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cpu(), b2))
                     self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2, out=res2.cpu()))
-
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyCUDA
-    @wrapDeterministicFlagAPITest
-    def test_cublas_config_deterministic_error(self, device):
-        test_cases = [
-            # (function, (tensor sizes))
-            ('mm', ((2, 2), (2, 2),)),
-            ('mv', ((2, 2), (2,),)),
-            ('bmm', ((1, 2, 2), (1, 2, 2),))]
-
-        test_configs = [
-            # (CuBLAS workspace config, is deterministic)
-            ('garbage', False),
-            (None, False),
-            (':4096:8', True),
-            (':16:8', True)]
-
-        cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
-        is_cuda10_2_or_higher = (
-            (torch.version.cuda is not None)
-            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
-
-        def test_case_info(fn_name, config):
-            return f'function "{fn_name}" with config "{"" if config is None else config}"'
-
-        # Create processes to test each combination of test cases and config settings
-        processes = []
-        for fn_name, arg_sizes in test_cases:
-            for config, is_config_deterministic in test_configs:
-                env = os.environ.copy()
-                if config is None:
-                    if env.get(cublas_var_name) is not None:
-                        del env[cublas_var_name]
-                else:
-                    env[cublas_var_name] = config
-                should_throw_error = is_cuda10_2_or_higher and not is_config_deterministic
-                script = f"""
-import torch
-torch.use_deterministic_algorithms(True)
-fn = torch.{fn_name}
-arg_sizes = {arg_sizes}
-device = '{device}'
-should_throw_error = {should_throw_error}
-args = []
-for arg_size in arg_sizes:
-    args.append(torch.randn(*arg_size, device=device))
-try:
-    fn(*args)
-except RuntimeError as e:
-    if not should_throw_error:
-        raise RuntimeError('Did not expect any error to be raised')
-    elif 'Deterministic behavior was enabled with either' not in str(e):
-        raise RuntimeError('Expected a CuBLAS nondeterministic error, but got a different error')
-else:
-    if should_throw_error:
-        raise RuntimeError('Expected a CuBLAS nondeterministic error, but it was not raised')
-
-"""
-                try:
-                    subprocess.check_output(
-                        [sys.executable, '-c', script],
-                        stderr=subprocess.STDOUT,
-                        # On Windows, opening the subprocess with the default CWD makes `import torch`
-                        # fail, so just set CWD to this script's directory
-                        cwd=os.path.dirname(os.path.realpath(__file__)),
-                        env=env)
-                except subprocess.CalledProcessError as e:
-                    self.fail(msg=(
-                        f'Subprocess exception while attempting to run {test_case_info(fn_name, config)}:\n'
-                        + e.output.decode("utf-8")))
 
     def _test_addbmm_baddbmm(self, func, b1, b2, ref, out_tensor):
         getattr(out_tensor, func + "_")(b1, b2)

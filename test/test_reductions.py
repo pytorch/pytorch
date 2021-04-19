@@ -15,8 +15,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
-    onlyOnCPUAndCUDA, onlyCUDA, expectedAlertNondeterministic, largeTensorTest,
-    precisionOverride)
+    onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, precisionOverride)
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -772,11 +771,6 @@ class TestReductions(TestCase):
         big_exp[1] = 1000000
         big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
-
-    @onlyCUDA
-    @expectedAlertNondeterministic('_bincount_cuda', fn_has_device_arg=False)
-    def test_bincount_alert_nondeterministic(self, device):
-        torch.bincount(torch.tensor([], device=device, dtype=torch.long))
 
     # TODO: how many var stability tests are there?
     def test_var_stability2(self, device):
@@ -2136,11 +2130,6 @@ class TestReductions(TestCase):
                         amax2 = torch.amax(amax2, dim=d, keepdim=keepdim)
                     self.assertEqual(amin1, amin2)
                     self.assertEqual(amax1, amax2)
-
-    @onlyCUDA
-    @expectedAlertNondeterministic('_histc_cuda', fn_has_device_arg=False)
-    def test_histc_alert_nondeterministic(self, device):
-        torch.histc(torch.tensor([], device=device), min=0, max=3)
 
     def test_histc(self, device):
         # negative nbins throws
