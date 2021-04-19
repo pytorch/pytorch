@@ -56,6 +56,11 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
+      - name: Create test binary build directories
+        run: |
+          mkdir -pv ../custom-op-build
+          mkdir -pv ../custom-backend-build
+          mkdir -pv ../jit-hook-build
       - name: Build PyTorch
         run: |
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
