@@ -48,23 +48,27 @@ class Transformer(Module):
     def __init__(self, d_model: int = 512, nhead: int = 8, num_encoder_layers: int = 6,
                  num_decoder_layers: int = 6, dim_feedforward: int = 2048, dropout: float = 0.1,
                  activation: str = "relu", custom_encoder: Optional[Any] = None, custom_decoder: Optional[Any] = None,
-                 layer_norm_eps: float = 1e-5, batch_first: bool = False) -> None:
+                 layer_norm_eps: float = 1e-5, batch_first: bool = False,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(Transformer, self).__init__()
 
         if custom_encoder is not None:
             self.encoder = custom_encoder
         else:
             encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout,
-                                                    activation, layer_norm_eps, batch_first)
-            encoder_norm = LayerNorm(d_model, eps=layer_norm_eps)
+                                                    activation, layer_norm_eps, batch_first,
+                                                    **factory_kwargs)
+            encoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
             self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         if custom_decoder is not None:
             self.decoder = custom_decoder
         else:
             decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout,
-                                                    activation, layer_norm_eps, batch_first)
-            decoder_norm = LayerNorm(d_model, eps=layer_norm_eps)
+                                                    activation, layer_norm_eps, batch_first,
+                                                    **factory_kwargs)
+            decoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
             self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
         self._reset_parameters()
@@ -279,16 +283,19 @@ class TransformerEncoderLayer(Module):
     __constants__ = ['batch_first']
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu",
-                 layer_norm_eps=1e-5, batch_first=False):
+                 layer_norm_eps=1e-5, batch_first=False,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(TransformerEncoderLayer, self).__init__()
-        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first)
+        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
+                                            **factory_kwargs)
         # Implementation of Feedforward model
-        self.linear1 = Linear(d_model, dim_feedforward)
+        self.linear1 = Linear(d_model, dim_feedforward, **factory_kwargs)
         self.dropout = Dropout(dropout)
-        self.linear2 = Linear(dim_feedforward, d_model)
+        self.linear2 = Linear(dim_feedforward, d_model, **factory_kwargs)
 
-        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps)
-        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps)
+        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
+        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
 
@@ -353,18 +360,21 @@ class TransformerDecoderLayer(Module):
     __constants__ = ['batch_first']
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu",
-                 layer_norm_eps=1e-5, batch_first=False):
+                 layer_norm_eps=1e-5, batch_first=False, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(TransformerDecoderLayer, self).__init__()
-        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first)
-        self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first)
+        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
+                                            **factory_kwargs)
+        self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
+                                                 **factory_kwargs)
         # Implementation of Feedforward model
-        self.linear1 = Linear(d_model, dim_feedforward)
+        self.linear1 = Linear(d_model, dim_feedforward, **factory_kwargs)
         self.dropout = Dropout(dropout)
-        self.linear2 = Linear(dim_feedforward, d_model)
+        self.linear2 = Linear(dim_feedforward, d_model, **factory_kwargs)
 
-        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps)
-        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps)
-        self.norm3 = LayerNorm(d_model, eps=layer_norm_eps)
+        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
+        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
+        self.norm3 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
