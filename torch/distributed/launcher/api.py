@@ -64,7 +64,7 @@ class LaunchConfig:
     rdzv_endpoint: str = ""
     rdzv_backend: str = "etcd"
     rdzv_configs: Dict[str, Any] = field(default_factory=dict)
-    rdzv_timeout: int = 300
+    rdzv_timeout: int = 900
     max_restarts: int = 3
     monitor_interval: float = 30
     start_method: str = "spawn"
