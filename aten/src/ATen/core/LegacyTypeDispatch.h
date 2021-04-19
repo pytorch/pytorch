@@ -66,12 +66,8 @@ namespace at {
  * error saying "one of the variables needed for gradient computation has be modified."
  */
 struct TORCH_API AutoDispatchBelowAutograd {
-  // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
-  // TODO: Eliminate this parameter entirely
-  AutoDispatchBelowAutograd(bool enabled = true) :
+  AutoDispatchBelowAutograd() :
     autograd_guard_(c10::autograd_dispatch_keyset) {
-
-    TORCH_INTERNAL_ASSERT(enabled);
   }
 
   // disable all autograd dispatch keys
