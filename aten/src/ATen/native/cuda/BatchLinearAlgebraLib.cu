@@ -677,7 +677,7 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau, int64_t m, int64_t n
   at::cuda::solver::xgeqrf_bufferSize<scalar_t>(
       at::cuda::getCurrentCUDASolverDnHandle(),
       params,
-      m
+      m,
       n,
       A_data,
       lda,
@@ -707,7 +707,7 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau, int64_t m, int64_t n
     at::cuda::solver::xgeqrf<scalar_t>(
         handle,
         params,
-        m
+        m,
         n,
         A_working_ptr,
         lda,
