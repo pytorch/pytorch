@@ -12,7 +12,8 @@ Tensor = torch.Tensor
 cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
 linalg.cholesky(input, *, out=None) -> Tensor
 
-Computes the Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix. Supports batched inputs.
+Computes the Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix.
+Supports batched inputs.
 
 For a complex Hermitian or real symmetric matrix :math:`A`, this is defined as
 
