@@ -129,7 +129,7 @@ class TestTypeHints(TestCase):
                     str(fn),
                 ])
             if result != 0:
-                self.fail(f"mypy failed: {stderr}\n{stdout}")
+                self.fail(f"mypy failed:\n{stderr}\n{stdout}")
 
 
 if __name__ == '__main__':
