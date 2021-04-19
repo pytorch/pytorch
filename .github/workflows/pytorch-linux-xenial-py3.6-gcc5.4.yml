@@ -161,6 +161,10 @@ jobs:
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
           MEMORY_LIMIT_MAX_JOBS=8 # our "linux.2xlarge" runner has 16 vCPUs, if we use all of them we'll OOM
           export MAX_JOBS=$(( SCCACHE_MAX_JOBS > MEMORY_LIMIT_MAX_JOBS ? MEMORY_LIMIT_MAX_JOBS : SCCACHE_MAX_JOBS ))
+          # Why the three volume mounts here? So test binaries are put in the correct spot
+          # NOTE: You cannot volume mount ${GITHUB_WORKSPACE}../:/var/lib/jenkins since sccache connection will hang
+          # See CUSTOM_OP_BUILD, JIT_HOOK_BUILD, CUSTOM_BACKEND_BUILD
+          # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086
           docker run \
@@ -174,6 +178,9 @@ jobs:
             --tty \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -v "${GITHUB_WORKSPACE}../custom-op-build:/var/lib/jenkins/custom-op-build" \
+            -v "${GITHUB_WORKSPACE}../custom-backend-build:/var/lib/jenkins/custom-backend-build" \
+            -v "${GITHUB_WORKSPACE}../jit-hook-build:/var/lib/jenkins/jit-hook-build" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && .jenkins/pytorch/test.sh'
