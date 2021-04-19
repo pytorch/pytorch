@@ -77,6 +77,8 @@ allow_list = [
     ("aten::_addmv_impl_", datetime.date(2021, 5, 15)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
+    ("aten::linspace", datetime.date(9999, 1, 1)),
+    ("aten::logspace", datetime.date(9999, 1, 1)),
 ]
 
 def allow_listed(schema, allow_list):
