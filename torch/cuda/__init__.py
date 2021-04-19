@@ -21,7 +21,7 @@ from .. import device as _device
 import torch._C
 
 try:
-    from torch._C import _cudart  # type: ignore
+    from torch._C import _cudart  # type: ignore[attr-defined]
 except ImportError:
     _cudart = None
 
@@ -36,7 +36,7 @@ _device_t = Union[_device, str, int, None]
 if hasattr(torch._C, '_CudaDeviceProperties'):
     _CudaDeviceProperties = torch._C._CudaDeviceProperties
 else:
-    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore
+    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore[assignment, misc]
 
 # Global variables dynamically populated by native code
 has_magma: bool = False
@@ -336,7 +336,7 @@ class StreamContext(object):
     """
     cur_stream : Optional['torch.cuda.Stream']
 
-    def __init__(self, stream: Optional['torch.cuda.Stream']):  # type: ignore
+    def __init__(self, stream: Optional['torch.cuda.Stream']):
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
@@ -356,10 +356,10 @@ class StreamContext(object):
 
         # If the stream is not on the current device, then
         # set the current stream on the device
-        if self.src_prev_stream.device != cur_stream.device:  # type: ignore
+        if self.src_prev_stream.device != cur_stream.device:
             with device(cur_stream.device):
                 self.dst_prev_stream = torch.cuda.current_stream(cur_stream.device)
-        torch.cuda.set_stream(cur_stream)  # type: ignore
+        torch.cuda.set_stream(cur_stream)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
         # Local cur_stream variable for type refinement
@@ -370,11 +370,11 @@ class StreamContext(object):
 
         # Reset the stream on the original device
         # and destination device
-        if self.src_prev_stream.device != cur_stream.device:  # type: ignore
-            torch.cuda.set_stream(self.dst_prev_stream)  # type: ignore
-        torch.cuda.set_stream(self.src_prev_stream)  # type: ignore
+        if self.src_prev_stream.device != cur_stream.device:  # type: ignore[union-attr]
+            torch.cuda.set_stream(self.dst_prev_stream)  # type: ignore[arg-type]
+        torch.cuda.set_stream(self.src_prev_stream)  # type: ignore[arg-type]
 
-def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ignore
+def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:
     r"""Wrapper around the Context-manager StreamContext that
     selects a given stream.
 
@@ -534,7 +534,7 @@ class _CudaBase(object):
         # We could use a Protocol here to tell mypy that self has `get_device` method
         # but it is only available in the typing module on Python >= 3.8
         # or on typing_extensions module on Python >= 3.6
-        with device(self.get_device()):  # type: ignore
+        with device(self.get_device()):  # type: ignore[attr-defined]
             return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
 
     __new__ = _lazy_new

@@ -113,7 +113,7 @@ def augment_many_model_functions_with_bundled_inputs(
         if input_list is not None and not isinstance(input_list, Sequence):
             raise TypeError("Error inputs for function {0} is not a Sequence".format(function_name))
 
-        function_arg_types = [arg.type for arg in function.schema.arguments[1:]]  # type: ignore
+        function_arg_types = [arg.type for arg in function.schema.arguments[1:]]  # type: ignore[attr-defined]
         deflated_inputs_type: ListType = ListType(TupleType(function_arg_types))
         model._c._register_attribute("_bundled_inputs_deflated_{name}".format(name=function_name), deflated_inputs_type, [])
 
@@ -138,7 +138,7 @@ def augment_many_model_functions_with_bundled_inputs(
             deflated_inputs = []
             parts = []
             for inp_idx, args in enumerate(input_list):
-                if not isinstance(args, Tuple) and not isinstance(args, List):  # type: ignore
+                if not isinstance(args, Tuple) and not isinstance(args, List):  # type: ignore[arg-type]
                     raise TypeError(
                         "Error bundled input for function {0} idx: {1} is not a Tuple or a List".format(function_name, inp_idx)
                     )

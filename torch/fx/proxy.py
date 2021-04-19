@@ -50,7 +50,7 @@ class TracerBase:
             user_frame = self._find_user_frame()
             if user_frame:
                 walk_stack_gen = traceback.walk_stack(user_frame)
-                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore
+                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore[arg-type]
                 tb_lines = summary.format()
                 proxy.node.stack_trace = ''.join(tb_lines)
 
@@ -90,7 +90,7 @@ class TracerBase:
             # expression as an argument to their constructor, so build this
             # intermediate tuple and unpack it into the NamedTuple constructor
             args = tuple(self.create_arg(elem) for elem in a)
-            return type(a)(*args)  # type: ignore
+            return type(a)(*args)  # type: ignore[arg-type]
         elif isinstance(a, (tuple, list)):
             return type(a)(self.create_arg(elem) for elem in a)
         elif isinstance(a, dict):
@@ -191,7 +191,7 @@ class Proxy:
         assert calling_frame is not None
         inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti // 2]
         if inst.opname == 'UNPACK_SEQUENCE':
-            return (self[i] for i in range(inst.argval))  # type: ignore
+            return (self[i] for i in range(inst.argval))  # type: ignore[index]
 
         return self.tracer.iter(self)
 

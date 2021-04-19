@@ -62,7 +62,7 @@ def get_node_first_input_and_output_type(
         assert node.op == 'call_module'
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
-        if isinstance(mod, logger_cls):  # type: ignore
+        if isinstance(mod, logger_cls):  # type: ignore[arg-type]
             # A logger's input and output type is the output type of
             # the preceding node.
             first_arg = node.args[0]
@@ -137,7 +137,7 @@ def return_first_non_observer_node(
     graph: (node_non_obs -> obs0 -> fq0), node = fq0 : returns node_non_obs
     """
     if node.op == 'call_module':
-        node_obj = getattr_from_fqn(gm, node.target)  # type: ignore
+        node_obj = getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
         if is_activation_post_process(node_obj):
             assert len(node.args) == 1
             assert isinstance(node.args[0], Node)
@@ -169,7 +169,7 @@ def get_number_of_non_param_args(
     Returns 2, because both x and hid are non-param args.
     """
     if node.op == 'call_module':
-        node_obj = getattr_from_fqn(gm, node.target)  # type: ignore
+        node_obj = getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
         if isinstance(node_obj, nn.LSTM):
             return 2
 

@@ -301,5 +301,5 @@ def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128
     return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
 
 def isinf(g, input):
-    from torch.onnx.symbolic_opset9 import _cast_Double  # type: ignore
-    return g.op("IsInf", _cast_Double(g, input, False))  # type: ignore
+    from torch.onnx.symbolic_opset9 import _cast_Double  # type: ignore[attr-defined]
+    return g.op("IsInf", _cast_Double(g, input, False))

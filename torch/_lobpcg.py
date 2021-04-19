@@ -606,7 +606,7 @@ def _lobpcg(A: Tensor,
         bparams['ortho_use_drop'] = bparams.get('ortho_use_drop', False)
 
     if not torch.jit.is_scripting():
-        LOBPCG.call_tracker = LOBPCG_call_tracker  # type: ignore
+        LOBPCG.call_tracker = LOBPCG_call_tracker  # type: ignore[assignment]
 
     if len(A.shape) > 2:
         N = int(torch.prod(torch.tensor(A.shape[:-2])))
@@ -628,7 +628,7 @@ def _lobpcg(A: Tensor,
             bXret[i] = worker.X[:, :k]
 
         if not torch.jit.is_scripting():
-            LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore
+            LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[assignment]
 
         return bE.reshape(A.shape[:-2] + (k,)), bXret.reshape(A.shape[:-2] + (m, k))
 
@@ -640,7 +640,7 @@ def _lobpcg(A: Tensor,
     worker.run()
 
     if not torch.jit.is_scripting():
-        LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore
+        LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[assignment]
 
     return worker.E[:k], worker.X[:, :k]
 

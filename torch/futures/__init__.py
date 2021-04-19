@@ -194,7 +194,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             raise fut_result
 
         super()._set_unwrap_func(raise_error)
-        self.set_result(result)  # type: ignore
+        self.set_result(result)  # type: ignore[arg-type]
 
 
 def collect_all(futures: List[Future]) -> Future[List[Future]]:

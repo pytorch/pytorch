@@ -20,7 +20,7 @@ from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
 from typing import List, Optional, Union
 
 from setuptools.command.build_ext import build_ext
-from pkg_resources import packaging  # type: ignore
+from pkg_resources import packaging  # type: ignore[attr-defined]
 
 IS_WINDOWS = sys.platform == 'win32'
 LIB_EXT = '.pyd' if IS_WINDOWS else '.so'
@@ -350,7 +350,7 @@ class BuildExtension(build_ext, object):
         Returns a subclass with alternative constructor that extends any original keyword
         arguments to the original constructor with the given options.
         '''
-        class cls_with_options(cls):  # type: ignore
+        class cls_with_options(cls):  # type: ignore[misc, valid-type]
             def __init__(self, *args, **kwargs):
                 kwargs.update(options)
                 super().__init__(*args, **kwargs)
@@ -1678,8 +1678,8 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         message = error_prefix
         # `error` is a CalledProcessError (which has an `ouput`) attribute, but
         # mypy thinks it's Optional[BaseException] and doesn't narrow
-        if hasattr(error, 'output') and error.output:  # type: ignore
-            message += f": {error.output.decode()}"  # type: ignore
+        if hasattr(error, 'output') and error.output:  # type: ignore[union-attr]
+            message += f": {error.output.decode()}"  # type: ignore[union-attr]
         raise RuntimeError(message) from e
 
 
@@ -1700,7 +1700,7 @@ def _import_module_from_library(module_name, path, is_python_module):
     # Close the .so file after load.
     with file:
         if is_python_module:
-            return imp.load_module(module_name, file, path, description)  # type: ignore
+            return imp.load_module(module_name, file, path, description)  # type: ignore[arg-type]
         else:
             torch.ops.load_library(path)
 

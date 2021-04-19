@@ -5,7 +5,7 @@ import functools
 from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
-from torch import default_generator  # type: ignore
+from torch import default_generator
 from torch.utils.data._typing import _DataPipeMeta
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
 from ... import Tensor, Generator
@@ -235,7 +235,7 @@ class ConcatDataset(Dataset[T_co]):
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super(ConcatDataset, self).__init__()
         # Cannot verify that datasets is Sized
-        assert len(datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore
+        assert len(datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore[arg-type]
         self.datasets = list(datasets)
         for d in self.datasets:
             assert not isinstance(d, IterableDataset), "ConcatDataset does not support IterableDataset"
@@ -288,7 +288,7 @@ class ChainDataset(IterableDataset):
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
             # Cannot verify that all self.datasets are Sized
-            total += len(d)  # type: ignore
+            total += len(d)
         return total
 
 
@@ -328,7 +328,7 @@ def random_split(dataset: Dataset[T], lengths: Sequence[int],
         generator (Generator): Generator used for the random permutation.
     """
     # Cannot verify that dataset is Sized
-    if sum(lengths) != len(dataset):  # type: ignore
+    if sum(lengths) != len(dataset):  # type: ignore[arg-type]
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
     indices = randperm(sum(lengths), generator=generator).tolist()

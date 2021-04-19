@@ -53,7 +53,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         if hasattr(fn, '__name__') and fn.__name__ == '<lambda>' and not DILL_AVAILABLE:
             warnings.warn("Lambda function is not supported for pickle, please use "
                           "regular python function or functools.partial instead.")
-        self.fn = fn  # type: ignore
+        self.fn = fn  # type: ignore[assignment]
         self.args = () if fn_args is None else fn_args
         self.kwargs = {} if fn_kwargs is None else fn_kwargs
 
@@ -77,9 +77,9 @@ class MapIterDataPipe(IterDataPipe[T_co]):
     def __setstate__(self, state):
         (self.datapipe, dill_function, self.args, self.kwargs) = state
         if DILL_AVAILABLE:
-            self.fn = dill.loads(dill_function)  # type: ignore
+            self.fn = dill.loads(dill_function)  # type: ignore[assignment]
         else:
-            self.fn = dill_function  # type: ignore
+            self.fn = dill_function  # type: ignore[assignment]
 
 
 @functional_datapipe('collate')

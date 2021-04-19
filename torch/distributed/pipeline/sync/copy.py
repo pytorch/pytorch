@@ -31,7 +31,7 @@ class Copy(torch.autograd.Function):
     """Copies tensors on specific streams."""
 
     @staticmethod
-    # type: ignore
+    # type: ignore[override]
     def forward(ctx: Context, prev_stream: AbstractStream, next_stream: AbstractStream, *input: Tensor,) -> Tensors:
         ctx.prev_stream = prev_stream
         ctx.next_stream = next_stream
@@ -84,7 +84,7 @@ class Wait(torch.autograd.Function):
     """
 
     @staticmethod
-    # type: ignore
+    # type: ignore[override]
     def forward(ctx: Context, prev_stream: AbstractStream, next_stream: AbstractStream, *input: Tensor,) -> Tensors:
         ctx.prev_stream = prev_stream
         ctx.next_stream = next_stream

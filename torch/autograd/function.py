@@ -86,7 +86,7 @@ class BackwardCFunction(_C._FunctionBase, _ContextMethodMixin, _HookMixin):
 
     def apply(self, *args):
         # _forward_cls is defined by derived class
-        return self._forward_cls.backward(self, *args)  # type: ignore
+        return self._forward_cls.backward(self, *args)  # type: ignore[attr-defined]
 
 
 class FunctionMeta(type):
@@ -118,7 +118,7 @@ class FunctionMeta(type):
         return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
 # mypy doesn't understand `with_metaclass` from torch._six
-class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):  # type: ignore
+class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):  # type: ignore[misc]
     r"""Records operation history and defines formulas for differentiating ops.
 
     See the Note on extending the autograd engine for more details on how to use
@@ -384,16 +384,16 @@ class NestedIOFunction(Function):
             del self._to_save_nested
         return result
 
-    def backward(self, *gradients: Any) -> Any:  # type: ignore
+    def backward(self, *gradients: Any) -> Any:  # type: ignore[override]
         nested_gradients = _unflatten(gradients, self._nested_output)
-        result = self.backward_extended(*nested_gradients)  # type: ignore
+        result = self.backward_extended(*nested_gradients)  # type: ignore[func-returns-value]
         return tuple(_iter_None_tensors(result))
 
     __call__ = _do_forward
 
-    def forward(self, *args: Any) -> Any:  # type: ignore
+    def forward(self, *args: Any) -> Any:  # type: ignore[override]
         nested_tensors = _map_tensor_data(self._nested_input)
-        result = self.forward_extended(*nested_tensors)  # type: ignore
+        result = self.forward_extended(*nested_tensors)  # type: ignore[func-returns-value]
         del self._nested_input
         self._nested_output = result
         return tuple(_iter_tensors(result))

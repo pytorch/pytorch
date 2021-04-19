@@ -130,7 +130,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
-            node = node.args[0]  # type: ignore
+            node = node.args[0]  # type: ignore[assignment]
         self.binary_op_node = node
         self.binary_op = node.target
 
@@ -162,7 +162,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         if self.binary_op in qbin_op_mapping:
             self.quantized_binary_op = qbin_relu_op_mapping[self.binary_op] \
                 if self.relu_node is not None \
-                else qbin_op_mapping[self.binary_op]  # type: ignore
+                else qbin_op_mapping[self.binary_op]
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
@@ -295,7 +295,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
-            node = node.args[0]  # type: ignore
+            node = node.args[0]  # type: ignore[assignment]
         self.conv_node = node
         if node.op == "call_module":
             self.conv = quantizer.modules[self.conv_node.target]
@@ -451,7 +451,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
-            node = node.args[0]  # type: ignore
+            node = node.args[0]  # type: ignore[assignment]
         self.linear_node = node
         if node.op == 'call_module':
             self.linear = quantizer.modules[self.linear_node.target]
@@ -619,7 +619,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         if weight_dtype == torch.qint8 \
                         else torch.ops.quantized.linear_dynamic_fp16
                     linear_input = load_arg(quantized=False)(self.linear_node.args[0])
-                    qlinear_args = (linear_input, packed_weight)  # type: ignore
+                    qlinear_args = (linear_input, packed_weight)  # type: ignore[assignment]
                     op_out = quantizer.quantized_graph.create_node(
                         "call_function", qlinear_op, qlinear_args, kwargs)
                     # Store the name of the dynamic op to get the path of node after replacement as well.
@@ -1055,7 +1055,7 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         assert node.op == 'call_module'
         qconfig = quantizer.qconfig_map[node.name]
-        convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore
+        convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = quantizer.modules[node.target]
         input_quantized_idxs = observed_standalone_module._standalone_module_input_quantized_idxs.tolist()
         quantized_standalone_module = convert(observed_standalone_module, is_reference=is_reference)

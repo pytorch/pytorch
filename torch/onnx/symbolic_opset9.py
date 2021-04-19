@@ -356,7 +356,7 @@ def _maybe_cast_reduce_op_input(g, self):
     if dtype is not None:
         # pytorch reduce-ops cast all other integral types to int64
         if not sym_help._is_fp(self) and not (dtype == 'Long'):
-            self = _cast_Long(g, self, False)  # type: ignore
+            self = _cast_Long(g, self, False)  # type: ignore[name-defined]
     return self
 
 
@@ -2291,7 +2291,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
     if lengths.type().scalarType() != 'Int':
-        lengths = _cast_Int(g, lengths, False)  # type: ignore
+        lengths = _cast_Int(g, lengths, False)  # type: ignore[name-defined]
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
@@ -2397,7 +2397,7 @@ def isnan(g, input):
     return output
 
 def _any(g, input):
-    input = _cast_Long(g, input, False)  # type: ignore
+    input = _cast_Long(g, input, False)  # type: ignore[name-defined]
     input_sum = sym_help._reducesum_helper(g, input, keepdims_i=0)
     return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
 
@@ -2670,7 +2670,7 @@ def arange(g, *args):
 
 
 def masked_fill(g, self, mask, value):
-    mask = _cast_Bool(g, mask, False)  # type: ignore
+    mask = _cast_Bool(g, mask, False)  # type: ignore[name-defined]
     value = sym_help._maybe_get_scalar(value)
     return g.op('Where', mask, sym_help._if_scalar_type_as(g, value, self), self)
 

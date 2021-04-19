@@ -140,9 +140,9 @@ def _get_entrypoint_name(
         2.2 otherwise, use ``entrypoint`` value.
     3. Otherwise, return empty string.
     """
-    if isinstance(entrypoint, Callable):  # type: ignore
-        return entrypoint.__name__  # type: ignore
-    elif isinstance(entrypoint, str):  # type: ignore
+    if isinstance(entrypoint, Callable):  # type: ignore[arg-type]
+        return entrypoint.__name__  # type: ignore[union-attr]
+    elif isinstance(entrypoint, str):
         if entrypoint == sys.executable:
             return next((arg for arg in args if arg[0] != "-"), "")
         else:

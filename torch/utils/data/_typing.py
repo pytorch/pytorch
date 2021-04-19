@@ -5,7 +5,7 @@ import collections
 import numbers
 from typing import (Any, Dict, Iterator, List, Set, Sequence, Tuple,
                     TypeVar, Union, get_type_hints)
-from typing import _tp_cache, _type_check, _type_repr  # type: ignore
+from typing import _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
 # TODO: Use TypeAlias when Python 3.6 is deprecated
 # Please check [Note: TypeMeta and TypeAlias]
 try:
@@ -14,9 +14,9 @@ except ImportError:  # Python > 3.6
     # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
     # For Python 3.9, only Protocol in typing uses metaclass
     from abc import ABCMeta
-    from typing import _ProtocolMeta  # type: ignore
+    from typing import _ProtocolMeta  # type: ignore[attr-defined]
 
-    class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore
+    class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore[no-redef]
         pass
 
 
@@ -81,7 +81,7 @@ def issubtype(left, right, recursive=True):
 
 
 def _decompose_type(t, to_list=True):
-    if isinstance(t, TypeVar):  # type: ignore
+    if isinstance(t, TypeVar):
         if t.__bound__ is not None:
             ts = [t.__bound__]
         else:
@@ -304,7 +304,7 @@ def _mro_subclass_init(obj):
             if b.__init_subclass__ == _dp_init_subclass:
                 return True
             if hasattr(b.__init_subclass__, '__func__') and \
-                    b.__init_subclass__.__func__ == _dp_init_subclass:  # type: ignore
+                    b.__init_subclass__.__func__ == _dp_init_subclass:  # type: ignore[attr-defined]
                 return True
     return False
 

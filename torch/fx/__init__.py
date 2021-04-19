@@ -1,4 +1,3 @@
-# type: ignore
 r'''
 **This feature is under a Beta release and its API may change.**
 

@@ -215,7 +215,7 @@ def torch_audio(key, data):
         return None
 
     try:
-        import torchaudio  # type: ignore
+        import torchaudio  # type: ignore[import]
     except ImportError as e:
         raise ModuleNotFoundError("Package `torchaudio` is required to be installed for default audio file loader."
                                   "Please use `pip install torchaudio` or `conda install torchaudio -c pytorch`"

@@ -239,9 +239,9 @@ class OpInfo(object):
 
         self.supports_sparse = supports_sparse
 
-        self.aliases = ()  # type: ignore
+        self.aliases = ()
         if aliases is not None:
-            self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore
+            self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -877,9 +877,9 @@ def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None, **
     b = make_tensor((S, S, S), device, dtype, low=1 if is_integral else 0.1, high=None,
                     requires_grad=requires_grad)
 
-    kwargs = None  # type: ignore
+    kwargs = None  # type: ignore[assignment]
     if rounding_mode is not None:
-        kwargs = dict(rounding_mode=rounding_mode)  # type: ignore
+        kwargs = dict(rounding_mode=rounding_mode)
 
     return (
         SampleInput(a, args=(b,), kwargs=kwargs),
@@ -1459,8 +1459,8 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
         # Tests for variant_consistency_jit, grad, gradgrad
         # are slower. Use smaller bags of `rep_dims` and `shapes`
         # in this case.
-        rep_dims = ((), (0, ), (0, 2), (1, 1), (2, 3), (1, 3, 2), (3, 1, 1))  # type: ignore
-        shapes = ((), (0,), (2,), (3, 2))  # type: ignore
+        rep_dims = ((), (0, ), (0, 2), (1, 1), (2, 3), (1, 3, 2), (3, 1, 1))  # type: ignore[assignment]
+        shapes = ((), (0,), (2,), (3, 2))  # type: ignore[assignment]
 
     tensors = [make_tensor(shape, device, dtype,
                            low=None, high=None,
@@ -2160,9 +2160,9 @@ def sample_kwargs_clamp(device, dtype, input):
     if dtype is torch.uint8:
         min_val, max_val = (random.randint(1, 3), random.randint(4, 8))
     elif dtype.is_floating_point:
-        min_val, max_val = (random.uniform(-8, 0), random.uniform(1, 8))  # type: ignore
+        min_val, max_val = (random.uniform(-8, 0), random.uniform(1, 8))  # type: ignore[assignment]
     else:
-        min_val, max_val = (random.randint(-8, 0), random.randint(1, 8))  # type: ignore
+        min_val, max_val = (random.randint(-8, 0), random.randint(1, 8))
     return {'min': min_val, 'max': max_val}, {'a_min': min_val, 'a_max': max_val}
 
 def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
@@ -2436,14 +2436,14 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', 
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
     def _samples_with_alpha_helper(args, alphas, filter_fn=lambda arg_alpha: True):
-        filtered_product = filter(filter_fn, product(args, alphas))  # type: ignore
+        filtered_product = filter(filter_fn, product(args, alphas))  # type: ignore[var-annotated]
         return (SampleInput(input, args=(arg,), kwargs=dict(alpha=alpha))
-                for (input, arg), alpha in filtered_product)  # type: ignore
+                for (input, arg), alpha in filtered_product)
 
     int_alpha, float_alpha, complex_alpha = 2, 0.1, 1 + 0.6j
 
     if variant == 'tensor':
-        samples = (  # type: ignore
+        samples = (
             SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)),)),
             SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)),)),
             SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper((S, S)),)),
@@ -2462,7 +2462,7 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', 
         args = ((_make_tensor_helper((S, S)), _make_tensor_helper((S, S))),
                 (_make_tensor_helper((S, S)), _make_tensor_helper((S,))),
                 (_make_tensor_helper(()), _make_tensor_helper(())))
-        samples += tuple(_samples_with_alpha_helper(args, alphas))  # type: ignore
+        samples += tuple(_samples_with_alpha_helper(args, alphas))  # type: ignore[assignment]
     elif variant == 'scalar':
         # Scalar Other
         samples = (SampleInput(_make_tensor_helper((S, S)), args=(0.5,)),
@@ -2470,11 +2470,11 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', 
                    SampleInput(_make_tensor_helper((S, S)), args=(1.5j,)),
                    SampleInput(_make_tensor_helper(()), args=(1.5j,)),
                    SampleInput(_make_tensor_helper((S, S)), args=(0.4 + 1.2j,)),
-                   SampleInput(_make_tensor_helper(()), args=(1.2 + 1.76j,)))  # type: ignore
+                   SampleInput(_make_tensor_helper(()), args=(1.2 + 1.76j,)))
 
         scalar_args = [(_make_tensor_helper((S, S)), 0.5), (_make_tensor_helper(()), 0.5),
                        (_make_tensor_helper((S, S)), 2.7j), (_make_tensor_helper(()), 2.7j),
-                       (_make_tensor_helper((S, S)), 1 - 2.7j), (_make_tensor_helper(()), 1 + 2.7j)]  # type: ignore
+                       (_make_tensor_helper((S, S)), 1 - 2.7j), (_make_tensor_helper(()), 1 + 2.7j)]
 
         alphas = [int_alpha, float_alpha, complex_alpha]
 
@@ -2504,7 +2504,7 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', 
         # torch.rsub(x, 1, alpha=1. + 1.6j)
         # RuntimeError: value cannot be converted to type double without overflow: (-1,-1.6)
 
-        samples += tuple(_samples_with_alpha_helper(scalar_args, alphas, filter_fn=filter_fn))  # type: ignore
+        samples += tuple(_samples_with_alpha_helper(scalar_args, alphas, filter_fn=filter_fn))  # type: ignore[assignment]
     else:
         raise Exception("Invalid variant!")
 
@@ -2612,10 +2612,10 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
         # SampleInput((_make_tensor_helper(()), _make_tensor_helper((S, S)), 0.4)),
         # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), 0.4)),
         # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
-    )  # type: ignore
+    )
 
     if dtype.is_complex:
-        samples = samples + (  # type: ignore
+        samples = samples + (  # type: ignore[assignment]
             # no broadcast
             SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)), 0.4j)),
             SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)), 1.2 + 0.1j)),

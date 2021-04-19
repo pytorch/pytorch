@@ -36,7 +36,7 @@ try:
     # use faster C loader if available
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
@@ -69,8 +69,8 @@ except ImportError:
 # A custom loader for YAML to let us also keep track of line numbers
 # of each entry in the YAML file
 class LineLoader(Loader):
-    def construct_mapping(self, node, deep=False):  # type: ignore
-        mapping = super().construct_mapping(node, deep=deep)  # type: ignore
+    def construct_mapping(self, node, deep=False):  # type: ignore[no-untyped-def]
+        mapping = super().construct_mapping(node, deep=deep)  # type: ignore[no-untyped-call]
         # Add 1 so line numbering starts at 1
         mapping['__line__'] = node.start_mark.line + 1
         return mapping
@@ -418,13 +418,13 @@ def dict_representer(dumper: Any, data: Any) -> Any:
 
 def format_yaml(data: object) -> str:
     noalias_dumper = yaml.dumper.SafeDumper
-    noalias_dumper.ignore_aliases = lambda self, data: True  # type: ignore
+    noalias_dumper.ignore_aliases = lambda self, data: True  # type: ignore[assignment]
     # Support serializing OrderedDict
-    noalias_dumper.add_representer(OrderedDict, dict_representer)  # type: ignore
+    noalias_dumper.add_representer(OrderedDict, dict_representer)  # type: ignore[no-untyped-call]
     # Some yaml parsers (e.g. Haskell's) don't understand line breaks.
     # width=float('Inf') turns off optional line breaks and improves
     # the portability of the outputted yaml.
-    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=float('Inf'))  # type: ignore
+    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=float('Inf'))  # type: ignore[no-any-return]
 
 # For some reason, some defaults we write to YAML are written as native
 # YAML objects, rather than doing them uniformly as strings.  This

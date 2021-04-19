@@ -12420,7 +12420,7 @@ dedent """
     # properly ignored.
     def test_mypy_type_ignore(self):
         @torch.jit.script
-        def foo(x):  # type: ignore
+        def foo(x):  # type: ignore[this-is-not-a-valid-mypy-error-code]
             return x
 
         @torch.jit.script

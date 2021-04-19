@@ -8,9 +8,9 @@ import binascii
 import codecs
 from typing import Optional, Tuple, cast
 
-import urllib3.exceptions  # type: ignore
-from etcd import Client as EtcdClient  # type: ignore
-from etcd import (  # type: ignore
+import urllib3.exceptions  # type: ignore[import]
+from etcd import Client as EtcdClient  # type: ignore[import]
+from etcd import (
     EtcdAlreadyExist,
     EtcdCompareFailed,
     EtcdException,

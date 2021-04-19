@@ -36,10 +36,10 @@ def get_all_examples():
     example_file_lines = [
         "import torch",
         "import torch.nn.functional as F",
-        "import math  # type: ignore",  # mypy complains about floats where SupportFloat is expected
-        "import numpy  # type: ignore",
-        "import io  # type: ignore",
-        "import itertools  # type: ignore",
+        "import math",
+        "import numpy",
+        "import io",
+        "import itertools",
         "",
         # for requires_grad_ example
         # NB: We are parsing this file as Python 2, so we must use

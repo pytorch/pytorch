@@ -172,8 +172,8 @@ class RNNBase(Module):
                     torch._cudnn_rnn_flatten_weight(
                         self._flat_weights, num_weights,
                         self.input_size, rnn.get_cudnn_mode(self.mode),
-                        self.hidden_size, self.proj_size, self.num_layers,  # type: ignore
-                        self.batch_first, bool(self.bidirectional))  # type: ignore
+                        self.hidden_size, self.proj_size, self.num_layers,
+                        self.batch_first, bool(self.bidirectional))
 
     def _apply(self, fn):
         ret = super(RNNBase, self)._apply(fn)
@@ -601,7 +601,7 @@ class LSTM(RNNBase):
 
     # In the future, we should prevent mypy from applying contravariance rules here.
     # See torch/nn/modules/module.py::_forward_unimplemented
-    def check_forward_args(self, input: Tensor, hidden: Tuple[Tensor, Tensor], batch_sizes: Optional[Tensor]):  # type: ignore
+    def check_forward_args(self, input: Tensor, hidden: Tuple[Tensor, Tensor], batch_sizes: Optional[Tensor]):  # type: ignore[override]
         self.check_input(input, batch_sizes)
         self.check_hidden_size(hidden[0], self.get_expected_hidden_size(input, batch_sizes),
                                'Expected hidden[0] size {}, got {}')
@@ -609,13 +609,13 @@ class LSTM(RNNBase):
                                'Expected hidden[1] size {}, got {}')
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
-    def permute_hidden(self, hx: Tuple[Tensor, Tensor], permutation: Optional[Tensor]) -> Tuple[Tensor, Tensor]:  # type: ignore
+    def permute_hidden(self, hx: Tuple[Tensor, Tensor], permutation: Optional[Tensor]) -> Tuple[Tensor, Tensor]:  # type: ignore[override]
         if permutation is None:
             return hx
         return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
-    @overload  # type: ignore
+    @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None
                 ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:  # noqa: F811
@@ -783,7 +783,7 @@ class GRU(RNNBase):
             raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
         super(GRU, self).__init__('GRU', *args, **kwargs)
 
-    @overload  # type: ignore
+    @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:  # noqa: F811
         pass

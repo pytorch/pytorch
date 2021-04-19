@@ -2173,7 +2173,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                               lambda: self.assertEqual(x, xv, rtol=4))
 
             self.assertRaisesRegex(TypeError, "takes from 3 to 4 positional arguments",
-                                   lambda: self.assertEqual(x, xv, "", 1.0))  # type: ignore
+                                   lambda: self.assertEqual(x, xv, "", 1.0))  # type: ignore[misc]
 
         def test_new(self) -> None:
             x = torch.autograd.Variable(torch.tensor([]))

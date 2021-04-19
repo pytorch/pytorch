@@ -283,7 +283,7 @@ def get_reversed_fusions() -> Set[Tuple[NSFusionType, int]]:
     for quant_pattern, _quant_handler in all_quant_patterns.items():
         # this only takes patterns of multiple ops
         if isinstance(quant_pattern, tuple):
-            results.add((quant_pattern, default_base_op_idx))  # type: ignore
+            results.add((quant_pattern, default_base_op_idx))  # type: ignore[arg-type]
 
     # After this point, results countains values such as
     # [..., ((torch.nn.Relu, torch.nn.Conv2d), 0), ...]

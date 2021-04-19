@@ -225,7 +225,7 @@ class EtcdServer:
         self._etcd_proc = subprocess.Popen(etcd_cmd, close_fds=True, stderr=stderr)
         self._wait_for_ready(timeout)
 
-    def get_client(self):  # type: ignore
+    def get_client(self):
         """
         Returns:
            An etcd client object that can be used to make requests to
