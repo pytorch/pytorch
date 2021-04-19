@@ -2314,8 +2314,8 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_polygamma(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    tensor_shapes = [(S, S), ()]
-    ns = [1, 2, 3, 4, 5]
+    tensor_shapes = ((S, S), ())
+    ns = (1, 2, 3, 4, 5)
 
     def generator():
         for shape, n in product(tensor_shapes, ns):
