@@ -76,7 +76,6 @@ jobs:
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            -v "${GITHUB_WORKSPACE}/../:/var/lib/jenkins" \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Chown workspace
