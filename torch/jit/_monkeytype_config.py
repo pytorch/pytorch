@@ -18,7 +18,10 @@ except ImportError:
           "to install MonkeyType. ")
 
 def get_qualified_name(func):
-    return func.__qualname__
+    # For class methods, the method name also includes class name. To
+    # To extract the method name, we split the function name using "."
+    # The last value in the list provides the method name.
+    return func.__qualname__.split(".")[-1]
 
 if _IS_MONKEYTYPE_INSTALLED:
 
