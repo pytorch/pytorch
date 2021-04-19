@@ -239,7 +239,7 @@ class OpInfo(object):
 
         self.supports_sparse = supports_sparse
 
-        self.aliases = ()  # type: ignore
+        self.aliases = ()
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore
 
@@ -879,7 +879,7 @@ def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None, **
 
     kwargs = None  # type: ignore
     if rounding_mode is not None:
-        kwargs = dict(rounding_mode=rounding_mode)  # type: ignore
+        kwargs = dict(rounding_mode=rounding_mode)
 
     return (
         SampleInput(a, args=(b,), kwargs=kwargs),
@@ -2162,7 +2162,7 @@ def sample_kwargs_clamp(device, dtype, input):
     elif dtype.is_floating_point:
         min_val, max_val = (random.uniform(-8, 0), random.uniform(1, 8))  # type: ignore
     else:
-        min_val, max_val = (random.randint(-8, 0), random.randint(1, 8))  # type: ignore
+        min_val, max_val = (random.randint(-8, 0), random.randint(1, 8))
     return {'min': min_val, 'max': max_val}, {'a_min': min_val, 'a_max': max_val}
 
 def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
@@ -2438,12 +2438,12 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', 
     def _samples_with_alpha_helper(args, alphas, filter_fn=lambda arg_alpha: True):
         filtered_product = filter(filter_fn, product(args, alphas))  # type: ignore
         return (SampleInput(input, args=(arg,), kwargs=dict(alpha=alpha))
-                for (input, arg), alpha in filtered_product)  # type: ignore
+                for (input, arg), alpha in filtered_product)
 
     int_alpha, float_alpha, complex_alpha = 2, 0.1, 1 + 0.6j
 
     if variant == 'tensor':
-        samples = (  # type: ignore
+        samples = (
             SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)),)),
             SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)),)),
             SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper((S, S)),)),
@@ -2470,11 +2470,11 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', 
                    SampleInput(_make_tensor_helper((S, S)), args=(1.5j,)),
                    SampleInput(_make_tensor_helper(()), args=(1.5j,)),
                    SampleInput(_make_tensor_helper((S, S)), args=(0.4 + 1.2j,)),
-                   SampleInput(_make_tensor_helper(()), args=(1.2 + 1.76j,)))  # type: ignore
+                   SampleInput(_make_tensor_helper(()), args=(1.2 + 1.76j,)))
 
         scalar_args = [(_make_tensor_helper((S, S)), 0.5), (_make_tensor_helper(()), 0.5),
                        (_make_tensor_helper((S, S)), 2.7j), (_make_tensor_helper(()), 2.7j),
-                       (_make_tensor_helper((S, S)), 1 - 2.7j), (_make_tensor_helper(()), 1 + 2.7j)]  # type: ignore
+                       (_make_tensor_helper((S, S)), 1 - 2.7j), (_make_tensor_helper(()), 1 + 2.7j)]
 
         alphas = [int_alpha, float_alpha, complex_alpha]
 
@@ -2612,7 +2612,7 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
         # SampleInput((_make_tensor_helper(()), _make_tensor_helper((S, S)), 0.4)),
         # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), 0.4)),
         # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
-    )  # type: ignore
+    )
 
     if dtype.is_complex:
         samples = samples + (  # type: ignore

@@ -10,7 +10,7 @@ from typing import Optional, Tuple, cast
 
 import urllib3.exceptions  # type: ignore
 from etcd import Client as EtcdClient  # type: ignore
-from etcd import (  # type: ignore
+from etcd import (
     EtcdAlreadyExist,
     EtcdCompareFailed,
     EtcdException,

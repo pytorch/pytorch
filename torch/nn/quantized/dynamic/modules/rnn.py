@@ -625,7 +625,7 @@ class GRU(RNNBase):
                                 sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
-    def permute_hidden(  # type: ignore
+    def permute_hidden(
         self, hx: Tensor, permutation: Optional[Tensor]
     ) -> Tensor:
         if permutation is None:

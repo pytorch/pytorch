@@ -113,7 +113,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Opti
             scale = float(scale)
             zero_point = int(zero_point)
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
-            quantize_op = torch.quantize_per_tensor  # type: ignore
+            quantize_op = torch.quantize_per_tensor
     elif dtype == torch.float16:
         node_type = "call_method"
         quantize_op = "to"

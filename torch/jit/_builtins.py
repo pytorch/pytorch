@@ -97,10 +97,10 @@ _builtin_ops = [
     (torch._VF.istft, "aten::istft"),  # type: ignore
     (torch._VF.cdist, "aten::cdist"),  # type: ignore
     (torch._VF.norm, "aten::norm"),  # type: ignore
-    (torch._VF.unique_dim, "aten::unique_dim"),  # type: ignore
+    (torch._VF.unique_dim, "aten::unique_dim"),
     (torch._VF.unique_consecutive, "aten::unique_consecutive"),  # type: ignore
-    (torch._VF.nuclear_norm, "aten::nuclear_norm"),  # type: ignore
-    (torch._VF.frobenius_norm, "aten::frobenius_norm"),  # type: ignore
+    (torch._VF.nuclear_norm, "aten::nuclear_norm"),
+    (torch._VF.frobenius_norm, "aten::frobenius_norm"),
     (torch._VF.tensordot, "aten::tensordot"),  # type: ignore
 ]
 
@@ -143,8 +143,8 @@ def _get_builtin_table():
 
     import torch.distributed.autograd as dist_autograd
     if dist_autograd.is_available():
-        _builtin_ops.append((dist_autograd.get_gradients, "aten::get_gradients"))  # type: ignore
-        _builtin_ops.append((dist_autograd.backward, "aten::dist_backward"))  # type: ignore
+        _builtin_ops.append((dist_autograd.get_gradients, "aten::get_gradients"))
+        _builtin_ops.append((dist_autograd.backward, "aten::dist_backward"))
 
     # populate the _builtin_table from _builtin_ops
     for builtin, aten_op in _builtin_ops:

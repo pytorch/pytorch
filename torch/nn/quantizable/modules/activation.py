@@ -70,7 +70,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         # TODO: The use of the `_LinearWithBias` increases the quantization noise
         # The `out_proj` in the parent is ``_LinearWithBias`, so need to ignore
         # the type for mypy not to complain.
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)  # type: ignore
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
 
         # Functionals
         self.q_scaling_product = nnq.FloatFunctional()
@@ -99,8 +99,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         observed.qconfig = other.qconfig
 
         # Set the linear weights
-        observed.out_proj.weight = other.out_proj.weight  # type: ignore
-        observed.out_proj.bias = other.out_proj.bias  # type: ignore
+        observed.out_proj.weight = other.out_proj.weight
+        observed.out_proj.bias = other.out_proj.bias
         if other._qkv_same_embed_dim:
             # Use separate params
             bias = other.in_proj_bias
@@ -206,9 +206,9 @@ class MultiheadAttention(nn.MultiheadAttention):
             fp.k_proj_weight = nn.Parameter(wK)
             fp.v_proj_weight = nn.Parameter(wV)
             if fp.in_proj_bias is None:
-                self.linear_Q.bias = None  # type: ignore
-                self.linear_K.bias = None  # type: ignore
-                self.linear_V.bias = None  # type: ignore
+                self.linear_Q.bias = None
+                self.linear_K.bias = None
+                self.linear_V.bias = None
             else:
                 fp.in_proj_bias[0:fp.embed_dim] = bQ
                 fp.in_proj_bias[fp.embed_dim:(fp.embed_dim * 2)] = bK
@@ -440,7 +440,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         # Reentering the quantized zone
         attn_output = self.quant_attn_output(attn_output)
-        attn_output = self.out_proj(attn_output)  # type: ignore
+        attn_output = self.out_proj(attn_output)
         attn_output_weights = self.quant_attn_output_weights(attn_output_weights)
 
         if need_weights:

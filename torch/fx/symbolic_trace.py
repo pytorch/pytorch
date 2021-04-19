@@ -313,7 +313,7 @@ class Tracer(TracerBase):
             if concrete_args is not None and name in concrete_args:
                 return concrete_args[name]
             if name[0] == '*':
-                default = ()    # type: ignore
+                default = ()
             else:
                 param = sig.parameters[name]
                 default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore

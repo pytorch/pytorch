@@ -296,7 +296,7 @@ def _get_name_for_subgraph(
 
 def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[NSNodeTargetType]:
     if node.op in ('call_function', 'call_method'):
-        return node.target  # type: ignore
+        return node.target
     elif node.op == 'call_module':
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
@@ -402,9 +402,9 @@ def get_matching_subgraph_pairs(
         # look up types of a and b for useful error messages
         type_start_a, type_start_b = None, None
         if cur_subgraph_a is not None:
-            type_start_a = _get_node_target_type(cur_subgraph_a.start_node, gm_a)  # type: ignore
+            type_start_a = _get_node_target_type(cur_subgraph_a.start_node, gm_a)
         if cur_subgraph_b is not None:
-            type_start_b = _get_node_target_type(cur_subgraph_b.start_node, gm_b)  # type: ignore
+            type_start_b = _get_node_target_type(cur_subgraph_b.start_node, gm_b)
 
         # check for results and determine what to do next
         if cur_subgraph_a is not None and cur_subgraph_b is not None:

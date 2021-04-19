@@ -270,7 +270,7 @@ class TestNumPyInterop(TestCase):
         ]
         for tp, dtype in zip(types, dtypes):
             # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-            if np.dtype(dtype).kind == 'u':  # type: ignore[misc]
+            if np.dtype(dtype).kind == 'u':
                 # .type expects a XxxTensor, which have no type hints on
                 # purpose, so ignore during mypy type checking
                 x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore
@@ -299,7 +299,7 @@ class TestNumPyInterop(TestCase):
             asarray = np.asarray(x, dtype=dtype)
             self.assertEqual(asarray.dtype, dtype)
             # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-            if np.dtype(dtype).kind == 'u':  # type: ignore[misc]
+            if np.dtype(dtype).kind == 'u':
                 wrapped_x = np.array([1, -2, 3, -4], dtype=dtype)
                 for i in range(len(x)):
                     self.assertEqual(asarray[i], wrapped_x[i])
@@ -337,7 +337,7 @@ class TestNumPyInterop(TestCase):
             for t_dtype in [torch.float, torch.double]:
                 # mypy raises an error when np.floatXY(2.0) is called
                 # even though this is valid code
-                np_sc = np_dtype(2.0)  # type: ignore
+                np_sc = np_dtype(2.0)
                 t = torch.ones(2, requires_grad=True, dtype=t_dtype)
                 r1 = t * np_sc
                 self.assertIsInstance(r1, torch.Tensor)
@@ -352,7 +352,7 @@ class TestNumPyInterop(TestCase):
     def test_parse_numpy_int(self, device):
         # Only concrete class can be given where "Type[number[_64Bit]]" is expected
         self.assertRaisesRegex(RuntimeError, "Overflow",
-                               lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))  # type: ignore[call-overload]
+                               lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
             scalar = 3

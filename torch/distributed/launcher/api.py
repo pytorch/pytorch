@@ -12,8 +12,8 @@ from typing import Any, Callable, Dict, List, Optional, Union, cast, Tuple
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
-from torch.distributed.elastic.agent.server.api import WorkerSpec, WorkerState  # type: ignore[import]
-from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent  # type: ignore[import]
+from torch.distributed.elastic.agent.server.api import WorkerSpec, WorkerState
+from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
 from torch.distributed.elastic.multiprocessing import Std
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
 from torch.distributed.elastic.rendezvous import RendezvousParameters
@@ -142,7 +142,7 @@ def _get_entrypoint_name(
     """
     if isinstance(entrypoint, Callable):  # type: ignore
         return entrypoint.__name__  # type: ignore
-    elif isinstance(entrypoint, str):  # type: ignore
+    elif isinstance(entrypoint, str):
         if entrypoint == sys.executable:
             return next((arg for arg in args if arg[0] != "-"), "")
         else:

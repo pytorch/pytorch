@@ -1,6 +1,6 @@
 import pickle
 
-import _compat_pickle  # type: ignore
+import _compat_pickle
 
 from .importer import Importer
 

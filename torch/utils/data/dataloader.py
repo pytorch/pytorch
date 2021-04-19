@@ -165,7 +165,7 @@ class DataLoader(Generic[T_co]):
                  multiprocessing_context=None, generator=None,
                  *, prefetch_factor: int = 2,
                  persistent_workers: bool = False):
-        torch._C._log_api_usage_once("python.data_loader")  # type: ignore
+        torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
             raise ValueError('num_workers option should be non-negative; '

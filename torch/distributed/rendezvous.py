@@ -61,7 +61,7 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     if rank != -1 or world_size != -1:
         query_dict: Dict[str, Union[int, str]] = dict(
             # mypy doesn't allow dict() to accept List of values (#257)
-            pair.split("=") for pair in filter(None, result.query.split("&"))  # type: ignore[arg-type, misc]
+            pair.split("=") for pair in filter(None, result.query.split("&"))
         )
         assert (
             "rank" not in query_dict and "world_size" not in query_dict

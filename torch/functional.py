@@ -735,7 +735,7 @@ def _unique_impl(input: Tensor, sorted: bool = True,
             return_counts=return_counts, dim=dim)
 
     if dim is not None:
-        output, inverse_indices, counts = _VF.unique_dim(  # type: ignore
+        output, inverse_indices, counts = _VF.unique_dim(
             input,
             dim,
             sorted=sorted,
@@ -1414,7 +1414,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     if dim is None and out is None and dtype is None and p is not None:
         if isinstance(p, str):
             if p == "fro":
-                return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)  # type: ignore
+                return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)
         if not isinstance(p, str):
             _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
             return _VF.norm(input, p, dim=_dim, keepdim=keepdim)  # type: ignore
@@ -1438,22 +1438,22 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             if _dim is None:
                 _dim = list(range(ndim))
             if out is None:
-                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)  # type: ignore
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)
             else:
-                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)
         elif p == "nuc":
             if dtype is not None:
                 raise ValueError("dtype argument is not supported in nuclear norm")
             if _dim is None:
                 if out is None:
-                    return _VF.nuclear_norm(input, keepdim=keepdim)  # type: ignore
+                    return _VF.nuclear_norm(input, keepdim=keepdim)
                 else:
-                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)  # type: ignore
+                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)
             else:
                 if out is None:
-                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)  # type: ignore
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)
                 else:
-                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)
         raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
     else:
         if _dim is None:

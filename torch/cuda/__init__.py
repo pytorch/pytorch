@@ -336,7 +336,7 @@ class StreamContext(object):
     """
     cur_stream : Optional['torch.cuda.Stream']
 
-    def __init__(self, stream: Optional['torch.cuda.Stream']):  # type: ignore
+    def __init__(self, stream: Optional['torch.cuda.Stream']):
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
@@ -356,10 +356,10 @@ class StreamContext(object):
 
         # If the stream is not on the current device, then
         # set the current stream on the device
-        if self.src_prev_stream.device != cur_stream.device:  # type: ignore
+        if self.src_prev_stream.device != cur_stream.device:
             with device(cur_stream.device):
                 self.dst_prev_stream = torch.cuda.current_stream(cur_stream.device)
-        torch.cuda.set_stream(cur_stream)  # type: ignore
+        torch.cuda.set_stream(cur_stream)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
         # Local cur_stream variable for type refinement
@@ -374,7 +374,7 @@ class StreamContext(object):
             torch.cuda.set_stream(self.dst_prev_stream)  # type: ignore
         torch.cuda.set_stream(self.src_prev_stream)  # type: ignore
 
-def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ignore
+def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:
     r"""Wrapper around the Context-manager StreamContext that
     selects a given stream.
 

@@ -5,7 +5,7 @@ import functools
 from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
-from torch import default_generator  # type: ignore
+from torch import default_generator
 from torch.utils.data._typing import _DataPipeMeta
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
 from ... import Tensor, Generator
@@ -288,7 +288,7 @@ class ChainDataset(IterableDataset):
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
             # Cannot verify that all self.datasets are Sized
-            total += len(d)  # type: ignore
+            total += len(d)
         return total
 
 

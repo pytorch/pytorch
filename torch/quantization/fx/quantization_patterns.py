@@ -162,7 +162,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         if self.binary_op in qbin_op_mapping:
             self.quantized_binary_op = qbin_relu_op_mapping[self.binary_op] \
                 if self.relu_node is not None \
-                else qbin_op_mapping[self.binary_op]  # type: ignore
+                else qbin_op_mapping[self.binary_op]
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,

@@ -1,5 +1,5 @@
 import torch
-from torch.fx import (  # type: ignore
+from torch.fx import (
     GraphModule,
     Proxy,
     map_arg
@@ -172,7 +172,7 @@ def maybe_insert_observer_for_special_module(
         observed_standalone_module = \
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
         standalone_module_input_idxs = \
-            observed_standalone_module._standalone_module_input_quantized_idxs.int().tolist()  # type: ignore
+            observed_standalone_module._standalone_module_input_quantized_idxs.int().tolist()
         observed_standalone_module = ObservedStandaloneGraphModule(
             observed_standalone_module, observed_standalone_module.graph)
         parent_name, name = _parent_name(node.target)
@@ -1099,18 +1099,18 @@ class Quantizer:
                     assert isinstance(prev_node, Node)
                     observer_dtype: torch.dtype = observer_module.dtype  # type: ignore
                     quant_env[node.name] = (
-                        quantize_node(self, load_non_quantized(prev_node),  # type: ignore
-                                      observer_module, node, is_input=True),  # type: ignore
-                        observer_dtype)  # type: ignore
+                        quantize_node(self, load_non_quantized(prev_node),
+                                      observer_module, node, is_input=True),
+                        observer_dtype)
             else:
                 # replace activation post process with quantization ops
                 root_module = self.modules[""]
                 assert isinstance(node.args[0], Node)
                 dtype: torch.dtype = observer_module.dtype  # type: ignore
                 quant_env[node.name] = (
-                    quantize_node(self, load_non_quantized(node.args[0]),  # type: ignore
-                                  observer_module, node, is_input=True),  # type: ignore
-                    dtype)  # type: ignore
+                    quantize_node(self, load_non_quantized(node.args[0]),
+                                  observer_module, node, is_input=True),
+                    dtype)
 
         # additional state to override inputs to be quantized, if specified
         # by the user
@@ -1139,7 +1139,7 @@ class Quantizer:
                 is_observed_standalone_module_node = (
                     node.op == 'call_module' and
                     is_observed_standalone_module(
-                        self.modules[node.target])  # type: ignore
+                        self.modules[node.target])
                 )
                 if qconfig is None and not is_observed_standalone_module_node:
                     result = self.quantized_graph.node_copy(

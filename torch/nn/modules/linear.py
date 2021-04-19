@@ -105,7 +105,7 @@ class _LinearWithBias(Linear):
     bias: Tensor  # type: ignore
 
     def __init__(self, in_features: int, out_features: int) -> None:
-        super().__init__(in_features, out_features, bias=True)  # type: ignore
+        super().__init__(in_features, out_features, bias=True)
 
 
 class Bilinear(Module):
@@ -230,8 +230,8 @@ class LazyLinear(LazyModuleMixin, Linear):
         if self.has_uninitialized_params():
             with torch.no_grad():
                 self.in_features = input.shape[-1]
-                self.weight.materialize((self.out_features, self.in_features))  # type: ignore
+                self.weight.materialize((self.out_features, self.in_features))
                 if self.bias is not None:
-                    self.bias.materialize((self.out_features,))  # type: ignore
+                    self.bias.materialize((self.out_features,))
                 self.reset_parameters()
 # TODO: PartialLinear - maybe in sparse?

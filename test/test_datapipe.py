@@ -285,7 +285,7 @@ class TestFunctionalIterDataPipe(TestCase):
                 self.assertEqual(len(wa), 1)
                 self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
                 with self.assertRaises(AttributeError):
-                    p = pickle.dumps(datapipe)  # type: ignore
+                    p = pickle.dumps(datapipe)
 
     def test_concat_datapipe(self):
         input_dp1 = IDP(range(10))

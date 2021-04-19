@@ -1,6 +1,6 @@
 from typing import Dict, Any
 
-from torch.fx import (  # type: ignore
+from torch.fx import (
     GraphModule,
     Node,
     map_arg

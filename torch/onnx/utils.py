@@ -466,7 +466,7 @@ def _model_to_graph(model, args, verbose=False,
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
         if not (isinstance(torch_out, list) or isinstance(torch_out, tuple)):
-            output_wrapped = [torch_out]  # type: ignore
+            output_wrapped = [torch_out]
         else:
             output_wrapped = torch_out  # type: ignore
 

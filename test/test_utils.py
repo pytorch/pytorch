@@ -724,7 +724,7 @@ class TestAssert(TestCase):
         # data can be passed without errors
         x = torch.randn(4, 4).fill_(1.0)
         ms(x)
-        with self.assertRaisesRegex(torch.jit.Error, "foo"):  # type: ignore[type-var]
+        with self.assertRaisesRegex(torch.jit.Error, "foo"):
             ms(torch.tensor([False], dtype=torch.bool))
 
 

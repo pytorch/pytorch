@@ -15,4 +15,4 @@ def enable_minidump_collection(directory=DEFAULT_MINIDUMP_DIR):
     elif not os.path.exists(directory):
         raise RuntimeError(f"Directory does not exist: {directory}")
 
-    torch._C._enable_minidump_collection(directory)  # type: ignore
+    torch._C._enable_minidump_collection(directory)

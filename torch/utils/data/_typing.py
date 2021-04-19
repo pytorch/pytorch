@@ -81,7 +81,7 @@ def issubtype(left, right, recursive=True):
 
 
 def _decompose_type(t, to_list=True):
-    if isinstance(t, TypeVar):  # type: ignore
+    if isinstance(t, TypeVar):
         if t.__bound__ is not None:
             ts = [t.__bound__]
         else:

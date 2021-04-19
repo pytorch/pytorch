@@ -1,7 +1,7 @@
 import torch
-from torch.fx import GraphModule  # type: ignore
-from torch.fx.symbolic_trace import Tracer  # type: ignore
-from torch.fx.node import Target, Node, Argument  # type: ignore
+from torch.fx import GraphModule
+from torch.fx.symbolic_trace import Tracer
+from torch.fx.node import Target, Node, Argument
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
@@ -232,7 +232,7 @@ def fuse_fx(model: torch.nn.Module,
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     assert not model.training, 'fuse_fx only works on models in eval mode'
-    graph_module = torch.fx.symbolic_trace(model)  # type: ignore
+    graph_module = torch.fx.symbolic_trace(model)
     return _fuse_fx(graph_module, fuse_custom_config_dict)
 
 def prepare_fx(

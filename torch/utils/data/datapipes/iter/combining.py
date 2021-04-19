@@ -34,7 +34,7 @@ class ConcatIterDataPipe(IterDataPipe):
                 raise NotImplementedError
             return self.length
         if all(isinstance(dp, Sized) and len(dp) >= 0 for dp in self.datapipes):
-            self.length = sum(len(dp) for dp in self.datapipes)  # type: ignore
+            self.length = sum(len(dp) for dp in self.datapipes)
         else:
             self.length = -1
         return len(self)
@@ -70,7 +70,7 @@ class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
                 raise NotImplementedError
             return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            self.length = min(len(dp) for dp in self.datapipes)  # type: ignore
+            self.length = min(len(dp) for dp in self.datapipes)
         else:
             self.length = -1
         return len(self)

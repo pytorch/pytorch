@@ -138,9 +138,9 @@ def parse_args(*arg_descriptors):
                 fn_name = fn.__name__
             except Exception:
                 arg_names = [None] * len(args)  # type: ignore
-                fn_name = None  # type: ignore
+                fn_name = None
             args = [_parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore
-                    for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]  # type: ignore
+                    for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]
             # only support _outputs in kwargs
             assert len(kwargs) <= 1
             if len(kwargs) == 1:
@@ -602,7 +602,7 @@ def _repeat_interleave_split_helper(g, self, reps, dim):
     if _export_onnx_opset_version <= 12:
         return g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
-        from torch.onnx.symbolic_opset13 import split  # type: ignore
+        from torch.onnx.symbolic_opset13 import split
         repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
         return split(g, self, repeats, dim, _outputs=reps)
 

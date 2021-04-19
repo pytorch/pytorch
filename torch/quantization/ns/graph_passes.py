@@ -338,7 +338,7 @@ def _insert_copy_of_node_a_after_input_node_c(
             arg_a = return_first_non_observer_node(node_a_arg, gm_a)
             if arg_a.op == 'get_attr':
                 arg_a_copy_name = \
-                    get_new_attr_name_with_prefix(arg_a.name + '_shadow_copy_')(gm_b)  # type: ignore
+                    get_new_attr_name_with_prefix(arg_a.name + '_shadow_copy_')(gm_b)
                 arg_a_obj = getattr_from_fqn(gm_a, arg_a.target)  # type: ignore
                 setattr(gm_b, arg_a_copy_name, arg_a_obj.detach())
                 node_a_arg_copy = graph_c.create_node(
@@ -356,7 +356,7 @@ def _insert_copy_of_node_a_after_input_node_c(
         if isinstance(node_a_kwarg, Node):
             kwarg_a = return_first_non_observer_node(node_a_kwarg, gm_a)
             kwarg_a_copy_name = \
-                get_new_attr_name_with_prefix(kwarg_a.name + '_shadow_copy_')(gm_b)  # type: ignore
+                get_new_attr_name_with_prefix(kwarg_a.name + '_shadow_copy_')(gm_b)
             kwarg_a_obj = getattr_from_fqn(gm_a, kwarg_a.target)  # type: ignore
             setattr(gm_b, kwarg_a_copy_name, kwarg_a_obj.detach())
             node_a_kwarg_copy = graph_c.create_node(
@@ -383,13 +383,13 @@ def _insert_copy_of_node_a_after_input_node_c(
         setattr(gm_b, new_mod_copy_name, mod_a)
         node_a_shadows_c = graph_c.create_node(
             node_a.op, new_mod_copy_name, (*input_node_c_args, *new_args),
-            new_kwargs, node_a_shadows_c_name)  # type: ignore
+            new_kwargs, node_a_shadows_c_name)
         return node_a_shadows_c
     else:
         assert node_a.op in ('call_function', 'call_method')
         node_a_shadows_c = graph_c.create_node(
             node_a.op, node_a.target, (*input_node_c_args, *new_args),
-            new_kwargs, node_a_shadows_c_name)  # type: ignore
+            new_kwargs, node_a_shadows_c_name)
         return node_a_shadows_c
 
 def create_a_shadows_b(
@@ -458,7 +458,7 @@ def create_a_shadows_b(
 
         if node_b_is_observer:
             # remove activation post process node
-            env_c[node_b.name] = env_c[node_b.args[0].name]  # type: ignore
+            env_c[node_b.name] = env_c[node_b.args[0].name]
 
         elif (node_b_is_start_node or node_b_is_end_node):
 
