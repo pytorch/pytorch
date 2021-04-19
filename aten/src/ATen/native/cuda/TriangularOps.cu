@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -81,10 +82,10 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
 }
 
 Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  return tril_cuda_out(self, self, k);
+  return tril_cuda_out(self, k, self);
 }
 
-Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
+Tensor& tril_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
   if (result.sizes() != self.sizes()) {
     result.resize_as_(self);
   }
@@ -95,10 +96,10 @@ Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
 }
 
 Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  return triu_cuda_out(self, self, k);
+  return triu_cuda_out(self, k, self);
 }
 
-Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
+Tensor& triu_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
   if (result.sizes() != self.sizes()) {
     result.resize_as_(self);
   }
@@ -170,7 +171,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
       sz = std::min(self.size(0) + dimension, self.size(1));
     }
 
-    result.resize_({sz});
+    at::native::resize_output(result, {sz});
     if (sz > 0) {
       at::assert_no_internal_overlap(result);
       auto result_stride = result.stride(0);
@@ -198,7 +199,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     auto n_elems = self.numel();
     auto sz = (dimension > 0) ? n_elems + dimension : n_elems - dimension;
     auto self_stride = self.stride(0);
-    result.resize_({sz, sz});
+    at::native::resize_output(result, {sz, sz});
     result.zero_();
     if (sz > 0) {
       at::assert_no_internal_overlap(result);
@@ -228,7 +229,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
   return result;
 }
 
-Tensor& diag_cuda_out(Tensor& result, const Tensor& self, int64_t dimension) {
+Tensor& diag_cuda_out(const Tensor& self, int64_t dimension, Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, ScalarType::Bool, self.scalar_type(), "diag_cuda", [&] {
     apply_diag<scalar_t>(result, self, dimension);
   });

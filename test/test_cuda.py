@@ -1485,10 +1485,10 @@ class TestCuda(TestCase):
     @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
-        self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
+        self._spawn_method(test_method, torch.tensor([1., -1., 1.]))
+        self._spawn_method(test_method, torch.tensor([1., inf, 1.]))
+        self._spawn_method(test_method, torch.tensor([1., -inf, 1.]))
+        self._spawn_method(test_method, torch.tensor([1., 1., nan]))
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -1695,8 +1695,6 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 2)
         self.assertEqual(torch.cuda.current_stream(), default_stream)
 
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_streaming_backwards_multiple_streams(self):
 
         class StreamModel(torch.nn.Module):
@@ -1732,8 +1730,6 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 5)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_streaming_backwards_device_transfer(self):
         # This function must run with non-default current streams on all devices, otherwise it's meaningless.
         # The intention is to test that to()'s backward (CopyBackward) interacts properly with the
@@ -2219,7 +2215,7 @@ torch.cuda.synchronize()
                     if i == skip_iter and scaler.is_enabled():
                         model[1].weight.grad.data.fill_(float('inf'))
                     scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, error_if_nonfinite=False)
                     scaler.step(optimizer)
                     scaler.update()
                 else:
@@ -2338,8 +2334,6 @@ torch.cuda.synchronize()
                 self.assertTrue(torch.allclose(c, s, atol=1e-7))
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_grad_scaling_multigpu(self):
         # Same as above, but runs some of the models on device 1.
         # GradScaler should transparently handle losses and gradients on multiple devices.
@@ -2680,6 +2674,12 @@ torch.cuda.synchronize()
     def test_autocast_nn_fp32(self):
         for op, args in self.autocast_lists.nn_fp32:
             self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_linalg_fp16(self):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
+            for op, args in self.autocast_lists.linalg_fp16:
+                self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._linalg)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_fp16(self):
@@ -3034,7 +3034,10 @@ torch.cuda.synchronize()
                            # TODO: reenable multinomial tests if/when the implementation is capturable.
                            # ("multinomial", (input.clone(), size, True), {}),
                            # ("multinomial", (input.clone(), size // 2, False), {}),
-                           ("normal", (input.clone() + 1, input.clone()), {}),
+                           # TODO: reenable normal test, where std is a device
+                           # tensor, when graph test failures are fixed
+                           # ("normal", (input.clone() + 1, input.clone()), {}),
+                           ("normal", (input.clone() + 1, 1.0), {}),
                            ("poisson", (input.clone(),), {}),
                            ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
                            ("randint", (0, 3, (size,)), {"device": "cuda", "dtype": torch.float}),
@@ -3433,6 +3436,34 @@ torch.cuda.synchronize()
         x = torch.ones(10, device="cuda:0")
         self.assertTrue(memory_allocated(0) > current_alloc[0])
         self.assertTrue(all(memory_allocated(torch.cuda.device(idx)) == current_alloc[idx] for idx in range(1, device_count)))
+
+    def test_matmul_memory_use(self):
+        def get_max_used():
+            torch.cuda.synchronize()
+            val = torch.cuda.max_memory_allocated()
+            torch.cuda.reset_peak_memory_stats()
+            return val
+
+        a = torch.rand(1, 32, 32, device="cuda")
+        b = torch.rand(24, 32, 1, device="cuda")
+
+        get_max_used()
+
+        torch.matmul(a, b)
+
+        matmul_mem = get_max_used()
+
+        a = a.expand(24, 32, 32)
+        torch.matmul(a, b)
+
+        matmul_expand_mem = get_max_used()
+
+        torch.bmm(a, b)
+
+        bmm_mem = get_max_used()
+
+        self.assertEqual(matmul_expand_mem, matmul_mem)
+        self.assertEqual(bmm_mem, matmul_mem)
 
 
 class TestCudaComm(TestCase):

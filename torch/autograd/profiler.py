@@ -1185,13 +1185,14 @@ def parse_kineto_results(result):
     # output top-level memory events
     for mem_record in mem_records:
         if not mem_record[1]:
+            rel_start_us = mem_record[0].start_us() - start_record.start_us()
             fe = FunctionEvent(
                 id=mem_record[0].handle(),
                 name="[memory]",
                 trace_name=None,  # not outputting in the trace
                 thread=mem_record[0].thread_id(),
-                start_us=mem_record[0].start_us(),
-                end_us=mem_record[0].start_us(),  # no duration
+                start_us=rel_start_us,
+                end_us=rel_start_us,  # no duration
                 fwd_thread=mem_record[0].fwd_thread_id(),
                 input_shapes=[],
                 stack=[],

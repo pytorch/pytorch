@@ -317,7 +317,7 @@
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
 
-- name: coalesce(Tensor self) -> Tensor
+- name: _coalesce(Tensor self) -> Tensor
   self: grad
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
@@ -377,8 +377,8 @@
 - name: deg2rad(Tensor self) -> Tensor
   self: deg2rad_backward(grad)
 
-- name: det(Tensor self) -> Tensor
-  self: det_backward(grad, self, result)
+- name: linalg_det(Tensor self) -> Tensor
+  self: linalg_det_backward(grad, self, result)
 
 - name: diag(Tensor self, int diagonal=0) -> Tensor
   self: diag_backward(grad, self.sizes(), diagonal)
@@ -400,11 +400,11 @@
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
-- name: div.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+- name: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
   self: div_tensor_self_backward(grad, other, self.scalar_type(), rounding_mode)
   other: div_tensor_other_backward(grad, self, other, rounding_mode)
 
-- name: div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+- name: div.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type(), rounding_mode)
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
@@ -558,17 +558,20 @@
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(grad.new_zeros(self.sizes(), self.options()), indices, grad)
 
-- name: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source, Scalar alpha=1) -> Tensor(a!)
+- name: index_add_.alpha(Tensor(a!) self, int dim, Tensor index, Tensor source, *, Scalar alpha) -> Tensor(a!)
   self: grad
   # The case source.dim() == 0  is necessary to support scalar tensors of the form
   # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
   # This is because source is not broadcastable to index, as source.dim() < index.dim()
-  source: "source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0))"
+  source: "maybe_multiply(source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0)), alpha)"
   index: non_differentiable
 
 - name: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   self: grad.clone().index_fill_(dim, index, 0)
-  source: grad.index_select(dim, index).expand_as(source)
+  # The case source.dim() == 0  is necessary to support scalar tensors of the form
+  # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
+  # This is because source is not broadcastable to index, as source.dim() < index.dim()
+  source: "source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0))"
   index: non_differentiable
 
 - name: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
@@ -909,9 +912,9 @@
   self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim)
 
 - name: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
-  self: grad.clone().put_(index, zeros_like(source), accumulate)
+  self: "accumulate ? grad : grad.put(index, zeros_like(source), false)"
   index: non_differentiable
-  source: grad.take(index)
+  source: grad.take(index).reshape_as(source)
 
 - name: linalg_qr(Tensor self, str mode='reduced') -> (Tensor Q, Tensor R)
   self: linalg_qr_backward(grads, self, mode, Q, R)
@@ -942,6 +945,9 @@
 
 - name: repeat(Tensor self, int[] repeats) -> Tensor
   self: repeat_backward(grad, repeats, self.sizes())
+
+- name: special_entr(Tensor self) -> Tensor
+  self: grad * (-(1 + self.log()))
 
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
@@ -1062,11 +1068,11 @@
   self: handle_r_to_c(self.scalar_type(), grad)
 
 - name: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  self: -grad * alpha
-  other: grad
+  self: handle_r_to_c(other.scalar_type(), -grad * alpha.conj())
+  other: handle_r_to_c(self.scalar_type(), grad)
 
 - name: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
-  self: -grad * alpha
+  self: handle_r_to_c(self.scalar_type(), -grad * alpha.conj())
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: grad.expand(self.sizes())
@@ -1092,6 +1098,9 @@
 - name: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
   self: non_differentiable
 
+- name: linalg_eigvals(Tensor self) -> Tensor
+  self: non_differentiable
+
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
 
@@ -1108,7 +1117,7 @@
   self: grad.rot90(-k, dims)
 
 - name: take(Tensor self, Tensor index) -> Tensor
-  self: take_backward(grad, self, index)
+  self: zeros_like(self).put_(index, grad, true)
   index: non_differentiable
 
 - name: tan(Tensor self) -> Tensor
@@ -1271,13 +1280,13 @@
   grad_output: embedding_dense_double_backward(grad, indices, padding_idx)
   indices: non_differentiable
 
-- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)
+- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False, int padding_idx=-1) -> (Tensor, Tensor, Tensor, Tensor)
   indices: non_differentiable
   offsets: non_differentiable
-  weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse, per_sample_weights)
-  per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, offsets, result1, mode)
+  weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse, per_sample_weights, padding_idx)
+  per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, offsets, result1, mode, padding_idx)
 
-- name: _embedding_bag_dense_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights) -> Tensor
+- name: _embedding_bag_dense_backward(Tensor grad, Tensor indices, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights, int padding_idx=-1) -> Tensor
   indices: non_differentiable
   offsets: non_differentiable
   offset2bag: non_differentiable
@@ -1477,8 +1486,8 @@
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
 
-- name: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
-  self: adaptive_avg_pool3d_backward(grad, self)
+- name: _adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
+  self: _adaptive_avg_pool3d_backward(grad, self)
 
 - name: adaptive_max_pool2d(Tensor self, int[2] output_size) -> (Tensor, Tensor)
   self: adaptive_max_pool2d_backward(grad, self, result1)
@@ -1586,8 +1595,8 @@
   grad_output: _adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
   self: zeros_like(self)
 
-- name: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
-  grad_output: adaptive_avg_pool3d(grad, { grad_output.size(-3), grad_output.size(-2), grad_output.size(-1) })
+- name: _adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
+  grad_output: _adaptive_avg_pool3d(grad, { grad_output.size(-3), grad_output.size(-2), grad_output.size(-1) })
   self: zeros_like(self)
 
 - name: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor

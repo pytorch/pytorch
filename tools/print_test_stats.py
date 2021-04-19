@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 import bz2
 import datetime
@@ -14,11 +15,11 @@ from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Set, Tuple, cast)
-from xml.dom import minidom  # type: ignore[import]
+from xml.dom import minidom
 
 import requests
 from typing_extensions import TypedDict
-from tools.stats_utils.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_S3_bucket_readonly,
+from tools.stats_utils.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
                                               Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
                                               Version1Report, Version2Report, ReportMetaMeta)
 
@@ -805,20 +806,13 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
         commits = commits[:-1]
 
     job = os.environ.get("CIRCLE_JOB", "")
-    bucket = get_S3_bucket_readonly('ossci-metrics')
-    index = {}
-    for commit in commits:
-        summaries = bucket.objects.filter(Prefix=f"test_time/{commit}/{job}/")
-        index[commit] = list(summaries)
+    objects: Dict[Commit, List[Report]] = defaultdict(list)
 
-    objects: Dict[Commit, List[Report]] = {}
-    # should we do these in parallel?
-    for commit, summaries in index.items():
-        objects[commit] = []
-        for summary in summaries:
-            binary = summary.get()["Body"].read()
-            string = bz2.decompress(binary).decode("utf-8")
-            objects[commit].append(json.loads(string))
+    for commit in commits:
+        objects[commit]
+        summaries = get_test_stats_summaries_for_job(sha=commit, job_prefix=job)
+        for _, summary in summaries.items():
+            objects[commit].extend(summary)
 
     print()
     print(regression_info(
@@ -925,9 +919,9 @@ if __name__ == '__main__':
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():
         for suite_name, test_suite in test_filename.test_suites.items():
+            total_time += test_suite.total_time
             if test_suite.total_time >= args.class_print_threshold:
                 test_suite.print_report(args.longest_of_class)
-                total_time += test_suite.total_time
                 longest_tests.extend(test_suite.test_cases.values())
     longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
 
@@ -939,8 +933,11 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"error encountered when uploading to s3: {e}")
 
-    print(f"Total runtime is {datetime.timedelta(seconds=int(total_time))}")
-    print(f"{len(longest_tests)} longest tests of entire run:")
+    print(f"Total runtime is {datetime.timedelta(seconds=total_time)}")
+    print(
+        f"{len(longest_tests)} longest tests of entire run"
+        f" (ignoring suites totaling less than {args.class_print_threshold} seconds):"
+    )
     for test_case in reversed(longest_tests):
         print(f"    {test_case.class_name}.{test_case.name}  time: {test_case.time:.2f} seconds")
 

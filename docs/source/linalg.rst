@@ -15,22 +15,30 @@ function for details.
 
 Functions
 ---------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: cholesky
-.. autofunction:: cond
-.. autofunction:: det
-.. autofunction:: slogdet
-.. autofunction:: eigh
-.. autofunction:: eigvalsh
-.. autofunction:: matrix_rank
-.. autofunction:: norm
-.. autofunction:: vector_norm
-.. autofunction:: pinv
-.. autofunction:: svd
-.. autofunction:: solve
-.. autofunction:: tensorinv
-.. autofunction:: tensorsolve
-.. autofunction:: inv
-.. autofunction:: qr
-.. autofunction:: lstsq
-.. autofunction:: householder_product
+
+    cholesky
+    cond
+    det
+    slogdet
+    eig
+    eigvals
+    eigh
+    eigvalsh
+    matrix_power
+    matrix_rank
+    multi_dot
+    norm
+    vector_norm
+    pinv
+    svd
+    solve
+    tensorinv
+    tensorsolve
+    inv
+    qr
+    lstsq
+    householder_product

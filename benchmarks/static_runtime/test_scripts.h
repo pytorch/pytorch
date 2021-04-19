@@ -108,6 +108,28 @@ const auto reshape_inplace_script = R"JIT(
       return (d, e, f)
 )JIT";
 
+const auto sigmoid_inplace_script = R"JIT(
+  def forward(self, inp: Tensor, shape: List[int]):
+      a = torch.sigmoid(inp, out=inp)
+      return (a)
+)JIT";
+
+const auto sigmoid_out_script = R"JIT(
+  def forward(self, inp: Tensor, shape: List[int]):
+      a = inp + inp
+      b = torch.sigmoid(inp, out=a)
+      return (b)
+)JIT";
+
+// b is in_contiguous
+const auto reshape_incontiguous_script = R"JIT(
+  def forward(self, a: Tensor, shape: List[int]):
+      b = a.transpose(0, 1)
+      c = b.reshape(shape)
+      c = c.relu()
+      return (c)
+)JIT";
+
 // exercise flatten_copy
 const auto flatten_script_1 = R"JIT(
   def forward(self, a: Tensor, start_dim: int, end_dim: int):
