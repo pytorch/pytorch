@@ -1,5 +1,5 @@
 import unittest
-import onnxruntime  # noqa
+import onnxruntime
 import torch
 
 import numpy as np

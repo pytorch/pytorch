@@ -419,7 +419,7 @@ class TestBottleneck(TestCase):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
 
-        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa: P204
                              stderr=subprocess.PIPE, shell=True)
         try:
             output, err = p.communicate(timeout=timeout)
@@ -697,7 +697,7 @@ class TestHub(TestCase):
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
-        from torch.utils.hipify import hipify_python # noqa
+        from torch.utils.hipify import hipify_python  # noqa: F401
 
 
 class TestAssert(TestCase):

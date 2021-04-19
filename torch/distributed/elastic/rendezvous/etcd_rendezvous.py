@@ -85,7 +85,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
     The basic etcd rendezvous configuration URL looks like the following
     ::
 
-     etcd://<etcd_address>:<port>/<job_id>?min_workers=<min_workers>&max_workers=<max_workers> # noqa W605
+     etcd://<etcd_address>:<port>/<job_id>?min_workers=<min_workers>&max_workers=<max_workers>  # noqa: W605
 
      -- example --
 

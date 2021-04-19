@@ -59,8 +59,8 @@ from functools import wraps
 from string import Template
 from typing import Callable, Dict, List, Optional, Tuple, TypeVar
 
-from .error_handler import ErrorHandler  # noqa F401
-from .handlers import get_error_handler  # noqa F401
+from .error_handler import ErrorHandler  # noqa: F401
+from .handlers import get_error_handler  # noqa: F401
 
 
 JSON = Dict

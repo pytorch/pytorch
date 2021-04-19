@@ -66,7 +66,7 @@ implementations of the parent :class:`api.PContext` class.
 import os
 from typing import Callable, Dict, Tuple, Union
 
-from torch.distributed.elastic.multiprocessing.api import (  # noqa F401
+from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     MultiprocessContext,
     PContext,
     ProcessFailure,

@@ -187,7 +187,7 @@ def get_type_line(source):
         if len(wrong_type_lines) > 0:
             raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
                                + " is probably invalid.\nIt must be '# type:'"
-                               + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)" # noqa
+                               + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)"  # noqa: B950
                                + "\nfor examples")
         return None
     elif len(type_lines) == 1:
@@ -209,7 +209,7 @@ def get_type_line(source):
             "Return type line '# type: (...) -> ...' not found on multiline "
             "type annotation\nfor type lines:\n" +
             '\n'.join([line[1] for line in type_lines]) +
-            "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
+            "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")
 
     def get_parameter_type(line):
         item_type = line[line.find(type_comment) + len(type_comment):]
