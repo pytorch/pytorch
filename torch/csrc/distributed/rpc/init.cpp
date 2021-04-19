@@ -626,7 +626,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def_readwrite(
           "devices",
           &TensorPipeRpcBackendOptions::devices,
-          R"(All devices used the local agent.)")
+          R"(All devices used by the local agent.)")
       .def("set_device_map", &TensorPipeRpcBackendOptions::setDeviceMap);
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =

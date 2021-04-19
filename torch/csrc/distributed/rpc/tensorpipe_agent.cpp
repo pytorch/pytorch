@@ -79,6 +79,8 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
   return deviceIndices;
 }
 
+// A helper function that first creates a LazyStreamContext and then grabs a
+// CUDA stream for each device in the given device list.
 std::shared_ptr<LazyStreamContext> createCalleeStreamContext(
     std::vector<c10::DeviceIndex> devices) {
   auto ctx = createLazyStreamContext();
@@ -100,6 +102,8 @@ std::unordered_set<c10::DeviceIndex> getLocalDevices(
   return deviceSet;
 }
 
+// 1) checks there is no duplication in the devices field
+// 2) checks all local devices in the deviceSet are included in deviceOpt
 void checkValidDevicesOption(
     const std::unordered_set<c10::DeviceIndex>& deviceSet,
     const std::vector<c10::DeviceIndex>& deviceOpt) {
@@ -1457,7 +1461,6 @@ std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForRemote(
 
   const auto& iter = deviceMaps.find(remoteName);
   if (iter == deviceMaps.end()) {
-
     for (const auto& t : message.tensors()) {
       TORCH_CHECK(
           t.device().is_cpu(),
