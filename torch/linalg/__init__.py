@@ -12,7 +12,7 @@ Tensor = torch.Tensor
 cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
 linalg.cholesky(input, *, out=None) -> Tensor
 
-Computes the Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix or of a batch of such matrices.
+Computes the Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix. Supports batched inputs.
 
 For a complex Hermitian or real symmetric matrix :math:`A`, this is defined as
 
@@ -93,7 +93,7 @@ Examples::
 inv = _add_docstr(_linalg.linalg_inv, r"""
 linalg.inv(input, *, out=None) -> Tensor
 
-Computes the `inverse`_ of square matrix or of a batch of square matrices if it exists.
+Computes the `inverse`_ of square matrix if it exists. Supports batched inputs
 
 Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
 
@@ -155,7 +155,7 @@ Examples::
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input, *, out=None) -> Tensor
 
-Computes the determinant of a matrix or of a batch of matrices.
+Computes the determinant of a square matrix. Supports batched inputs.
 
 Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
 
@@ -210,10 +210,10 @@ Example::
 slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
 linalg.slogdet(input, *, out=None) -> (Tensor, Tensor)
 
-Computes the sign and logarithm of the norm of the determinant of a square matrix or of a batch of square matrices.
+Computes the sign and logarithm of the norm of the determinant of a square matrix. Supports batched inputs.
 
-For a complex :attr:`input`, as the determinant is complex in this case, it returns the angle
-and the logarithm of the modulus of the determinant, that is, a logarithmic polar decomposition of the determinant.
+For a complex :attr:`input`, it returns the angle and the logarithm of the modulus of the
+determinant, that is, a logarithmic polar decomposition of the determinant.
 
 It returns a named tuple `(sign, logabsdet)`.
 If :attr:`input` is a batch of matrices, then `sign`, `logabsdet` are also batched with the same
@@ -259,7 +259,7 @@ Example::
 eig = _add_docstr(_linalg.linalg_eig, r"""
 linalg.eig(input, *, out=None) -> (Tensor, Tensor)
 
-Computes the eigenvalue decomposition of a square matrix or of a batch of square matrices if it exists.
+Computes the eigenvalue decomposition of a square matrix if it exists. Supports batched inputs.
 
 For a square matrix :math:`A`, this is defined as
 
@@ -346,7 +346,7 @@ Examples::
 eigvals = _add_docstr(_linalg.linalg_eigvals, r"""
 linalg.eigvals(input, *, out=None) -> Tensor
 
-Computes the eigenvalues of a square matrix or of a batch of square matrices.
+Computes the eigenvalues of a square matrix. Supports batched inputs.
 
 Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
 The output tensor will always be complex-valued, even when :attr:`input` is real.
@@ -380,7 +380,7 @@ Examples::
 eigh = _add_docstr(_linalg.linalg_eigh, r"""
 linalg.eigh(input, UPLO='L', *, out=None) -> (Tensor, Tensor)
 
-Computes the eigenvalue decomposition of a complex Hermitian or real symmetric matrix or of a batch of such matrices.
+Computes the eigenvalue decomposition of a complex Hermitian or real symmetric matrix. Supports batched inputs.
 
 For a complex Hermitian or real symmetric matrix :math:`A`, this is defined as
 
@@ -482,8 +482,7 @@ Examples::
 eigvalsh = _add_docstr(_linalg.linalg_eigvalsh, r"""
 linalg.eigvalsh(input, UPLO='L', *, out=None) -> Tensor
 
-Computes the eigenvalues and eigenvectors of a complex Hermitian or real symmetric
-matrix or of a batch of such matrices.
+Computes the eigenvalues of a complex Hermitian or real symmetric matrix. Supports batched inputs.
 
 The eigenvalues are returned in ascending order.
 
@@ -544,7 +543,7 @@ Examples::
 householder_product = _add_docstr(_linalg.linalg_householder_product, r"""
 householder_product(input, tau, *, out=None) -> Tensor
 
-Computes the first `n` columns of a product of Householder matrices or of a batch of such matrices
+Computes the first `n` columns of a product of Householder matrices. Supports batched inputs.
 
 Assume that :attr:`input` has shape `(*, m, n)` with `m >= n` and :attr:`tau` has shape
 `(*, k)` with `k <= n` where `*` is zero or more batch dimensions. Denoting
@@ -613,7 +612,7 @@ Examples::
 lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
 torch.linalg.lstsq(input, b, cond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
 
-Computes the least squares solution of a system (or of a batch of systems) of linear equations.
+Computes the least squares solution of a system  of linear equations. Supports batched inputs.
 
 Assume that :attr:`input`, :attr:`b` have shapes `(*, m, n)`, `(*, m, k)` where `*` is zero
 or more batch dimensions. For every matrix :math:`A` in :attr:`input` and every set :math:`B`
@@ -714,7 +713,7 @@ Example::
 matrix_power = _add_docstr(_linalg.linalg_matrix_power, r"""
 matrix_power(input, n, *, out=None) -> Tensor
 
-Computes the :attr:`n`-th power of a matrix or of a batch of matrices for an integer :attr:`n`.
+Computes the :attr:`n`-th power of a matrix for an integer :attr:`n`. Supports batched inputs.
 
 If :attr:`n` `= 0`, it returns the identity matrix (or batch) of the same shape
 as :attr:`input`. If :attr:`n` is negative, it returns the inverse of each matrix
@@ -754,7 +753,7 @@ Example::
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
 matrix_rank(input, tol=None, hermitian=False, *, out=None) -> Tensor
 
-Computes the numerical rank of a matrix or of a batch of matrices
+Computes the numerical rank of a matrix. Supports batched inputs.
 
 The matrix rank is computed as the number of singular values
 (or eigenvalues in absolute value when :attr:`hermitian`\ `= True`)
@@ -831,7 +830,7 @@ Examples::
 vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
 linalg.vector_norm(input, ord=None, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
-Computes the vector norm of a vector or of a batch of vectors.
+Computes the vector norm of a vector. Supports batched inputs.
 
 If :attr:`input` is complex valued, it computes the norm of :attr:`input`\ `.abs()`
 
@@ -961,7 +960,7 @@ Examples::
 norm = _add_docstr(_linalg.linalg_norm, r"""
 linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
 
-Computes the matrix norm or vector norm of a vector or a matrix or of a batch of any of the two.
+Computes the vector norm of a vector or the matrix norm of a matrix. Supports batched inputs.
 
 If :attr:`input` is complex valued, it computes the norm of :attr:`input`\ `.abs()`
 
@@ -1084,13 +1083,13 @@ Using the :attr:`dim` argument to compute matrix norms::
 svd = _add_docstr(_linalg.linalg_svd, r"""
 linalg.svd(input, full_matrices=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-Computes the singular value decomposition of a matrix or of a batch of matrices.
+Computes the singular value decomposition of a matrix. Supports batched inputs.
 
 For a matrix :math:`A`, this is defined as
 
 .. math::
 
-    \text{input} = U \operatorname{diag}(S) V^{\text{H}}
+    A = U \operatorname{diag}(S) V^{\text{H}}
 
 where :math:`V^{\text{H}}` is the conjugate transpose when :math:`V` is complex, and the transpose when :math:`V` is real-valued.
 The matrices  :math:`U`, :math:`V` (and thus :math:`V^{\text{H}}`) are orthogonal in the real case,
@@ -1257,7 +1256,7 @@ Example::
 cond = _add_docstr(_linalg.linalg_cond, r"""
 linalg.cond(input, p=None, *, out=None) -> Tensor
 
-Computes the condition number with respect to a norm of a matrix or of a batch of matrices.
+Computes the condition number of a matrix with respect to a norm. Supports batched inputs.
 
 The condition number :math:`\kappa` of a matrix :math:`A` is defined as
 
@@ -1386,7 +1385,7 @@ Examples::
 pinv = _add_docstr(_linalg.linalg_pinv, r"""
 linalg.pinv(input, rcond=1e-15, hermitian=False, *, out=None) -> Tensor
 
-Computes the Moore-Penrose pseudoinverse of a matrix or of a batch of matrices.
+Computes the Moore-Penrose pseudoinverse of a matrix. Supports batched inputs.
 
 If :attr:`hermitian`\ `= True`, :attr:`input` should be a complex Hermitian or real symmetric
 matrix or batch of matrices. In this case, it will just use the lower-triangular half of the matrix.
@@ -1483,7 +1482,7 @@ Examples::
 solve = _add_docstr(_linalg.linalg_solve, r"""
 linalg.solve(input, other, *, out=None) -> Tensor
 
-Computes the solution of a square system (or of a batch of square systems) of linear equations with unique solution.
+Computes the solution of a square system  of linear equations with unique solution. Supports batched inputs.
 
 This method accepts both matrices and vectors as the right-hand side of the linear equation.
 We will denote by `*` zero or more batch dimensions.
@@ -1621,7 +1620,7 @@ Examples::
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
 linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
 
-Computes the action of the multiplicative inverse of :func:`torch.tensordot` on a tensor.
+Computes the solution `X` to the system `torch.tensordot(input, X) = other`.
 
 If `m` is the product of the first :attr:`other`\ `.ndim`  dimensions of :attr:`input` and
 `n` is the product of the rest of the dimensions, this function expects `m` and `n` to be equal.
@@ -1685,7 +1684,7 @@ Examples::
 qr = _add_docstr(_linalg.linalg_qr, r"""
 qr(input, mode='reduced', *, out=None) -> (Tensor, Tensor)
 
-Computes the QR decomposition of a matrix or of a batch of matrices.
+Computes the QR decomposition of a matrix. Supports batched inputs.
 
 For a matrix :math:`A`, this is defined as
 
