@@ -11,6 +11,7 @@ const char* toString(DispatchKey t) {
       return "CPU";
     case DispatchKey::CUDA:
       return "CUDA";
+
     case DispatchKey::HIP:
       return "HIP";
     case DispatchKey::FPGA:
@@ -51,6 +52,10 @@ const char* toString(DispatchKey t) {
       return "SparseCPU";
     case DispatchKey::SparseCUDA:
       return "SparseCUDA";
+    case DispatchKey::SparseCsrCPU:
+      return "SparseCsrCPU";
+    case DispatchKey::SparseCsrCUDA:
+      return "SparseCsrCUDA";
     case DispatchKey::SparseHIP:
       return "SparseHIP";
     case DispatchKey::SparseXPU:
@@ -66,13 +71,12 @@ const char* toString(DispatchKey t) {
     case DispatchKey::PrivateUse3:
       return "PrivateUse3";
 
-    case DispatchKey::Meta:
-      return "Meta";
-
-    case DispatchKey::InplaceOrView:
-      return "InplaceOrView";
     case DispatchKey::Conjugate:
       return "Conjugate";
+    case DispatchKey::Meta:
+      return "Meta";
+    case DispatchKey::InplaceOrView:
+      return "InplaceOrView";
     case DispatchKey::Autograd:
       return "Autograd";
     case DispatchKey::AutogradCPU:

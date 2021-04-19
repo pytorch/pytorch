@@ -112,6 +112,9 @@ enum class DispatchKey : uint8_t {
   // [Masquerading as CUDA]
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
 
+  SparseCsrCPU,
+  SparseCsrCUDA,
+
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
@@ -144,6 +147,10 @@ enum class DispatchKey : uint8_t {
   // has named dimension propagation that doesn't match that of its
   // constituent parts.
   Named,
+
+  // The Conjugate dispatch key is set for any tensors that need to perform conjugation
+  // This is implemented at a dispatch level right before any backends run
+  Conjugate,
 
   // Note [InplaceOrView key]
   // InplaceOrView key is used by inplace or view ops to register a kernel
@@ -180,10 +187,6 @@ enum class DispatchKey : uint8_t {
   // up to the `VariableType` kernel. Thus we only add the extra dispatch
   // to view/inplace ops to minimize its perf impact to real models.
   InplaceOrView,
-
-  // The Conjugate dispatch key is set for any tensors that need to perform conjugation
-  // This is implemented at a dispatch level right before any backends run
-  Conjugate,
 
   // Note [Alias Dispatch Key : Autograd]
   // All backends are oblivious to autograd; autograd is handled as a
