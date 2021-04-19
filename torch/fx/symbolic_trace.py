@@ -7,14 +7,9 @@ from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 from itertools import chain
 import torch
-<<<<<<< HEAD
 import torch._C._fx  # type: ignore[import]
 from torch._C import ScriptObject  # type: ignore[attr-defined]
-=======
-import torch._C._fx  # type: ignore
-from torch._C import ScriptObject  # type: ignore
 import torch.utils._pytree as pytree
->>>>>>> 155b3eddb2 (test)
 
 import sys
 from .node import Argument, map_aggregate
@@ -334,7 +329,12 @@ class Tracer(TracerBase):
                 default = ()
             else:
                 param = sig.parameters[name]
+<<<<<<< HEAD
                 default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore[assignment]
+=======
+                default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore
+
+>>>>>>> 7e4c95a920 (fix issues)
             return self.create_proxy('placeholder', name, default, {},
                                      type_expr=fn_for_analysis.__annotations__.get(name, None))
 
@@ -355,8 +355,8 @@ class Tracer(TracerBase):
         flat_args, in_spec = pytree.tree_flatten(tuple(args))
         self.graph._in_spec = in_spec
         self.graph._orig_args = orig_args[:total_args]
-        for idx, arg in enumerate(flat_args):
-            if arg is PH:
+        for idx, arg in enumerate(flat_args[skip_arg_idx:], skip_arg_idx):
+            if not isinstance(arg, Proxy):
                 flat_args[idx] = self.create_proxy('placeholder', f'tree_{str(idx)}', (), {})
 
         def flatten_fn(*args):

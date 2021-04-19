@@ -2337,7 +2337,7 @@ class TestFX(JitTestCase):
             (f_dict_add, {'a': PH, 'z': (PH, PH, PH)}),
             (f_dict_add, {'a': PH, 'z': []}),
             (f_custom, Foo(PH, PH)),
-            # (f_custom, Foo(PH, 3)), # currently fails - very annoying...
+            (f_custom, Foo(PH, 3)),
             (f_custom_dict, Foo({'a': PH, 'b': PH}, PH)),
         ]
         val = {'a': PH, 'z': []}
@@ -2346,7 +2346,7 @@ class TestFX(JitTestCase):
 
         def verify_pytree(f, inp):
             val = pytree.tree_map(inp, lambda x: torch.randn(3) if x == PH else x)
-            num_flat_args = len(pytree.tree_flatten(val)[0])
+            num_flat_args = len([i == PH for i in pytree.tree_flatten(inp)[0]])
             orig_out = f(val)
             nf = symbolic_trace(f, concrete_args={'x': inp})
             self.assertEqual(nf(val), orig_out)

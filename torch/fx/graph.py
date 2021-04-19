@@ -939,7 +939,7 @@ class Graph:
 
         # If the original function didn't have self as its first argument, we
         # would have added it.
-        if orig_vars[0] != 'self':
+        if len(orig_vars) == 0 or orig_vars[0] != 'self':
             orig_vars.insert(0, 'self')
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
