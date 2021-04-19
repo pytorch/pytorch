@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
+#include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
@@ -163,6 +164,7 @@ static const OperatorSet& supported_eltwise_set() {
       // TODO: enable slice, shape inference is not implemented for this op yet
 
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::matmul(Tensor self, Tensor other) -> Tensor",
   };
   // clang-format on
 
@@ -232,6 +234,15 @@ bool isSupported(Node* node) {
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = true;
+static bool texpr_parallel_cpu_enabled = false;
+
+bool texprParallelCPUEnabled() {
+  return texpr_parallel_cpu_enabled;
+}
+
+void setTexprParallelCPUEnabled(bool val) {
+  texpr_parallel_cpu_enabled = val;
+}
 
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
@@ -854,7 +865,14 @@ class TensorExprFuser {
       return false;
     }
     if (device->is_cpu()) {
-      return canFuseOnCPU();
+      // CPU fusion is only supported for single-thread.
+      if (!canFuseOnCPU()) {
+        return false;
+      }
+      if (at::get_num_threads() == 1 || texprParallelCPUEnabled()) {
+        return true;
+      }
+      return false;
     } else if (device->is_cuda()) {
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
@@ -897,7 +915,8 @@ class TensorExprFuser {
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
     };
     static const OperatorSet cpu_only_operator_set{
-      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::matmul(Tensor self, Tensor other) -> Tensor",
     };
     // clang-format on
 
@@ -905,15 +924,22 @@ class TensorExprFuser {
     for (const Value* v : node->inputs()) {
       if (auto const& tt = v->type()->cast<TensorType>()) {
         auto const& st = tt->scalarType();
+        auto const& device = tt->device();
 
         // All tensors must be typed.
-        if (!st) {
+        if (!st || !device) {
           return false;
         }
 
         // Byte tensors introduce too many corner cases in type promotion.
         // Better not to try to handle them.
         if (*st == c10::ScalarType::Byte) {
+          return false;
+        }
+
+        // Float16 has a few kinks on LLVM.  Disable it until we either move to
+        // a more stable version or find workarounds.
+        if (*st == c10::ScalarType::Half && *device == c10::kCPU) {
           return false;
         }
 
@@ -992,6 +1018,12 @@ class TensorExprFuser {
     if (node->kind() == aten::conv2d) {
       if (!tensorexpr::conv2dIsSupported(node)) {
         GRAPH_DEBUG("Params of conv2d are not supported");
+        return false;
+      }
+    }
+    if (node->kind() == aten::matmul) {
+      if (!tensorexpr::matmulIsSupported(node)) {
+        GRAPH_DEBUG("Shapes of matmul inputs are not supported");
         return false;
       }
     }
