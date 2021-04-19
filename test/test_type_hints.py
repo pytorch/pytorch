@@ -1,10 +1,11 @@
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, set_cwd
 import tempfile
 import torch
 import doctest
 import os
 import inspect
+from pathlib import Path
 
 try:
     import mypy.api
@@ -118,11 +119,15 @@ class TestTypeHints(TestCase):
                 )
             except OSError:
                 raise unittest.SkipTest('cannot symlink') from None
-            (stdout, stderr, result) = mypy.api.run([
-                '--cache-dir=.mypy_cache/doc',
-                '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
-                os.path.abspath(fn),
-            ])
+            repo_rootdir = Path(__file__).resolve().parent.parent
+            # TODO: Would be better not to chdir here, this affects the
+            # entire process!
+            with set_cwd(str(repo_rootdir)):
+                (stdout, stderr, result) = mypy.api.run([
+                    '--cache-dir=.mypy_cache/doc',
+                    '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
+                    os.path.abspath(fn),
+                ])
             if result != 0:
                 self.fail(f"mypy failed:\n{stdout}")
 
