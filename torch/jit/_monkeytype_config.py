@@ -6,11 +6,11 @@ from collections import defaultdict
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
-    import monkeytype
-    from monkeytype import trace as monkeytype_trace
-    from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger
-    from monkeytype.config import default_code_filter
-    from monkeytype.tracing import CallTrace, CodeFilter
+    import monkeytype  # type: [import]
+    from monkeytype import trace as monkeytype_trace  # type: [import]
+    from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: [import]
+    from monkeytype.config import default_code_filter  # type: [import]
+    from monkeytype.tracing import CallTrace, CodeFilter  # type: [import]
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
     print("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType"
@@ -74,11 +74,11 @@ if _IS_MONKEYTYPE_INSTALLED:
                 _all_type = " "
                 for _type in types:
                     # If the type is a type imported from typing
-                    # like Tuple, List, Dict then only the type part
-                    # is extracted and appended to _all_type.
-                    # TODO: use builtin function in typing to extract the typename.
-                    if "typing" in str(_type):
-                        _all_type += str(_type).split(".")[1] + ","
+                    # like Tuple, List, Dict then replace "typing."
+                    # with a null string.
+                    _type_to_string = str(_type)
+                    if "typing" in _type_to_string:
+                        _all_type += _type_to_string.replace("typing.", '') + ","
                     else:
                         _all_type += _type.__name__ + ','
                 _all_type = _all_type.lstrip(" ")  # Remove any trailing spaces
