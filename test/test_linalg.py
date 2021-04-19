@@ -7424,12 +7424,11 @@ else:
     def test_geqrf(self, device, dtype):
 
         def run_test(shape):
-            # NumPy outputs the result of geqrf operation
-            # with mode = 'raw' of numpy.linalg.qr
-            # So we compare the implementation against NumPy
+            # numpy.linalg.qr with mode = 'raw' computes the same operation as torch.geqrf
+            # so this test compares against that function
             A = make_tensor(shape, dtype=dtype, device=device)
 
-            # NumPy's qr doesn't work with batched input
+            # numpy.linalg.qr doesn't work with batched input
             m, n = A.shape[-2:]
             tau_size = "n" if m > n else "m"
             np_dtype = A.cpu().numpy().dtype
@@ -7442,7 +7441,7 @@ else:
             expected = numpy_geqrf_batched(A.cpu())
             actual = torch.geqrf(A)
 
-            # NumPy's qr returns transposed result
+            # numpy.linalg.qr returns transposed result
             self.assertEqual(expected[0].swapaxes(-2, -1), actual[0])
             self.assertEqual(expected[1], actual[1])
 
