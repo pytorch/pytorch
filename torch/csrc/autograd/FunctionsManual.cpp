@@ -941,11 +941,12 @@ Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int64_t numel) {
 }
 
 static Tensor mean_backward(
-    const Tensor& grad, const Tensor& self, c10::optional<IntArrayRef> dim, bool keepdim) {
+    const Tensor& grad, const IntArrayRef sizes, int64_t numel,
+    c10::optional<IntArrayRef> dim, bool keepdim) {
   if (dim.has_value()) {
-    return mean_backward(grad, self.sizes(), *dim, keepdim);
+    return mean_backward(grad, sizes, *dim, keepdim);
   } else {
-    return mean_backward(grad, self.sizes(), self.numel());
+    return mean_backward(grad, sizes, numel);
   }
 }
 
@@ -959,7 +960,7 @@ Tensor var_std_mean_backward(
                   : var_backward(grads[0], self, dim, correction, keepdim);
   }
   if (grads[1].defined()) {
-    Tensor mean_grad = mean_backward(grads[1], self, dim, keepdim);
+    Tensor mean_grad = mean_backward(grads[1], self.sizes(), self.numel(), dim, keepdim);
     grad = grad.defined() ? grad + mean_grad : mean_grad;
   }
   return grad;
