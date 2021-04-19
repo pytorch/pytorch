@@ -192,8 +192,7 @@ def _tensorpipe_construct_rpc_backend_options_handler(
 
 # detect if any worker has invalid device_map configurations, and return
 # names of failed workers
-def _tensorpipe_check_device_maps(agent, options):
-    device_maps = options.device_maps
+def _tensorpipe_check_device_maps(agent, device_maps):
     if device_maps is None:
         device_maps = {}
 
@@ -280,7 +279,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     api._init_rpc_states(agent)
 
     try:
-        _tensorpipe_check_device_maps(agent, rpc_backend_options)
+        _tensorpipe_check_device_maps(agent, rpc_backend_options.device_maps)
         agent.join()
     except Exception:
         api.shutdown()
