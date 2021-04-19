@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <stdexcept>
 
 namespace torch {
 namespace jit {
@@ -511,6 +512,19 @@ StaticModule::StaticModule(
     : opts_(opts),
       graph_(std::move(graph_and_schema.first)),
       schema_(std::move(graph_and_schema.second)) {
+  // check opt flags
+  if (opts.optimize_graph_output_memory) {
+    if (!(opts_.optimize_memory && opts_.enable_out_variant)) {
+      throw std::runtime_error(
+          "When optimize_graph_output_memory is true, optimize_memory and enable_out_variant must be set to true");
+    }
+  }
+  if (opts_.optimize_memory) {
+    if (!opts_.enable_out_variant) {
+      throw std::runtime_error(
+          "When optimize_memory is true, enable_out_variant must be set to true");
+    }
+  }
   // map Value* to IValue (from inputs or prim::Constant) or null
   std::unordered_map<Value*, IValue*> value_to_ivalue;
   // map Value* to its SSA definition IR
@@ -580,9 +594,13 @@ StaticModule::StaticModule(
   external_values_ = lm.second;
   if (opts_.optimize_memory) {
     auto values = GetMemoryPlanningCandidates(graph_);
-    if (!opts_.enable_out_variant) {
-      values.first = {};
-    }
+    // Note (penguin): since it does not make sense to have optimize_memory
+    // enabled but enable_out_variant disabled, we check the flag dependence
+    // during initialization of StaticModule so that the following condition
+    // would not be true. This would make the code easier to understand
+    // if (!opts_.enable_out_variant) {
+    //   values.first = {};
+    // }
     value_to_same_storage_values_ =
         GenerateSameStorageValues(lm, values, alias_db);
   }
@@ -725,12 +743,17 @@ c10::IValue StaticRuntime::operator()(
   }
 
   if (static_module_.opts().cleanup_activations) {
+    // MemoryPlanner is created after the first invocation of `run()`. This is
+    // done intentionally because MemoryPlanner uses `TensorStorageImpl`
+    // object sizes of the previous `run()` for memory planning of subsequent
+    // runs
     if (!planner_) {
       planner_ = std::make_unique<MemoryPlanner>(
           this,
           static_module_.values_share_same_storage(),
           static_module_.external_values(),
-          static_module_.opts().enable_out_variant);
+          static_module_.opts().enable_out_variant,
+          static_module_.opts().optimize_graph_output_memory);
     }
     planner_->deallocate();
     // clean up owning refs of input tensors
@@ -892,7 +915,8 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
             this,
             static_module_.values_share_same_storage(),
             static_module_.external_values(),
-            static_module_.opts().enable_out_variant);
+            static_module_.opts().enable_out_variant,
+            static_module_.opts().optimize_graph_output_memory);
       }
       planner_->deallocate();
       // clean up owning refs of input tensors
@@ -1042,11 +1066,12 @@ MemoryPlanner::MemoryPlanner(
     const std::unordered_map<const Value*, std::vector<const Value*>>&
         value_to_same_storage_values,
     const std::unordered_set<const Value*>& external_values,
-    bool out_variants) {
+    bool enable_out_variant,
+    bool manage_graph_output_memory) {
   // collect register indices of outputs of ops with out variant
   std::unordered_set<const Value*> managed_tensor_values;
   std::unordered_set<const Value*> leaked_values;
-  if (out_variants) {
+  if (enable_out_variant) {
     for (ProcessedNode& pnode : runtime->nodes()) {
       if (canReuseInputsOutputs(pnode.node())) {
         for (auto i = 0; i < pnode.outputs().size(); ++i) {
@@ -1095,7 +1120,7 @@ MemoryPlanner::MemoryPlanner(
     unmanaged_ivalues_.emplace_back(out);
   }
 
-  if (out_variants) {
+  if (enable_out_variant) {
     ::torch::jit::assign_storage_to_managed_tensors(
         runtime,
         managed_tensor_values,
@@ -1180,12 +1205,12 @@ void MemoryPlanner::deallocate() {
 ProcessedNode::ProcessedNode(
     Node* node,
     std::vector<const IValue*>&& inputs,
-    bool enable_out_variants)
+    bool enable_out_variant)
     : node_(node), inputs_(std::move(inputs)) {
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
 
-  if (enable_out_variants && canRunOutOfPlace(node)) {
+  if (enable_out_variant && canRunOutOfPlace(node)) {
     fn_ = getOutOfPlaceOperation(node);
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
