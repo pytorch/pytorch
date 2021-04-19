@@ -70,6 +70,7 @@ using upsampling_nearest3d = void(*)(const Tensor& output, const Tensor& input, 
 using upsampling_linear1d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_w);
 using upsampling_bilinear2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using upsampling_trilinear3d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
+using upsampling_bicubic2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel);
 DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel);
 DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_kernel);
@@ -82,6 +83,7 @@ DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_kernel);
 DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel);
 DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel);
+DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
 
 static std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
@@ -356,6 +358,34 @@ static inline scalar_t cubic_interp1d(
   get_cubic_upsample_coefficients<scalar_t>(coeffs, t);
 
   return x0 * coeffs[0] + x1 * coeffs[1] + x2 * coeffs[2] + x3 * coeffs[3];
+}
+
+template<typename scalar_t>
+static inline void compute_source_index_and_lambda(
+    int64_t& input_index0,
+    int64_t& input_index1,
+    scalar_t& lambda0,
+    scalar_t& lambda1,
+    scalar_t ratio,
+    int64_t output_index,
+    int64_t input_size,
+    int64_t output_size,
+    bool align_corners) {
+  if (output_size == input_size) {
+    // scale_factor = 1, simply copy
+    input_index0 = output_index;
+    input_index1 = output_index;
+    lambda0 = static_cast<scalar_t>(1);
+    lambda1 = static_cast<scalar_t>(0);
+  } else {
+    const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
+        ratio, output_index, align_corners, /*cubic=*/false);
+    input_index0 = static_cast<int64_t>(real_input_index);
+    int64_t offset = (input_index0 < input_size - 1) ? 1 : 0;
+    input_index1 = input_index0 + offset;
+    lambda1 = real_input_index - input_index0;
+    lambda0 = static_cast<scalar_t>(1.) - lambda1;
+  }
 }
 
 } // namespace native

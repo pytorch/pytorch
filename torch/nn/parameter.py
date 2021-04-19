@@ -141,12 +141,16 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
     will throw a runtime error. The only operations that can be performed on a uninitialized
     parameter are changing its datatype, moving it to a different device and
     converting it to a regular :class:`torch.nn.Parameter`.
+
+    The default device or dtype to use when the parameter is materialized can be set
+    during construction using e.g. ``device='cuda'``.
     """
 
     cls_to_become = Parameter
 
-    def __new__(cls, requires_grad=True):
-        data = torch.tensor([])
+    def __new__(cls, requires_grad=True, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        data = torch.tensor([], **factory_kwargs)
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
 
@@ -161,10 +165,14 @@ class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     will throw a runtime error. The only operations that can be performed on a uninitialized
     parameter are changing its datatype, moving it to a different device and
     converting it to a regular :class:`torch.Tensor`.
+
+    The default device or dtype to use when the buffer is materialized can be set
+    during construction using e.g. ``device='cuda'``.
     """
 
     cls_to_become = torch.Tensor
 
-    def __new__(cls, requires_grad=False):
-        data = torch.tensor([])
+    def __new__(cls, requires_grad=False, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        data = torch.tensor([], **factory_kwargs)
         return torch.Tensor._make_subclass(cls, data, requires_grad)
