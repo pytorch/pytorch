@@ -2,6 +2,7 @@ import os
 import sys
 import torch
 from torch.testing._internal.jit_utils import JitTestCase
+from typing import List
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -26,6 +27,21 @@ def test_mul(a, b):
 def test_args_complex(real, img):
     return torch.complex(real, img)
 
+def test_bool(a):
+    if a:
+        return -1
+    else:
+        return 0
+
+def test_str(a):
+    if a == "":
+        return False
+    else:
+        return True
+
+def test_list_and_tuple(a):
+    return sum(a)
+
 class TestPDT(JitTestCase):
     """
     A suite of tests for profile directed typing in TorchScript.
@@ -40,9 +56,35 @@ class TestPDT(JitTestCase):
         scripted_fn_add = torch.jit._script_pdt(test_sum, example_inputs=[(3, 4)])
         scripted_fn_sub = torch.jit._script_pdt(test_sub, example_inputs=[(3.9, 4.10)])
         scripted_fn_mul = torch.jit._script_pdt(test_mul, example_inputs=[(-10, 9)])
+        scripted_fn_bool = torch.jit._script_pdt(test_bool, example_inputs=[(True,)])
+        scripted_fn_str = torch.jit._script_pdt(test_str, example_inputs=[("",)])
         scripted_fn_complex = torch.jit._script_pdt(test_args_complex, example_inputs=[(torch.rand(3, 4), torch.rand(3, 4))])
+
         self.assertEqual(scripted_fn_add(10, 2), test_sum(10, 2))
         self.assertEqual(scripted_fn_sub(6.5, 2.9), test_sub(6.5, 2.9))
         self.assertEqual(scripted_fn_mul(-1, 3), test_mul(-1, 3))
+        self.assertEqual(scripted_fn_bool(True), test_bool(True))
+        self.assertEqual(scripted_fn_str("abc"), test_str("abc"))
+
         arg1, arg2 = torch.rand(3, 4), torch.rand(3, 4)
         self.assertEqual(scripted_fn_complex(arg1, arg2), test_args_complex(arg1, arg2))
+
+    def test_pdt_list(self):
+        scripted_fn_float = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[([4.9, 8.9],)])
+        self.assertEqual(scripted_fn_float([11.9, 7.6]), test_list_and_tuple([11.9, 7.6]))
+
+        scripted_fn_bool = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[([True, False, True],)])
+        self.assertEqual(scripted_fn_bool([True, True, True]), test_list_and_tuple([True, True, True]))
+
+        scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs = [([3, 4, 5], )])
+        self.assertEqual(scripted_fn_int([1, 2, 3]), test_list_and_tuple([1, 2, 3]))
+
+    def test_pdt_tuple(self):
+        scripted_fn_float = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((4.9, 8.9),)])
+        self.assertEqual(scripted_fn_float((11.9, 7.6)), test_list_and_tuple((11.9, 7.6)))
+
+        scripted_fn_bool = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((True, False, True),)])
+        self.assertEqual(scripted_fn_bool((True, True, True)), test_list_and_tuple((True, True, True)))
+
+        scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs = [((3, 4, 5), )])
+        self.assertEqual(scripted_fn_int((1, 2, 3)), test_list_and_tuple((1, 2, 3)))
