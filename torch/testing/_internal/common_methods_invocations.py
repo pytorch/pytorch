@@ -3732,20 +3732,10 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_outer,),
     OpInfo('permute',
-           op=lambda x, dims: x.permute(dims),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
-           skips=(
-               # As `permute` has method variant only.
-               # RuntimeError:
-               # object has no attribute permute:
-               # File "<string>", line 3
-               # def the_method(i0):
-               #     return torch.permute(i0, (0, 2, 3, 1))
-               #         ~~~~~~~~~~~~~ <--- HERE
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-           ),
+           assert_autodiffed=True,
            sample_inputs_func=sample_inputs_permute),
     OpInfo('pow',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),

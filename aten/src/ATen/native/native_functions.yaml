@@ -2791,7 +2791,7 @@
   variants: function
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
-  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  variants: function, method
   dispatch:
     CompositeExplicitAutograd: permute
 
