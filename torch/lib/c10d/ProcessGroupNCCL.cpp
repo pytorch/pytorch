@@ -10,6 +10,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Logging.h>
+#include <c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/cuda/nccl.h>
 
 #include <c10d/Utils.hpp>
@@ -397,6 +398,14 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
 
 // Same as calling synchronize().
 bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
+  RECORD_PARAM_COMMS(
+      rank_,      // rank
+      "wait",     // colName
+      0,          // inSize
+      0,          // outSize
+      at::kByte,  // dType
+      {},         // inSplitSizes
+      {});        // outSplitSizes
   synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
   return true;
@@ -1219,6 +1228,17 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     const AllreduceOptions& opts) {
   check_gpu_tensors(tensors);
 
+  // @lint-ignore CLANGTIDY
+  auto tensor = tensors.back();
+  RECORD_PARAM_COMMS(
+      rank_,                    // rank
+      "allreduce",              // colName
+      tensor.numel(),           // inSize
+      tensor.numel(),           // outSize
+      tensor.scalar_type(),     // dType
+      std::vector<int64_t>(),   // inSplitSizes
+      std::vector<int64_t>());  // outSplitSizes
+
   return collective(
       tensors,
       tensors,
@@ -1251,6 +1271,17 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
     const BroadcastOptions& opts) {
   check_gpu_tensors(tensors);
 
+  // @lint-ignore CLANGTIDY
+  auto tensor = tensors.back();
+  RECORD_PARAM_COMMS(
+      rank_,                // rank
+      "broadcast",          // colName
+      tensor.numel(),       // inSize
+      tensor.numel(),       // outSize
+      tensor.scalar_type(), // dType
+      {},                   // inSplitSizes
+      {});                  // outSplitSizes
+
   return collective(
       tensors,
       tensors,
@@ -1275,6 +1306,16 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   check_gpu_tensors(tensors);
+  // @lint-ignore CLANGTIDY
+  auto tensor = tensors.back();
+  RECORD_PARAM_COMMS(
+      rank_,                // rank
+      "reduce",             // colName
+      tensor.numel(),       // inSize
+      tensor.numel(),       // outSize
+      tensor.scalar_type(), // dType
+      {},                   // inSplitSizes
+      {});                  // outSplitSizes
 
   return collective(
       tensors,
@@ -1307,6 +1348,19 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   auto outputFlattened =
       flatten_for_scatter_gather(outputTensors, inputTensors, size_);
   check_gpu_tensors(outputFlattened);
+
+  // @lint-ignore CLANGTIDY
+  auto tensor = inputTensors.back();
+  RECORD_PARAM_COMMS(
+      rank_,                // rank
+      "all_gather",         // colName
+      tensor.numel(),       // inSize
+      tensor.numel() *      // outSize
+        this->getSize(),    // dType
+      tensor.scalar_type(), // inSplitSizes
+      {},                   // outSplitSizes
+      {});
+
 
   return collective(
       inputTensors,
@@ -1357,6 +1411,18 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
     const ReduceScatterOptions& opts) {
   check_gpu_tensors(outputTensors);
 
+  // @lint-ignore CLANGTIDY
+  auto tensor = outputTensors.back();
+  RECORD_PARAM_COMMS(
+      rank_,                // rank
+      "reduce_scatter",     // colName
+      tensor.numel() *      // inSize
+        this->getSize(),    // outSize
+      tensor.numel(),       // dType
+      tensor.scalar_type(), // inSplitSizes
+      {},                   // outSplitSizes
+      {});
+
   auto inputFlattened =
       flatten_for_scatter_gather(inputTensors, outputTensors, size_);
   check_gpu_tensors(inputFlattened);
@@ -1399,6 +1465,16 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
     const BarrierOptions& opts) {
+
+  RECORD_PARAM_COMMS(
+      rank_,      // rank
+      "barrier",  // colName
+      0,          // inSize
+      0,          // outSize
+      at::kByte,  // dType
+      {},         // inSplitSizes
+      {});        // outSplitSizes
+
   std::vector<at::Device> devices;
 
   // Use user defined GPU device ids if provided
@@ -1464,6 +1540,16 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
   if (outputSplitSizes.size() == 0 && inputSplitSizes.size() == 0) {
     std::vector<at::Tensor> inputTensors = {inputTensor};
     std::vector<at::Tensor> outputTensors = {outputTensor};
+
+    RECORD_PARAM_COMMS(
+        rank_,                // rank
+        "all_to_all",         // colName
+        inputTensor.numel(),  // inSize
+        outputTensor.numel(), // outSize
+        at::kByte,            // dType
+        {},                   // inSplitSizes
+        {});                  // outSplitSizes
+
     return collective(
         inputTensors,
         outputTensors,
@@ -1489,6 +1575,16 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
     std::vector<at::Tensor> inputTensors = {inputTensor};
     std::vector<at::Tensor> outputTensors = {outputTensor};
+
+    RECORD_PARAM_COMMS(
+        rank_,                        // rank
+        "all_to_allv",                // colName
+        inputTensor.numel(),          // inSize
+        outputTensor.numel(),         // outSize
+        at::kByte,                    // dType
+        std::move(inputSplitSizes),   // inSplitSizes
+        std::move(outputSplitSizes)); // outSplitSizes
+
     return collective(
         inputTensors,
         outputTensors,
@@ -1534,21 +1630,21 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
     check_gpu_single_tensor(outputTensors[r]);
     check_gpu_single_tensor(inputTensors[r]);
     TORCH_CHECK(device == outputTensors[r].device() && device == inputTensors[r].device(),
-      "Tensors must be on the same device")
+        "Tensors must be on the same device")
   }
   std::vector<at::Tensor> inputTensor0 = {inputTensors[0]};
   std::vector<at::Tensor> outputTensor0 = {outputTensors[0]};
   return collective(
-    inputTensor0,
-    outputTensor0,
-    [&](at::Tensor& /* unused */,
-        at::Tensor& /* unused */,
-        ncclComm_t comm,
-        at::cuda::CUDAStream& stream) {
-      torch::cuda::nccl::all2all(outputTensors, inputTensors, comm, stream);
-      return ncclSuccess;
-    },
-    OpType::ALLTOALL);
+      inputTensor0,
+      outputTensor0,
+      [&](at::Tensor& /* unused */,
+          at::Tensor& /* unused */,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        torch::cuda::nccl::all2all(outputTensors, inputTensors, comm, stream);
+        return ncclSuccess;
+      },
+      OpType::ALLTOALL);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(

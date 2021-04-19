@@ -1,6 +1,5 @@
-#include <ATen/Utils.h>
-
 #include <ATen/Config.h>
+#include <ATen/Utils.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -26,6 +25,16 @@
 #include <ATen/native/ConvUtils.h>
 #include <algorithm>
 #include <memory>
+#include <c10/core/Layout.h>
+#include <c10/util/StringUtil.h>
+
+#if AT_MKLDNN_ENABLED()
+#include <ATen/CPUFunctions.h>
+#include <dnnl_types.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ideep.hpp>
+#endif
+
 // clang-format on
 
 namespace torch {
@@ -169,7 +178,9 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
 
   for (Node* node : graph->nodes()) {
     auto k = node->kind();
-    if (k == aten::relu || k == aten::sigmoid || k == aten::dropout) {
+    if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
+        k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
+        k == prim::MKLDNNRelu6) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -205,6 +216,59 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   }
 }
 
+// This is a factory function that creates an Operation that that takes
+// MKLDNN tensors and unpacks them into 1D contiguous tensors that we can
+// run aten operations on. The precondition for using this function is that the
+// aten operations in `aten_op` should be an identity for zero inputs. In other
+// words, this should: `aten_op(0) = 0` The reason for this precondition has to
+// do with blocked formats MKLDNN uses to lay tensor elements (nChw8c, nChw16c,
+// etc). It splits the channel dimension into chunks of 8/16 makes it the
+// innermost dimension. Whenever the channel dim isn't divisible by 8/16 the
+// innermost dimension is padded with 0s. The precondition, `aten_op(0) == 0`
+// allows us to avoid any special casing of padded elements.
+Operation createUnaryOp(
+    std::function<void(at::Tensor output, at::Tensor input)> aten_op,
+    bool inplace = false) {
+  return [aten_op, inplace](Stack* stack) {
+    auto a = pop(stack).toTensor();
+    c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+    // we cast `a` to an `ideep::tensor`, so we can get at its descriptor
+    // which we then use to set up `out` tensor w/ the same props as a
+    auto a_it = at::native::itensor_from_mkldnn(a);
+    auto mkldnn_raw_data = a_it.get_data_handle();
+    auto a_options_with_strided = a.options().layout(c10::kStrided);
+    // we also wrap `a` storage into an aten tensor
+    auto in_aten =
+        at::from_blob(mkldnn_raw_data, {a.numel()}, a_options_with_strided);
+
+    auto out_raw_data = mkldnn_raw_data;
+    auto out = a;
+    if (!inplace) {
+      // `a_it.get_desc()` will allocate a tensor
+      // of the right physical size.
+      auto it_empty = ideep::tensor(a_it.get_desc());
+      TORCH_INTERNAL_ASSERT(it_empty.get_desc() == a_it.get_desc());
+      out = at::native::new_with_itensor_mkldnn(
+          std::move(it_empty),
+          optTypeMetaToScalarType(a.options().dtype_opt()),
+          a.options().device_opt());
+
+      out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
+    }
+
+    // tensor's physical size could be bigger than a logical one
+    // `a_it.get_desc().get_size()` returns the real physical size (in bytes)
+    // we use it to compute `nelem` for `aten` ops
+    TORCH_INTERNAL_ASSERT(
+        a_it.get_desc().get_size() % elementSize(a.scalar_type()) == 0);
+    auto nelem = a_it.get_desc().get_size() / elementSize(a.scalar_type());
+    auto out_aten = at::from_blob(
+        out_raw_data, {static_cast<int64_t>(nelem)}, a_options_with_strided);
+    aten_op(out_aten, in_aten);
+    push(stack, out);
+  };
+}
+
 Operation BroadOp(const Node* node) {
   return [](Stack* stack) {
     auto b = pop(stack).toTensor();
@@ -212,31 +276,131 @@ Operation BroadOp(const Node* node) {
     auto b_size = b.sizes();
     auto a_size = a.sizes();
     if (a_size.equals(b_size)) {
+      // TODO: follow up with MKLDNN what the best way is
+      // to handle perf incompatible formats
       push(stack, a, b);
+      return;
     } else {
       auto out_size = at::infer_size(a_size, b_size);
-      size_t out_numel = out_size[0];
+      int64_t out_numel = out_size[0];
       for (size_t i = 1, end = out_size.size(); i < end; ++i) {
         out_numel = out_numel * out_size[i];
       }
+
+      auto exp_a = a;
+      auto exp_b = b;
       // mkldnn tensors only support reshape, not expand or view operators
       if (a_size.equals(out_size)) {
         push(stack, a);
       } else if (out_numel == a.numel()) {
-        push(stack, a.reshape(out_size));
+        exp_a = a.reshape(out_size);
       } else {
-        push(stack, a.to_dense().expand(out_size).to_mkldnn());
+        // TODO: consider to initializing to a blocked layout
+        // directly if needed
+        exp_a = a.to_dense().expand(out_size).to_mkldnn();
       }
+
       if (b_size.equals(out_size)) {
         push(stack, b);
       } else if (out_numel == b.numel()) {
-        push(stack, b.reshape(out_size).to_mkldnn());
+        exp_b = b.reshape(out_size);
       } else {
-        push(stack, b.to_dense().expand(out_size).to_mkldnn());
+        exp_b = b.to_dense().expand(out_size).to_mkldnn();
       }
+
+      {
+        // If one of the inputs was expanded and converted to nchw/nhwc
+        // we might end up in a very bad spot if the second argument
+        // is in a blocked format. In this case, MKLDNN uses its
+        // reference implementation for a binary operation that follows
+        // these broadcasts and it could be up to ~100x slower.
+        // We use a very simple heuristic to convert an arg in nchw
+        // to the blocked format of the other argument.
+        c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+        auto a_it = at::native::itensor_from_mkldnn(exp_a);
+        auto b_it = at::native::itensor_from_mkldnn(exp_b);
+
+        // `is_public_format` means a tensor's physical layout isn't in MKLDNN
+        // blocked layout e.g. nchw or nhwc but not nChw8c
+        if (!a_it.is_public_format()) {
+          if (b_it.is_public_format()) {
+            b_it = b_it.reorder_if_differ_in(a_it.get_desc());
+          }
+        } else if (!b_it.is_public_format()) {
+          if (a_it.is_public_format()) {
+            a_it = a_it.reorder_if_differ_in(b_it.get_desc());
+          }
+        }
+
+        auto a_options = exp_a.options();
+        auto a_out = at::native::new_with_itensor_mkldnn(
+            std::move(a_it),
+            optTypeMetaToScalarType(a_options.dtype_opt()),
+            a_options.device_opt());
+        push(stack, a_out);
+        auto b_options = exp_b.options();
+        auto b_out = at::native::new_with_itensor_mkldnn(
+            std::move(b_it),
+            optTypeMetaToScalarType(b_options.dtype_opt()),
+            b_options.device_opt());
+        push(stack, b_out);
+      };
     }
   };
 }
+
+// any op added to this registry needs to meet
+// the precondition: `aten_op(0) == 0`
+const RegisterOperators MKLDNNHardSwishOpReg({
+    torch::jit::Operator(
+        "prim::MKLDNNHardSwish_(Tensor(a!) self) -> Tensor(a!)",
+        createUnaryOp(
+            [](at::Tensor output, at::Tensor input) {
+              at::cpu::hardswish_out(output, input);
+            },
+            true),
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNHardSigmoid_(Tensor(a!) self) -> Tensor(a!)",
+        createUnaryOp(
+            [](at::Tensor output, at::Tensor input) {
+              at::cpu::hardsigmoid_out(output, input);
+            },
+            true),
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNRelu6_(Tensor(a!) self) -> Tensor(a!)",
+        createUnaryOp(
+            [](at::Tensor output, at::Tensor input) {
+              at::cpu::hardtanh_out(output, input, 0.f, 6.f);
+            },
+            true),
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNHardSwish(Tensor a) -> Tensor",
+        createUnaryOp(
+            [](at::Tensor output, at::Tensor input) {
+              at::cpu::hardswish_out(output, input);
+            },
+            false),
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNHardSigmoid(Tensor a) -> Tensor",
+        createUnaryOp(
+            [](at::Tensor output, at::Tensor input) {
+              at::cpu::hardsigmoid_out(output, input);
+            },
+            false),
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNRelu6(Tensor(a!) self) -> Tensor(a!)",
+        createUnaryOp(
+            [](at::Tensor output, at::Tensor input) {
+              at::cpu::hardtanh_out(output, input, 0.f, 6.f);
+            },
+            false),
+        AliasAnalysisKind::FROM_SCHEMA),
+});
 
 const RegisterOperators BroadOpReg({
     torch::jit::Operator(
@@ -456,12 +620,31 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       body_node->replaceInput(1, node->outputs().at(1));
     }
 
+    if (body_node->kind() == aten::hardswish) {
+      body_node->replaceWithNewSymbol(prim::MKLDNNHardSwish);
+      body_node->destroy();
+      continue;
+    }
+
+    if (body_node->kind() == aten::hardsigmoid) {
+      body_node->replaceWithNewSymbol(prim::MKLDNNHardSigmoid);
+      body_node->destroy();
+      continue;
+    }
+
+    if (body_node->kind() == aten::relu6) {
+      body_node->replaceWithNewSymbol(prim::MKLDNNRelu6);
+      body_node->destroy();
+      continue;
+    }
+
     if (body_node->kind() == aten::conv2d ||
         body_node->kind() == aten::conv3d) {
       // this node doesnt handle string padding yet...
       if (!body_node->namedInput("padding")->type()->cast<StringType>()) {
         body_node->replaceWithNewSymbol(Symbol::prim("mkldnn_convolution"));
         body_node->destroy();
+        continue;
       }
     }
   }
@@ -624,12 +807,16 @@ class MKLDNNSubgraphSlicer {
     // the input is mkldnn supported
     switch (n->kind()) {
       case aten::relu:
+      case aten::relu6:
       case aten::sigmoid:
+      case aten::hardsigmoid:
+      case aten::hardswish:
       // TODO: max_pool on mkldnn can be slower than in eager. ideally, we'd
       // only fuse it if we knew including max_pool lead to fewer layout
       // conversions. from initial testing including it speeds up models
       case aten::max_pool2d:
       case aten::max_pool3d:
+      case aten::adaptive_avg_pool2d:
         return true;
     }
 
@@ -757,8 +944,11 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
           aten::add_,
           aten::mul_,
           aten::relu_,
+          aten::relu6_,
+          aten::hardswish_,
           aten::dropout_,
           aten::sigmoid_,
+          aten::hardsigmoid_,
       };
       return mkldnn_ops.count(node_to_functionalize->kind()) != 0;
     });
