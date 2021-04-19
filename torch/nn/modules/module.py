@@ -1538,9 +1538,15 @@ class Module:
         for _, module in self.named_modules():
             yield module
 
-    def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = ''):
+    def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = '', remove_duplicate: bool = True):
         r"""Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.
+
+        Args:
+            memo: a memo to store the set of modules already added to the result
+            prefix: a prefix that will be added to the name of the module
+            remove_duplicate: whether to remove the duplicated module instances in the result
+            or not
 
         Yields:
             (string, Module): Tuple of name and module
@@ -1567,13 +1573,14 @@ class Module:
         if memo is None:
             memo = set()
         if self not in memo:
-            memo.add(self)
+            if remove_duplicate:
+                memo.add(self)
             yield prefix, self
             for name, module in self._modules.items():
                 if module is None:
                     continue
                 submodule_prefix = prefix + ('.' if prefix else '') + name
-                for m in module.named_modules(memo, submodule_prefix):
+                for m in module.named_modules(memo, submodule_prefix, remove_duplicate):
                     yield m
 
     def train(self: T, mode: bool = True) -> T:

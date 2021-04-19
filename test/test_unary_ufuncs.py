@@ -1195,6 +1195,38 @@ class TestUnaryUfuncs(TestCase):
         t = torch.tensor([inf, -inf, nan], device=device, dtype=dtype)
         self.assertTrue(torch.i0(t).isnan().all())
 
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
+    @dtypes(torch.bfloat16, torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_special_i0e_vs_scipy(self, device, dtype):
+        def check_equal(t):
+            # Test by comparing to scipy
+            actual = torch.special.i0e(t)
+            if dtype is torch.bfloat16:
+                t = t.to(torch.float32)
+            expected = scipy.special.i0e(t.cpu().numpy())
+
+            # Casting down for dtype float16 is required since scipy upcasts to float32
+            if dtype is torch.bfloat16 or dtype is torch.float16:
+                expected = torch.from_numpy(expected).to(dtype)
+            self.assertEqual(actual, expected)
+
+        t = torch.tensor([], device=device, dtype=dtype)
+        check_equal(t)
+
+        range = (-1e7, 1e7)
+        if dtype == torch.half:
+            range = (-65000, 65000)
+
+        t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
+        check_equal(t)
+
+        # NaN, inf, -inf are tested in reference_numerics tests.
+        info = torch.finfo(dtype)
+        min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
+        t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
+        check_equal(t)
+
     # TODO: allow large opinfo values to be opted-into via metadata
     @dtypes(torch.long)
     def test_abs_big_number(self, device, dtype):
