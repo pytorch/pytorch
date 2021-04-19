@@ -946,7 +946,11 @@ class DistributedTest:
             rank = dist.get_rank()
             send_size = rank + 1
             tensor = _build_tensor(send_size)
-            profile_ctx = torch.autograd.profiler.profile(record_shapes=True) if enable_profiling else contextlib.suppress()
+            profile_ctx = (
+                torch.autograd.profiler.profile(record_shapes=True)
+                if enable_profiling else
+                suppress()
+            )
             with profile_ctx as prof:
                 for src in range(0, dist.get_world_size()):
                     if src == rank:
@@ -998,7 +1002,11 @@ class DistributedTest:
             recv_ranks = list()
             irecv_ranks = list()
 
-            profile_ctx = torch.autograd.profiler.profile(record_shapes=True) if enable_profiling else contextlib.suppress()
+            profile_ctx = (
+                torch.autograd.profiler.profile(record_shapes=True)
+                if enable_profiling else
+                suppress()
+            )
             with profile_ctx as prof:
                 for dst in range(0, dist.get_world_size()):
                     if dst == rank:
@@ -1072,7 +1080,11 @@ class DistributedTest:
             world_size = dist.get_world_size()
             send_recv_size = 10
             tensor = _build_tensor(send_recv_size, value=rank)
-            profiler_ctx = torch.autograd.profiler.profile(record_shapes=True) if enable_profiling else contextlib.suppress()
+            profiler_ctx = (
+                torch.autograd.profiler.profile(record_shapes=True)
+                if enable_profiling else
+                suppress()
+            )
             with profiler_ctx as prof:
                 for dst in range(0, world_size):
                     if dst == rank:
@@ -1112,7 +1124,11 @@ class DistributedTest:
         def _test_isend(self, enable_profiling):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
-            profiler_ctx = torch.autograd.profiler.profile(record_shapes=True) if enable_profiling else contextlib.suppress()
+            profiler_ctx = (
+                torch.autograd.profiler.profile(record_shapes=True)
+                if enable_profiling else
+                suppress()
+            )
             with profiler_ctx as prof:
                 if rank == 0:
                     requests = [
