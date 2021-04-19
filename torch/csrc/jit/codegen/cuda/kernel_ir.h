@@ -1056,11 +1056,24 @@ class TORCH_CUDA_CU_API BroadcastOp final : public Expr {
 //!
 class TORCH_CUDA_CU_API Allocate final : public Expr {
  public:
+  //! Allocation of a multi-dimensional buffer
+  //!
+  //! param shape Size of each dimension
   explicit Allocate(
       Passkey passkey,
       Val* buffer,
-      MemoryType memory_type = MemoryType::Local,
-      Val* size = nullptr,
+      MemoryType memory_type,
+      std::vector<Val*> shape = {},
+      bool zero_init = false);
+
+  //! Allocation of a non-dimensional buffer
+  //!
+  //! param size Size of allocation
+  explicit Allocate(
+      Passkey passkey,
+      Val* buffer,
+      MemoryType memory_type,
+      Val* size,
       bool zero_init = false);
 
   void accept(IrVisitor* visitor) const override {
@@ -1083,6 +1096,10 @@ class TORCH_CUDA_CU_API Allocate final : public Expr {
     return size_;
   }
 
+  const std::vector<Val*>& shape() const {
+    return shape_;
+  }
+
   bool zeroInit() const {
     return zero_init_;
   }
@@ -1100,8 +1117,11 @@ class TORCH_CUDA_CU_API Allocate final : public Expr {
  private:
   Val* buffer_ = nullptr;
   MemoryType memory_type_ = MemoryType::Local;
-  Val* size_ = nullptr;
+  //! Size of each dimension
+  std::vector<Val*> shape_;
   bool zero_init_ = false;
+  //! Total size
+  Val* size_ = nullptr;
 
   // This alias tracks the next Allocate node in a linked chain of aliases
   // If the alias is nullptr, then the Allocate node uses memory in the kernel

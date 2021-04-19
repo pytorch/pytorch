@@ -82,11 +82,13 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
   //! Register input as an input of the kernel
   void addInput(Val* input) {
     inputs_.push_back(input);
+    input_set_.insert(input);
   }
 
   //! Register output as an output of the kernel
   void addOutput(Val* output) {
     outputs_.push_back(output);
+    output_set_.insert(output);
   }
 
   const auto& inputs() const {
@@ -95,6 +97,14 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
 
   const auto& outputs() const {
     return outputs_;
+  }
+
+  bool isInput(Val* val) const {
+    return input_set_.find(val) != input_set_.end();
+  }
+
+  bool isOutput(Val* val) const {
+    return output_set_.find(val) != output_set_.end();
   }
 
   const auto& topLevelExprs() const {
@@ -146,6 +156,8 @@ class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
   // Kernel inputs and outputs
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
+  std::unordered_set<Val*> input_set_;
+  std::unordered_set<Val*> output_set_;
 
   // Used to allocate unique value IDs
   kir::ValueId next_value_id_ = 1;

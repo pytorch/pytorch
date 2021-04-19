@@ -185,30 +185,23 @@ namespace {
 
 at::Tensor inferAndAlloc(
     const kir::TensorView* tv,
+    const std::vector<kir::Val*>& sizes,
     kir::ExpressionEvaluator& expr_eval,
     const CompileOptions& options,
     bool zero_init = false) {
   FUSER_PERF_SCOPE("inferAndAlloc");
 
-  std::vector<int64_t> sizes;
+  std::vector<int64_t> inferred_sizes;
 
-  const auto domain = tv->domain();
-  const auto maybe_rfactor_domain =
-      domain->hasRFactor() ? domain->rfactorDomain() : domain->rootDomain();
-
-  for (const auto id : maybe_rfactor_domain) {
-    if (id->isReduction() ||
-        id->iterType() == IterType::BroadcastWithoutStride) {
-      continue;
-    }
-    const auto inferred_val = expr_eval.evaluate(id->rawExtent());
+  for (const auto size : sizes) {
+    const auto inferred_val = expr_eval.evaluate(size);
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(),
         "Could not launch kernel as program could not infer ",
-        kir::toString(id->rawExtent()),
+        kir::toString(size),
         " for the buffer ",
         kir::toString(tv));
-    sizes.push_back(inferred_val.value());
+    inferred_sizes.push_back(inferred_val.value());
   }
 
   const auto at_type = data_type_to_aten(tv->dtype());
@@ -216,15 +209,37 @@ at::Tensor inferAndAlloc(
   if (zero_init) {
     const auto tensor_options =
         at::TensorOptions().dtype(at_type).device(options.device);
-    c10::IntArrayRef isizes(sizes);
+    c10::IntArrayRef isizes(inferred_sizes);
     return at::zeros(isizes, tensor_options);
   } else {
-    c10::IntArrayRef isizes(sizes);
+    c10::IntArrayRef isizes(inferred_sizes);
     // Non Variable type guard for empty_cuda call
     at::AutoNonVariableTypeMode non_variable_type_mode;
     return at::native::empty_cuda(
         isizes, at_type, c10::nullopt, options.device, c10::nullopt);
   }
+}
+
+at::Tensor inferAndAllocOutput(
+    const kir::TensorView* tv,
+    kir::ExpressionEvaluator& expr_eval,
+    const CompileOptions& options,
+    bool zero_init = false) {
+  const auto domain = tv->domain();
+  const auto maybe_rfactor_domain =
+      domain->hasRFactor() ? domain->rfactorDomain() : domain->rootDomain();
+
+  std::vector<kir::Val*> sizes;
+
+  for (const auto id : maybe_rfactor_domain) {
+    if (id->isReduction() ||
+        id->iterType() == IterType::BroadcastWithoutStride) {
+      continue;
+    }
+    sizes.push_back(id->rawExtent());
+  }
+
+  return inferAndAlloc(tv, sizes, expr_eval, options, zero_init);
 }
 
 } // namespace
@@ -376,17 +391,22 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
     kir::ExpressionEvaluator& expr_eval) {
   FUSER_PERF_SCOPE("allocGlobalVals");
   GlobalBuffers global_buffers;
+  const auto kernel = lowered_.kernel();
   const auto& kernel_summary = lowered_.kernel()->summary();
   for (auto alloc : kernel_summary.global_allocations) {
     TORCH_INTERNAL_ASSERT(
         alloc->buffer()->isA<kir::TensorView>(),
         "Cannot allocate global buffers that are not tensors.");
+    auto tv = alloc->buffer()->as<kir::TensorView>();
+    if (kernel->isOutput(tv)) {
+      continue;
+    }
     if (!alloc->zeroInit()) {
-      global_buffers.empty_buffers.push_back(inferAndAlloc(
-          alloc->buffer()->as<kir::TensorView>(), expr_eval, options_, false));
+      global_buffers.empty_buffers.push_back(
+          inferAndAlloc(tv, alloc->shape(), expr_eval, options_, false));
     } else {
-      global_buffers.zero_buffers.push_back(inferAndAlloc(
-          alloc->buffer()->as<kir::TensorView>(), expr_eval, options_, true));
+      global_buffers.zero_buffers.push_back(
+          inferAndAlloc(tv, alloc->shape(), expr_eval, options_, true));
     }
   }
 
@@ -402,7 +422,7 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
     TORCH_INTERNAL_ASSERT(
         output->isA<kir::TensorView>(),
         "Cannot allocate outputs that are not tensors.");
-    outputs.push_back(inferAndAlloc(
+    outputs.push_back(inferAndAllocOutput(
         output->as<kir::TensorView>(), expr_eval, options_, false));
   }
   return outputs;

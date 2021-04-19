@@ -142,16 +142,34 @@ class AllocationInserter : public kir::MutableIrVisitor {
     info.init_expr = init_expr;
   }
 
-  void createAllocExpr(AllocationInformation& info, bool is_output) {
-    if (is_output) {
-      info.alloc_expr = nullptr;
-      return;
-    }
-
-    auto fuser_tv = info.buffer->fuserTv();
+  std::vector<kir::Val*> getGlobalAllocationSizes(AllocationInformation& info) {
+    const auto& domain = info.buffer->domain();
+    const auto& maybe_rfactor_domain =
+        domain->hasRFactor() ? domain->rfactorDomain() : domain->rootDomain();
 
     std::vector<kir::Val*> alloc_dims;
-    const MemoryType memory_type = info.buffer->memoryType();
+
+    for (const auto id : maybe_rfactor_domain) {
+      if (id->isReduction() ||
+          id->iterType() == IterType::BroadcastWithoutStride) {
+        continue;
+      }
+      alloc_dims.push_back(id->rawExtent());
+    }
+
+    return alloc_dims;
+  }
+
+  std::vector<kir::Val*> getNonGlobalAllocExpr(AllocationInformation& info) {
+    auto fuser_tv = info.buffer->fuserTv();
+    const auto memory_type = info.buffer->memoryType();
+    TORCH_INTERNAL_ASSERT(
+        memory_type != MemoryType::Global,
+        "Invalid memory type: ",
+        memory_type);
+
+    std::vector<kir::Val*> alloc_dims;
+
     for (size_t axis_i = 0; axis_i < fuser_tv->nDims(); axis_i++) {
       const auto local_id =
           gpu_lower->lowerValue(fuser_tv->axis(axis_i))->as<kir::IterDomain>();
@@ -201,21 +219,32 @@ class AllocationInserter : public kir::MutableIrVisitor {
       alloc_dims.push_back(concrete_id->rawExtent());
     }
 
-    // Multiply all the dimensions we're going to use for the allocation
-    // together to get the total size
-    kir::Val* size = nullptr;
-    if (alloc_dims.size() == 0) {
-      size = ir_builder.create<kir::Int>(1);
+    return alloc_dims;
+  }
+
+  void createAllocExpr(AllocationInformation& info, bool is_output) {
+    if (is_output) {
+      info.alloc_expr = nullptr;
+      return;
+    }
+
+    std::vector<kir::Val*> alloc_dims;
+    const MemoryType memory_type = info.buffer->memoryType();
+
+    if (memory_type == MemoryType::Global) {
+      alloc_dims = getGlobalAllocationSizes(info);
     } else {
-      size = alloc_dims[0];
-      for (size_t i = 1; i < alloc_dims.size(); i++) {
-        size = ir_builder.mulExpr(size, alloc_dims[i]);
-      }
+      alloc_dims = getNonGlobalAllocExpr(info);
+    }
+
+    if (alloc_dims.size() == 0 &&
+        info.buffer->domain()->noReductions().size() != 0) {
+      alloc_dims.push_back(ir_builder.create<kir::Int>(1));
     }
 
     // Create the allocation node
     info.alloc_expr = ir_builder.create<kir::Allocate>(
-        info.buffer, info.buffer->memoryType(), size);
+        info.buffer, info.buffer->memoryType(), alloc_dims);
   }
 
   void handle(kir::Expr* expr) {
@@ -253,10 +282,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
         }
       }
 
-      const bool is_output = std::find(
-                                 gpu_lower->kernel()->outputs().begin(),
-                                 gpu_lower->kernel()->outputs().end(),
-                                 out) != gpu_lower->kernel()->outputs().end();
+      const bool is_output = gpu_lower->kernel()->isOutput(out);
 
       // Don't need to alloc outputs, and if we don't need to initialize we're
       // done.
