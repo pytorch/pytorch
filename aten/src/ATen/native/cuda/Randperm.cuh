@@ -10,7 +10,7 @@ namespace {
 
 // See note [Algorithm of randperm]
 template<typename T, typename scalar_t>
-__global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T mask, int n, at::PhiloxCudaState philox_args) {
+__global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T mask, int n/*, at::PhiloxCudaState philox_args*/) {
   int tid = threadIdx.x + blockDim.x * blockIdx.x;
 
   // find the beginning of islands
@@ -26,7 +26,7 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
 
   // do random permutation inside each island.
   data += tid;
-  // auto seeds = at::cuda::philox::unpack(philox_args);
+  auto seeds = at::cuda::philox::unpack(philox_args);
   // curandStatePhilox4_32_10_t state;
   // curand_init(std::get<0>(seeds), tid, std::get<1>(seeds), &state);
   for (int i = island_size - 1; i > 0; i--) {
@@ -53,7 +53,7 @@ void randperm_handle_duplicate_keys(T *keys, scalar_t *data, int bits, int64_t n
   T mask = static_cast<T>((1UL << bits) - 1);
   std::cout << "bits: " << bits << ", seeds: " << rng_engine_inputs.seed_ << ", " << rng_engine_inputs.offset_.val << std::endl;
   randperm_handle_duplicate_keys_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
-    keys, data, mask, n, rng_engine_inputs);
+    keys, data, mask, n/*, rng_engine_inputs*/);
 }
 
 }
