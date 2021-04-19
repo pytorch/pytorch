@@ -27,7 +27,7 @@ namespace at {
 
 namespace meta {
 
-TORCH_META_FUNC(addmm)(const Tensor &self, const Tensor &mat1, const Tensor &mat2, 
+TORCH_META_FUNC(addmm)(const Tensor &self, const Tensor &mat1, const Tensor &mat2,
                        const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ",
               mat1.dim(), "-D tensor");
@@ -1046,7 +1046,7 @@ Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, co
 }
 
 Tensor& mm_cpu_out(const Tensor & self, const Tensor & mat2, Tensor & result) {
-  //self arg sent to addmm_out cannot be resized here we use result as self argument for addmm, 
+  //self arg sent to addmm_out cannot be resized here we use result as self argument for addmm,
   //and the result tensor is user-supplied and can be of wrong size
   //it's not a hard error, because we allow resizing result, but it becomes a hard error
   //in addmm, because addmm expects self to satisfy proper conditions
