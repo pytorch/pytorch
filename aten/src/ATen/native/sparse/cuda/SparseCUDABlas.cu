@@ -270,7 +270,7 @@ void adjustLd(char transb, int64_t m, int64_t n, int64_t k, int64_t *ldb, int64_
   }
 }
 
-void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, float alpha, float *csrvala, int *csrrowptra, int *csrcolinda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
+void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, float *alpha, float *csrvala, int *csrrowptra, int *csrcolinda, float *b, int64_t ldb, float *beta, float *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -288,11 +288,11 @@ void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  TORCH_CUDASPARSE_CHECK(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
+  TORCH_CUDASPARSE_CHECK(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
-void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
+void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double *alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double *beta, double *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -311,12 +311,12 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  TORCH_CUDASPARSE_CHECK(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
+  TORCH_CUDASPARSE_CHECK(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
   // TODO: Proper fix is to create real descriptor classes
 }
 
-void Ccsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
+void Ccsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, cuComplex *alpha, cuComplex *csrvala, int *csrrowptra, int *csrcolinda, cuComplex *b, int64_t ldb, cuComplex *beta, cuComplex *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -334,11 +334,11 @@ void Ccsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  TORCH_CUDASPARSE_CHECK(cusparseCcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
+  TORCH_CUDASPARSE_CHECK(cusparseCcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
-void Zcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double *alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double *beta, double *c, int64_t ldc)
+void Zcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, cuDoubleComplex *alpha, cuDoubleComplex *csrvala, int *csrrowptra, int *csrcolinda, cuDoubleComplex *b, int64_t ldb, cuDoubleComplex *beta, cuDoubleComplex *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
