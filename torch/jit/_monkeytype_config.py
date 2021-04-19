@@ -6,11 +6,11 @@ from collections import defaultdict
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
-    import monkeytype  # type: ignore[import]
-    from monkeytype import trace as monkeytype_trace  # type: ignore[import]
-    from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: ignore[import]
-    from monkeytype.config import default_code_filter  # type: ignore[import]
-    from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore[import]
+    import monkeytype  # type: ignore
+    from monkeytype import trace as monkeytype_trace  # type: ignore
+    from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: ignore
+    from monkeytype.config import default_code_filter  # type: ignore
+    from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
     print("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType"
@@ -66,8 +66,8 @@ if _IS_MONKEYTYPE_INSTALLED:
         def consolidate_types(self, qualified_name: str) -> Dict:
             all_args = self.analyze(qualified_name)
             # If there are more types for an argument,
-            # then consolidate the type to `Union` and replace the entry
-            # by type `Union`.
+            # then consolidate the type to `Any` and replace the entry
+            # by type `Any`.
             # This currently handles only cases with only one return value
             # TODO: Consolidate types for multiple return values
             for arg, types in all_args.items():
@@ -84,7 +84,7 @@ if _IS_MONKEYTYPE_INSTALLED:
                 _all_type = _all_type.lstrip(" ")  # Remove any trailing spaces
 
                 if len(types) > 1:
-                    all_args[arg] = {'Union[' + _all_type[:-1] + ']'}
+                    all_args[arg] = {'Any'}
                 else:
                     all_args[arg] = {_all_type[:-1]}
             return all_args
