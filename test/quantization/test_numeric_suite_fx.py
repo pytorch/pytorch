@@ -42,6 +42,18 @@ from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
     GraphMatchingException,
 )
+from torch.quantization.ns.mappings import (
+    FUNS_IO_TYPE_FP32,
+    FUNS_IO_TYPE_INT8,
+    FUNS_IO_TYPE_FP32_OR_INT8,
+    FUNS_UNMATCHABLE,
+    MODS_IO_TYPE_FP32,
+    MODS_IO_TYPE_INT8,
+    MODS_IO_TYPE_FP32_OR_INT8,
+    MODS_UNMATCHABLE,
+    METHS_IO_TYPE_FP32_OR_INT8,
+    METHS_UNMATCHABLE,
+)
 from torch.quantization._numeric_suite_fx import (
     extract_weights,
     _extract_weights_impl,
@@ -429,6 +441,29 @@ class TestFXGraphMatcher(QuantizationTestCase):
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
+    def test_methods(self):
+        """
+        Verify that graph matching works on methods
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x.sigmoid()
+                return x
+
+        m1 = M().eval()
+        m2 = M().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m1p = prepare_fx(m1, qconfig_dict)
+        m2p = prepare_fx(m2, qconfig_dict)
+        results = get_matching_subgraph_pairs(m1p, m2p)
+        expected_types = {
+            'base_op_torch.sigmoid_0':
+                (('sigmoid', 'sigmoid'), ('sigmoid', 'sigmoid')),
+        }
+        self.assert_types_for_matched_subgraph_pairs(
+            results, expected_types, m1p, m2p)
+
+
     def test_op_relationship_mapping(self):
         """
         Tests that the mapping of op relationships is complete.
@@ -500,8 +535,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
             if isinstance(pattern, tuple):
                 base_op = pattern[-1]
             elif isinstance(pattern, str):
-                # TODO(future PR): add handling for these
-                continue
+                base_op = pattern
             else:
                 base_op = pattern
 
@@ -808,6 +842,21 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_match_activations_fun_qat(self):
         self._test_match_activations_fun_impl(prepare_fn=prepare_qat_fx)
 
+    @skipIfNoFBGEMM
+    def test_match_activations_meth_ptq(self):
+        """
+        Verify that add_loggers works on methods
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x.sigmoid()
+                return x
+
+        m = M().eval()
+        res = self._test_match_activations(
+            m, (torch.randn(4, 4),),
+            results_len=1)
+
     def _test_add_shadow_loggers_mod_impl(self, prepare_fn=prepare_fx):
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
@@ -844,6 +893,21 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     @skipIfNoFBGEMM
     def test_add_shadow_loggers_fun_qat(self):
         self._test_add_shadow_loggers_fun_impl(prepare_fn=prepare_qat_fx)
+
+    @skipIfNoFBGEMM
+    def test_add_shadow_loggers_meth_ptq(self):
+        """
+        Verify that add_loggers works on methods
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x.sigmoid()
+                return x
+
+        m = M().eval()
+        res = self._test_match_shadow_activations(
+            m, (torch.randn(4, 4),),
+            results_len=1)
 
     @skipIfNoFBGEMM
     def test_add_shadow_loggers_multiple_dtype_casts(self):
@@ -953,6 +1017,45 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 should_log_inputs=should_log_inputs)
 
     @skipIfNoFBGEMM
+    def test_op_with_either_fp32_or_int8_input(self):
+        """
+        Verify that shadowing works with ops which accept either fp32 or
+        int8 inputs.
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(x)
+                x = F.relu(x)
+                return x
+
+        m = M()
+        res = self._test_match_shadow_activations(
+            m, (torch.randn(4, 4),),
+            results_len=2)
+
+    @skipIfNoFBGEMM
+    def test_int8_shadows_int8(self):
+        """
+        Verify that shadowing works where both modules are int8
+        """
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mp(torch.randn(4, 1, 4, 4))
+        mq1 = convert_fx(copy.deepcopy(mp))
+        mq2 = convert_fx(mp)
+        mq1_shadows_mq2 = add_shadow_loggers('a', mq1, 'b', mq2, OutputLogger)
+        mq1_shadows_mq2(torch.randn(4, 1, 4, 4))
+        act_compare_dict = extract_shadow_logger_info(
+            mq1_shadows_mq2, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 1)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
+
+    @skipIfNoFBGEMM
     def test_user_module(self):
         """
         For user defined modules,
@@ -1020,6 +1123,128 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         }
         self.checkGraphModuleNodes(
             mp_shadows_mq_ns, expected_node_occurrence=unshadowed_expected_occurrence)
+
+    def test_op_io_dtype_coverage(self):
+        """
+        Tests that all the ops quantization cares about have input and output
+        dtypes defined.
+        """
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        type_a_related_to_b = \
+            get_type_a_related_to_b(base_name_to_sets_of_related_ops)
+
+        # 1. check static quant module mappings
+        static_quant_mod_mappings = get_default_static_quant_module_mappings()
+        for fp32_type, int8_type in static_quant_mod_mappings.items():
+            types_to_skip = (
+                torch.quantization.QuantStub,
+                torch.quantization.DeQuantStub,
+                nnq.FloatFunctional,
+                # TODO(future PR): look into whether shadowing embeddings
+                # makes sense
+                nn.Embedding,
+                nn.EmbeddingBag,
+            )
+            if fp32_type in types_to_skip:
+                continue
+            self.assertTrue(
+                fp32_type in MODS_IO_TYPE_FP32,
+                f"missing IO type handling for f{fp32_type}")
+            self.assertTrue(
+                int8_type in MODS_IO_TYPE_INT8,
+                f"missing IO type handling for f{int8_type}")
+
+        # 2. check static quant op mappings
+        static_quant_fun_mappings = get_default_float_to_quantized_operator_mappings()
+        for fp32_type, int8_type in static_quant_fun_mappings.items():
+            self.assertTrue(
+                fp32_type in FUNS_IO_TYPE_FP32,
+                f"missing IO type handling for f{fp32_type}")
+            self.assertTrue(
+                int8_type in FUNS_IO_TYPE_INT8,
+                f"missing IO type handling for f{int8_type}")
+
+        # 3. check dynamic quant mappings
+        dynamic_quant_mappings = get_default_dynamic_quant_module_mappings()
+        for fp32_type1, fp32_type2 in dynamic_quant_mappings.items():
+            # TODO(future PR): verify correct I/O for these and remove from
+            # this list.
+            types_to_skip = (
+                nn.GRUCell,
+                nn.GRU,
+                nn.LSTMCell,
+                nn.RNNCell,
+            )
+            if fp32_type1 in types_to_skip:
+                continue
+            self.assertTrue(
+                fp32_type1 in MODS_IO_TYPE_FP32,
+                f"missing IO type handling for f{fp32_type1}")
+            self.assertTrue(
+                fp32_type2 in MODS_IO_TYPE_FP32,
+                f"missing IO type handling for f{fp32_type2}")
+
+        # 4. go through the ops mapped to each QuantizeHandler type, and verify
+        # correctness.
+        default_quant_patterns = get_default_quant_patterns()
+        for pattern, qhandler_cls in default_quant_patterns.items():
+            base_op = None
+            if isinstance(pattern, tuple):
+                base_op = pattern[-1]
+            elif isinstance(pattern, str):
+                base_op = pattern
+            else:
+                base_op = pattern
+
+            if (
+                qhandler_cls in (
+                    qp.BinaryOpQuantizeHandler,
+                    qp.RNNDynamicQuantizeHandler,
+                )
+            ):
+                # TODO(future PR): implement shadowing for binary ops
+                # TODO(future PR): implement shadowing for RNN ops
+                continue
+            elif qhandler_cls == qp.CatQuantizeHandler:
+                self.assertTrue(
+                    base_op in FUNS_IO_TYPE_FP32,
+                    f"missing IO type handling for {base_op}")
+            elif (
+                qhandler_cls in (
+                    qp.ConvReluQuantizeHandler,
+                    qp.LinearReLUQuantizeHandler,
+                    qp.BatchNormQuantizeHandler,
+                    qp.DefaultNodeQuantizeHandler,
+                    qp.ELUQuantizeHandler,
+                )
+            ):
+                self.assertTrue(
+                    (base_op in FUNS_IO_TYPE_FP32) or (base_op in MODS_IO_TYPE_FP32),
+                    f"missing IO type handling for {base_op}")
+            elif (
+                qhandler_cls in (
+                    qp.FixedQParamsOpQuantizeHandler,
+                    qp.CopyNodeQuantizeHandler,
+                )
+            ):
+                if (
+                    base_op in FUNS_UNMATCHABLE or
+                    base_op in MODS_UNMATCHABLE or
+                    base_op in METHS_UNMATCHABLE
+                ):
+                    continue
+
+                self.assertTrue(
+                    (base_op in FUNS_IO_TYPE_FP32_OR_INT8) or
+                    (base_op in MODS_IO_TYPE_FP32_OR_INT8) or
+                    (base_op in METHS_IO_TYPE_FP32_OR_INT8),
+                    f"missing IO type handling for {base_op}")
+            elif qhandler_cls == qp.EmbeddingQuantizeHandler:
+                # embedding shadowing is not implemented, for now
+                continue
+            else:
+                raise AssertionError(
+                    f"handing for {qhandler_cls} not implemented")
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
