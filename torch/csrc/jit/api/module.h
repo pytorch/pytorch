@@ -229,6 +229,12 @@ struct TORCH_API Module : public Object {
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
       bool save_mobile_debug_info = false) const;
 
+  void _backport_for_mobile(
+      const std::string& input_filename,
+      const std::string& output_filename,
+      const ExtraFilesMap& extra_files = ExtraFilesMap(),
+      bool save_mobile_debug_info = false) const;
+
   Module copy() const;
 
   Module deepcopy() const;

@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/method.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -32,6 +33,7 @@ namespace jit {
 
 static constexpr const char* kArchiveNameConstants = "constants";
 static constexpr const char* kArchiveNameBytecode = "bytecode";
+static constexpr uint64_t kBytecodeVersionV4 = 0x4L;
 
 char const* toString(OpCode op);
 
@@ -416,6 +418,10 @@ class ScriptModuleSerializer {
     use_tensors_archive_table_ = enable;
   }
 
+  void overwriteBytecodeVersion(const uint64_t bytecode_version) {
+    overwrite_bytecode_version_ = bytecode_version;
+  }
+
  private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
@@ -450,12 +456,10 @@ class ScriptModuleSerializer {
             std::make_pair(kArchiveNameConstants, tensor_index);
       }
     }
-
     bool can_use_tensors_archive_table =
         (use_tensors_archive_table_ &&
          tensors_archive_table_users_.find(archive_name) !=
              tensors_archive_table_users_.end());
-
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
@@ -566,13 +570,14 @@ class ScriptModuleSerializer {
 
   void writeByteCode(const Module& module, bool save_mobile_debug_info) {
     std::vector<c10::IValue> elements;
-    elements.emplace_back(
-        static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+    const uint64_t bytecode_version = overwrite_bytecode_version_.has_value()
+        ? overwrite_bytecode_version_.value()
+        : caffe2::serialize::kProducedBytecodeVersion;
+    elements.emplace_back(static_cast<int64_t>(bytecode_version));
     c10::optional<std::vector<c10::IValue>> debug_info_elements;
     if (save_mobile_debug_info) {
       debug_info_elements = std::vector<c10::IValue>();
-      debug_info_elements->emplace_back(
-          static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+      debug_info_elements->emplace_back(static_cast<int64_t>(bytecode_version));
     }
 
     moduleMethodsTuple(
@@ -619,11 +624,11 @@ class ScriptModuleSerializer {
 
   bool use_tensors_archive_table_ = true;
   TensorIndexMap tensors_archive_table_;
-
   std::unordered_set<std::string> tensors_archive_table_resources_ = {
       kArchiveNameConstants};
   std::unordered_set<std::string> tensors_archive_table_users_ = {
       kArchiveNameBytecode};
+  at::optional<uint64_t> overwrite_bytecode_version_;
 
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
@@ -667,6 +672,42 @@ void ExportModule(
     bool bytecode_format,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(writer_func);
+  serializer.serialize(
+      module, extra_files, bytecode_format, save_mobile_debug_info);
+}
+
+void BackPortByteCode(
+    const Module& module,
+    const std::string& filename,
+    const uint64_t input_bytecode_version,
+    const ExtraFilesMap& extra_files,
+    bool bytecode_format,
+    bool save_mobile_debug_info) {
+  const uint64_t output_bytecode_version = input_bytecode_version - 1;
+  ScriptModuleSerializer serializer(filename);
+
+  if (output_bytecode_version == kBytecodeVersionV4) {
+    serializer.useTensorsArchiveTable(false);
+    serializer.overwriteBytecodeVersion(kBytecodeVersionV4);
+  } else {
+    TORCH_WARN(
+        "The input bytecode model version is ",
+        input_bytecode_version,
+        ". Currently only support backporting to version ",
+        kBytecodeVersionV4);
+  }
+  serializer.serialize(
+      module, extra_files, bytecode_format, save_mobile_debug_info);
+}
+
+void BackPortByteCodeToVersion(
+    const Module& module,
+    const std::string& filename,
+    const uint64_t to_version,
+    const ExtraFilesMap& extra_files,
+    bool bytecode_format,
+    bool save_mobile_debug_info) {
+  ScriptModuleSerializer serializer(filename);
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
 }

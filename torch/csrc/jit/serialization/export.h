@@ -87,6 +87,22 @@ TORCH_API void ExportModule(
     bool bytecode_format = false,
     bool save_mobile_debug_info = false);
 
+TORCH_API void BackPortByteCode(
+    const Module& module,
+    const std::string& filename,
+    const uint64_t input_bytecode_version,
+    const ExtraFilesMap& metadata = ExtraFilesMap(),
+    bool bytecode_format = true,
+    bool save_mobile_debug_info = false);
+
+TORCH_API void BackPortByteCodeToVersion(
+    const Module& module,
+    const std::string& filename,
+    const uint64_t to_version,
+    const ExtraFilesMap& metadata = ExtraFilesMap(),
+    bool bytecode_format = true,
+    bool save_mobile_debug_info = false);
+
 // Write the bytes of a pickle archive and the tensors referenced inside that
 // archive
 TORCH_API void writeArchiveAndTensors(
