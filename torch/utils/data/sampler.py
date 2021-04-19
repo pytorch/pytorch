@@ -221,7 +221,7 @@ class BatchSampler(Sampler[List[int]]):
         self.batch_size = batch_size
         self.drop_last = drop_last
 
-    def __iter__(self) -> Iterator[int]:
+    def __iter__(self) -> Iterator[List[int]]:
         batch = []
         for idx in self.sampler:
             batch.append(idx)
