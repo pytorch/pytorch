@@ -53,10 +53,13 @@ public:
   // https://github.com/pybind/pybind11/issues/2957
   IntrusivePtrNoGilDestructor(T* impl) : impl_(c10::intrusive_ptr<T>::reclaim(impl)) {}
   ~IntrusivePtrNoGilDestructor() {
-    pybind11::gil_scoped_release release;
-    impl_.reset();
-    if (_Py_IsFinalizing()) {
-      release.disarm();
+    if (impl_) {
+      if (PyGILState_Check()) {
+        pybind11::gil_scoped_release release;
+        impl_.reset();
+      } else {
+        impl_.reset();
+      }
     }
   }
   T& operator*() const noexcept { return *impl_; }
