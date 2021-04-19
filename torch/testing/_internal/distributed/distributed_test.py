@@ -2703,8 +2703,11 @@ class DistributedTest:
 
         @unittest.skipIf(BACKEND == "nccl", "NCCL does not support CPU barrier")
         def test_barrier_full_group(self):
-            group, group_id, rank = self._init_full_group_test()
-            self._test_barrier_helper(group, group_id, rank)
+            print("DBG: in test_barrier_full_group, running the test 100 times");
+            for i in range(100):
+                print("Iteration ", i)
+                group, group_id, rank = self._init_full_group_test()
+                self._test_barrier_helper(group, group_id, rank)
 
         def _test_broadcast_multigpu_helper(self, group, group_id, rank, rank_to_GPU):
             for src in group:
