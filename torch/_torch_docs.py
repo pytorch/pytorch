@@ -8138,6 +8138,7 @@ Example::
             [0.9087]])
 
 .. function:: std(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
+   :noindex:
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used.
 Otherwise, the sample deviation is calculated, without any correction.
@@ -8153,6 +8154,7 @@ Keyword args:
 
 
 .. function:: std(input, unbiased) -> Tensor
+   :noindex:
 
 Calculates the standard deviation of all elements in the :attr:`input` tensor.
 
@@ -8215,6 +8217,7 @@ Example::
      tensor([[ 0.0645,  0.4485,  0.8707, -0.0665]]))
 
 .. function:: std_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
+   :noindex:
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
 the standard deviation. Otherwise, the sample deviation is calculated, without
@@ -8233,6 +8236,7 @@ Returns:
     A tuple (std, mean) containing the standard deviation and mean.
 
 .. function:: std_mean(input, unbiased) -> (Tensor, Tensor)
+   :noindex:
 
 Calculates the standard deviation and mean of all elements in the :attr:`input`
 tensor.
@@ -9446,6 +9450,7 @@ Example::
             [0.8258]])
 
 .. function:: var(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
+   :noindex:
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used.
 Otherwise, the sample variance is calculated, without any correction.
@@ -9460,6 +9465,7 @@ Keyword args:
     {out}
 
 .. function:: var(input, unbiased) -> Tensor
+   :noindex:
 
 Calculates the variance of all elements in the :attr:`input` tensor.
 
@@ -9521,6 +9527,7 @@ Example::
      tensor([[ 0.0645,  0.4485,  0.8707, -0.0665]]))
 
 .. function:: var_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
+   :noindex:
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
 the variance. Otherwise, the sample variance is calculated, without any
@@ -9539,8 +9546,9 @@ Returns:
     A tuple (var, mean) containing the variance and mean.
 
 .. function:: var_mean(input, unbiased) -> (Tensor, Tensor)
+   :noindex:
 
-Calculates the standard deviation and mean of all elements in the :attr:`input`
+Calculates the variance and mean of all elements in the :attr:`input`
 tensor.
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used.
