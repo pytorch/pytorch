@@ -1468,8 +1468,8 @@ def _object_to_tensor(obj):
     f = io.BytesIO()
     _pickler(f).dump(obj)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
-    byte_tensor = torch.ByteTensor(byte_storage)
-    local_size = torch.LongTensor([byte_tensor.numel()])
+    byte_tensor = torch.tensor(byte_storage, dtype=torch.uint8)
+    local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long)
     return byte_tensor, local_size
 
 
@@ -1561,7 +1561,9 @@ def all_gather_object(object_list, obj, group=None):
     all_gather(output_tensors, input_tensor, group=group)
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.ByteTensor)  # type:ignore[call-overload]
+        tensor = tensor.type(torch.uint8)  # type:ignore[call-overload]
+        if tensor.device != torch.device("cpu"):
+            tensor = tensor.cpu()
         tensor_size = object_size_list[i]
         object_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1661,7 +1663,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     if my_rank != dst:
         return
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.ByteTensor)  # type: ignore[call-overload]
+        tensor = tensor.type(torch.uint8)  # type: ignore[call-overload]
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1723,7 +1725,7 @@ def broadcast_object_list(object_list, src=0, group=None):
         tensor_list, size_list = zip(*[_object_to_tensor(obj) for obj in object_list])
         object_sizes_tensor = torch.cat(size_list)
     else:
-        object_sizes_tensor = torch.LongTensor(len(object_list))
+        object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long)
 
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
@@ -1743,7 +1745,10 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank == src:
         object_tensor = torch.cat(tensor_list)
     else:
-        object_tensor = torch.ByteTensor(torch.sum(object_sizes_tensor).item())
+        object_tensor = torch.empty(
+            torch.sum(object_sizes_tensor).int().item(),  # type: ignore[arg-type]
+            dtype=torch.uint8
+        )
 
     if is_nccl_backend:
         object_tensor = object_tensor.to(current_device)
@@ -1753,7 +1758,9 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank != src:
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
-            obj_view = obj_view.type(torch.ByteTensor)  # type: ignore[call-overload]
+            obj_view = obj_view.type(torch.uint8)  # type: ignore[call-overload]
+            if obj_view.device != torch.device("cpu"):
+                obj_view = obj_view.cpu()
             offset += obj_size
             object_list[i] = _tensor_to_object(obj_view, obj_size)
 
@@ -1826,7 +1833,6 @@ def scatter_object_list(
         )
         tensor_list, tensor_sizes = list(tensor_list), list(tensor_sizes)
 
-    obj_tensor_size = torch.LongTensor([0])
     # Src rank broadcasts the maximum tensor size. This is because all ranks are
     # expected to call into scatter() with equal-sized tensors.
     if my_rank == src:
@@ -1834,11 +1840,11 @@ def scatter_object_list(
         for tensor in tensor_list:
             tensor.resize_(max_tensor_size)
     else:
-        max_tensor_size = torch.LongTensor([0])
+        max_tensor_size = torch.tensor([0], dtype=torch.long)
     broadcast(max_tensor_size, src=src, group=group)
 
     # Scatter actual serialized objects
-    output_tensor = torch.ByteTensor(max_tensor_size.item())
+    output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8)
     scatter(
         output_tensor,
         scatter_list=None if my_rank != src else tensor_list,
@@ -1847,6 +1853,7 @@ def scatter_object_list(
     )
 
     # Scatter per-object sizes to trim tensors when deserializing back to object
+    obj_tensor_size = torch.tensor([0], dtype=torch.long)
     scatter(
         obj_tensor_size,
         scatter_list=None if my_rank != src else tensor_sizes,
