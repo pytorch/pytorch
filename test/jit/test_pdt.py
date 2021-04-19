@@ -2,7 +2,7 @@ import os
 import sys
 import torch
 from torch.testing._internal.jit_utils import JitTestCase
-from typing import List  # noqa F401
+from typing import List, Dict, Tuple  # noqa F401
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -41,6 +41,12 @@ def test_str(a):
 
 def test_list_and_tuple(a):
     return sum(a)
+
+def test_dict(a):
+    return a['foo']
+
+def test_dict_int_list(a):
+    return a[1]
 
 class TestPDT(JitTestCase):
     """
@@ -88,3 +94,14 @@ class TestPDT(JitTestCase):
 
         scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((3, 4, 5), )])
         self.assertEqual(scripted_fn_int((1, 2, 3)), test_list_and_tuple((1, 2, 3)))
+
+    def test_pdt_dict(self):
+        _input = {'foo' : True, 'bar': False}
+        scripted_fn = torch.jit._script_pdt(test_dict, example_inputs=[(_input,)])
+        self.assertEqual(scripted_fn({'foo' : False, 'bar': True}, ), test_dict({'foo' : False, 'bar': True}, ))
+
+    def test_pdt_dict_1(self):
+        _input = {0 : [True, False], 1: [False, True]}
+        scripted_fn = torch.jit._script_pdt(test_dict_int_list, example_inputs=[(_input,)])
+        self.assertEqual(scripted_fn({0 : [False, False], 1: [True, True]}, ),
+                         test_dict_int_list({0 : [False, False], 1: [True, True]}, ))
