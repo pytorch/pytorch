@@ -3457,6 +3457,29 @@ torch.cuda.synchronize()
         # dummy allocation triggers process_events, Hopefully successfully processes b's end-of-life event.
         c = torch.zeros((3,), device="cuda")
 
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_cudnn_dropout(self):
+        # Tests the interaction of cuda graph capture with DropoutState's syncs in ATen/native/cudnn/RNN.cpp.
+        # In particular, if user runs a sequence of captured and noncaptured cudnn rnns, DropoutState should
+        # avoid syncing noncapturing streams with captured events or vice versa.
+        model = torch.nn.LSTM(512, 512, 2, dropout=0.5).cuda()
+        x = torch.ones(100, 192, 512, device="cuda")
+
+        y = model(x)
+
+        g = torch.cuda._Graph()
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+           g.capture_begin()
+           y = model(x)
+           g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        y = model(x)
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
         mean, invstd = torch.batch_norm_gather_stats(

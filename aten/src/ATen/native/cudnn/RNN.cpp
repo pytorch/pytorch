@@ -1378,6 +1378,12 @@ struct DropoutState {
   at::Tensor buffer;
   c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
+#if CUDA_VERSION >= 11000
+  // cudaStreamGetCaptureInfo will never give back a capture id of 0, so 0 can serve
+  // as a sentinel value that capture was not underway.
+  CaptureId_t capture_id_last_lock = 0;
+  CaptureId_t capture_id_last_unlock = 0;
+#endif
 
   // Every time we use a dropout state, we need to synchronize with its event,
   // to make sure all previous uses finish running before this one starts. Once
@@ -1389,7 +1395,22 @@ struct DropoutState {
     // NB: We can't ignore the lock even when event is undefined, because someone
     // could then define it before we get to unlock().
     mutex.lock();
-    if (event) {
+#if CUDA_VERSION >= 11000
+    cudaStreamCaptureStatus status;
+    AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
+                                           &status,
+                                           &capture_id_last_unlock));
+    if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
+      capture_id_last_lock = 0;
+    }
+#endif
+    if (event
+#if CUDA_VERSION >= 11000
+        // Only wait on the last usage if we're not capturing this call in a CUDA graph
+        // or if we're in the same capture as the last usage.
+        && capture_id_last_lock == capture_id_last_unlock;
+#endif
+    ) {
       event->block(cuda::getCurrentCUDAStream());
     }
   }
@@ -1398,6 +1419,16 @@ struct DropoutState {
     if (event) {
       event->record();
     }
+#if CUDA_VERSION >= 11000
+    cudaStreamCaptureStatus status;
+    AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
+                                           &status,
+                                           &capture_id_last_unlock));
+    if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
+      capture_id_last_unlock = 0;
+    }
+    TORCH_INTERNAL_ASSERT(capture_id_last_unlock == capture_id_last_lock);
+#endif
     mutex.unlock();
   }
 };
