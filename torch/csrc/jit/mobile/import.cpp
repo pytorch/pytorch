@@ -521,7 +521,7 @@ c10::IValue BytecodeDeserializer::readArchive(
     }
   };
 
-  static const std::string slash = "/";
+  constexpr char slash = '/';
   auto read_record = [&](const std::string& name) {
     std::size_t found = name.find(slash);
     std::stringstream ss;
