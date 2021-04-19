@@ -1094,10 +1094,10 @@ class TestAsserts(TestCase):
     def test_msg_str(self, device):
         msg = "Custom error message!"
 
-        a = torch.tensor(1, device=device)
-        b = torch.tensor(2, device=device)
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
 
-        for fn in self.assert_fns_with_inputs(a, b):
+        for fn in self.assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
                 fn(msg=msg)
 
@@ -1105,13 +1105,13 @@ class TestAsserts(TestCase):
     def test_msg_callable(self, device):
         msg = "Custom error message!"
 
-        def make_msg(a, b, info):
+        def make_msg(actual, expected, trace):
             return msg
 
-        a = torch.tensor(1, device=device)
-        b = torch.tensor(2, device=device)
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
 
-        for fn in self.assert_fns_with_inputs(a, b):
+        for fn in self.assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
                 fn(msg=make_msg)
 
