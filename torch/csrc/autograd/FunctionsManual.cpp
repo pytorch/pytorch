@@ -3257,9 +3257,9 @@ Tensor i1_backward(const Tensor& grad, const Tensor& self, const Tensor& result)
       at::kHalf, at::kBFloat16, self.scalar_type(), "i1_backward", [&]() {
         auto eps = std::numeric_limits<scalar_t>::epsilon();
         auto self_is_not_tiny = self.abs() > eps;
-        auto safe_self = at::where(self_is_not_tiny, self, eps);
+        auto safe_self = at::where(self_is_not_tiny, self, at::full({}, eps, self.options()));
         auto gradx = (safe_self.i0() - (result * safe_self.reciprocal()));
-        return grad * at::where(self_is_not_tiny, gradx, 0.5);
+        return grad * at::where(self_is_not_tiny, gradx, at::full({}, 0.5, self.options()));
       });
 }
 
@@ -3268,9 +3268,9 @@ Tensor i1e_backward(const Tensor& grad, const Tensor& self, const Tensor& result
       at::kHalf, at::kBFloat16, self.scalar_type(), "i1e_backward", [&]() {
         auto eps = std::numeric_limits<scalar_t>::epsilon();
         auto self_is_not_tiny = self.abs() > eps;
-        auto safe_self = at::where(self_is_not_tiny, self, eps);
+        auto safe_self = at::where(self_is_not_tiny, self, at::full({}, eps, self.options()));
         auto gradx = (at::special_i0e(safe_self) - result * (safe_self.sgn() + safe_self.reciprocal()));
-        return grad * at::where(self_is_not_tiny, gradx, 0.5);
+        return grad * at::where(self_is_not_tiny, gradx, at::full({}, 0.5, self.options()));
       });
 }
 
