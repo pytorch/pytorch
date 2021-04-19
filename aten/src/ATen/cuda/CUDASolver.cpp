@@ -1257,6 +1257,7 @@ void xgeqrf_bufferSize<float>(CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(float)) {
       workspaceInBytesOnHost));
 }
 
+template <>
 void xgeqrf_bufferSize<double>(CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(double)) {
   TORCH_CUSOLVER_CHECK(cusolverDnXgeqrf_bufferSize(
       handle,
