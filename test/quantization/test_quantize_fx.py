@@ -2849,8 +2849,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
             prepare_custom_config_dict=prepare_custom_config_dict)
 
     @skipIfNoFBGEMM
-    def test_quantized_cat(self):
-        """ quantization of the output of cat will be depend on the
+    def test_cat(self):
+        """ quantization of the output of cat will depend on the
         input of cat. we only quantize the output of cat when its inputs are quantized.
         """
         class QuantizedInput(torch.nn.Module):
@@ -2877,6 +2877,15 @@ class TestQuantizeFxOps(QuantizationTestCase):
         for quant_type in self.static_quant_types:
             self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node)
             self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node)
+
+        # check cat is using the same observer for input and output
+        m = QuantizedInput().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        # two inputs and one output of torch.cat are using same observer, so we have
+        # 2 observers that's replicated
+        all_observers = len(dict(m.named_modules(remove_duplicate=False)))
+        distinct_observers = len(dict(m.named_modules()))
+        self.assertEqual(all_observers, distinct_observers + 2)
 
 
     @skipIfNoFBGEMM
