@@ -1658,6 +1658,11 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
+void LoopNest::unroll(For* f) {
+  Stmt* unrolled;
+  unroll(f, &unrolled);
+}
+
 bool LoopNest::normalize(For* f) {
   if (!f) {
     throw malformed_input("normalize attempted on null loop");
@@ -1762,6 +1767,11 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
       normalized_loops[0]->loop_options());
   p->replace_stmt(normalized_loops[0], *flattened);
   return true;
+}
+
+bool LoopNest::flatten(const std::vector<For*>& loops) {
+  For* flattened;
+  return flatten(loops, &flattened);
 }
 
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
