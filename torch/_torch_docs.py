@@ -8136,7 +8136,6 @@ Example::
 add_docstr(torch.std_mean,
            r"""
 std_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
-   :noindex:
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
 the standard deviation. Otherwise, the sample deviation is calculated, without
@@ -9364,7 +9363,6 @@ Example::
 add_docstr(torch.var_mean,
            r"""
 var_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
-   :noindex:
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
 the variance. Otherwise, the sample variance is calculated, without any
