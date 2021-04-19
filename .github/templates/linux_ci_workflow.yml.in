@@ -183,7 +183,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}../jit-hook-build:/var/lib/jenkins/jit-hook-build" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && .jenkins/pytorch/test.sh'
+            sh -c 'sudo chown -R jenkins ../ && pip install dist/*.whl && .jenkins/pytorch/test.sh'
       - name: Clean up docker images
         if: always()
         run: |
