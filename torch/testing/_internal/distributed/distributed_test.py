@@ -970,8 +970,6 @@ class DistributedTest:
                         dist.recv(output_tensor, src)
                         self.assertEqual(output_tensor, expected_tensor)
 
-                self._barrier()
-
             if enable_profiling:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
