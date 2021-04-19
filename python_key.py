@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torch._C.key as key
 
 HANDLED_FUNCTIONS = {}
@@ -11,33 +13,37 @@ class PythonTensor(torch.Tensor):
 
     def tensor(self):
         return self.value
-    func_mapping = {
-        'aten::_unsafe_view': torch.Tensor.view,
-    }
+
     def __torch_function__(self, func, types, args=(), kwargs={}):
-        print(func)
-        # if isinstance(func, str):
-        #     if func in self.func_mapping:
-        #         func = self.func_mapping[func]
-        #     else:
-        #         import pdb; pdb.set_trace()
+        print("torch_function: ", func)
         out = kwargs['val']
         if isinstance(out, torch.Tensor):
             return PythonTensor(out.shape)
         else:
             return out
 
-x = PythonTensor((5, 5))
-# def f(x):
-#     return x*2
+import torchvision.models as models
+x = PythonTensor((5))
+
+class Foo(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Linear(3, 3)
+
+    def forward(self, x):
+        return F.linear(x, torch.ones(3, 3))
+
+model = Foo()
 def f(x):
-    out = (x*2).sum()
+    out = torch.dot(x, torch.ones(5))
     out.backward()
-    # return x.view((25,))
-    # return torch.dot(x, torch.ones(5))
+    return out
+    # out = (x*2).sum()
+    # out.backward()
 grad_x = key.addKey(x)
 grad_x.requires_grad = True
-out = f(grad_x)
+f(grad_x)
+# out = torch.vmap(f)(grad_x)
 # print(torch.vmap(f)(key.addKey(x)))
 # print(torch.jit.trace(torch.vmap(f),(x)))
 # print(key.removeKey(out))

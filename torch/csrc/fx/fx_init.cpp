@@ -119,7 +119,8 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
 }
 
 bool isPythonTensor(at::Tensor tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::PythonKey);
+  return tensor.unsafeGetTensorImpl()->key_set().has(
+      c10::DispatchKey::PythonKey);
 }
 PythonTensorImpl* getPythonImpl(at::Tensor tensor) {
   return static_cast<PythonTensorImpl*>(tensor.unsafeGetTensorImpl());
@@ -133,7 +134,6 @@ py::object removeKey(at::Tensor tensor) {
   assert(isPythonTensor(tensor));
   return getPythonImpl(tensor)->value_;
 }
-
 
 void initFx(PyObject* module) {
   static std::array<PyMethodDef, 2> PatchMethods = {{
@@ -179,10 +179,10 @@ py::tuple vectorToPyTuple(const std::vector<T> &data, std::function<PyObject*(T)
 		}
 		PyTuple_SET_ITEM(tuple, i, num);
 	}
-	return py::cast<py::tuple>(tuple);
+        return py::cast<py::tuple>(tuple);
 }
 void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  std::cout<<"python fallback"<<std::endl;
+  std::cout << "python fallback" << std::endl;
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
@@ -207,7 +207,7 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   }
 
   py::object torch_function = PyObject_FastGetAttrString(pyTensorArgs[0].ptr(), "__torch_function__");
-  for (auto v: unwrappedArgs) {
+  for (auto v : unwrappedArgs) {
     torch::jit::push(stack, v);
   }
   op.callBoxed(stack);
@@ -216,12 +216,13 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   py::tuple py_types = py::cast<py::tuple>(vectorToPyTuple<py::object>(pyArgs, [](py::object x) -> PyObject* { return PyObject_Type(x.ptr()); }));
 
   py::dict kwargs;
-  kwargs["val"] =torch::jit::toPyObject(realOut);
+  kwargs["val"] = torch::jit::toPyObject(realOut);
 
   std::string func_name = op.operator_name().name;
   std::string delimiter = "aten::";
-  func_name = func_name.substr(func_name.find(delimiter)+delimiter.size());
-  py::object torch_api_function = PyObject_FastGetAttrString(THPVariableClass, (char*)func_name.c_str());
+  func_name = func_name.substr(func_name.find(delimiter) + delimiter.size());
+  py::object torch_api_function =
+      PyObject_FastGetAttrString(THPVariableClass, (char*)func_name.c_str());
   if (torch_api_function == nullptr) {
     torch_api_function = py::str(op.operator_name().name);
   }
