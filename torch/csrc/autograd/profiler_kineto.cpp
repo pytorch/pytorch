@@ -171,11 +171,17 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
         cpu_trace->activities[idx].callStack = stacksToStr(kineto_events_[idx].stack());
 #endif
       }
+#ifdef USE_KINETO_UPDATED
+      if (kineto_events_[idx].hasTypes()) {
+        cpu_trace->activities[idx].addMetadata("Input type", dtypesToStr(kineto_events_[idx].dtypes());
+      }
+#else
       if (kineto_events_[idx].hasTypes()) {
         cpu_trace->activities[idx].inputTypes = dtypesToStr(kineto_events_[idx].dtypes());
       } else {
         cpu_trace->activities[idx].inputTypes = "[]";
       }
+#endif
     }
   }
 

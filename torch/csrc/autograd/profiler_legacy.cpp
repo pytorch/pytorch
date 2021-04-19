@@ -368,7 +368,6 @@ std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
   return sizes;
 }
 
-
 namespace {
 
 enum EventIValueIdx {
