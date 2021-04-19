@@ -25,6 +25,8 @@
 #include <ATen/native/ConvUtils.h>
 #include <algorithm>
 #include <memory>
+#include "ATen/core/stack.h"
+#include "jit/runtime/operator.h"
 #include <c10/core/Layout.h>
 #include <c10/util/StringUtil.h>
 
@@ -180,7 +182,8 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     auto k = node->kind();
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
         k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
-        k == prim::MKLDNNRelu6) {
+        k == prim::MKLDNNRelu6 || k == prim::MKLDNNHardTanh ||
+        k == aten::hardtanh) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -369,6 +372,18 @@ const RegisterOperators MKLDNNHardSwishOpReg({
             true),
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
+        "prim::MKLDNNHardTanh_(Tensor(a!) self) -> Tensor(a!)",
+        [](const Node* n) -> Operation {
+          auto min_val = n->f(attr::min_val);
+          auto max_val = n->f(attr::max_val);
+          auto aten_op = [min_val, max_val](
+                             at::Tensor output, at::Tensor input) {
+            at::cpu::hardtanh_out(output, input, min_val, max_val);
+          };
+          return createUnaryOp(aten_op, true);
+        },
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
         "prim::MKLDNNRelu6_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
@@ -399,6 +414,18 @@ const RegisterOperators MKLDNNHardSwishOpReg({
               at::cpu::hardtanh_out(output, input, 0.f, 6.f);
             },
             false),
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNHardTanh(Tensor self) -> Tensor",
+        [](const Node* n) -> Operation {
+          auto min_val = n->f(attr::min_val);
+          auto max_val = n->f(attr::max_val);
+          auto aten_op = [min_val, max_val](
+                             at::Tensor output, at::Tensor input) {
+            at::cpu::hardtanh_out(output, input, min_val, max_val);
+          };
+          return createUnaryOp(aten_op, false);
+        },
         AliasAnalysisKind::FROM_SCHEMA),
 });
 
@@ -640,8 +667,19 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
 
     if (body_node->kind() == aten::hardtanh) {
       WithInsertPoint insert_guard{body_node};
-      auto out_val = body_node->owningGraph()->insert(
-          prim::MKLDNNRelu6, {body_node->input(0)});
+      // N.B. we can't use `insert` as it calls `getOperation` (via
+      // `emitBuiltinCall`) which uses `min_val` and `max_val` attrs which we
+      // haven't set yet.
+      auto out_node = body_node->owningGraph()->create(
+          {prim::MKLDNNHardTanh}, {body_node->input(0)}, 1);
+      auto min_val =
+          constant_as<double>(body_node->namedInput("min_val")).value();
+      auto max_val =
+          constant_as<double>(body_node->namedInput("max_val")).value();
+      out_node->f_(attr::min_val, min_val);
+      out_node->f_(attr::max_val, max_val);
+      body_node->owningGraph()->insertNode(out_node);
+      auto out_val = out_node->output();
       out_val->copyMetadata(body_node->output());
       body_node->output()->replaceAllUsesWith(out_val);
       body_node->destroy();
@@ -833,7 +871,7 @@ class MKLDNNSubgraphSlicer {
     if (n->kind() == aten::hardtanh) {
       auto min_val = constant_as<double>(n->namedInput("min_val")).value();
       auto max_val = constant_as<double>(n->namedInput("max_val")).value();
-      if (min_val == 0. && max_val == 6.) {
+      if (min_val <= 0. && max_val >= 0.) {
         return true;
       }
     }
