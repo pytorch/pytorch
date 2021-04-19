@@ -55,7 +55,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
  public:
   explicit TCPStoreMasterDaemon(int storeListenSocket);
 
- protected:
+ private:
   void run();
   void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
@@ -82,8 +82,6 @@ class TCPStoreMasterDaemon : public BackgroundThread {
       const enum WatchResponseType& type,
       std::vector<uint8_t>& oldData,
       std::vector<uint8_t>& newData);
-
- private:
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
   // From key -> the list of sockets waiting on the key
   std::unordered_map<std::string, std::vector<int>> waitingSockets_;
@@ -103,22 +101,24 @@ class TCPStoreWorkerDaemon : public BackgroundThread {
       std::string key,
       std::function<
           void(c10::optional<std::string>, c10::optional<std::string>)> cb);
-  std::mutex mtx;
-  std::condition_variable cv;
-  bool callbackRegistered = false;
+  std::condition_variable& getCallbackRegistered() {
+    return callbackRegistered;
+  }
+  bool getCallbackRegisteredData() const {
+    return callbackRegisteredData;
+  }
+  void setCallbackRegisteredData(bool condition) {
+    callbackRegisteredData = condition;
+  }
 
- protected:
+ private:
   void run();
   void callbackHandler(int socket);
   // List of callbacks map each watched key
-  std::unordered_map<
-      std::string,
-      std::function<
-          void(c10::optional<std::string>, c10::optional<std::string>)>>
-      keyToCallbacks;
-
- private:
+  std::unordered_map<std::string, StoreCallbackFunction> keyToCallbacks;
   std::mutex keyToCallbacksMutex;
+  std::condition_variable callbackRegistered;
+  bool callbackRegisteredData = false;
 };
 
 class TCPStore : public Store {
@@ -146,14 +146,9 @@ class TCPStore : public Store {
 
   bool deleteKey(const std::string& key) override;
 
-  // callback function will be given arguments (optiona<string> oldValue,
-  // optional<string> newValue)
   // NOTE: calling other TCPStore APIs inside the callback is NOT threadsafe
-  void watchKey(
-      const std::string& key,
-      std::function<
-          void(c10::optional<std::string>, c10::optional<std::string>)>
-          callback) override;
+  void watchKey(const std::string& key, StoreCallbackFunction callback)
+      override;
 
   bool check(const std::vector<std::string>& keys) override;
 
@@ -174,13 +169,15 @@ class TCPStore : public Store {
   // Returns the port used by the TCPStore.
   PortType getPort() const noexcept;
 
- protected:
+ private:
   int64_t addHelper_(const std::string& key, int64_t value);
   std::vector<uint8_t> getHelper_(const std::string& key);
   void waitHelper_(
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout);
 
+  std::mutex watchKeyMutex;
+  std::mutex callbackRegistrationMutex;
   bool isServer_;
   int storeSocket_ = -1;
   int listenSocket_ = -1;

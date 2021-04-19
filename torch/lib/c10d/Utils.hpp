@@ -581,6 +581,7 @@ void sendBytes(
   }
 #endif
 
+// Ignore SIGPIPE as the send() return value is always checked for error
 #ifdef MSG_NOSIGNAL
   flags |= MSG_NOSIGNAL;
 #endif

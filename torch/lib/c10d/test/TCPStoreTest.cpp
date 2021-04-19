@@ -158,13 +158,13 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   std::atomic<int> numCallbacksExecuted{0};
   const int numThreads = 16;
   const int keyChangeOperation = 3;
-  std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
-      callback = [&numCallbacksExecuted,
-                  &numCallbacksExecutedPromise,
-                  &numThreads,
-                  &keyChangeOperation](
-                     c10::optional<std::string> /* unused */,
-                     c10::optional<std::string> /* unused */) {
+  c10d::StoreCallbackFunction callback =
+      [&numCallbacksExecuted,
+       &numCallbacksExecutedPromise,
+       &numThreads,
+       &keyChangeOperation](
+          c10::optional<std::string> /* unused */,
+          c10::optional<std::string> /* unused */) {
         numCallbacksExecuted++;
         if (numCallbacksExecuted == numThreads * keyChangeOperation) {
           numCallbacksExecutedPromise.set_value(numCallbacksExecuted);
@@ -258,21 +258,20 @@ void testKeyChangeHelper(
   std::promise<bool> callbackPromise;
 
   // Test the correctness of new_value and old_value
-  std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
-      callback =
-          [expectedOldValue, expectedNewValue, &callbackPromise, &eptr, &key](
-              c10::optional<std::string> oldValue,
-              c10::optional<std::string> newValue) {
-            try {
-              EXPECT_EQ(
-                  expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
-              EXPECT_EQ(
-                  expectedNewValue.value_or("NONE"), newValue.value_or("NONE"));
-            } catch (...) {
-              eptr = std::current_exception();
-            }
-            callbackPromise.set_value(true);
-          };
+  c10d::StoreCallbackFunction callback =
+      [expectedOldValue, expectedNewValue, &callbackPromise, &eptr, &key](
+          c10::optional<std::string> oldValue,
+          c10::optional<std::string> newValue) {
+        try {
+          EXPECT_EQ(
+              expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
+          EXPECT_EQ(
+              expectedNewValue.value_or("NONE"), newValue.value_or("NONE"));
+        } catch (...) {
+          eptr = std::current_exception();
+        }
+        callbackPromise.set_value(true);
+      };
   store.watchKey(key, callback);
 
   // Perform the specified update according to key
