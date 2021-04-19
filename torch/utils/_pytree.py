@@ -115,7 +115,7 @@ class LeafSpec(TreeSpec):
 
 
 def tree_flatten_spec(pytree: PyTree, spec: TreeSpec):
-    if spec.num_leaves == 1:
+    if isinstance(spec, LeafSpec):
         return [pytree]
     flatten_fn_spec = SUPPORTED_NODES[spec.type].flatten_fn_spec
     child_pytrees = flatten_fn_spec(pytree, spec)
@@ -175,6 +175,9 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
 
     return unflatten_fn(child_pytrees, spec.context)
 
+def tree_map(pytree: PyTree, fn):
+    flat_args, spec = tree_flatten(pytree)
+    return tree_unflatten([fn(i) for i in flat_args], spec)
 
 # Broadcasts a pytree to the provided TreeSpec and returns the flattened
 # values. If this is not possible, then this function returns None.

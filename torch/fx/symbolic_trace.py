@@ -354,7 +354,7 @@ class Tracer(TracerBase):
 
         flat_args, in_spec = pytree.tree_flatten(tuple(args))
         self.graph._in_spec = in_spec
-        self.graph._orig_args = orig_args[skip_arg_idx:total_args]
+        self.graph._orig_args = orig_args[:total_args]
         for idx, arg in enumerate(flat_args):
             if arg is PH:
                 flat_args[idx] = self.create_proxy('placeholder', f'tree_{str(idx)}', (), {})

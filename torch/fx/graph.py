@@ -929,13 +929,22 @@ class Graph:
         if self._in_spec is not None:
             assert(self._orig_args is not None)
             orig_vars = self._orig_args
-            body.insert(0, f"{', '.join(free_vars)} = pytree.tree_flatten_spec([{', '.join(orig_vars)}], self._in_spec)\n")
+            has_orig_self = (orig_vars[0] == 'self')
+            if has_orig_self:
+                free_vars.insert(0, 'self')
+            if len(free_vars) > 0:  # pytree has no placeholders in it
+                body.insert(0, f"{', '.join(free_vars)}, = pytree.tree_flatten_spec([{', '.join(orig_vars)}], self._in_spec)\n")
         else:
             orig_vars = free_vars
+
+        # If the original function didn't have self as its first argument, we
+        # would have added it.
+        if orig_vars[0] != 'self':
+            orig_vars.insert(0, 'self')
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""
-def forward(self, {', '.join(orig_vars)}){maybe_return_annotation[0]}:
+def forward({', '.join(orig_vars)}){maybe_return_annotation[0]}:
 {code}"""
 
         return PythonCode(fn_code,
