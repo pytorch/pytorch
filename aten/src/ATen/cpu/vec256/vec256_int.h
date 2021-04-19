@@ -43,7 +43,8 @@ private:
   static const Vec256<int64_t> ones;
 public:
   using value_type = int64_t;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 4;
   }
   using Vec256i::Vec256i;
