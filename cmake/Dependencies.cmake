@@ -411,6 +411,12 @@ if(USE_QNNPACK)
     add_subdirectory(
       "${QNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
+
+    # TODO: See https://github.com/pytorch/pytorch/issues/56285
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      target_compile_options(qnnpack PRIVATE -Wno-deprecated-declarations)
+    endif()
+
     # We build static versions of QNNPACK and pthreadpool but link
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
