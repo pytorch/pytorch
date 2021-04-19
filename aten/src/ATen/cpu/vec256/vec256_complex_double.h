@@ -22,7 +22,8 @@ private:
   __m256d values;
 public:
   using value_type = c10::complex<double>;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 2;
   }
   Vec256() {}
