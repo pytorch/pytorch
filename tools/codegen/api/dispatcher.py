@@ -2,7 +2,7 @@ from tools.codegen.model import (Argument, FunctionSchema, Return,
                                  SelfArgument, TensorOptionsArguments, Type,
                                  assert_never)
 
-from tools.codegen.api.types import ArgName, Binding, CType
+from tools.codegen.api.types import ArgName, Binding, NamedCType, CType
 from tools.codegen.api import cpp
 
 import itertools
@@ -26,17 +26,17 @@ from typing import Sequence, List, Union
 def name(func: FunctionSchema) -> str:
     return cpp.name(func)
 
-def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     # This is a faux amis.  If it makes sense in the future to add
     # more special cases here, or invert things so cpp.argument_type
     # calls this, or just completely inline the function, please do
     # it.
     return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
-def argument_type(a: Argument, *, binds: ArgName) -> CType:
+def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
     return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
-def returns_type(rs: Sequence[Return]) -> str:
+def returns_type(rs: Sequence[Return]) -> CType:
     # At present, there is no difference. But there could be!
     return cpp.returns_type(rs)
 
@@ -45,7 +45,7 @@ def argument(
 ) -> List[Binding]:
     if isinstance(a, Argument):
         return [Binding(
-            ctype=argument_type(a, binds=a.name),
+            nctype=argument_type(a, binds=a.name),
             name=a.name,
             argument=a,
         )]

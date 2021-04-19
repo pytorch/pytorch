@@ -535,7 +535,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
 // This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
 // for "the assigned value is a Tensor" case
 // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
-static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, const Tensor& value, bool disable_slice_optimization = false) {
+static inline void set_item(const Tensor& self, const ArrayRef<TensorIndex>& indices, const Tensor& value, bool disable_slice_optimization = false) {
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
 
