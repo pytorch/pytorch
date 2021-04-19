@@ -368,23 +368,6 @@ std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
   return sizes;
 }
 
-std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
-  std::vector<std::string> types;
-  types.reserve(fn.inputs().size());
-  for (const c10::IValue& input : fn.inputs()) {
-    if (!input.isTensor()) {
-      types.emplace_back();
-      continue;
-    }
-    const at::Tensor& tensor = input.toTensor();
-    if (tensor.defined()) {
-      types.push_back(static_cast<std::string>(input.toTensor().dtype().name()));
-    } else {
-      types.emplace_back();
-    }
-  }
-  return types;
-}
 
 namespace {
 

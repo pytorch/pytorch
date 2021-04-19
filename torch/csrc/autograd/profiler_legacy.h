@@ -510,7 +510,6 @@ struct TORCH_API FileLineFunc {
 TORCH_API std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs);
 TORCH_API std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs);
 TORCH_API std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn);
-TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
   explicit ProfilerThreadLocalState(const ProfilerConfig& config)
