@@ -634,8 +634,9 @@ See the note below on how to choose the best driver. See also the `full descript
 
 :attr:`cond` is used to determine the effective rank of the matrices in :attr:`input`
 for rank-revealing drivers, that is, when :attr:`driver` is one of (`'gelsy'`, `'gelsd'`, `'gelss'`).
-In this case, if :math:`\sigma_i` are the singular values of `A` in decreasing order, :math:`\sigma_i` will be rounded down to zero if
-:math:`\sigma_i \leq \text{cond} \cdot \sigma_1`. If :attr:`cond` `= None` (default), :attr:`cond` is set to the machine precision of the dtype of :attr:`input`.
+In this case, if :math:`\sigma_i` are the singular values of `A` in decreasing order,
+:math:`\sigma_i` will be rounded down to zero if :math:`\sigma_i \leq \text{cond} \cdot \sigma_1`.
+If :attr:`cond` `= None` (default), :attr:`cond` is set to the machine precision of the dtype of :attr:`input`.
 
 This function returns the solution to the problem and some extra information in a namedtuple of
 four tensors `(solution, residuals, rank, singular_values)` containing:
@@ -966,7 +967,8 @@ If :attr:`input` is complex valued, it computes the norm of :attr:`input`\ `.abs
 
 - If :attr:`dim` is an `int`, the vector norm will be computed.
 - If :attr:`dim` is a `2`-`tuple`, the matrix norm will be computed.
-- If :attr:`dim`\ `= None` and :attr:`ord` `= None`, :attr:`input` is flattened to 1D and the `2`-norm of the resulting vector is returned.
+- If :attr:`dim`\ `= None` and :attr:`ord` `= None`,
+  :attr:`input` is flattened to 1D and the `2`-norm of the resulting vector is returned.
 - If :attr:`dim`\ `= None` and :attr:`ord` `!= None`, :attr:`input` must be 1D or 2D.
 
 :attr:`ord` defines the norm that is computed. The following norms are supported:
