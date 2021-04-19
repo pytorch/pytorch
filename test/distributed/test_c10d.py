@@ -4835,12 +4835,11 @@ class CommTest(MultiProcessTestCase):
 
     @property
     def world_size(self):
-        # Would like to use torch.cuda.device_count() here, but runs into
-        # CUDA re-init in forked subprocess error.
-        if os.environ.get("WORLD_SIZE", None) is not None:
-            return int(os.environ["WORLD_SIZE"])
-        else:
-            return 2
+        # Test runs with world size of 2 in CI, but can be configured via
+        # WORLD_SIZE env var for dev purposes. Would like to use
+        # torch.cuda.device_count() here, but runs into CUDA re-init in forked
+        # subprocess error.
+        return os.environ.get("WORLD_SIZE", 2)
 
     def _test_broadcast_coalesced(self, process_group, device, root_rank):
         half = torch.float16
