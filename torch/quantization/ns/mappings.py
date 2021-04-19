@@ -30,6 +30,10 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.layer_norm,
         F.leaky_relu,
         F.silu,
+        # TODO(future PR): implement shadowing for binary ops and
+        # uncomment below
+        # operator.add,
+        # operator.mul,
     ])
 
     FUNS_IO_TYPE_FP16: Set[NSNodeTargetType] = set()
@@ -49,6 +53,10 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         toq.instance_norm,
         toq.layer_norm,
         toq.leaky_relu,
+        # TODO(future PR): implement shadowing for binary ops and
+        # uncomment below
+        # toq.add,
+        # toq.mul,
     ])
 
     FUNS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = set([

@@ -105,6 +105,17 @@ class LinearReluLinearFunctional(nn.Module):
         return x
 
 
+class AddMulFunctional(nn.Module):
+    def forward(self, x):
+        x = x + 1.0
+        x = x * 1.0
+        x = 1.0 + x
+        x = 1.0 * x
+        x = x + x
+        x = x * x
+        return x
+
+
 class AllConvAndLinearFusionModules(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1027,6 +1038,13 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self._test_match_activations(
             m, (torch.randn(1, 1, 2, 2),),
             results_len=2)
+
+    @skipIfNoFBGEMM
+    def test_add_mul_inputs_activations(self):
+        m = AddMulFunctional().eval()
+        res = self._test_match_activations(
+            m, (torch.randn(2, 2),),
+            results_len=6, should_log_inputs=True)
 
     @skipIfNoFBGEMM
     def test_linear_fp16_weights(self):

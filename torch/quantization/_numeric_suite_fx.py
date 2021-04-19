@@ -43,6 +43,7 @@ class OutputLogger(nn.Module):
         prev_node_target_type: str,
         results_type: str,
         index_within_arg: int,
+        index_of_arg: int,
     ):
         super().__init__()
         self.stats: List[torch.Tensor] = []
@@ -78,6 +79,9 @@ class OutputLogger(nn.Module):
         # index of this node within the arg of the input/output node
         # for example, in cat([x1, x2, x3], dim=0), x2 would have index_within_arg == 1
         self.index_within_arg = index_within_arg
+        # index of this node within the args of the input/output node
+        # for example, in add(x1, x2), x2 would have index_of_arg == 1
+        self.index_of_arg = index_of_arg
 
     # Note: cannot annotate the type of x because TorchScript does not support
     #   the Union type.
@@ -92,7 +96,8 @@ class OutputLogger(nn.Module):
     def __repr__(self):
         return f"""OutputLogger(ref_name={self.ref_name}, model_name={self.model_name},
 prev_node_name={self.prev_node_name}, ref_node_name={self.ref_node_name},
-results_type={self.results_type}, index_within_arg={self.index_within_arg})"""
+results_type={self.results_type}, index_within_arg={self.index_within_arg},
+index_of_arg={self.index_of_arg})"""
 
 
 class NSTracer(quantize_fx.QuantizationTracer):
@@ -293,10 +298,12 @@ def _extract_logger_info_one_model(
                 'prev_node_name': mod.prev_node_name,
                 'prev_node_target_type': mod.prev_node_target_type,
                 'index_within_arg': mod.index_within_arg,
+                'index_of_arg': mod.index_of_arg,
             })
             # ensure the list stays sorted
             results[key][mod.results_type][mod.model_name].sort(
-                key=lambda res: res['index_within_arg']
+                key=lambda res:
+                f"{res['index_of_arg']}:{res['index_within_arg']}"
             )
 
 
