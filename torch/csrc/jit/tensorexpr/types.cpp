@@ -42,8 +42,11 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DTYPE_DEFINE)
 
 #undef DTYPE_DEFINE
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API Dtype kHandle(ScalarType::Handle, 1);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API Dtype kUninitialized(ScalarType::Uninitialized, 1);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API Dtype kVoid(ScalarType::None, 1);
 
 Dtype ToDtype(ScalarType type) {

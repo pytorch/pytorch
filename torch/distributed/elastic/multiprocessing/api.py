@@ -17,6 +17,7 @@ import time
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from enum import IntFlag
+from multiprocessing import synchronize
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Union
 
 import torch.multiprocessing as mp
@@ -271,6 +272,7 @@ def _wrap(
     stdout_redirects: Dict[int, str],  # redirect file for stdout (to console if None)
     stderr_redirects: Dict[int, str],  # redirect file for stderr (to console if None)
     ret_vals: Dict[int, mp.SimpleQueue],
+    queue_finished_reading_event: synchronize.Event,
 ) -> None:
     # get the per-rank params up front so we fail fast if no mapping is found
     args_ = args[local_rank]
@@ -289,6 +291,7 @@ def _wrap(
     with stdout_cm, stderr_cm:
         ret = record(fn)(*args_)
     ret_val_.put(ret)
+    queue_finished_reading_event.wait()
 
 
 class MultiprocessContext(PContext):
@@ -331,6 +334,9 @@ class MultiprocessContext(PContext):
         # see comments in ``join()`` for what this is
         self._return_values: Dict[int, Any] = {}
         self._pc: Optional[mp.ProcessContext] = None
+        # Note: set method should ONLY be invoked for the use case when all processes finished
+        # successfully. If any process died on event.wait() calling set() method will deadlock.
+        self._worker_finished_event = mp.get_context(self.start_method).Event()
 
     def _start(self):
         if self._pc:
@@ -347,6 +353,7 @@ class MultiprocessContext(PContext):
                 self.stdouts,
                 self.stderrs,
                 self._ret_vals,
+                self._worker_finished_event,
             ),
             nprocs=self.nprocs,
             join=False,
@@ -354,15 +361,19 @@ class MultiprocessContext(PContext):
             start_method=self.start_method,
         )
 
+    def _is_done(self) -> bool:
+        return len(self._return_values) == self.nprocs
+
     def _poll(self) -> Optional[RunProcsResult]:
         assert self._pc is not None  # assertion for mypy type checker
 
         try:
-            # torch.mp.ProcessContext returns True if all the workers have
-            # successfully finished, False if some/all are still running
-            # and throws an Exception if some/all of them failed
+            # torch.mp.ProcessContext Throws an Exception if some/all of
+            # worker processes failed
             # timeout < 0 checks worker status and return immediately
-            done = self._pc.join(-1)
+            # Join will never return success since we use synchronize.Event to wait
+            # for all processes to finish.
+            self._pc.join(-1)
 
             # IMPORTANT: we use multiprocessing.Queue to carry worker return values
             # back to the parent, the worker process will wait before terminating
@@ -376,8 +387,12 @@ class MultiprocessContext(PContext):
                     # save the return values temporarily into a member var
                     self._return_values[local_rank] = return_queue.get()
 
-            if done:
+            if self._is_done():
                 # we should ALWAYS have ALL the return values when all the processes are done
+                self._worker_finished_event.set()
+                # Wait untill all processes are finished. At this point workers finished executing
+                # user function
+                self._pc.join()
                 _validate_full_rank(
                     self._return_values, self.nprocs, "return_value queue"
                 )
