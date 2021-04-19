@@ -100,11 +100,11 @@ class TestSaveLoad(PackageTestCase):
         package_b = hi.import_module("package_b")
         self.assertEqual(package_b.result, "package_b")
 
-        package_a = hi.import_module("package_a")
-        self.assertEqual(package_a.result, "package_a")
+        math = hi.import_module("math")
+        self.assertEqual(math.__name__, "math")
 
-        package_a_subpackage = hi.import_module("package_a.subpackage")
-        self.assertEqual(package_a_subpackage.result, "package_a.subpackage")
+        xml_sub_sub_package = hi.import_module("xml.sax.xmlreader")
+        self.assertEqual(xml_sub_sub_package.__name__, "xml.sax.xmlreader")
 
         subpackage_1 = hi.import_module("package_b.subpackage_1")
         self.assertEqual(subpackage_1.result, "subpackage_1")
