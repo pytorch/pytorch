@@ -996,6 +996,10 @@ class DistributedTest:
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode causes hang")
+        @unittest.skipIf(
+            IS_MACOS or IS_WINDOWS,
+            "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124"
+        )
         def test_send_recv_torch_profiler(self):
             torch_profiler_ctx = torch.profiler.profile(
                 activities=[torch.profiler.ProfilerActivity.CPU],
@@ -1078,6 +1082,10 @@ class DistributedTest:
             BACKEND == "nccl", "Nccl does not support send/recv from any source"
         )
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
+        @unittest.skipIf(
+            IS_MACOS or IS_WINDOWS,
+            "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124"
+        )
         def test_send_recv_any_source_torch_profiler(self):
             torch_profiler_ctx = torch.profiler.profile(
                 activities=[torch.profiler.ProfilerActivity.CPU],
@@ -1126,6 +1134,10 @@ class DistributedTest:
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
+        @unittest.skipIf(
+            IS_MACOS or IS_WINDOWS,
+            "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124"
+        )
         def test_send_recv_with_tag_torch_profiler(self):
             torch_profiler_ctx = torch.profiler.profile(
                 activities=[torch.profiler.ProfilerActivity.CPU],
@@ -1181,6 +1193,10 @@ class DistributedTest:
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
+        @unittest.skipIf(
+            IS_MACOS or IS_WINDOWS,
+            "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124"
+        )
         def test_isend_torch_profiler(self):
             torch_profiler_ctx = torch.profiler.profile(
                 activities=[torch.profiler.ProfilerActivity.CPU],
@@ -4289,6 +4305,10 @@ class DistributedTest:
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
+        @unittest.skipIf(
+            IS_MACOS or IS_WINDOWS,
+            "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124"
+        )
         def test_ddp_profiling_torch_profiler(self):
             cpu_act = torch.profiler.ProfilerActivity.CPU
             cuda_act = torch.profiler.ProfilerActivity.CUDA
