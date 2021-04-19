@@ -2463,7 +2463,7 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
         with torch.no_grad():
             t[torch.randn_like(t) > 0] = 0
 
-        samples += (SampleInput(t),)
+        samples += (SampleInput(t),)  # type: ignore
 
     return samples
 
