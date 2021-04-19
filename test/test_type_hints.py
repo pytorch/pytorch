@@ -77,7 +77,7 @@ class TestTypeHints(TestCase):
         """
         Run documentation examples through mypy.
         """
-        fn = os.path.join(os.path.dirname(__file__), 'generated_type_hints_smoketest.py')
+        fn = Path(__file__).resolve().parent / 'generated_type_hints_smoketest.py'
         with open(fn, "w") as f:
             print(get_all_examples(), file=f)
 
@@ -126,10 +126,10 @@ class TestTypeHints(TestCase):
                 (stdout, stderr, result) = mypy.api.run([
                     '--cache-dir=.mypy_cache/doc',
                     '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
-                    os.path.abspath(fn),
+                    str(fn),
                 ])
             if result != 0:
-                self.fail(f"mypy failed:\n{stdout}")
+                self.fail(f"mypy failed: {stderr}\n{stdout}")
 
 
 if __name__ == '__main__':
