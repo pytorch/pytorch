@@ -331,14 +331,14 @@ void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos
 }
 
 /*
-  The geqrf function computes QR decomposition of matrices stored in `input`.
+  The geqrf function computes the QR decomposition of matrices stored in `input`.
   However, rather than producing a Q matrix directly, it produces a sequence of
   elementary reflectors which may later be composed to construct Q - for example
   with the orgqr or ormqr functions.
 
   Args:
   * `input` - [in] Input tensor for QR decomposition
-             [out] QR decomposition result which contains:
+              [out] QR decomposition result which contains:
               i)  The elements of R, on and above the diagonal.
               ii) Directions of the reflectors implicitly defining Q.
              Tensor with the directions of the elementary reflectors below the diagonal,
