@@ -6596,6 +6596,24 @@ Args:
 
 """)
 
+add_docstr(torch.permute,
+           r"""
+permute(input, dims) -> Tensor
+
+Returns a view of the original tensor :attr:`input` with its dimensions permuted.
+
+Args:
+    {input}
+    dims (tuple of ints): The desired ordering of dimensions
+
+Example:
+    >>> x = torch.randn(2, 3, 5)
+    >>> x.size()
+    torch.Size([2, 3, 5])
+    >>> torch.permute(x, (2, 0, 1)).size()
+    torch.Size([5, 2, 3])
+""")
+
 add_docstr(torch.poisson,
            r"""
 poisson(input, generator=None) -> Tensor
