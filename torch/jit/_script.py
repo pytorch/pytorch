@@ -40,7 +40,7 @@ from torch.jit._monkeytype_config import (
     monkeytype_trace,
     JitTypeTraceConfig ,
     JitTypeTraceStore
-)  # type: ignore[import]
+)
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
@@ -882,58 +882,9 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Opt
     if monkeytype_trace:
         monkeytype_config = JitTypeTraceConfig(type_trace_db)
         with monkeytype_trace(monkeytype_config):
-            for example_input in example_inputs:
+            for example_input in example_inputs:  # type: ignore[union-attr]
                 obj(*example_input)
-
-    if inspect.isclass(obj):
-        # If this type is a `nn.Module` subclass, they probably meant to pass
-        # an instance instead of a Module
-        if issubclass(obj, torch.nn.Module):
-            raise RuntimeError(
-                "Type '{}' cannot be compiled since it inherits"
-                " from nn.Module,"
-                " pass an instance instead".format(obj)
-            )
-
-        # Enums are automatically usable in TorchScript, explicitly scripting
-        # is not necessary, but not harmful either.
-        if issubclass(obj, enum.Enum):
-            return obj
-
-        if not _is_new_style_class(obj):
-            raise RuntimeError(
-                "TorchScript classes must be new-style classes. "
-                "Please inherit from 'object'."
-            )
-        if len(obj.mro()) > 2:
-            raise RuntimeError(
-                "TorchScript classes does not support inheritance yet. "
-                "Please directly inherit from 'object'."
-            )
-        if _rcb is None:
-            _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
-        _compile_and_register_class(obj, _rcb, qualified_name)
-        return obj
-    else:
-        # this is a decorated fn, and we need to the underlying fn and its rcb
-        if hasattr(obj, "__script_if_tracing_wrapper"):
-            obj = obj.__original_fn
-            _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
-
-        _check_directly_compile_overloaded(obj)
-        maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
-        if maybe_already_compiled_fn:
-            return maybe_already_compiled_fn
-        ast = get_jit_def(obj, obj.__name__)
-        if _rcb is None:
-            _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
-        fn = torch._C._jit_script_compile(
-            qualified_name, ast, _rcb, get_default_args(obj)
-        )
-        # Forward docstrings
-        fn.__doc__ = obj.__doc__
-        _set_jit_function_cache(obj, fn)
-        return fn
+    return script(obj, optimize, _frames_up, _rcb)
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
