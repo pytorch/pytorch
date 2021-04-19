@@ -79,6 +79,18 @@ class LinearReluFunctional(nn.Module):
         return x
 
 
+class LinearFunctional(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w1 = nn.Parameter(torch.empty(4, 4))
+        self.b1 = nn.Parameter(torch.zeros(4))
+        torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+    def forward(self, x):
+        x = F.linear(x, self.w1, self.b1)
+        return x
+
+
 class LinearReluLinearFunctional(nn.Module):
     def __init__(self):
         super().__init__()
@@ -1053,6 +1065,22 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 results_len=1,
                 qconfig_dict=qconfig_dict,
                 should_log_inputs=should_log_inputs)
+
+    @skipIfNoFBGEMM
+    def test_linear_fp16_vs_linear_fp16_shadow_activations(self):
+        m = LinearFunctional().eval()
+        qconfig_dict = {'': torch.quantization.float16_static_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mq1 = convert_fx(copy.deepcopy(mp))
+        mq2 = convert_fx(copy.deepcopy(mp))
+        mq1_shadows_mq2 = _add_shadow_loggers_impl(
+            'a', mq1, 'b', mq2, OutputLogger, should_log_inputs=False)
+        mq1_shadows_mq2(torch.randn(4, 4))
+        act_compare_dict = extract_shadow_logger_info(
+            mq1_shadows_mq2, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 1)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
+
 
     @skipIfNoFBGEMM
     def test_op_with_either_fp32_or_int8_input(self):

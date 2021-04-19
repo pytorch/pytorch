@@ -220,6 +220,46 @@ def _insert_dtype_cast_after_node(
     else:
         raise AssertionError(f"type f{type(prev_node_c)} is not handled")
 
+def _copy_node_from_a_to_c(
+    node_a: Node,
+    gm_a: GraphModule,
+    gm_b: GraphModule,
+    graph_c: Graph,
+) -> Node:
+    """
+    Simple copy of node_a to graph_c.
+    """
+    if node_a.op == 'get_attr':
+        node_a_copy_name = \
+            get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)  # type: ignore
+        node_a_obj = getattr_from_fqn(gm_a, node_a.target)  # type: ignore
+        setattr(gm_b, node_a_copy_name, node_a_obj.detach())
+        node_a_copy = graph_c.create_node(
+            node_a.op, node_a_copy_name, (), {}, node_a_copy_name)
+        return node_a_copy
+    elif node_a.op == 'call_method':
+        assert node_a.target in ('dequantize', 'to'), \
+            f"target {node_a.target} is not implemented"
+        if node_a.target == 'dequantize':
+            arg_copy = _copy_node_from_a_to_c(node_a.args[0], gm_a, gm_b, graph_c)  # type: ignore
+            node_a_copy_name = \
+                get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)  # type: ignore
+            node_a_copy = graph_c.create_node(
+                node_a.op, node_a.target, (arg_copy,), {}, node_a_copy_name)
+            return node_a_copy
+        else:  # to
+            arg_copy = _copy_node_from_a_to_c(node_a.args[0], gm_a, gm_b, graph_c)  # type: ignore
+            node_a_copy_name = \
+                get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)  # type: ignore
+            node_a_copy = graph_c.create_node(
+                node_a.op, node_a.target, (arg_copy, node_a.args[1]), {},
+                node_a_copy_name)
+            return node_a_copy
+
+    else:
+        raise AssertionError(
+            f"handling of node with op {node_a.op} is not implemented")
+
 def _insert_copy_of_subgraph_a_after_input_node_c(
     input_node_c: Union[Node, List[Node]],
     input_node_c_2: Optional[Union[Node, List[Node]]],
@@ -333,17 +373,8 @@ def _insert_copy_of_node_a_after_input_node_c(
     for node_a_arg in node_a.args[num_non_param_args:]:
         if isinstance(node_a_arg, Node):
             arg_a = return_first_non_observer_node(node_a_arg, gm_a)
-            if arg_a.op == 'get_attr':
-                arg_a_copy_name = \
-                    get_new_attr_name_with_prefix(arg_a.name + '_shadow_copy_')(gm_b)  # type: ignore
-                arg_a_obj = getattr_from_fqn(gm_a, arg_a.target)  # type: ignore
-                setattr(gm_b, arg_a_copy_name, arg_a_obj.detach())
-                node_a_arg_copy = graph_c.create_node(
-                    'get_attr', arg_a_copy_name, (), {}, arg_a_copy_name)
-                new_args.append(node_a_arg_copy)
-            else:
-                raise AssertionError(
-                    f"handling of node with op {arg_a.op} is not implemented")
+            node_a_arg_copy = _copy_node_from_a_to_c(arg_a, gm_a, gm_b, graph_c)
+            new_args.append(node_a_arg_copy)
         else:
             raise AssertionError(
                 f"handling for arg of type {type(node_a_arg)} is not implemented")
@@ -352,12 +383,7 @@ def _insert_copy_of_node_a_after_input_node_c(
     for node_a_k, node_a_kwarg in node_a.kwargs.items():
         if isinstance(node_a_kwarg, Node):
             kwarg_a = return_first_non_observer_node(node_a_kwarg, gm_a)
-            kwarg_a_copy_name = \
-                get_new_attr_name_with_prefix(kwarg_a.name + '_shadow_copy_')(gm_b)  # type: ignore
-            kwarg_a_obj = getattr_from_fqn(gm_a, kwarg_a.target)  # type: ignore
-            setattr(gm_b, kwarg_a_copy_name, kwarg_a_obj.detach())
-            node_a_kwarg_copy = graph_c.create_node(
-                'get_attr', kwarg_a_copy_name, (), {}, kwarg_a_copy_name)
+            node_a_kwarg_copy = _copy_node_from_a_to_c(kwarg_a, gm_a, gm_b, graph_c)
             new_kwargs[node_a_k] = node_a_kwarg_copy
         else:
             new_kwargs[node_a_k] = node_a_kwarg
