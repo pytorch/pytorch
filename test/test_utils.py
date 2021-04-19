@@ -419,7 +419,7 @@ class TestBottleneck(TestCase):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
 
-        p = subprocess.Popen(command, stdout=subprocess.PIPE,
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa: P204
                              stderr=subprocess.PIPE, shell=True)
         try:
             output, err = p.communicate(timeout=timeout)
