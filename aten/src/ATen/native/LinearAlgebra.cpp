@@ -50,7 +50,7 @@ TORCH_META_FUNC(addmm)(const Tensor &self, const Tensor &mat1, const Tensor &mat
       self_sizes[0], "x", self_sizes[1], ")");
 
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
-  const long int size_[2] = {mat1.sizes().data()[0], mat2.sizes().data()[1]};
+  const int64_t size_[2] = {mat1.sizes().data()[0], mat2.sizes().data()[1]};
   set_output(0, IntArrayRef(size_, 2), {}, self.options(), names);
   auto result = maybe_get_output(0);
   //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
