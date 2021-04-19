@@ -1,4 +1,4 @@
-from functools import partial, wraps, reduce
+from functools import partial, wraps
 import warnings
 
 import torch
@@ -107,8 +107,16 @@ class TestGradients(TestCase):
         if not op.supports_dtype(dtype, torch.device(device).type):
             self.skipTest(f"Skipped! {op.name} does not support dtype {str(dtype)}")
 
+        def is_inplace(variant):
+            if hasattr(variant, "__wrapped__"):
+                return variant.__wrapped__ is op.get_inplace()
+            return variant is op.get_inplace()
+
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
+            if sample.broadcasts_input and is_inplace(variant):
+                continue
+
             # Note on TensorList inputs
             #
             # gradcheck does not support TensorList inputs so here we pass TensorList
@@ -220,70 +228,114 @@ class TestCommon(JitCommonTestCase):
     @_variant_ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         # Acquires variants (method variant, inplace variant, aliases)
-        method = op.get_method()
-        inplace = op.get_inplace()
+
+        method = op.method_variant
+        inplace = op.inplace_variant
 
         # list of all inplace ops: inplace variant + alias inplace variants if exist
         inplace_ops = [inplace, ]
+        variants = [method, inplace]
 
-        aliases = []
         for a_op in op.aliases:
-            aliases.append(a_op.op)
-            aliases.append(a_op.method_variant)
-            aliases.append(a_op.inplace_variant)
+            variants.append(a_op.op)
+            variants.append(a_op.method_variant)
+            variants.append(a_op.inplace_variant)
             inplace_ops.append(a_op.inplace_variant)
-        aliases = tuple(aliases)
 
-        inplace_ops = tuple(v for v in inplace_ops if v is not None)
-        variants = (v for v in (method, inplace) + aliases if v is not None)
+        inplace_variants = tuple(filter(None, inplace_ops))
+        variants = tuple(filter(None, variants))
 
         _requires_grad = (op.supports_autograd and
                           (dtype.is_floating_point or op.supports_complex_autograd))
+
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
-        for sample in samples:
-            # TODO: Check grad for all Tensors requiring grad if sample.input is TensorList
-            tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
 
-            # Computes function forward and backward values
-            tensor.grad = None
-            expected_forward = op(sample.input, *sample.args, **sample.kwargs)
-            expected_grad = None
+        def _test_consistency_helper(samples, variants):
+            for sample in samples:
+                # TODO: Check grad for all Tensors requiring grad if sample.input is TensorList
+                tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
 
-            # Skips inplace variants if the output dtype is not the same as
-            #   the input dtype
-            skip_inplace = False
-            if (isinstance(expected_forward, torch.Tensor) and
-                    expected_forward.dtype is not tensor.dtype):
-                skip_inplace = True
-
-            # TODO: backward consistency only supported for single tensor outputs
-            # TODO: backward consistency only checked on first input Tensor
-            # TODO: update to handle checking grads of all tensor inputs as
-            #   derived from each tensor output
-            if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
-                    and (dtype.is_floating_point or op.supports_complex_autograd)):
-                expected_forward.sum().backward()
-                expected_grad = tensor.grad
-
-            # Test eager consistency
-            for variant in variants:
-                # Skips inplace ops
-                if variant in inplace_ops and skip_inplace:
-                    continue
-
-                # Compares variant's forward
-                # Note: copies the to-be-modified input when testing the inplace variant
+                # Computes function forward and backward values
                 tensor.grad = None
-                cloned = clone_input_helper(sample.input) if variant in inplace_ops else sample.input
-                variant_forward = variant(cloned,
-                                          *sample.args,
-                                          **sample.kwargs)
-                self.assertEqual(expected_forward, variant_forward)
+                expected_forward = op(sample.input, *sample.args, **sample.kwargs)
+                expected_grad = None
 
-                # Compares variant's backward
-                if expected_grad is not None and (variant not in inplace_ops or op.supports_inplace_autograd):
-                    variant_forward.sum().backward()
-                    self.assertEqual(expected_grad, tensor.grad)
+                # Skips inplace variants if the output dtype is not the same as
+                #   the input dtype
+                skip_inplace = False
+                if (isinstance(expected_forward, torch.Tensor) and
+                        expected_forward.dtype is not tensor.dtype):
+                    skip_inplace = True
+
+                # TODO: backward consistency only supported for single tensor outputs
+                # TODO: backward consistency only checked on sample.input, not all
+                #   tensor inputs
+                # TODO: update to handle checking grads of all tensor inputs as
+                #   derived from each tensor output
+                if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
+                        and (dtype.is_floating_point or op.supports_complex_autograd)):
+                    expected_forward.sum().backward()
+                    expected_grad = tensor.grad
+
+                # Test eager consistency
+                for variant in variants:
+                    # Skips inplace ops
+                    if variant in inplace_ops and skip_inplace:
+                        continue
+
+                    # Compares variant's forward
+                    # Note: copies the to-be-modified input when testing the inplace variant
+                    tensor.grad = None
+                    cloned = clone_input_helper(sample.input) if variant in inplace_ops else sample.input
+
+                    if variant in inplace_ops and sample.broadcasts_input:
+                        with self.assertRaises(RuntimeError):
+                            variant_forward = variant(cloned,
+                                                      *sample.args,
+                                                      **sample.kwargs)
+                        continue
+
+                    variant_forward = variant(cloned,
+                                              *sample.args,
+                                              **sample.kwargs)
+                    self.assertEqual(expected_forward, variant_forward)
+
+                    # Compares variant's backward
+                    if expected_grad is not None and \
+                            (variant not in inplace_ops or op.supports_inplace_autograd):
+                        variant_forward.sum().backward()
+                        self.assertEqual(expected_grad, tensor.grad)
+
+        _test_consistency_helper(samples, variants)
+
+        def _test_inplace_preserve_storage(samples, variants):
+            for sample in samples:
+                # Skips inplace variants if the output dtype is not the same as
+                #   the input dtype
+                expected_forward = op(sample.input, *sample.args, **sample.kwargs)
+                tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
+                skip_inplace = False
+                if (isinstance(expected_forward, torch.Tensor) and
+                        expected_forward.dtype is not tensor.dtype):
+                    skip_inplace = True
+                if skip_inplace:
+                    return
+                for variant in variants:
+                    cloned = clone_input_helper(sample.input) if variant in inplace_ops else sample.input
+                    inp_tensor = cloned if isinstance(cloned, torch.Tensor) else cloned[0]
+                    data_ptr = inp_tensor.data_ptr()
+                    variant_forward = variant(cloned,
+                                              *sample.args,
+                                              **sample.kwargs)
+                    # TODO Support non-tensor outputs if they exist for inplace ops
+                    if (isinstance(variant_forward, torch.Tensor)):
+                        self.assertEqual(data_ptr, variant_forward.data_ptr(), atol=0, rtol=0)
+                    else:
+                        self.assertTrue(False, "Non-tensor outputs for inplace ops are not supported")
+
+        if len(inplace_ops) > 0:
+            inplace_samples = list(filter(lambda sample: not sample.broadcasts_input, samples))
+            _test_inplace_preserve_storage(inplace_samples, inplace_variants)
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (function, method, inplace)
@@ -528,12 +580,12 @@ class TestCommon(JitCommonTestCase):
 
         # Case 1: out= with the correct shape, dtype, and device,
         #   but noncontiguous.
-        #   Expected behavior: strides are respected.
+        #   Expected behavior: strides are respected and `out` storage is not changed.
         def _case_one_transform(t):
             return make_tensor(t.shape,
                                dtype=t.dtype,
                                device=t.device,
-                               discontiguous=True)
+                               noncontiguous=True)
 
         # Extracts strides from a tensor or iterable of tensors into a tuple
         def _extract_strides(out):
@@ -543,14 +595,25 @@ class TestCommon(JitCommonTestCase):
             # assumes (see above) that out is an iterable of tensors
             return tuple(map(lambda t: t.stride(), out))
 
+        def _extract_data_ptrs(out):
+            if isinstance(out, torch.Tensor):
+                return (out.data_ptr(),)
+
+            # assumes (see above) that out is an iterable of tensors
+            return tuple(map(lambda t: t.data_ptr(), out))
+
+
         out = _apply_out_transform(_case_one_transform, expected)
         original_strides = _extract_strides(out)
+        original_ptrs = _extract_data_ptrs(out)
 
         op_out(out=out)
         final_strides = _extract_strides(out)
+        final_ptrs = _extract_data_ptrs(out)
 
         self.assertEqual(expected, out)
         self.assertEqual(original_strides, final_strides)
+        self.assertEqual(original_ptrs, final_ptrs)
 
         # Case 2: out= with the correct dtype and device, but the wrong shape
         #   Expected behavior: resize with a warning.
@@ -565,7 +628,8 @@ class TestCommon(JitCommonTestCase):
             return make_tensor(wrong_shape, dtype=t.dtype, device=t.device)
 
         out = _apply_out_transform(_case_two_transform, expected)
-        with self.assertWarnsRegex(UserWarning, "An output with one or more elements"):
+        msg_fail = "Resized a non-empty tensor but did not warn about it."
+        with self.assertWarnsRegex(UserWarning, "An output with one or more elements", msg=msg_fail):
             op_out(out=out)
         self.assertEqual(expected, out)
 
@@ -601,7 +665,8 @@ class TestCommon(JitCommonTestCase):
                 return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
 
             out = _apply_out_transform(_case_four_transform, expected)
-            with self.assertRaises(RuntimeError):
+            msg_fail = f"Expected RuntimeError when calling with input.device={device} and out.device={wrong_device}"
+            with self.assertRaises(RuntimeError, msg=msg_fail):
                 op_out(out=out)
 
         # Case 5: out= with correct shape and device, but a dtype
@@ -614,13 +679,15 @@ class TestCommon(JitCommonTestCase):
         #   tensor is a floating point or complex dtype.
         _dtypes = floating_and_complex_types_and(torch.float16, torch.bfloat16)
         if (isinstance(expected, torch.Tensor) and expected.dtype in _dtypes or
-                (not isinstance(expected, torch.Tensor) and
-                 reduce(lambda cur, t: cur or t.dtype in _dtypes, expected, False))):
+                (not isinstance(expected, torch.Tensor) and any(t.dtype in _dtypes for t in expected))):
             def _case_five_transform(t):
                 return make_tensor(t.shape, dtype=torch.long, device=t.device)
 
-            out = out = _apply_out_transform(_case_five_transform, expected)
-            with self.assertRaises(RuntimeError):
+            out = _apply_out_transform(_case_five_transform, expected)
+            msg_fail = "" if not isinstance(expected, torch.Tensor) else \
+                       ("Expected RuntimeError when doing an unsafe cast from a result of dtype "
+                        f"{expected.dtype} into an out= with dtype torch.long")
+            with self.assertRaises(RuntimeError, msg=msg_fail):
                 op_out(out=out)
 
 

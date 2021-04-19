@@ -4,11 +4,12 @@
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/native/Resize.h>
 #include <c10/util/accumulate.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
 
-#include <ATen/cuda/CubUtils.cuh>
+#include <ATen/cuda/cub.cuh>
 
 
 namespace at { namespace native {
@@ -590,7 +591,7 @@ Tensor& _cumsum_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   checkAllSameGPU("cumsum", {output_arg, input_arg});
   checkSameType("cumsum", output_arg, input_arg);
 
-  result.resize_(self.sizes());
+  at::native::resize_output(result, self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
     return result;
@@ -626,7 +627,7 @@ Tensor& _cumprod_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   checkAllSameGPU("cumprod", {output_arg, input_arg});
   checkSameType("cumprod", output_arg, input_arg);
 
-  result.resize_(self.sizes());
+  at::native::resize_output(result, self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
     return result;
