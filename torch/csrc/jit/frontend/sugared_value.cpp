@@ -101,27 +101,22 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       std::unordered_map<std::string, std::string>,
       EnumClassHash>;
   static const PropertiesLookup builtin_properties = {
+      {TypeKind::OptionalType,
+       {
+           {"unchecked_unwrap_optional", "prim"},
+       }},
       {TypeKind::TensorType,
        {
-           {"dtype", "prim"},
-           {"device", "prim"},
-           {"grad", "prim"},
-           {"data", "prim"},
-           {"shape", "prim"},
-           {"is_cuda", "prim"},
-           {"is_xpu", "prim"},
-           {"is_sparse", "prim"},
-           {"is_mkldnn", "prim"},
-           {"is_mlc", "prim"},
-           {"is_quantized", "prim"},
-           {"is_vulkan", "prim"},
-           {"is_meta", "prim"},
-           {"is_leaf", "aten"},
-           {"requires_grad", "prim"},
-           {"layout", "prim"},
-           {"T", "prim"},
-           {"ndim", "prim"},
-           {"name", "prim"},
+           {"dtype", "prim"},         {"device", "prim"},
+           {"grad", "prim"},          {"data", "prim"},
+           {"shape", "prim"},         {"is_cuda", "prim"},
+           {"is_xpu", "prim"},        {"is_sparse", "prim"},
+           {"is_sparse_csr", "prim"}, {"is_mkldnn", "prim"},
+           {"is_mlc", "prim"},        {"is_quantized", "prim"},
+           {"is_vulkan", "prim"},     {"is_meta", "prim"},
+           {"is_leaf", "aten"},       {"requires_grad", "prim"},
+           {"layout", "prim"},        {"T", "prim"},
+           {"ndim", "prim"},          {"name", "prim"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
   auto kind = value_->type()->kind();
@@ -209,10 +204,17 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   }
 
   ErrorReport report(loc);
-  report << "Tried to access nonexistent attribute or method '" << field
-         << "' of type '" << value_->type()->repr_str() << "'.";
-  if (value_->type()->kind() == ClassType::Kind) {
-    report << " Did you forget to initialize an attribute in __init__()?";
+  report << "'" << value_->type()->repr_str()
+         << "' object has no attribute or method '" << field << "'.";
+  if (auto classType = value_->type()->cast<ClassType>()) {
+    if (classType->isUnresolvedClassAttribute(field)) {
+      report
+          << " '" << field
+          << "' is defined as a class attribute which currently is not"
+             " supported. Consider converting this to an instance attribute.";
+    } else {
+      report << " Did you forget to initialize an attribute in __init__()?";
+    }
   }
   throw report;
 }
