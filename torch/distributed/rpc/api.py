@@ -401,7 +401,7 @@ except TypeError:
     # TypeError: metaclass conflict: the metaclass of a derived class
     # must be a (non-strict) subclass of the metaclasses of all its bases
     # Mypy doesn't understand __class__ (mypy bug #4177)
-    class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):  # type: ignore[name-defined, valid-type]
+    class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):  # type: ignore[name-defined, misc, valid-type]
         pass
 
     # Combine the implementation class and the type class.

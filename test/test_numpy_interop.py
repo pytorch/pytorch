@@ -337,7 +337,7 @@ class TestNumPyInterop(TestCase):
             for t_dtype in [torch.float, torch.double]:
                 # mypy raises an error when np.floatXY(2.0) is called
                 # even though this is valid code
-                np_sc = np_dtype(2.0)
+                np_sc = np_dtype(2.0)  # type: ignore[abstract, arg-type]
                 t = torch.ones(2, requires_grad=True, dtype=t_dtype)
                 r1 = t * np_sc
                 self.assertIsInstance(r1, torch.Tensor)

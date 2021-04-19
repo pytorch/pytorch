@@ -154,7 +154,7 @@ def split_module(
 
         # Set correct output values
         output_vals = tuple(partition.environment[orig_nodes[name]] for name in partition.outputs)
-        output_vals = output_vals[0] if len(output_vals) == 1 else output_vals
+        output_vals = output_vals[0] if len(output_vals) == 1 else output_vals  # type: ignore[assignment]
         partition.graph.output(output_vals)
 
         # Construct GraphModule for this partition
@@ -168,7 +168,7 @@ def split_module(
             # Unpack multiple return values from submodule
             output_val_proxy = torch.fx.proxy.Proxy(output_val)  # type: ignore[attr-defined]
             for i, output_name in enumerate(partition.outputs):
-                base_mod_env[output_name] = output_val_proxy[i].node
+                base_mod_env[output_name] = output_val_proxy[i].node  # type: ignore[index]
         else:
             base_mod_env[list(partition.outputs)[0]] = output_val
 

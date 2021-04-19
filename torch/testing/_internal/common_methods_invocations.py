@@ -617,7 +617,7 @@ def sample_inputs_add(op_info, device, dtype, requires_grad, **kwargs):
         ((), (S, S, S), True),
         ((S, 1, S), (M, S), True),
     ]
-    test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore
+    test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
     samples = []
     for first_shape, shape_or_scalar, broadcasts_input in test_cases:
         arg = shape_or_scalar

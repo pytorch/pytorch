@@ -173,7 +173,7 @@ class GraphModule(torch.nn.Module):
         # it is a subclass of the user-defined class, the only difference
         # is an extra layer to install the forward method
 
-        class GraphModuleImpl(cls):  # type: ignore[valid-type]
+        class GraphModuleImpl(cls):  # type: ignore[misc, valid-type]
             pass
         return super().__new__(GraphModuleImpl)
 
