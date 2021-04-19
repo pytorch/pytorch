@@ -15,9 +15,7 @@ namespace native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void upsample_linear1d_out_frame(
     const int n,
     const accscalar_t rwidth,
@@ -64,9 +62,7 @@ __global__ void upsample_linear1d_out_frame(
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void upsample_linear1d_out_frame_backward(
     const int n,
     const accscalar_t rwidth,
