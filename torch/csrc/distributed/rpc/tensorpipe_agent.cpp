@@ -108,8 +108,7 @@ void checkValidDevicesOption(
     const std::unordered_set<c10::DeviceIndex>& deviceSet,
     const std::vector<c10::DeviceIndex>& deviceOpt) {
   std::unordered_set<c10::DeviceIndex> optsDeviceSet(
-      deviceOpt.begin(),
-      deviceOpt.end());
+      deviceOpt.begin(), deviceOpt.end());
 
   // no duplications are allowed in opts_.devices
   TORCH_CHECK(
@@ -119,23 +118,23 @@ void checkValidDevicesOption(
   // opts_.devices must be a superset of local devices in reverseDeviceMaps_
   std::vector<c10::DeviceIndex> cut;
   std::set_difference(
-      deviceSet.begin(), deviceSet.end(),
-      optsDeviceSet.begin(), optsDeviceSet.end(),
+      deviceSet.begin(),
+      deviceSet.end(),
+      optsDeviceSet.begin(),
+      optsDeviceSet.end(),
       std::back_inserter(cut));
 
   if (!cut.empty()) {
     std::ostringstream oss;
     std::copy(
-        cut.begin(),
-        cut.end(),
-        std::ostream_iterator<int32_t>(oss, ", "));
+        cut.begin(), cut.end(), std::ostream_iterator<int32_t>(oss, ", "));
     TORCH_CHECK(
-      false,
-      "The devices field in TensorPipeRpcBackendOptions must either be "
-      "None or contain all local devices use by its agent. However, "
-      "local devices ",
-      oss.str(),
-      "are used in (peer) device_maps but not included the devices field.");
+        false,
+        "The devices field in TensorPipeRpcBackendOptions must either be "
+        "None or contain all local devices use by its agent. However, "
+        "local devices ",
+        oss.str(),
+        "are used in (peer) device_maps but not included the devices field.");
   }
 }
 
@@ -523,10 +522,12 @@ TensorPipeAgent::TensorPipeAgent(
   {
     // If devices was not specified in the options, use local devices in the
     // deviceMap to initialize devices. Later, when setting reverseDeviceMaps_,
-    // the devices_ will be updated again using local devices in reverseDeviceMaps_.
+    // the devices_ will be updated again using local devices in
+    // reverseDeviceMaps_.
     auto deviceSet = getLocalDevices(opts_.deviceMaps);
     if (opts_.devices.empty()) {
-      std::copy(deviceSet.begin(), deviceSet.end(), std::back_inserter(devices_));
+      std::copy(
+          deviceSet.begin(), deviceSet.end(), std::back_inserter(devices_));
     } else {
       checkValidDevicesOption(deviceSet, opts_.devices);
       devices_ = opts_.devices;
