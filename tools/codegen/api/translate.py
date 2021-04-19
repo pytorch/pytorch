@@ -158,7 +158,7 @@ Check this module for more information.
                 return memory_format
             try:
                 options = direct_solve(options_ctype)
-                return f"c10::impl::check_tensor_options_and_extract_memory_format({options}, {memory_format})"
+                return f"c10::detail::check_tensor_options_and_extract_memory_format({options}, {memory_format})"
             except UnsatError:
                 return memory_format
 

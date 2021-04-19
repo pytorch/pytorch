@@ -1,7 +1,7 @@
-#include <ATen/core/op_registration/adaption.h>
+#include <ATen/DispatchWrapperUtil.h>
 
 namespace c10 {
-namespace impl {
+namespace detail {
 
 void common_device_check_failure(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
   TORCH_CHECK(false,
@@ -16,5 +16,5 @@ void undefined_device_check_failure(at::CheckedFrom methodName, at::CheckedFrom 
     "(when checking arugment for argument ", argName, " in method ", methodName, ")");
 }
 
-} // namespace impl
+} // namespace detail
 } // namespace c10

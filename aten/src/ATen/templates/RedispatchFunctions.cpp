@@ -4,7 +4,7 @@
 #include <ATen/Functions.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/op_registration/adaption.h>
+#include <ATen/DispatchWrapperUtil.h>
 
 ${static_dispatch_extra_headers}
 

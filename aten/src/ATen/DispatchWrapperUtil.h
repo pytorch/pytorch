@@ -39,7 +39,7 @@
  */
 
 namespace c10 {
-namespace impl {
+namespace detail {
 
 inline c10::optional<MemoryFormat>
 check_tensor_options_and_extract_memory_format(
@@ -97,5 +97,5 @@ inline void check_or_update_common_device(optional<Device>& common_device, const
     check_or_update_common_device(common_device, tensor, methodName, argName);
   }
 }
-} // namespace impl
+} // namespace detail
 } // namespace c10

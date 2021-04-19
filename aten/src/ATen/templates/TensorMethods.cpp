@@ -1,16 +1,16 @@
-#include <c10/core/Scalar.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/NamedTensor.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/DispatchWrapperUtil.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
+#include <c10/core/Scalar.h>
 #include <c10/core/Stream.h>
-#include <c10/macros/Macros.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/NamedTensor.h>
-#include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/op_registration/adaption.h>
-#include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 ${static_dispatch_extra_headers}

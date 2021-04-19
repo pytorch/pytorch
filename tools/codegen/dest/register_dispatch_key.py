@@ -180,7 +180,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     for arg in candidate_args:
                         if arg.type.is_tensor_like():
                             device_guard += f"""
-  c10::impl::check_or_update_common_device(common_device, {arg.name}, "{name}", "{arg.name}");"""
+  c10::detail::check_or_update_common_device(common_device, {arg.name}, "{name}", "{arg.name}");"""
                     device_guard += "\n  const OptionalDeviceGuard device_guard(common_device);\n"
 
             return f"""\
