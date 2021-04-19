@@ -334,11 +334,33 @@ void Ccsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  TORCH_CUDASPARSE_CHECK(cusparseCcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
+  #ifdef USE_ROCM
+    TORCH_CUDASPARSE_CHECK(cusparseCcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz,
+      reinterpret_cast<const hipComplex*>(alpha),
+      desc,
+      reinterpret_cast<const hipComplex*>(csrvala),
+      csrrowptra, csrcolinda,
+      reinterpret_cast<const hipComplex*>(b),
+      i_ldb,
+      reinterpret_cast<const hipComplex*>(beta),
+      reinterpret_cast<hipComplex*>(c),
+      i_ldc));
+  #else
+    TORCH_CUDASPARSE_CHECK(cusparseCcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz,
+      reinterpret_cast<const cuComplex*>(alpha),
+      desc,
+      reinterpret_cast<const cuComplex*>(csrvala),
+      csrrowptra, csrcolinda,
+      reinterpret_cast<const cuComplex*>(b),
+      i_ldb,
+      reinterpret_cast<const cuComplex*>(beta),
+      reinterpret_cast<cuComplex*>(c),
+      i_ldc));
+  #endif
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
-void Zcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const cuDoubleComplex *alpha, const cuDoubleComplex *csrvala, int *csrrowptra, int *csrcolinda, const cuDoubleComplex *b, int64_t ldb, const cuDoubleComplex *beta, cuDoubleComplex *c, int64_t ldc)
+void Zcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, const void *alpha, const void *csrvala, int *csrrowptra, int *csrcolinda, const void *b, int64_t ldb, const void *beta, void *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
@@ -357,7 +379,29 @@ void Zcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  TORCH_CUDASPARSE_CHECK(cusparseZcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, beta, c, i_ldc));
+ #ifdef USE_ROCM
+    TORCH_CUDASPARSE_CHECK(cusparseZcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz,
+      reinterpret_cast<const hipDoubleComplex*>(alpha),
+      desc,
+      reinterpret_cast<const hipDoubleComplex*>(csrvala),
+      csrrowptra, csrcolinda,
+      reinterpret_cast<const hipDoubleComplex*>(b),
+      i_ldb,
+      reinterpret_cast<const hipDoubleComplex*>(beta),
+      reinterpret_cast<hipDoubleComplex*>(c),
+      i_ldc));
+  #else
+    TORCH_CUDASPARSE_CHECK(cusparseZcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz,
+      reinterpret_cast<const cuDoubleComplex*>(alpha),
+      desc,
+      reinterpret_cast<const cuDoubleComplex*>(csrvala),
+      csrrowptra, csrcolinda,
+      reinterpret_cast<const cuDoubleComplex*>(b),
+      i_ldb,
+      reinterpret_cast<const cuDoubleComplex*>(beta),
+      reinterpret_cast<cuDoubleComplex*>(c),
+      i_ldc));
+  #endif
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
@@ -397,14 +441,14 @@ template<> void csrmm2<c10::complex<float>>(
   c10::complex<float> *b, int64_t ldb, c10::complex<float> beta, c10::complex<float> *c, int64_t ldc)
 {
   Ccsrmm2(transa, transb, m, n, k, nnz,
-    reinterpret_cast<const cuComplex*>(&alpha),
-    reinterpret_cast<const cuComplex*>(csrvala),
+    reinterpret_cast<const void*>(&alpha),
+    reinterpret_cast<const void*>(csrvala),
     csrrowptra,
     csrcolinda,
-    reinterpret_cast<const cuComplex*>(b),
+    reinterpret_cast<const void*>(b),
     ldb,
-    reinterpret_cast<const cuComplex*>(&beta),
-    reinterpret_cast<cuComplex*>(c), ldc);
+    reinterpret_cast<const void*>(&beta),
+    reinterpret_cast<void*>(c), ldc);
 }
 
 template<> void csrmm2<c10::complex<double>>(
@@ -414,14 +458,14 @@ template<> void csrmm2<c10::complex<double>>(
   c10::complex<double> *b, int64_t ldb, c10::complex<double> beta, c10::complex<double> *c, int64_t ldc)
 {
   Zcsrmm2(transa, transb, m, n, k, nnz,
-    reinterpret_cast<const cuDoubleComplex*>(&alpha),
-    reinterpret_cast<const cuDoubleComplex*>(csrvala),
+    reinterpret_cast<const void*>(&alpha),
+    reinterpret_cast<const void*>(csrvala),
     csrrowptra,
     csrcolinda,
-    reinterpret_cast<const cuDoubleComplex*>(b),
+    reinterpret_cast<const void*>(b),
     ldb,
-    reinterpret_cast<const cuDoubleComplex*>(&beta),
-    reinterpret_cast<cuDoubleComplex*>(c), ldc);
+    reinterpret_cast<const void*>(&beta),
+    reinterpret_cast<void*>(c), ldc);
 }
 
 
