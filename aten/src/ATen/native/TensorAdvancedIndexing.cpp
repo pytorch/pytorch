@@ -434,6 +434,11 @@ Tensor take(const Tensor& self, const Tensor& index) {
 }
 
 Tensor & index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate) {
+  if (!accumulate) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("index_put_ with accumulate=False");
+  }
   return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 
@@ -738,7 +743,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   if (self.dim() > 0) {
     result_size[dim] = numel;
   }
-  result.resize_(result_size);
+  at::native::resize_output(result, result_size);
 
   auto index_contig = index.contiguous();
 
@@ -951,7 +956,7 @@ Tensor& gather_out_cpu_cuda(
     const Tensor& index,
     bool sparse_grad,
     Tensor& result) {
-  resize_output(result, index.sizes());
+  at::native::resize_output(result, index.sizes());
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_partial_overlap(result, index);
@@ -967,6 +972,14 @@ Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool spars
 Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
+  }
+  if (globalContext().deterministicAlgorithms() && index.dim() == 1 && self.dim() == 1){
+    TORCH_CHECK(index.numel() == grad.numel(), "index and grad should have same number of elements, "
+      "but got ", index.numel(), " versus ", grad.numel());
+    torch::List<c10::optional<Tensor>> indices;
+    indices.reserve(1);
+    indices.push_back(index);
+    return at::zeros(self.sizes(), grad.options()).index_put_(indices, grad, true);
   }
   return at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad);
 }
@@ -1053,9 +1066,9 @@ Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
-  Tensor _mask, _self;
+  c10::MaybeOwned<Tensor> _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
-  return _self.clone(at::MemoryFormat::Contiguous).masked_scatter_(_mask, source);
+  return _self->clone(at::MemoryFormat::Contiguous).masked_scatter_(*_mask, source);
 }
 
 static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const Scalar& value) {
@@ -1108,9 +1121,9 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Scalar& sourc
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-    Tensor _mask, _self;
+    c10::MaybeOwned<Tensor> _mask, _self;
     std::tie(_mask, _self) = expand_outplace(mask, self);
-    result = _self.clone(at::MemoryFormat::Contiguous);
+    result = _self->clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
@@ -1122,9 +1135,9 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-    Tensor _mask, _self;
+    c10::MaybeOwned<Tensor> _mask, _self;
     std::tie(_mask, _self) = expand_outplace(mask, self);
-    result = _self.clone(at::MemoryFormat::Contiguous);
+    result = _self->clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
@@ -1148,12 +1161,12 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
             "please use a mask with dtype torch.bool instead.");
   }
 
-  Tensor _mask, _self;
+  c10::MaybeOwned<Tensor> _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
 
-  auto shape = _self.sizes();
-  int64_t numel = _mask.sum().item().toLong();
-  result.resize_({numel});
+  auto shape = _self->sizes();
+  int64_t numel = _mask->sum().item().toLong();
+  at::native::resize_output(result, {numel});
   if (numel == 0) {
     return result;
   }
@@ -1169,15 +1182,15 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   // answers. A sufficient condition that no reorder happened is that both _self and _mask is contiguous.
   // If it is not satisfied, use parallel kernel that handles permutations correctly
   bool use_serial_kernel = (self.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ) &&
-  _self.is_contiguous() && _mask.is_contiguous();
+  _self->is_contiguous() && _mask->is_contiguous();
   if (use_serial_kernel) {
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)  // result is intenionally zero-strided above
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(result_strided)
-      .add_input(_self)
-      .add_input(_mask)
+      .add_input(*_self)
+      .add_input(*_mask)
       .build();
 
     masked_select_serial_stub(iter.device_type(), iter, orig_stride);
@@ -1186,7 +1199,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
 
   // Use a prefix sum to record the output locations of the masked elements,
   // so as to parallel with TensorIterator.
-  auto mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
+  auto mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(*_mask);
   auto mask_prefix_sum = at::empty(shape, self.options().dtype(at::kLong));
   auto mask_long_data = mask_long.data_ptr<int64_t>();
   auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();
@@ -1200,8 +1213,8 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(result_strided)
-    .add_input(_self)
-    .add_input(_mask)
+    .add_input(*_self)
+    .add_input(*_mask)
     .add_input(mask_prefix_sum)
     .build();
 
@@ -1353,10 +1366,9 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
   TORCH_CHECK(mask.device().type() == at::kCPU, "device type of mask (", mask.device().type(), ") is not CPU");
   TORCH_CHECK(source.device().type() == at::kCPU, "device type of source (", source.device().type(), ") is not CPU");
 
-  Tensor b_mask;
-  std::tie(b_mask) = expand_inplace(self, mask, "masked_scatter_");
+  c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_scatter_");
 
-  if (b_mask.dtype() == ScalarType::Byte) {
+  if (b_mask->dtype() == ScalarType::Byte) {
     TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
   }
@@ -1368,7 +1380,7 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self)
-      .add_input(b_mask)
+      .add_input(*b_mask)
       .build();
 
   masked_scatter_stub(iter.device_type(), iter, src_cont);
