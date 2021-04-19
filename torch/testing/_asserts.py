@@ -314,9 +314,9 @@ def _check_tensors_close(
 
     Closeness is defined by
 
-    .. math::
+        .. code::
 
-        \lvert a - b \rvert \le \texttt{atol} + \texttt{rtol} \cdot \lvert b \rvert
+            torch.abs(actual - expected) <= (atol + rtol * expected)
 
     If both tolerances, :attr:`rtol` and :attr:`rtol`, are ``0``, asserts that :attr:`actual` and :attr:`expected` are
     bitwise equal.
@@ -661,7 +661,7 @@ def assert_close(
 
     .. math::
 
-        \lvert a - b \rvert \le \texttt{atol} + \texttt{rtol} \cdot \lvert b \rvert
+        \lvert \text{actual} - \text{expected} \rvert \le \texttt{atol} + \texttt{rtol} \cdot \lvert \text{expected} \rvert
 
     Optionally, checks that some attributes of tensor pairs are equal.
 
@@ -710,7 +710,7 @@ def assert_close(
     The following table displays the default ``rtol``'s and ``atol``'s. Note that the :class:`~torch.dtype` refers to
     the promoted type in case :attr:`actual` and :attr:`expected` do not have the same :attr:`~torch.Tensor.dtype`.
 
-    +===========================+============+==========+
+    +---------------------------+------------+----------+
     | :class:`~torch.dtype`     | ``rtol``   | ``atol`` |
     +===========================+============+==========+
     | :attr:`~torch.float16`    | ``1e-3``   | ``1e-5`` |
