@@ -177,13 +177,11 @@ const Expr* IRMutator::mutate(const Load* v) {
     }
     indices_new.push_back(new_ind);
   }
-  const Expr* mask = v->mask();
   const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
-  const Expr* mask_new = mask->accept_mutator(this);
-  if (buf == buf_new && !any_index_changed && mask == mask_new) {
+  if (buf == buf_new && !any_index_changed) {
     return v;
   }
-  return new Load(dtype, buf_new, indices_new, mask_new);
+  return new Load(dtype, buf_new, indices_new);
 }
 
 const Expr* IRMutator::mutate(const Buf* v) {
@@ -371,15 +369,12 @@ Stmt* IRMutator::mutate(const Store* v) {
     indices_new.push_back(new_ind);
   }
   const Expr* value = v->value();
-  const Expr* mask = v->mask();
   const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
   const Expr* value_new = value->accept_mutator(this);
-  const Expr* mask_new = mask->accept_mutator(this);
-  if (buf == buf_new && !any_index_changed && value == value_new &&
-      mask == mask_new) {
+  if (buf == buf_new && !any_index_changed && value == value_new) {
     return (Stmt*)v;
   }
-  return new Store(buf_new, indices_new, value_new, mask_new);
+  return new Store(buf_new, indices_new, value_new);
 }
 
 Stmt* IRMutator::mutate(const AtomicAdd* v) {
@@ -518,7 +513,7 @@ Stmt* StmtClone::mutate(const Block* v) {
 }
 
 Stmt* StmtClone::mutate(const Store* v) {
-  return new Store(v->buf(), v->indices(), v->value(), v->mask());
+  return new Store(v->buf(), v->indices(), v->value());
 }
 
 Stmt* StmtClone::mutate(const AtomicAdd* v) {

@@ -459,7 +459,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
         return true;
       }
       if (THPVariable_Check(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
+        const auto& var = THPVariable_Unpack(obj);
         return !var.requires_grad() && var.dim() == 0;
       }
       return false;
@@ -469,7 +469,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
         return true;
       }
       if (THPVariable_Check(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
+        const auto& var = THPVariable_Unpack(obj);
         return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
       }
       return false;
@@ -1071,7 +1071,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     return at::Tensor();
   }
   if (THPVariable_Check(obj)) {
-    return reinterpret_cast<THPVariable*>(obj)->cdata;
+    return THPVariable_Unpack(obj);
   }
 
   at::Scalar scalar;
@@ -1114,7 +1114,7 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
   if (THPVariable_Check(arg)) {
-    return ((THPVariable*)arg)->cdata.item();
+    return THPVariable_Unpack(arg).item();
   }
 
   if (THPUtils_checkLong(arg)) {
