@@ -1119,7 +1119,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     int peer,
     OpType opType,
     PreProcess pre,
-    PostProcess post) {
+    PostProcess post,
+    const char* profilingTitle) {
   const auto devices = getDeviceList(tensors);
   const auto key = getKeySendRecv(rank_, peer);
   int p2pRank = rank_ <= peer ? 0 : 1;
@@ -1130,12 +1131,20 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
 
   // Work itself will create the CUDA events on all GPUs of tensors
-  auto work = initWork(devices, rank_, opType);
+  bool can_profile = tensors.size() == 1;
+  auto work = initWork(
+      devices,
+      rank_,
+      opType,
+      can_profile ? profilingTitle : nullptr,
+      can_profile ? c10::optional<std::vector<at::Tensor>>(tensors)
+                  : c10::nullopt);
 
-  if (opType == OpType::RECV) {
-    // Store references to outputs to be used by WorkNCCL::result and operator<<.
-    work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensors);
-  }
+  // Store references to outputs to be used by WorkNCCL::result and operator<<.
+  // Note that these outputs are only valid for recv(), as send() does not
+  // modify the inputs but we still create these outputs for use cases such as
+  // profiling.
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensors);
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
@@ -1179,11 +1188,24 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     work->store_ = store_;
   }
 
-  if (opType == OpType::RECV) {
+
+  // Future only needs to be created and marked completed with outputs for
+  // recv(), but still create future for use cases such as profiling even for
+  // send().
+  {
     at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
     work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
         c10::ListType::create(c10::TensorType::get()));
     work->future_->markCompleted(at::IValue(*work->outputs_));
+  }
+
+  // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
+  // future blocks the stream this callback runs on the corresponding
+  // cudaEvents_ ensuring appropriate synchronization.
+  if (work->recordFunctionEndCallback_) {
+    work->future_->addCallback([work]() {
+      work->recordFunctionEndCallback_();
+    });
   }
 
   return work;
@@ -1211,14 +1233,16 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     std::vector<at::Tensor>& tensor,
     Fn fn,
     int peer,
-    OpType opType) {
+    OpType opType,
+    const char* profilingTitle) {
   return pointToPoint(
       tensor,
       fn,
       peer,
       opType,
       [](std::vector<at::cuda::CUDAStream>&) {},
-      [](std::vector<at::cuda::CUDAStream>&) {});
+      [](std::vector<at::cuda::CUDAStream>&) {},
+      profilingTitle);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
@@ -1660,7 +1684,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
         return ncclSuccess;
       },
       dstRank,
-      OpType::SEND);
+      OpType::SEND,
+      "nccl:send");
   return ret;
 }
 
@@ -1679,7 +1704,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
         return ncclSuccess;
       },
       srcRank,
-      OpType::RECV);
+      OpType::RECV,
+      "nccl:recv");
   return ret;
 }
 #else
