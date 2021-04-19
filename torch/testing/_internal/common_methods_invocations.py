@@ -1445,18 +1445,8 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     return wrapped_fn
 
 
-def scipy_unary_ufunc_integer_promotion_wrapper(fn):
-    # Wrapper that passes PyTorch's default scalar
-    #   type as an argument to the wrapped NumPy
-    #   unary ufunc when given an integer input.
-    #   This mimicks PyTorch's integer->floating point
-    #   type promotion.
-    #
-    # This is necessary when NumPy promotes
-    #   integer types to double, since PyTorch promotes
-    #   integer types to the default scalar type.
-
-    # Helper to determine if promotion is needed
+def np_unary_ufunc_integer_promotion_wrapper_with_astype(fn):
+    # Check np_unary_ufunc_integer_promotion_wrapper
     def is_integral(dtype):
         return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
 
@@ -3359,7 +3349,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     UnaryUfuncInfo('special.i1',
                    aten_name='special_i1',
-                   ref=scipy_unary_ufunc_integer_promotion_wrapper(scipy.special.i1),
+                   ref=np_unary_ufunc_integer_promotion_wrapper_with_astype(scipy.special.i1),
                    decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                   torch.float16: 3e-1}),),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
