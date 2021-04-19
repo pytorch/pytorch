@@ -4102,6 +4102,7 @@
     CompositeExplicitAutograd: _sparse_addmm
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
     CPU: addmm_cpu_out
     CUDA: addmm_out_cuda
@@ -4111,18 +4112,16 @@
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
+  structured_delegate: addmm.out
   dispatch:
-    CPU: addmm_cpu
-    CUDA: addmm_cuda
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
     SparseCsrCPU: addmm_sparse_csr_dense_cpu
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  structured_delegate: addmm.out
   dispatch:
-    CPU: addmm_cpu_
-    CUDA: addmm__cuda
     # Warning!  For whatever reason, the inplace sparse addmm is NON
     # broadcasting
     SparseCPU: s_addmm_sparse_dense_cpu_
