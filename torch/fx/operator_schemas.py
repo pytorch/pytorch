@@ -95,6 +95,14 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
 
     return signatures
 
+def create_type_hint(x):
+    if isinstance(x, tuple):
+        if len(x) == 0:
+            return Tuple[()]
+        if all(type(i) is type(x[0]) for i in x):
+            return Tuple[type(x[0]), ...]
+        return Tuple[Any, ...]
+    return type(x)
 
 def type_matches(signature_type : Any, argument_type : Any):
     sig_origin_type = getattr(signature_type, '__origin__', signature_type)
@@ -116,7 +124,7 @@ def type_matches(signature_type : Any, argument_type : Any):
         contained = t.__args__
         if t.__args__ == ((),):  # Tuple[()].__args__ == ((),) for some reason
             return True
-        return all(c is int for c in contained)
+        return all(c is int or (c is Ellipsis) for c in contained)
 
     if signature_type is List[int] and is_homogeneous_int_tuple(argument_type):
         # Tuple[int] is accepted for List[int] parameters
@@ -128,8 +136,7 @@ def type_matches(signature_type : Any, argument_type : Any):
 
     if signature_type is numbers.Number and argument_type in {int, float}:
         return True
-
-    return signature_type is argument_type
+    return issubclass(argument_type, signature_type)
 
 def normalize_function(
         target: Callable, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None, arg_types : Optional[Tuple[Any]] = None,

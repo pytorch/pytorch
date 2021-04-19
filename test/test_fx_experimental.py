@@ -3,7 +3,7 @@ import operator
 import unittest
 import sys
 import math
-from typing import Callable, Dict, Union, List, Optional
+from typing import Callable, Dict, Union, List
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
@@ -30,7 +30,7 @@ from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 from torch.fx.operator_schemas import _torchscript_type_to_python_type, normalize_function, normalize_module
-from torch.fx.passes.shape_prop import extract_tensor_metadata
+from torch.fx.passes.shape_prop import extract_tensor_metadata, ShapeProp
 
 try:
     from torchvision.models import resnet18
@@ -830,27 +830,21 @@ terrible spacing
         input = torch.randn(5, 3, 224, 224)
         ref_outs = traced(input)
 
+        ShapeProp(traced).propagate(input)
+        traced = NormalizeArgs(traced).transform()
+
+
         modules = dict(traced.named_modules())
+
         for node in traced.graph.nodes:
-            if node.op == 'call_function' and node.target.__module__ != '_operator':
-                if node.target is torch.conv2d:
-                    overload_types = [torch.Tensor, torch.Tensor, Optional[torch.Tensor], List[int], List[int],
-                                      List[int], int]
-                    normalized_args = node.normalized_arguments(traced, overload_types, {})
-                else:
-                    normalized_args = node.normalized_arguments(traced)
-                assert normalized_args
-                node.args = ()
-                node.kwargs = normalized_args
-            if node.op == 'call_module':
+            if node.op == 'call_function' and node.target != operator.add:
+                self.assertEqual(len(node.args), 0)
+            elif node.op == 'call_module':
                 submod_class = modules[node.target].__class__
                 nn_class = getattr(torch.nn, submod_class.__name__)
                 if submod_class == nn_class:
-                    normalized_args = node.normalized_arguments(traced)
-                    assert normalized_args
-                    node.args = ()
-                    node.kwargs = normalized_args
-        traced.recompile()
+                    self.assertEqual(len(node.args), 0)
+        traced(input)
         self.assertEqual(traced(input), ref_outs)
 
     def test_normalize_modules_exhaustive(self):

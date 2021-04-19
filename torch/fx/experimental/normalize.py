@@ -1,9 +1,10 @@
 import torch
 import torch.fx
+import torch.fx as fx
 import operator
-from typing import Any, Callable, Dict, Tuple
-from torch.fx.node import Argument, Target
-from torch.fx.operator_schemas import normalize_module, normalize_function
+from typing import Any, Callable, Dict, Tuple, Optional
+from torch.fx.node import Argument, Target, Node
+from torch.fx.operator_schemas import normalize_module, normalize_function, create_type_hint
 
 from torch.fx import Transformer
 from .schema_type_annotation import AnnotateTypesWithSchema
@@ -20,15 +21,31 @@ class NormalizeArgs(Transformer):
         traced = torch.fx.symbolic_trace(m)
         traced = NormalizeArgs(traced).transform()
     """
-    def __init__(self, module : torch.nn.Module, normalize_functionals : bool = True,
-                 normalize_modules : bool = True):
+    def __init__(self, module : torch.nn.Module):
         super().__init__(module)
-        self.normalize_functionals = normalize_functionals
-        self.normalize_modules = normalize_modules
+        self.node_map = {}
 
-    def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
+    def run_node(self, n: Node) -> Any:
+        args, kwargs = self.fetch_args_kwargs_from_env(n)
+
+        def get_type(arg):
+            if isinstance(arg, fx.Proxy):
+                old_meta = self.node_map[arg].meta
+                return old_meta['type'] if 'type' in old_meta else None
+            return create_type_hint(arg)
+
+        arg_types = [get_type(arg) for arg in args]
+        kwarg_types = {k: get_type(v) for k, v in kwargs.items()}
+        if n.op == 'call_function':
+            out = self.call_function(n.target, args, kwargs, arg_types, kwarg_types)
+        else:
+            out = super().run_node(n)
+        self.node_map[out] = n
+        return out
+
+    def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any], arg_types: Optional[Tuple[Any]] = None, kwarg_types : Optional[Dict[str, Any]] = None):
         assert callable(target)
-        new_kwargs = normalize_function(target, args, kwargs)  # type: ignore
+        new_kwargs = normalize_function(target, args, kwargs, arg_types, kwarg_types)  # type: ignore
         if new_kwargs:
             return self.tracer.create_proxy('call_function', target, (), new_kwargs)
         else:

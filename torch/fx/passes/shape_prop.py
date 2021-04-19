@@ -117,6 +117,11 @@ class ShapeProp(torch.fx.Interpreter):
         if found_tensor:
             n.meta['tensor_meta'] = meta
 
+        def create_type_hint(x):
+            if isinstance(x, tuple):
+                return Tuple[type(x), ...]
+            return type(x)
+        n.meta['type'] = create_type_hint(result)
         return result
 
     def propagate(self, *args):
