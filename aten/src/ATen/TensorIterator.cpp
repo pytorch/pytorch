@@ -1,4 +1,5 @@
 #include <ATen/native/TensorIterator.h>
+#include <c10/core/DeviceGuard.h>
 
 #include <array>
 #include <ATen/ExpandUtils.h>
@@ -211,7 +212,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   //   - determines if there are undefined outputs
   //   - determines if there are different dtypes and attempts
   //       to quickly acquire a common dtype
-  Device common_device = kCPU;
+  common_device_ = at::kCPU;
   common_dtype_ = ScalarType::Undefined;
   // NB: despite output_dtype's generic sounding name, it only is
   // used in a nontrivial way if check_all_same_dtype is true
@@ -245,8 +246,8 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     TORCH_INTERNAL_ASSERT(op.target_dtype == op.current_dtype)
 
     // Acquires the first non-CPU device (if any) as the common device
-    if (common_device == kCPU && !op.tensor.is_cpu()) {
-      common_device = op.tensor.device();
+    if (common_device_ == kCPU && !op.tensor.is_cpu()) {
+      common_device_ = op.tensor.device();
     }
 
     if (!op.is_output) {
@@ -322,7 +323,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   for (auto& op : operands_) {
     if (!op.is_type_defined()) {
       op.target_dtype = common_dtype_;
-      op.device = common_device;
+      op.device = common_device_;
       continue;
     }
 
@@ -334,16 +335,16 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     // Checks all tensors are on the same device, if requested
     if (config.check_all_same_device_) {
       // Handles CPU scalars on CUDA kernels that support them
-      if (!common_device.is_cpu() &&
+      if (!common_device_.is_cpu() &&
           config.allow_cpu_scalars_ && !op.is_output && op.tensor.dim() == 0 &&
           op.tensor.is_cpu()) {
         TORCH_CHECK(current_cpu_scalars_on_non_cpu < max_cpu_scalars_on_non_cpu,
                     "Trying to pass too many CPU scalars to non-CPU kernel!");
         ++current_cpu_scalars_on_non_cpu;
-      } else if (op.device != common_device) {
+      } else if (op.device != common_device_) {
         TORCH_CHECK(false,
                     "Expected all tensors to be on the same device, but "
-                    "found at least two devices, ", common_device, " and ", op.device, "!");
+                    "found at least two devices, ", common_device_, " and ", op.device, "!");
       }
     }
 
@@ -356,7 +357,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
 
     // Creates temporaries for CPU operations, if needed and requested
     // TODO: reuse temporaries when possible (e.g. for inplace operations)
-    if (common_device == kCPU) {
+    if (common_device_ == kCPU) {
       // Casts to outputs by creating temporaries of the correct dtype (if needed)
       // NB: we skip this on is_meta_, because the temporary allocation here is
       // unnecessary if we aren't going to actually do the compute
@@ -618,6 +619,8 @@ int TensorIteratorBase::num_reduce_dims() const {
 }
 
 void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
+  DeviceGuard device_guard(common_device_);
+
   int64_t numel = this->numel();
   if (numel == 0) {
     return;

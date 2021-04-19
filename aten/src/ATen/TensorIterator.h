@@ -432,6 +432,8 @@ protected:
   /// this matches the dtype of the output tensors, but not always!
   ScalarType common_dtype_ = ScalarType::Undefined;
 
+  Device common_device_ = at::kCPU;
+
   /// Set by split(), see should_accumulate() and is_final_output()
   bool accumulate_ = false;
   bool final_output_ = true;

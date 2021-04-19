@@ -65,7 +65,7 @@ void undefined_device_check_failure(at::CheckedFrom methodName, at::CheckedFrom 
 void common_device_check_failure(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName);
 
 inline void check_or_update_common_device(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
-  // TODO: This check should be done seperately
+  // TODO: This check should be done separately
   if (C10_UNLIKELY(!tensor.defined())) {
     undefined_device_check_failure(methodName, argName);
   }
