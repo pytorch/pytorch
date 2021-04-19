@@ -2632,6 +2632,20 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
 
     return samples
 
+def sample_inputs_tensordot(self, device, dtype, requires_grad, **kwargs):
+    cases = (
+        ((2, 2, 2), (2, 2, 2), (2)),
+        ((2, 2, 1), (2, 1, 2), ([0, 1], [2, 0])),
+    )
+    samples = []
+    for first_shape, second_shape, dims in cases:
+        samples.append(SampleInput(make_tensor(first_shape, device, dtype,
+                                   requires_grad=requires_grad),
+                       args=(make_tensor(second_shape, device, dtype,
+                             requires_grad=requires_grad),),
+                       kwargs=dict(dims=dims,)))
+    return tuple(samples)
+
 def sample_inputs_kron(op_info, device, dtype, requires_grad):
     test_cases = (
         ((S, S), (M, L)),
@@ -4582,19 +4596,27 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_kron),
     OpInfo('inner',
-           dtypes=floating_types(),
-           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           # BFloat16 support on CUDA requires CUDA 11 and SM53
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                           *[torch.bfloat16] if CUDA11OrLater else []),
-           dtypesIfROCM=floating_types_and(torch.half),
-           supports_out=True,
-           sample_inputs_func=sample_inputs_inner,
+           dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_inner),
+    OpInfo('tensordot',
+           dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           safe_casts_outputs=True,
+           sample_inputs_func=sample_inputs_tensordot,
            skips=(
-               # Reference Issue: https://github.com/pytorch/pytorch/issues/56022
-               # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               SkipInfo('TestCommon', 'test_out', dtypes=[torch.float32]),
-           )),
+               # Currently failing due to an INTERNAL_ASSERT_FAILED error.
+               # Reference: https://github.com/pytorch/pytorch/issues/56314
+               SkipInfo("TestCommon", "test_variant_consistency_jit", dtypes=[torch.float32]),
+               # Skip operator schema test because this is a functional and not an operator.
+               # Reference: https://github.com/pytorch/pytorch/issues/54574
+               SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           )
+           ),
     OpInfo('logcumsumexp',
            dtypes=floating_types_and(),
            dtypesIfCUDA=floating_types_and(torch.half),
