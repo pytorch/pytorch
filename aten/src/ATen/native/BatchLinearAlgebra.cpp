@@ -1698,15 +1698,8 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string
   }
 
   // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
-  auto infos_orgqr = at::empty({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cpu", [&]{
-    apply_orgqr<scalar_t>(q_working_copy, tau_working_copy, infos_orgqr, n_columns_q);
-  });
-  if (self.dim() > 2) {
-    batchCheckErrors(infos_orgqr, "qr_cpu");
-  } else {
-    singleCheckErrors(infos_orgqr.item().toInt(), "qr_cpu");
-  }
+  orgqr_stub(q_working_copy.device().type(), q_working_copy, tau_working_copy, n_columns_q);
+
   return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q), R);
 }
 
@@ -1754,11 +1747,10 @@ DEFINE_DISPATCH(orgqr_stub);
   * `input` - Tensor with the directions of the elementary reflectors below the diagonal.
   * `tau` - Tensor containing the magnitudes of the elementary reflectors.
   * `result` - result Tensor, which will contain the orthogonal (or unitary) matrix Q.
-  * `infos` - Tensor to store LAPACK/MAGMA error codes
 
   For further details, please see the LAPACK/MAGMA documentation.
 */
-Tensor& householder_product_out_info(const Tensor& input, const Tensor& tau, Tensor& result, Tensor& infos) {
+Tensor& householder_product_out_helper(const Tensor& input, const Tensor& tau, Tensor& result) {
   TORCH_INTERNAL_ASSERT(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT(input.size(-2) >= input.size(-1));
   TORCH_INTERNAL_ASSERT(input.size(-1) >= tau.size(-1));
@@ -1768,10 +1760,6 @@ Tensor& householder_product_out_info(const Tensor& input, const Tensor& tau, Ten
 
   TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
   TORCH_INTERNAL_ASSERT(result.device() == input.device());
-
-  TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
-  TORCH_INTERNAL_ASSERT(infos.device() == input.device());
-  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
@@ -1793,12 +1781,8 @@ Tensor& householder_product_out_info(const Tensor& input, const Tensor& tau, Ten
   // orgqr_stub (apply_orgqr) performs calculations in-place and result must be a copy of input
   result.copy_(input);
 
-  // infos must be contiguous
-  TORCH_INTERNAL_ASSERT(infos.is_contiguous());
-  infos.fill_(0);
-
   auto n = input.size(-1);
-  result = orgqr_stub(result.device().type(), result, tau_, infos, n);
+  result = orgqr_stub(result.device().type(), result, tau_, n);
   return result;
 }
 
@@ -1850,10 +1834,6 @@ Tensor& linalg_householder_product_out(const Tensor& input, const Tensor& tau, T
   //   "result shape ", result.sizes(), " does not match input shape ", input.sizes());
   // }
 
-  // cuSOLVER and MAGMA are used for CUDA inputs and cuSOLVER requires 'infos' to reside in GPU memory
-  // MAGMA path doesn't use it
-  auto infos = at::empty({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
-
   bool result_input_same_type = (result.scalar_type() == input.scalar_type());
   bool result_equal_expected_shape = result.sizes().equals(input.sizes());
   bool is_batched_column_major = false;
@@ -1868,20 +1848,14 @@ Tensor& linalg_householder_product_out(const Tensor& input, const Tensor& tau, T
   // we have to allocate a temporary tensor
   if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
-    result_tmp = householder_product_out_info(input, tau, result_tmp, infos);
+    result_tmp = householder_product_out_helper(input, tau, result_tmp);
     at::native::resize_output(result, result_tmp.sizes());
     result.copy_(result_tmp);
   } else {
     // use result's storage directly
-    result = householder_product_out_info(input, tau, result, infos);
+    result = householder_product_out_helper(input, tau, result);
   }
 
-  // Now check LAPACK/MAGMA error codes
-  if (result.dim() > 2) {
-    batchCheckErrors(infos, "torch.linalg.householder_product");
-  } else {
-    singleCheckErrors(infos.item().toInt(), "torch.linalg.householder_product");
-  }
   return result;
 }
 
