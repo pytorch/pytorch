@@ -84,7 +84,7 @@ class _FunctionalAdagrad(object):
                       grads,
                       state_sums,
                       state_steps,
-                      self.defaults['lr'],
-                      self.defaults['weight_decay'],
-                      self.defaults['lr_decay'],
-                      self.defaults['eps'])
+                      lr=self.defaults['lr'],
+                      weight_decay=self.defaults['weight_decay'],
+                      lr_decay=self.defaults['lr_decay'],
+                      eps=self.defaults['eps'])
