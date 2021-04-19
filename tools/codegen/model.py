@@ -378,11 +378,9 @@ class NativeFunction:
         if self.structured:
             assert self.func.kind() == SchemaKind.out, "Put structured field on the out= " \
                 "variant of a function; did you mean structured_delegate?"
-            assert self.device_guard, "device_guard: False is not respected by structured kernels"
         if self.structured_delegate:
             assert self.func.kind() != SchemaKind.out, "structured_delegate field not allowed " \
                 "on out= functions; did you mean structured?"
-            assert self.device_guard, "device_guard: False is not respected by structured kernels"
         # Technically, with the asserts above, this assert is impossible to
         # happen
         assert not (self.structured and self.structured_delegate), \
