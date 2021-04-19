@@ -1028,7 +1028,6 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
   m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
-  m.impl("conj", native::conj);
 
   // inplace operations
   m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);

@@ -154,11 +154,9 @@ def _scalar_str(self, formatter1, formatter2=None):
     # handle the negative bit
 
     if formatter2 is not None:
-        real_self = torch.view_as_real(self)
-        real_str = _scalar_str(real_self[0], formatter1)
-        imag = real_self[1]
-        imag_str = _scalar_str(imag, formatter2) + "j"
-        if imag < 0:
+        real_str = _scalar_str(self.real, formatter1)
+        imag_str = _scalar_str(self.imag, formatter2) + "j"
+        if self.imag < 0:
             return real_str + imag_str.lstrip()
         else:
             return real_str + "+" + imag_str.lstrip()
@@ -245,12 +243,8 @@ def _tensor_str(self, indent):
     if self.dtype.is_complex:
         # handle the conjugate bit
         self = self.resolve_conj()
-        real_self = torch.view_as_real(self)
-        real = real_self[..., 0]
-        imag = real_self[..., 1]
-        real_formatter = _Formatter(get_summarized_data(real) if summarize else real)
-        imag_formatter = _Formatter(
-            get_summarized_data(imag) if summarize else imag)
+        real_formatter = _Formatter(get_summarized_data(self.real) if summarize else self.real)
+        imag_formatter = _Formatter(get_summarized_data(self.imag) if summarize else self.imag)
         return _tensor_str_with_formatter(self, indent, summarize, real_formatter, imag_formatter)
     else:
         formatter = _Formatter(get_summarized_data(self) if summarize else self)
@@ -329,6 +323,29 @@ def _str_intern(inp):
         if values.numel() == 0:
             values_str += ', size=' + str(tuple(values.shape))
         tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
+    elif self.is_sparse_csr:
+        suffixes.append('size=' + str(tuple(self.shape)))
+        suffixes.append('nnz=' + str(self._nnz()))
+        if not has_default_dtype:
+            suffixes.append('dtype=' + str(self.dtype))
+        crow_indices_prefix = 'crow_indices=tensor('
+        crow_indices = self.crow_indices().detach()
+        crow_indices_str = _tensor_str(crow_indices, indent + len(crow_indices_prefix))
+        if crow_indices.numel() == 0:
+            crow_indices_str += ', size=' + str(tuple(crow_indices.shape))
+        col_indices_prefix = 'col_indices=tensor('
+        col_indices = self.col_indices().detach()
+        col_indices_str = _tensor_str(col_indices, indent + len(col_indices_prefix))
+        if col_indices.numel() == 0:
+            col_indices_str += ', size=' + str(tuple(col_indices.shape))
+        values_prefix = 'values=tensor('
+        values = self.values().detach()
+        values_str = _tensor_str(values, indent + len(values_prefix))
+        if values.numel() == 0:
+            values_str += ', size=' + str(tuple(values.shape))
+        tensor_str = crow_indices_prefix + crow_indices_str + '),\n' + ' ' * indent +\
+            col_indices_prefix + col_indices_str + '),\n' + ' ' * indent +\
+            values_prefix + values_str + ')'
     elif self.is_quantized:
         suffixes.append('size=' + str(tuple(self.shape)))
         if not has_default_dtype:

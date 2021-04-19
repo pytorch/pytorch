@@ -36,6 +36,11 @@ namespace meta {
 // extra error checking/have a different signature, etc.
 CREATE_UNARY_META_FUNC(sin)
 CREATE_UNARY_META_FUNC(sinc)
+CREATE_UNARY_META_FUNC(sinh)
+CREATE_UNARY_META_FUNC(cosh)
+CREATE_UNARY_META_FUNC(acosh)
+CREATE_UNARY_META_FUNC(cos)
+CREATE_UNARY_META_FUNC(special_i0e)
 
 } // namespace meta
 
@@ -253,14 +258,35 @@ Tensor real(const Tensor& self) {
   }
 }
 
+Tensor neg_view(const Tensor& self) {
+  Tensor self_;
+  auto impl = c10::make_intrusive<TensorImpl>(
+    Storage(self.storage()), self.key_set(), self.dtype());
+  impl->set_storage_offset(self.storage_offset());
+  impl->set_sizes_and_strides(self.sizes(), self.strides());
+  impl->set_neg(!self.is_neg());
+  self_ = Tensor(std::move(impl));
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
     auto real_tensor = at::view_as_real_physical(self);
-    auto true_real_tensor = self.is_conj() ? real_tensor.neg() : real_tensor;
+    auto true_real_tensor = self.is_conj() ? real_tensor.neg_view() : real_tensor;
     return at::select(true_real_tensor, real_tensor.dim() - 1, 1);
   } else {
     TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
   }
+}
+
+// No op if the neg bit is not set
+// else returns a new negated tensor with neg bit set to 0
+Tensor resolve_neg(const Tensor& self) {
+  if (!self.is_neg()) { return self; }
+  auto result = at::empty_like(self, self.options());
+  // negation is handled in `copy_()`
+  return result.copy_(self);
 }
 
 Tensor resolve_conj(const Tensor& self) {
@@ -369,6 +395,10 @@ Tensor& i0_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(re
 Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
 Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
+TORCH_IMPL_FUNC(special_i0e_out) (const Tensor& self, const Tensor& result) {
+  i0e_stub(device_type(), *this);
+}
+
 Tensor& log_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, log_stub); }
 Tensor log(const Tensor& self) { return unary_op_impl_float(self, log_stub); }
 Tensor& log_(Tensor& self) { return unary_op_impl_(self, at::log_out); }
@@ -425,24 +455,11 @@ Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
 CREATE_UNARY_TORCH_IMPL_FUNC(sin)
-
-Tensor& cos_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cos_stub); }
-Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
-Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
-
+CREATE_UNARY_TORCH_IMPL_FUNC(cos)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
-
-Tensor& sinh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, sinh_stub); }
-Tensor sinh(const Tensor& self) { return unary_op_impl_float(self, sinh_stub); }
-Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
-
-Tensor& cosh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cosh_stub); }
-Tensor cosh(const Tensor& self) { return unary_op_impl_float(self, cosh_stub); }
-Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
-
-Tensor& acosh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, acosh_stub); }
-Tensor acosh(const Tensor& self) { return unary_op_impl_float(self, acosh_stub); }
-Tensor& acosh_(Tensor& self) { return unary_op_impl_(self, at::acosh_out); }
+CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
+CREATE_UNARY_TORCH_IMPL_FUNC(cosh)
+CREATE_UNARY_TORCH_IMPL_FUNC(acosh)
 
 // arccosh, alias for acosh
 Tensor& arccosh_out(const Tensor& self, Tensor& result) { return at::acosh_out(result, self); }
@@ -578,24 +595,7 @@ Tensor& neg_out(const Tensor& self, Tensor& result) {
   return unary_op_impl_out(result, self, neg_stub);
 }
 
-Tensor resolve_neg(const Tensor& self) {
-  if (!self.is_neg()) { return self; }
-  auto result = at::empty_like(self, self.options());
-  // negation is handled in `copy_()`
-  return result.copy_(self);
-}
-
-Tensor neg(const Tensor& self) {
-  Tensor self_;
-  auto impl = c10::make_intrusive<TensorImpl>(
-    Storage(self.storage()), self.key_set(), self.dtype());
-  impl->set_storage_offset(self.storage_offset());
-  impl->set_sizes_and_strides(self.sizes(), self.strides());
-  impl->set_neg(!self.is_neg());
-  self_ = Tensor(std::move(impl));
-  namedinference::propagate_names(self_, self);
-  return self_;
-}
+Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
 
 Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
@@ -851,6 +851,7 @@ DEFINE_DISPATCH(floor_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-
 DEFINE_DISPATCH(frac_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(frexp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(i0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(i0e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log10_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log1p_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -876,5 +877,6 @@ DEFINE_DISPATCH(tanh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(trigamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(trunc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lgamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
 } // namespace native
 } // namespace at

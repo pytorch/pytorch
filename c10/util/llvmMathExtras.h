@@ -10,8 +10,7 @@
  //
  //===----------------------------------------------------------------------===//
 
- #ifndef LLVM_SUPPORT_MATHEXTRAS_H
- #define LLVM_SUPPORT_MATHEXTRAS_H
+ #pragma once
 
  #include <algorithm>
  #include <cassert>
@@ -55,6 +54,7 @@
  }
  #endif
 
+ namespace c10 {
  namespace llvm {
  /// The behavior an operation has on an input of 0.
  enum ZeroBehavior {
@@ -862,5 +862,4 @@
  /// Use this rather than HUGE_VALF; the latter causes warnings on MSVC.
  extern const float huge_valf;
  } // End llvm namespace
-
- #endif
+ } // End c10 namespace
