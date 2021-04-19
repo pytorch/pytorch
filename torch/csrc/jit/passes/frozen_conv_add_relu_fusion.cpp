@@ -21,13 +21,15 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 #if AT_CUDNN_ENABLED()
   SubgraphRewriter rewriter;
 
-  // TODO: fix CUDNN conv1d and conv3d failure
-  std::array<std::string, 1> conv_operators = {"conv2d"};
+  // CUDNN does not support conv1d
+  std::array<std::string, 2> conv_operators = {"conv2d", "conv3d"};
+  std::array<std::string, 2> add_operators = {"add", "add_"};
+  std::array<std::string, 2> relu_operators = {"relu", "relu_"};
 
   auto conv_relu_rstring = CodeTemplate(R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
       %x = aten::${conv}(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
-      %res = aten::relu(%x)
+      %res = aten::${relu}(%x)
       return (%res))");
 
   std::string conv_relu_fused = R"(
@@ -38,8 +40,8 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
   auto conv_add_relu_rstring = CodeTemplate(R"(
     graph(%input, %weight, %bias, %z, %alpha, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
       %x = aten::${conv}(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
-      %y = aten::add(%x, %z, %alpha)
-      %res = aten::relu(%y)
+      %y = aten::${add}(%x, %z, %alpha)
+      %res = aten::${relu}(%y)
       return (%res))");
 
   std::string conv_add_relu_fused = R"(
@@ -48,12 +50,18 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
         return (%res))";
 
   for (const auto& conv : conv_operators) {
-    TemplateEnv env;
-    env.s("conv", conv);
-    rewriter.RegisterRewritePattern(
-        conv_relu_rstring.format(env), conv_relu_fused);
-    rewriter.RegisterRewritePattern(
-        conv_add_relu_rstring.format(env), conv_add_relu_fused);
+    for (const auto& relu : relu_operators) {
+      TemplateEnv env;
+      env.s("conv", conv);
+      env.s("relu", relu);
+      rewriter.RegisterRewritePattern(
+          conv_relu_rstring.format(env), conv_relu_fused);
+      for (const auto& add : add_operators) {
+        env.s("add", add);
+        rewriter.RegisterRewritePattern(
+            conv_add_relu_rstring.format(env), conv_add_relu_fused);
+      }
+    }
   }
 
   auto filter = [](const Match& match,
@@ -97,9 +105,6 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
   // Convert _convolution and in-place operators for simpler replacement pattern
   // matching
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
-  RemoveTensorMutation(graph, [](Node* node) {
-    return node->kind() == aten::add_ || node->kind() == aten::relu_;
-  });
 
   rewriter.runOnGraph(graph, filter);
 #endif

@@ -120,13 +120,20 @@ class _Namespace:
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
+        match = self._name_suffix_regex.match(candidate)
+        if match is None:
+            base = candidate
+            num = None
+        else:
+            base, num_str = match.group(1, 2)
+            num = int(num_str)
+
+        candidate = base if num is None else f'{base}_{num}'
+        num = num if num else 0
+
         while candidate in self._used_names or self._is_illegal_name(candidate, obj):
-            match = self._name_suffix_regex.match(candidate)
-            if match is None:
-                candidate = candidate + '_1'
-            else:
-                base, num = match.group(1, 2)
-                candidate = f'{base}_{int(num) + 1}'
+            num += 1
+            candidate = f'{base}_{num}'
 
         self._used_names.setdefault(candidate)
         if obj is None:

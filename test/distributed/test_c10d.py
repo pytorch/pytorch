@@ -1,4 +1,5 @@
 import copy
+import logging
 import math
 import operator
 import os
@@ -46,6 +47,7 @@ from torch.testing._internal.common_distributed import (
     simple_sparse_reduce_tests,
     skip_if_win32,
     create_device,
+    with_dist_debug_levels,
     with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
@@ -594,6 +596,24 @@ class RendezvousEnvTest(TestCase):
 
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
+
+    @retry_on_connect_failures
+    def test_logging_init(self):
+        os.environ["WORLD_SIZE"] = "1"
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = str(common.find_free_port())
+        os.environ["RANK"] = "0"
+
+        previous_handlers = logging.root.handlers
+
+        c10d.init_process_group(backend="gloo", init_method="env://")
+
+        current_handlers = logging.root.handlers
+        self.assertEqual(len(previous_handlers), len(current_handlers))
+        for current, previous in zip(current_handlers, previous_handlers):
+            self.assertEqual(current, previous)
+
+        c10d.destroy_process_group()
 
 
 class RendezvousFileTest(TestCase):
@@ -2700,8 +2720,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         Note: this test can be sped up by only running it on a CPU module
         once DistributedDataParallel supports them.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        torch.cuda.set_device(self.rank)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            init_method=f"file://{self.file_name}"
+        )
+        process_group = c10d.distributed_c10d._get_default_group()
 
         class FindUnusedParametersModule(nn.Module):
             def __init__(self):
@@ -2727,6 +2753,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             device_id
         )
 
+        ddp_model = None
+
         def test_find_unused_parameters(
             find_unused_parameters, test_default=False, gradient_as_bucket_view=False
         ):
@@ -2745,6 +2773,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                     find_unused_parameters=find_unused_parameters,
                     gradient_as_bucket_view=gradient_as_bucket_view,
                 )
+            nonlocal ddp_model
+            ddp_model = model
 
             output, fc3 = model(input)
             output = fc3(output)
@@ -2760,10 +2790,30 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             )
         except Exception as ex:
             self.assertTrue(
-                str(ex).startswith("Expected to mark a variable ready only once.")
+                str(ex).startswith(
+                    "Expected to mark a variable ready only once.",
+                )
             )
+            unused_index = 2
+            unused_index_str = f"Parameter at index {unused_index}"
+            model = ddp_model.module
+            for module_name, module in model.named_modules():
+                if module == model.fc3:
+                    for parameter_name, _ in module.named_parameters(
+                        recurse=False
+                    ):
+                        unused_fqn = f"{module_name}.{parameter_name}"
+                        # Only one such parameter in model.fc3, since bias=False
+                        break
+
+            if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
+                unused_index_str += f" with name {unused_fqn}"
+
+            self.assertTrue(unused_index_str in str(ex))
         else:
             self.fail("Expected exception")
+
+        dist.barrier(process_group)
 
         # Then test that the default behavior can be overridden by setting
         # `find_unused_parameters=False`.
@@ -2782,14 +2832,42 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         except Exception as ex:
             self.fail("Unexpected exception: %s" % ex)
 
+    # TODO: Combine the following tests once https://github.com/pytorch/pytorch/issues/55967
+    # is resolved.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_find_unused_parameters_kwarg(self):
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_find_unused_parameters_kwarg_debug_detail(self):
         self._test_find_unused_parameters_kwarg()
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_find_unused_parameters_kwarg_grad_is_view(self):
+    @with_dist_debug_levels(levels=["INFO"])
+    def test_find_unused_parameters_kwarg_debug_info(self):
+        self._test_find_unused_parameters_kwarg()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_find_unused_parameters_kwarg_debug_off(self):
+        self._test_find_unused_parameters_kwarg()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_find_unused_parameters_kwarg_grad_is_view_debug_detail(self):
+        self._test_find_unused_parameters_kwarg(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["INFO"])
+    def test_find_unused_parameters_kwarg_grad_is_view_debug_info(self):
+        self._test_find_unused_parameters_kwarg(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_find_unused_parameters_kwarg_grad_is_view_debug_off(self):
         self._test_find_unused_parameters_kwarg(gradient_as_bucket_view=True)
 
     def _test_global_local_unused_params_grad(self, gradient_as_bucket_view=False):
