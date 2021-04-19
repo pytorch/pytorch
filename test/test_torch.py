@@ -2,12 +2,14 @@
 import torch
 import numpy as np
 
+import contextlib
 import io
 import inspect
 import math
 import random
 import re
 import copy
+import os
 import tempfile
 import unittest
 import warnings
@@ -2880,6 +2882,39 @@ def add_neg_dim_tests():
 
         assert not hasattr(AbstractTestCases._TestTorchMixin, test_name), "Duplicated test name: " + test_name
         setattr(AbstractTestCases._TestTorchMixin, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
+
+
+@contextlib.contextmanager
+def torch_vital_set(value):
+    stash = None
+    if 'TORCH_VITAL' in os.environ:
+        stash = os.environ['TORCH_VITAL']
+    os.environ['TORCH_VITAL'] = value
+    try:
+        yield
+    finally:
+        if stash:
+            os.environ['TORCH_VITAL'] = stash
+        else:
+            del os.environ['TORCH_VITAL']
+
+
+# Tests Vital Signs for Torch
+class TestVitalSigns(TestCase):
+    def test_basic_vitals(self):
+        with torch_vital_set(''):
+            self.assertFalse(torch.vitals_enabled())
+        with torch_vital_set('ON'):
+            self.assertTrue(torch.vitals_enabled())
+
+    def test_write_vital(self):
+        with torch_vital_set('ON'):
+            self.assertTrue(torch.vitals_enabled())
+            # This tests the code path of setting a vital
+            self.assertTrue(torch.set_vital('Dataloader', 'basic_unit_test', 'TEST'))
+            # Ideally we would have a read test for vitals, though because the the C++ design
+            # pattern of loggers we use, we can't know the whole list of vitals until the
+            # global C++ namespace is destructed.
 
 
 # Device-generic tests. Instantiated below and not run directly.
@@ -7134,17 +7169,6 @@ tensor_op_tests = [
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [tf32_on_and_off(0.01), _wrap_warn_once("This overload of addmm_? is deprecated")]),
-    ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
-        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types,
-        True, [], 0, True),
-    ('addmv', 'scalar', _medium_1d,
-        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
-        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
-        [_wrap_warn_once("This overload of addmv_? is deprecated")]),
-    ('addmv', 'two_scalars', _medium_1d,
-        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
-        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
-        [_wrap_warn_once("This overload of addmv_? is deprecated")]),
     ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _types, _types_no_half),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
     ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
@@ -7174,14 +7198,6 @@ tensor_op_tests = [
     ('dot', '', _medium_1d, lambda t, d: [_medium_1d(t, d)],
         1e-2, 1e-5, 1e-5, _float_types + _complex_types, _cpu_types, False),
     ('element_size', '', _medium_1d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
-    ('eq', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
-    ('eq', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)], 1e-5, 1e-5, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
-    ('ne', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
-    ('ne', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)], 1e-5, 1e-5, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
     ('equal', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('equal', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -7195,14 +7211,6 @@ tensor_op_tests = [
     ('lcm', '', _small_3d, lambda t, d: [_small_3d(t, d)], 0, 0, 0,
      [torch.int16, torch.int32, torch.int64],
      [torch.int16, torch.int32, torch.int64], True, [onlyOnCPUAndCUDA]),
-    ('ge', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
-    ('le', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
-    ('gt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
-    ('lt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
     ('is_contiguous', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     # TODO: can't check negative case - cross-device copy is contiguous
     ('is_same_size', 'negative', _medium_2d, lambda t, d: [_small_3d(t, d)],
