@@ -8097,7 +8097,48 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.std, r"""
-std(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
+std(input, dim=None, *, correction=1, keepdim=False, out=None) -> Tensor
+
+Calculates the standard deviation over the dimensions specified by :attr:`dim`.
+:attr:`dim` can be a single dimension, list of dimensions, or ``None`` to
+reduce over all dimensions.
+
+The standard deviation (:math:`\sigma`) is calculated as
+
+.. math:: \sigma = \sqrt{\frac{1}{N - \delta N}\sum_{i=0}^{N-1}(x_i-\bar{x})^2}
+
+where :math:`x` is the sample set of elements, :math:`\bar{x}` is the
+sample mean, :math:`N` is the number of samples and :math:`\delta N` is
+the :attr:`correction`.
+""" + r"""
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+
+Keyword args:
+    correction (int): difference between the sample size and sample degrees of freedom.
+                      Defaults to Bessel's correction, ``correction = 1``.
+    {keepdim}
+    {out}
+
+Example::
+
+    >>> a = torch.tensor(
+            [[ 0.2035,  1.2959,  1.8101, -0.4644],
+             [ 1.5027, -0.3270,  0.5905,  0.6538],
+             [-1.5745,  1.3330, -0.5596, -0.6548],
+             [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    >>> torch.std(a, dim=1, keepdim=True)
+    tensor([[1.0311],
+            [0.7477],
+            [1.2204],
+            [0.9087]])
+
+.. function:: std(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
+   :noindex:
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used.
 Otherwise, the sample deviation is calculated, without any correction.
@@ -8133,7 +8174,49 @@ Example::
 
 add_docstr(torch.std_mean,
            r"""
-std_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
+std_mean(input, dim=None, *, correction=1, keepdim=False, out=None) -> (Tensor, Tensor)
+
+Calculates the standard deviation and mean over the dimensions specified by
+:attr:`dim`. :attr:`dim` can be a single dimension, list of dimensions, or
+``None`` to reduce over all dimensions.
+
+The standard deviation (:math:`\sigma`) is calculated as
+
+.. math:: \sigma = \sqrt{\frac{1}{N - \delta N}\sum_{i=0}^{N-1}(x_i-\bar{x})^2}
+
+where :math:`x` is the sample set of elements, :math:`\bar{x}` is the
+sample mean, :math:`N` is the number of samples and :math:`\delta N` is
+the :attr:`correction`.
+
+""" + r"""
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+
+Keyword args:
+    correction (int): difference between the sample size and sample degrees of freedom.
+                      Defaults to Bessel's correction, ``correction = 1``.
+    {keepdim}
+    {out}
+
+Returns:
+    A tuple (std, mean) containing the standard deviation and mean.
+
+Example::
+
+    >>> a = torch.tensor(
+            [[ 0.2035,  1.2959,  1.8101, -0.4644],
+             [ 1.5027, -0.3270,  0.5905,  0.6538],
+             [-1.5745,  1.3330, -0.5596, -0.6548],
+             [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    >>> torch.std_mean(a, dim=0, keepdim=True)
+    (tensor([[1.2620, 1.0028, 1.0957, 0.6038]]),
+     tensor([[ 0.0645,  0.4485,  0.8707, -0.0665]]))
+
+.. function:: std_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
    :noindex:
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
@@ -9326,7 +9409,48 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.var, r"""
-var(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
+var(input, dim=None, *, correction=1, keepdim=False, out=None) -> Tensor
+
+Calcualtes the variance over the dimensions specified by :attr:`dim`. :attr:`dim`
+can be a single dimension, list of dimensions, or ``None`` to reduce over all
+dimensions.
+
+The variance (:math:`\sigma^2`) is calculated as
+
+.. math:: \sigma^2 = \frac{1}{N - \delta N}\sum_{i=0}^{N-1}(x_i-\bar{x})^2
+
+where :math:`x` is the sample set of elements, :math:`\bar{x}` is the
+sample mean, :math:`N` is the number of samples and :math:`\delta N` is
+the :attr:`correction`.
+""" + r"""
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+
+Keyword args:
+    correction (int): difference between the sample size and sample degrees of freedom.
+                      Defaults to Bessel's correction, ``correction = 1``.
+    {keepdim}
+    {out}
+
+Example::
+
+    >>> a = torch.tensor(
+            [[ 0.2035,  1.2959,  1.8101, -0.4644],
+             [ 1.5027, -0.3270,  0.5905,  0.6538],
+             [-1.5745,  1.3330, -0.5596, -0.6548],
+             [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    >>> torch.var(a, dim=1, keepdim=True)
+    tensor([[1.0631],
+            [0.5590],
+            [1.4893],
+            [0.8258]])
+
+.. function:: var(input, dim, unbiased, keepdim=False, *, out=None) -> Tensor
+   :noindex:
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used.
 Otherwise, the sample variance is calculated, without any correction.
@@ -9361,7 +9485,48 @@ Example::
 
 add_docstr(torch.var_mean,
            r"""
-var_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
+var_mean(input, dim=None, *, correction=1, keepdim=False, out=None) -> (Tensor, Tensor)
+
+Calculates the variance and mean over the dimensions specified by :attr:`dim`.
+:attr:`dim` can be a single dimension, list of dimensions, or ``None`` to
+reduce over all dimensions.
+
+The variance (:math:`\sigma^2`) is calculated as
+
+.. math:: \sigma^2 = \frac{1}{N - \delta N}\sum_{i=0}^{N-1}(x_i-\bar{x})^2
+
+where :math:`x` is the sample set of elements, :math:`\bar{x}` is the
+sample mean, :math:`N` is the number of samples and :math:`\delta N` is
+the :attr:`correction`.
+""" + r"""
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+
+Keyword args:
+    correction (int): difference between the sample size and sample degrees of freedom.
+                      Defaults to Bessel's correction, ``correction = 1``.
+    {keepdim}
+    {out}
+
+Returns:
+    A tuple (var, mean) containing the variance and mean.
+
+Example::
+
+    >>> a = torch.tensor(
+            [[ 0.2035,  1.2959,  1.8101, -0.4644],
+             [ 1.5027, -0.3270,  0.5905,  0.6538],
+             [-1.5745,  1.3330, -0.5596, -0.6548],
+             [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    >>> torch.var_mean(a, dim=0, keepdim=True)
+    (tensor([[1.5926, 1.0056, 1.2005, 0.3646]]),
+     tensor([[ 0.0645,  0.4485,  0.8707, -0.0665]]))
+
+.. function:: var_mean(input, dim, unbiased, keepdim=False, *, out=None) -> (Tensor, Tensor)
    :noindex:
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used to calculate
