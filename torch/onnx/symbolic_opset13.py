@@ -72,7 +72,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
 
     sizes = self.type().sizes()
     if sizes is not None and sizes[dim] is not None:
-        size = self.type().sizes()[dim]
+        size = sizes[dim]
     else:
         if _outputs is not None:
             size = split_size * _outputs
