@@ -94,6 +94,7 @@ def split_module(
         partition = partitions[partition_name]
         for input in partition.inputs:
             placeholder = partition.graph.placeholder(input)
+            placeholder.meta = orig_nodes[input].meta.copy()
             partition.environment[orig_nodes[input]] = placeholder
 
     # Transform nodes and collect targets for partition's submodule
@@ -123,6 +124,7 @@ def split_module(
             assert isinstance(gathered_kwargs, dict)
             new_node = partition.graph.create_node(op=node.op, target=target, args=gathered_args,
                                                    kwargs=gathered_kwargs)
+            new_node.meta = node.meta.copy()
             partition.environment[node] = new_node
 
     # Set up values to construct base module
