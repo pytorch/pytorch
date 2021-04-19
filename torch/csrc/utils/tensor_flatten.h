@@ -8,10 +8,13 @@
 
 namespace torch { namespace utils {
 
-inline int64_t type_id(const at::Tensor& tensor) {
-  return static_cast<int64_t>(tensor.options().backend()) *
-      static_cast<int64_t>(at::ScalarType::NumOptions) +
-      static_cast<int64_t>(tensor.scalar_type());
+/// Generate an ID for a combination of tensor backend + scalar type to be used
+/// when ordering tensors ('like' tensors are grouped by pulling out their
+/// backend + scalar type, so this function combines that into a single number)
+inline size_t type_id(const at::Tensor& tensor) {
+  return static_cast<size_t>(tensor.options().backend()) *
+      static_cast<size_t>(at::ScalarType::NumOptions) +
+      static_cast<size_t>(tensor.scalar_type());
 }
 
 inline at::Tensor flatten_dense_tensors(at::TensorList tensors) {
