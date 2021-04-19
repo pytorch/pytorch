@@ -7013,6 +7013,7 @@ Args:
         Can be a variable number of arguments or a collection like a list or tuple.
 
 Keyword args:
+    {generator}
     {out}
     {dtype}
     {layout}
@@ -7139,6 +7140,7 @@ Args:
         Can be a variable number of arguments or a collection like a list or tuple.
 
 Keyword args:
+    {generator}
     {out}
     {dtype}
     {layout}
