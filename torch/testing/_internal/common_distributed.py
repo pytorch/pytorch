@@ -21,7 +21,7 @@ import torch.distributed as c10d
 import torch.cuda.nccl
 
 from functools import partial, reduce
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA, find_free_port
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA, find_free_port, retry_on_connect_failures
 
 logger = logging.getLogger(__name__)
 
@@ -224,21 +224,13 @@ def skip_if_win32():
         "This unit test case is not supportted on Windows platform",
     )
 
+@retry_on_connect_failures
 def create_tcp_store(addr="localhost", world_size=1, wait_for_workers=True):
     """
     Creates a TCP store. Retries if the chosen port is already in use.
     """
-    ports = []
-    for _ in range(10):
-        try:
-            port = find_free_port()
-            ports.append(port)
-            return c10d.TCPStore(addr, port, world_size, True, wait_for_workers=wait_for_workers)
-        except RuntimeError as error:
-            if str(error) == "Address already in use":
-                continue
-            raise
-    raise RuntimeError("Unable to find free port (tried %s)" % ", ".join(ports))
+    port = find_free_port()
+    return c10d.TCPStore(addr, port, world_size, True, wait_for_workers=wait_for_workers)
 
 TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
