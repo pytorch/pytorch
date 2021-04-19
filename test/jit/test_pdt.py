@@ -61,6 +61,15 @@ def test_multiple_types_2(a):
     assert a is not None
     return a
 
+class M1:
+    def fn(a):  # noqa B902
+        return a
+
+class M2:
+    def fn(a):  # noqa B902
+        assert a is not None
+        return a
+
 class TestPDT(JitTestCase):
     """
     A suite of tests for profile directed typing in TorchScript.
@@ -134,3 +143,13 @@ class TestPDT(JitTestCase):
         self.assertEqual(scripted_fn_2([10, 11, 14]), test_multiple_types_2([10, 11, 14]))
         self.assertEqual(scripted_fn_2(False), test_multiple_types_2(False))
         self.assertEqual(scripted_fn_2({"abc" : True, "def": False}), test_multiple_types_2({"abc" : True, "def": False}))
+
+    def test_class_methods(self):
+        scripted_fn = torch.jit._script_pdt(M1.fn, example_inputs=[(10, )])
+        self.assertEqual(scripted_fn(M1.fn(2)), M1.fn(2))  # type: ignore[arg-type]
+
+    def test_class_methods_all_types(self):
+        scripted_fn = torch.jit._script_pdt(M2.fn, example_inputs=[(10, ), (True, ), ({"abc" : True, "def": False}, )])
+        self.assertEqual(scripted_fn(M2.fn(2)), M2.fn(2))  # type: ignore[arg-type]
+        self.assertEqual(scripted_fn(M2.fn(False)), M2.fn(False))  # type: ignore[arg-type]
+        self.assertEqual(scripted_fn(M2.fn({"a": [1]})), M2.fn({"a": [1]}))  # type: ignore[arg-type]
