@@ -90,7 +90,5 @@ using binary_fn = void (*)(TensorIterator&);
 DECLARE_DISPATCH(binary_fn, complex_stub);
 DECLARE_DISPATCH(binary_fn, polar_stub);
 
-DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t, const double), kaiser_window_stub);
-
 } // namespace native
 } // namespace at

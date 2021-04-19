@@ -4,6 +4,7 @@ import inspect
 import re
 import builtins
 import torch
+import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
@@ -249,13 +250,9 @@ def try_real_annotations(fn, loc):
     if all(ann is sig.empty for ann in all_annots):
         return None
 
-    def as_ann(ann):
-        # sig.empty is really annoying so convert it to None
-        return ann if ann is not sig.empty else None
-
-    arg_types = [ann_to_type(as_ann(p.annotation), loc)
+    arg_types = [ann_to_type(p.annotation, loc)
                  for p in sig.parameters.values()]
-    return_type = ann_to_type(as_ann(sig.return_annotation), loc)
+    return_type = ann_to_type(sig.return_annotation, loc)
     return arg_types, return_type
 
 
@@ -275,11 +272,29 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
     # feature request if you find it necessary.
     return torch._C.unify_type_list(ir_types)
 
+def is_tensor(ann):
+
+    if issubclass(ann, torch.Tensor):
+        return True
+
+    if issubclass(ann, (torch.LongTensor, torch.DoubleTensor, torch.FloatTensor,
+                        torch.IntTensor, torch.ShortTensor, torch.HalfTensor,
+                        torch.CharTensor, torch.ByteTensor, torch.BoolTensor)):
+        warnings.warn("TorchScript will treat type annotations of Tensor "
+                      "dtype-specific subtypes as if they are normal Tensors. "
+                      "dtype constraints are not enforced in compilation either.")
+        return True
+
+    return False
+
+
 
 def try_ann_to_type(ann, loc):
-    if ann is None:
+    if ann is inspect.Signature.empty:
         return TensorType.getInferred()
-    if inspect.isclass(ann) and issubclass(ann, torch.Tensor):
+    if ann is None:
+        return NoneType.get()
+    if inspect.isclass(ann) and is_tensor(ann):
         return TensorType.get()
     if is_tuple(ann):
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])

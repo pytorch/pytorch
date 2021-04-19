@@ -65,7 +65,7 @@ TypePtr ScriptTypeParser::subscriptToType(
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return OptionalType::create(elem_type);
 
-  } else if (typeName == "Future") {
+  } else if (typeName == "Future" || typeName == "torch.jit.Future") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
           << " expected exactly one element type but found "
@@ -209,9 +209,20 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
     case '.': {
       auto select = Select(expr);
       const std::string& name = select.selector().name();
-      // Special case for torch.Tensor
-      if (isTorch(select.value()) && name == "Tensor") {
-        return "Tensor";
+      // Special case for torch.Tensor and its' subclasses
+      const std::unordered_set<std::string> tensor_subtypes = {
+          "Tensor",
+          "LongTensor",
+          "FloatTensor",
+          "DoubleTensor",
+          "IntTensor",
+          "ShortTensor",
+          "HalfTensor",
+          "CharTensor",
+          "ByteTensor",
+          "BoolTensor"};
+      if (isTorch(select.value()) && tensor_subtypes.count(name) == 1) {
+        return name;
       } else {
         // Otherwise, it's a fully qualified class name
         return collectQualname(select);
