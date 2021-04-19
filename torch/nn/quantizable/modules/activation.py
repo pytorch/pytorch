@@ -59,18 +59,21 @@ class MultiheadAttention(nn.MultiheadAttention):
     def __init__(self, embed_dim: int, num_heads: int,
                  dropout: float = 0., bias: bool = True,
                  add_bias_kv: bool = False, add_zero_attn: bool = False,
-                 kdim: int = None, vdim: int = None, batch_first: bool = False):
+                 kdim: int = None, vdim: int = None, batch_first: bool = False,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(MultiheadAttention, self).__init__(embed_dim, num_heads, dropout,
                                                  bias, add_bias_kv,
-                                                 add_zero_attn, kdim, vdim, batch_first)
-        self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
-        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias)
-        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias)
+                                                 add_zero_attn, kdim, vdim, batch_first,
+                                                 **factory_kwargs)
+        self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)
+        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias, **factory_kwargs)
+        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias, **factory_kwargs)
 
         # TODO: The use of the `_LinearWithBias` increases the quantization noise
         # The `out_proj` in the parent is ``_LinearWithBias`, so need to ignore
         # the type for mypy not to complain.
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)  # type: ignore
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)  # type: ignore
 
         # Functionals
         self.q_scaling_product = nnq.FloatFunctional()
