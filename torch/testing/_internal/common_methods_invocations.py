@@ -3467,7 +3467,7 @@ op_db: List[OpInfo] = [
                    supports_autograd=False),
     UnaryUfuncInfo('special.i0e',
                    aten_name='special_i0e',
-                   ref=scipy.special.i0e,
+                   ref=scipy.special.i0e if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 3e-1}),),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
