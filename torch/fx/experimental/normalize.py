@@ -27,7 +27,8 @@ class NormalizeArgs(Transformer):
         self.normalize_modules = normalize_modules
 
     def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
-        new_kwargs = normalize_function(target, args, kwargs)
+        assert callable(target)
+        new_kwargs = normalize_function(target, args, kwargs)  # type: ignore
         if new_kwargs:
             return self.tracer.create_proxy('call_function', target, (), new_kwargs)
         else:
@@ -35,7 +36,7 @@ class NormalizeArgs(Transformer):
 
     def call_module(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
         assert isinstance(target, str)
-        new_kwargs = normalize_module(self.module, target, args, kwargs)
+        new_kwargs = normalize_module(self.module, target, args, kwargs)  # type: ignore
         if new_kwargs:
             return super().call_module(target, (), new_kwargs)
         else:

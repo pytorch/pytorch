@@ -453,7 +453,7 @@ class Node:
         `args/kwargs` will be matched up to the module/functional's
         signature and return exclusively kwargs in positional order.
         Also populates default values. Does not support positional-only
-        parameters or varargs parameters (*args, **kwargs).
+        parameters or varargs parameters.
 
         Supports module calls.
 
@@ -469,11 +469,11 @@ class Node:
             Returns normalized_kwargs, or `None` if not successful.
         """
         if self.op == 'call_function':
-            assert isinstance(self.target, Callable)  # type: ignore
+            assert callable(self.target)
             return normalize_function(self.target, self.args, self.kwargs, arg_types, kwarg_types)  # type: ignore
         elif self.op == 'call_module':
             assert isinstance(self.target, str)
-            return normalize_module(root, self.target, self.args, self.kwargs)
+            return normalize_module(root, self.target, self.args, self.kwargs)  # type: ignore
 
         return None
 

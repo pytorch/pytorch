@@ -222,7 +222,7 @@ def normalize_function(
     return new_kwargs
 
 def normalize_module(
-        root: torch.nn.Module, target: Callable, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        root: torch.nn.Module, target: str, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
     Returns normalized arguments to PyTorch modules. This means that
     `args/kwargs` will be matched up to the functional's
@@ -249,6 +249,8 @@ def normalize_module(
         classname = submod.__class__.__name__
         if getattr(torch.nn, classname, None) == submod.__class__:
             sig = inspect.signature(inspect.unwrap(submod.forward))
+            if kwargs is None:
+                kwargs = {}
             new_kwargs = _args_kwargs_to_normalized_kwargs(sig, args, kwargs)
             return new_kwargs
     return None
