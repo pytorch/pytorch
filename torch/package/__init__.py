@@ -1,3 +1,4 @@
+from .glob_group import GlobGroup
 from .importer import (
     Importer,
     ObjMismatchError,
