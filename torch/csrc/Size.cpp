@@ -41,7 +41,7 @@ PyObject * THPSize_NewFromSizes(int dim, const int64_t *sizes)
 
 static bool isTracedZeroDimVar(PyObject *item) {
   if (!THPVariable_Check(item)) return false;
-  auto & var = reinterpret_cast<THPVariable*>(item)->cdata;
+  auto & var = THPVariable_Unpack(item);
   return var.dim() == 0 && torch::jit::tracer::getValueTrace(var);
 }
 
