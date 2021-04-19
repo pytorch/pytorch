@@ -1976,7 +1976,7 @@ def embedding(
     Shape:
         - Input: LongTensor of arbitrary shape containing the indices to extract
         - Weight: Embedding matrix of floating point type with shape `(V, embedding_dim)`,
-                            where V = maximum index + 1 and embedding_dim = the embedding size
+          where V = maximum index + 1 and embedding_dim = the embedding size
         - Output: `(*, embedding_dim)`, where `*` is the input shape
 
     Examples::
@@ -2048,6 +2048,7 @@ def embedding_bag(
     sparse: bool = False,
     per_sample_weights: Optional[Tensor] = None,
     include_last_offset: bool = False,
+    padding_idx: Optional[int] = None,
 ) -> Tensor:
     r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
@@ -2082,33 +2083,28 @@ def embedding_bag(
             :attr:`offsets`, if those are not None.
 
         include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
-        The last element is the size of the input, or the ending index position of the last bag (sequence).
+            The last element is the size of the input, or the ending index position of the last bag (sequence).
 
+        padding_idx (int, optional): If given, indicates which indices in :attr:`input` represent padding. When
+                                     a :attr:`padding_idx` is encountered in :attr:`input` during a reduction,
+                                     it is skipped. This allows each bag to be a different logical size.
 
     Shape:
-
         - :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
 
-          - If :attr:`input` is 2D of shape `(B, N)`,
+          - If :attr:`input` is 2D of shape `(B, N)`, it will be treated as ``B`` bags (sequences)
+            each of fixed length ``N``, and this will return ``B`` values aggregated in a way
+            depending on the :attr:`mode`. :attr:`offsets` is ignored and required to be ``None`` in this case.
 
-            it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
-            this will return ``B`` values aggregated in a way depending on the :attr:`mode`.
-            :attr:`offsets` is ignored and required to be ``None`` in this case.
+          - If :attr:`input` is 1D of shape `(N)`, it will be treated as a concatenation of
+            multiple bags (sequences). :attr:`offsets` is required to be a 1D tensor containing
+            the starting index positions of each bag in :attr:`input`. Therefore, for :attr:`offsets`
+            of shape `(B)`, :attr:`input` will be viewed as having ``B`` bags.
+            Empty bags (i.e., having 0-length) will have returned vectors filled by zeros.
 
-          - If :attr:`input` is 1D of shape `(N)`,
+        - :attr:`weight` (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
 
-            it will be treated as a concatenation of multiple bags (sequences).
-            :attr:`offsets` is required to be a 1D tensor containing the
-            starting index positions of each bag in :attr:`input`. Therefore,
-            for :attr:`offsets` of shape `(B)`, :attr:`input` will be viewed as
-            having ``B`` bags. Empty bags (i.e., having 0-length) will have
-            returned vectors filled by zeros.
-
-        - :attr:`weight` (Tensor): the learnable weights of the module of
-          shape `(num_embeddings, embedding_dim)`
-
-        - :attr:`per_sample_weights` (Tensor, optional). Has the same shape as
-          :attr:`input`.
+        - :attr:`per_sample_weights` (Tensor, optional). Has the same shape as :attr:`input`.
 
         - :attr:`output`: aggregated embedding values of shape `(B, embedding_dim)`
 
@@ -2119,9 +2115,17 @@ def embedding_bag(
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.tensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.tensor([0,4])
-        >>> F.embedding_bag(embedding_matrix, input, offsets)
+        >>> F.embedding_bag(input, embedding_matrix, offsets)
         tensor([[ 0.3397,  0.3552,  0.5545],
                 [ 0.5893,  0.4386,  0.5882]])
+
+        >>> # example with padding_idx
+        >>> embedding_matrix = torch.rand(10, 3)
+        >>> input = torch.tensor([2, 2, 2, 2, 4, 3, 2, 9])
+        >>> offsets = torch.tensor([0,4])
+        >>> F.embedding_bag(input, embedding_matrix, offsets, padding_idx=2, mode='sum')
+        tensor([[ 0.0000,  0.0000,  0.0000],
+                [-0.7082,  3.2145, -2.6251]])
     """
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
@@ -2137,6 +2141,7 @@ def embedding_bag(
             sparse=sparse,
             per_sample_weights=per_sample_weights,
             include_last_offset=include_last_offset,
+            padding_idx=padding_idx,
         )
     # Check for backward compatibility.
     # Used to be embedding_bag(weight, input, ...)
@@ -2210,7 +2215,7 @@ def embedding_bag(
         )
 
     ret, _, _, _ = torch.embedding_bag(
-        weight, input, offsets, scale_grad_by_freq, mode_enum, sparse, per_sample_weights, include_last_offset
+        weight, input, offsets, scale_grad_by_freq, mode_enum, sparse, per_sample_weights, include_last_offset, padding_idx
     )
     return ret
 

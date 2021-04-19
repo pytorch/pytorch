@@ -135,7 +135,7 @@ TEST(BoundsInference, _4) {
       });
   Tensor* c = Compute(
       "c", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a.load(y, x) * b->call(y, x);
+        return a.load(y, x) * b->load(y, x);
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
@@ -267,7 +267,7 @@ TEST(BoundsInference, _6) {
       });
   Tensor* c = Compute(
       "c", {{CH, "y"}, {CW, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a.load(y + 100, x + 100) * b->call(y * 2, x * 5);
+        return a.load(y + 100, x + 100) * b->load(y * 2, x * 5);
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
@@ -510,11 +510,11 @@ TEST(BoundsInference, CacheReads) {
       });
   Tensor* B = Compute(
       "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 30, j + 3);
+        return A->load(i + 30, j + 3);
       });
   Tensor* C = Compute(
       "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
   LoopNest l({B, C});
@@ -683,7 +683,7 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
       });
   Tensor* B = Compute(
       "B", {{64, "i"}, {64, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i, j) + 5;
+        return A->load(i, j) + 5;
       });
 
   LoopNest l({A, B});
