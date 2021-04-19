@@ -2164,20 +2164,40 @@ def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
 
 
 def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
-    tensors = [
-        make_tensor((2, 2, 3), device, dtype, requires_grad=requires_grad),
-        make_tensor((2, 3), device, dtype, requires_grad=requires_grad),
-        make_tensor((2, 1, 3), device, dtype, requires_grad=requires_grad),
-    ]
+    x = make_tensor((3,), device, dtype, requires_grad=requires_grad)
+    y = make_tensor((4,), device, dtype, requires_grad=requires_grad)
+    A = make_tensor((2, 3,), device, dtype, requires_grad=requires_grad, noncontiguous=True)
+    B = make_tensor((1, 3,), device, dtype, requires_grad=requires_grad)
+    C = make_tensor((1, 2, 3,), device, dtype, requires_grad=requires_grad)
+    D = make_tensor((1, 3, 4,), device, dtype, requires_grad=requires_grad, noncontiguous=True)
+    E = make_tensor((4, 4,), device, dtype, requires_grad=requires_grad)
+    H = make_tensor((3, 3,), device, dtype, requires_grad=requires_grad, noncontiguous=True)
+    I = make_tensor((1, 3, 1,), device, dtype, requires_grad=requires_grad)
 
-    # (<number of operands>, <equation>)
-    test_cases = [
-        (1, '...->'),
-        (2, 'bik,jk->bij'),
-        (3, 'a...,...,a...->...'),
-    ]
+    inputs = []
 
-    return [SampleInput(tensors[:nop], args=(eq,)) for nop, eq in test_cases]
+    # Vector operations
+    inputs.append(SampleInput(x, args=('i->',)))                        # sum
+    inputs.append(SampleInput([x, y], args=('i,j->ij',)))               # outer
+
+    # Matrix operations
+    inputs.append(SampleInput([A], args=("ij->i",)))                    # col sum
+    inputs.append(SampleInput([A, B], args=("ij,kj->ik",)))             # matmul
+    inputs.append(SampleInput([A, E], args=("ij,ab->ijab",)))           # matrix outer product
+
+    # Tensor operations
+    inputs.append(SampleInput([C, D], args=("aij,ajk->aik",)))          # batch matmul
+    inputs.append(SampleInput([D, E], args=("aij,jk->aik",)))           # tensor matrix contraction
+    inputs.append(SampleInput([C, B], args=("ijk,ik->j",)))             # non contiguous
+
+    # Test diagonals
+    inputs.append(SampleInput([I], args=('iji->j',)))                   # non-contiguous trace
+
+    # Test ellipsis
+    inputs.append(SampleInput([H], args=("i...->...",)))
+    inputs.append(SampleInput([C, x], args=('...ik, ...j -> ij',)))
+
+    return inputs
 
 
 def sample_inputs_linalg_qr(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -4472,11 +4492,12 @@ op_db: List[OpInfo] = [
            # we need this lambda because SampleInput expects tensor input as the first argument
            op=lambda tensors, equation: torch.einsum(equation, tensors),
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
            supports_out=False,
            sample_inputs_func=sample_inputs_einsum,
            # test does not work with passing lambda for op
-           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+                  SkipInfo('TestCommon', 'test_fx'))),
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),

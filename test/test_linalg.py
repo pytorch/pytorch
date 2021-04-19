@@ -4230,12 +4230,6 @@ class TestLinalg(TestCase):
             res = torch.einsum(equation, operands)
             self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
 
-            # Check autograd
-            ops = [op.detach().requires_grad_() for op in operands]
-            self.assertTrue(gradcheck(lambda *ops: torch.einsum(equation, ops), ops))
-            for op in ops:
-                self.assertTrue(op._version == 0)
-
         # Test cases from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
         x = torch.rand(5, device=device, dtype=dtype)
         y = torch.rand(7, device=device, dtype=dtype)
@@ -4249,20 +4243,17 @@ class TestLinalg(TestCase):
         H = torch.randn(4, 4, device=device, dtype=dtype)
         I = torch.rand(2, 3, 2, device=device, dtype=dtype)
 
-        # Note: gradcheck fails if the same input is given multiple times which is why the
-        # calls to clone below. (see https://github.com/pytorch/pytorch/issues/9282)
-
         # Vector operations
         check('i->', x)                     # sum
-        check('i,i->', x, x.clone())        # dot
-        check('i,i->i', x, x.clone())       # vector element-wisem mul
+        check('i,i->', x, x)                # dot
+        check('i,i->i', x, x)               # vector element-wisem mul
         check('i,j->ij', x, y)              # outer
 
         # Matrix operations
         check("ij->ji", A)                  # transpose
         check("ij->j", A)                   # row sum
         check("ij->i", A)                   # col sum
-        check("ij,ij->ij", A, A.clone())    # matrix element-wise mul
+        check("ij,ij->ij", A, A)            # matrix element-wise mul
         check("ij,j->i", A, x)              # matrix vector multiplication
         check("ij,kj->ik", A, B)            # matmul
         check("ij,ab->ijab", A, E)          # matrix outer product
@@ -4392,7 +4383,7 @@ class TestLinalg(TestCase):
 
     def test_einsum_error_cases(self, device):
         def check(equation, operands, regex, exception=RuntimeError):
-            with self.assertRaisesRegex(exception, r'einsum\(\) ' + regex):
+            with self.assertRaisesRegex(exception, r'einsum\(\): ' + regex):
                 torch.einsum(equation, operands)
 
         x = torch.rand(2)
