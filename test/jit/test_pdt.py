@@ -2,7 +2,7 @@ import os
 import sys
 import torch
 from torch.testing._internal.jit_utils import JitTestCase
-from typing import List
+from typing import List  # noqa F401
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -76,7 +76,7 @@ class TestPDT(JitTestCase):
         scripted_fn_bool = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[([True, False, True],)])
         self.assertEqual(scripted_fn_bool([True, True, True]), test_list_and_tuple([True, True, True]))
 
-        scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs = [([3, 4, 5], )])
+        scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[([3, 4, 5], )])
         self.assertEqual(scripted_fn_int([1, 2, 3]), test_list_and_tuple([1, 2, 3]))
 
     def test_pdt_tuple(self):
@@ -86,5 +86,5 @@ class TestPDT(JitTestCase):
         scripted_fn_bool = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((True, False, True),)])
         self.assertEqual(scripted_fn_bool((True, True, True)), test_list_and_tuple((True, True, True)))
 
-        scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs = [((3, 4, 5), )])
+        scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((3, 4, 5), )])
         self.assertEqual(scripted_fn_int((1, 2, 3)), test_list_and_tuple((1, 2, 3)))
