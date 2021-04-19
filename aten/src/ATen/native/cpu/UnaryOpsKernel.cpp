@@ -759,9 +759,9 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel);
 REGISTER_DISPATCH(special_entr_stub, &entr_kernel);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel);
+REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel);
 REGISTER_DISPATCH(special_i1_stub, &i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &i1e_kernel);
-REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel);
 
 
 IMPLEMENT_COMPLEX_KERNEL(acos)

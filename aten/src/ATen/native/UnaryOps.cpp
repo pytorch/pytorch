@@ -371,18 +371,6 @@ Tensor& i0_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(re
 Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
 Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
-TORCH_IMPL_FUNC(special_i0e_out) (const Tensor& self, const Tensor& result) {
-  i0e_stub(device_type(), *this);
-}
-
-TORCH_IMPL_FUNC(special_i1_out) (const Tensor& self, const Tensor& result) {
-  i1_stub(device_type(), *this);
-}
-
-TORCH_IMPL_FUNC(special_i1e_out) (const Tensor& self, const Tensor& result) {
-  i1e_stub(device_type(), *this);
-}
-
 Tensor& round_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, round_stub); }
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
