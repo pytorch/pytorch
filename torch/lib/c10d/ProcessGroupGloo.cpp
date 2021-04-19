@@ -2726,6 +2726,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
 void ProcessGroupGloo::monitoredBarrier(
     const BarrierOptions& opts,
     bool waitAllRanks) {
+      C10_LOG_API_USAGE_ONCE("torch.distributed.monitored_barrier");
   // Use default timeout if no timeout was specified.
   auto monitoredBarrierTimeout =
       (opts.timeout == kUnsetTimeout) ? this->options_->timeout : opts.timeout;
@@ -2738,94 +2739,109 @@ void ProcessGroupGloo::monitoredBarrier(
   if (rank != 0) {
     auto sendWork = send(commTensor, 0, t1);
     auto recvWork = recv(commTensor, 0, t2);
-    sendWork->wait();
-    recvWork->wait();
+    try {
+      sendWork->wait();
+      recvWork->wait();
+    } catch (const std::exception& e) {
+      const std::string error = c10::str(
+        "Rank ",
+        rank,
+        " successfully reached monitoredBarrier, but received errors while waiting",
+        " to be unblocked by rank 0. Please check rank 0 logs for faulty rank."
+      );
+      logAndThrow(
+        error,
+        c10::str(error, "\n Original exception: \n", e.what())
+      );
+    }
     return;
   }
   auto startTime = std::chrono::steady_clock::now();
   auto worldSize = this->getSize();
-  // Holds mapping of rank to pair of recv/send work.
-  std::map<
-      int,
-      std::tuple<
-          c10::intrusive_ptr<ProcessGroup::Work>,
-          c10::intrusive_ptr<ProcessGroup::Work>>>
-      works;
-  // Kick off all work
+  // Mappings of rank to recvWork/sendWork respectively.
+  std::map<int, c10::intrusive_ptr<ProcessGroup::Work>> recvWorkMap;
+  std::map<int, c10::intrusive_ptr<ProcessGroup::Work>> sendWorkMap;
+  // Kick off recvWork and wait to unblock sendWork->wait() from non-zero ranks.
+  // Failed/hanging ranks will not ack this call, letting rank 0 know about the
+  // failure.
   for (int dstRank = 1; dstRank < worldSize; ++dstRank) {
-    auto recvWork = recv(commTensor, dstRank, t1);
-    auto sendWork = send(commTensor, dstRank, t2);
-    works.insert(
-        {dstRank, std::make_tuple(std::move(recvWork), std::move(sendWork))});
+    recvWorkMap.insert({dstRank, recv(commTensor, dstRank, t1)});
   }
 
-  std::vector<int> processedRanks;
+  auto waitLoop =
+      [&](const std::map<int, c10::intrusive_ptr<ProcessGroup::Work>>& works) {
+        std::vector<int> processedRanks;
+        for (auto& work : works) {
+          bool rankResponded = false;
+          try {
+            // Note: if waitAllRanks=false, we recompute the time remaining in
+            // barrier and use this recomputed time in wait(). However, if
+            // waitAllRanks=true, we use the original timeout, since if we use
+            // up the entire timeout waiting for response from rank n, then we
+            // won't have any timeout left to query ranks beginning with n + 1.
+            auto remainingTime = getRemainingTime(
+                startTime, monitoredBarrierTimeout, waitAllRanks);
+            if (!waitAllRanks) {
+              checkRemainingTime(
+                  monitoredBarrierTimeout,
+                  remainingTime,
+                  processedRanks,
+                  rank);
+            }
+            work.second->wait(remainingTime);
+            rankResponded = true;
+          } catch (const std::exception& e) {
+            const std::string error = c10::str(
+                "Rank ",
+                work.first,
+                " failed to pass monitoredBarrier in ",
+                monitoredBarrierTimeout.count(),
+                " ms");
+            if (waitAllRanks) {
+              LOG(ERROR) << error;
+            } else {
+              logAndThrow(
+                  error,
+                  c10::str(error, "\n Original exception: \n", e.what()));
+            }
+          }
+          if (rankResponded) {
+            processedRanks.push_back(work.first);
+          }
+        }
+        // If we are collecting all failed ranks, check if we need to throw if
+        // some ranks have not responded.
+        if (waitAllRanks && processedRanks.size() != size_) {
+          std::vector<int> failedRanks;
+          for (int i = 1; i < size_; ++i) {
+            if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
+                processedRanks.end()) {
+              failedRanks.push_back(i);
+            }
+          }
 
-  // Wait for send/recv from all ranks
-  for (auto& work : works) {
-    bool rankResponded = false;
-    try {
-      // Note: if waitAllRanks=false, we recompute the time remaining in barrier
-      // and use this recomputed time in wait(). However, if waitAllRanks=true,
-      // we use the original timeout, since if we use up the entire timeout
-      // waiting for response from rank n, then we won't have any timeout left to
-      // query ranks beginning with n + 1.
-      auto remainingTime =
-          getRemainingTime(startTime, monitoredBarrierTimeout, waitAllRanks);
-      if (!waitAllRanks) {
-        checkRemainingTime(
-          monitoredBarrierTimeout, remainingTime, processedRanks, rank);
-      }
-      std::get<0>(work.second)->wait(remainingTime);
-      remainingTime =
-          getRemainingTime(startTime, monitoredBarrierTimeout, waitAllRanks);
-      if (!waitAllRanks) {
-      checkRemainingTime(
-          monitoredBarrierTimeout, remainingTime, processedRanks, rank);
-      }
-      std::get<1>(work.second)->wait(remainingTime);
-      rankResponded = true;
-    } catch (const std::exception& e) {
-      const std::string error = c10::str(
-          "Rank ",
-          work.first,
-          " failed to pass monitoredBarrier in ",
-          monitoredBarrierTimeout.count(),
-          " ms");
-      if (waitAllRanks) {
-        LOG(ERROR) << error;
-      } else {
-        logAndThrow(
-          error, c10::str(error, "\n Original exception: \n", e.what()));
-      }
-    }
-    if (rankResponded) {
-      processedRanks.push_back(work.first);
-    }
+          TORCH_INTERNAL_ASSERT(!failedRanks.empty());
+          const std::string ranksStr = c10::Join(", ", failedRanks);
+          const std::string error = c10::str(
+              "Ranks ",
+              ranksStr,
+              " failed to pass monitoredBarrier in ",
+              monitoredBarrierTimeout.count(),
+              " ms");
+          logAndThrow(error, error);
+        }
+      };
+
+  waitLoop(recvWorkMap);
+  // If we've reached here successfully, this means all ranks have acked in
+  // monitoredBarrier. Unblock all ranks now by responding to their recv(). This
+  // ensures that this is a true barrier in that all ranks  exit it successfully
+  // or none of them do.
+  for (int dstRank = 1; dstRank < worldSize; ++dstRank) {
+    sendWorkMap.insert({dstRank, send(commTensor, dstRank, t2)});
   }
 
-  // If we are collecting all failed ranks, check if we need to throw if some
-  // ranks have not responded.
-  if (waitAllRanks && processedRanks.size() != size_) {
-    std::vector<int> failedRanks;
-    for (int i = 1; i < size_; ++i) {
-      if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
-          processedRanks.end()) {
-        failedRanks.push_back(i);
-      }
-    }
-
-    if (!failedRanks.empty()) {
-      const std::string ranksStr = c10::Join(", ", failedRanks);
-      const std::string error = c10::str(
-          "Ranks ",
-          ranksStr,
-          " failed to pass monitoredBarrier in ",
-          monitoredBarrierTimeout.count(),
-          " ms");
-      logAndThrow(error, error);
-    }
-  }
+  waitLoop(sendWorkMap);
 
   auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - startTime);
