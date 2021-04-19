@@ -10731,7 +10731,7 @@ dedent """
             ReassignSelfRHS()
 
     def test_unknown_builtin(self):
-        with self.assertRaisesRegex(RuntimeError, 'nonexistent attribute or method'):
+        with self.assertRaisesRegex(RuntimeError, 'object has no attribute or method'):
             @torch.jit.script
             def unknown_builtin(x):
                 return x.splork(3)
@@ -12048,12 +12048,12 @@ dedent """
 
         self.checkScript(f, (torch.rand(20, 20, 20),), optimize=True)
 
-        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
+        with self.assertRaisesRegex(RuntimeError, "object has no attribute or method"):
             @torch.jit.script
             def g1(x):
                 return x.max(dim=1).unknown_symbol
 
-        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
+        with self.assertRaisesRegex(RuntimeError, "object has no attribute or method"):
             @torch.jit.script
             def g2(x):
                 print((x, x, x).__doc__)
