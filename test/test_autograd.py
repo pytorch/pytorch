@@ -7353,7 +7353,7 @@ class TestAutogradDeviceType(TestCase):
             m = torch.cat((asd, asd))
             m.sum().backward()
 
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_sparse_ctor_getter_backward(self, device, dtype):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
         def _test(size, sparse_dim, nnz, device):
@@ -7367,7 +7367,7 @@ class TestAutogradDeviceType(TestCase):
                                          dtype=dtype)[0]
 
             def fn(v):
-                x = torch.sparse_coo_tensor(i, v, size, device=device)
+                x = torch.sparse_coo_tensor(i, v, size, dtype=dtype, device=device)
                 y = (x + other).coalesce()
                 yv = y.values()
                 new_v = yv.tanh()
@@ -7388,7 +7388,7 @@ class TestAutogradDeviceType(TestCase):
             nnz = 0 if empty_nnz else 5
             _test(sparse_size + dense_size, len(sparse_size), nnz, device)
 
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_sparse_backward(self, device, dtype):
         class FixedGradientFunction(Function):
             @staticmethod
@@ -7414,19 +7414,19 @@ class TestAutogradDeviceType(TestCase):
         ], dtype=torch.long)
         v2 = make_tensor([4, 2], dtype=dtype, device=device)
         sparse_grad2 = torch.sparse_coo_tensor(i2, v2, size, dtype=dtype, device=device)
-        dense_grad = torch.rand(size, device=device).double()
+        dense_grad = torch.rand(size, device=device, dtype=dtype)
         fn = FixedGradientFunction
 
         # sparse first
-        x = torch.randn(size, device=device, requires_grad=True)
+        x = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
         (fn.apply(x, sparse_grad1) + fn.apply(x, dense_grad) + fn.apply(x, sparse_grad2)).sum().backward()
         self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
         # dense first
-        x = torch.randn(size, device=device, requires_grad=True)
+        x = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
         (fn.apply(x, dense_grad) + fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
         self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
         # sparse only
-        x = torch.randn(size, device=device, requires_grad=True)
+        x = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
         (fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
