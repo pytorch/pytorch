@@ -637,6 +637,10 @@ class Vec256<float> {
     return map(calc_i0);
   }
 
+  Vec256<float> i0e() const {
+    return map(calc_i0e);
+  }
+
   DEFINE_MEMBER_OP(operator==, float, vec_cmpeq)
   DEFINE_MEMBER_OP(operator!=, float, vec_cmpne)
   DEFINE_MEMBER_OP(operator<, float, vec_cmplt)

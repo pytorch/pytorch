@@ -23,6 +23,8 @@ import warnings
 import random
 import contextlib
 import shutil
+import datetime
+import pathlib
 import socket
 import subprocess
 import time
@@ -817,17 +819,45 @@ except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
 
+FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
+
+def fetch_and_cache(name: str, url: str):
+    """
+    Some tests run in a different process so globals like `slow_test_dict` won't
+    always be filled even though the test file was already downloaded on this
+    machine, so cache it on disk
+    """
+    path = os.path.join(tempfile.gettempdir(), name)
+
+    def is_cached_file_valid():
+        # Check if the file is new enough (say 1 hour for now). A real check
+        # could make a HEAD request and check/store the file's ETag
+        fname = pathlib.Path(path)
+        now = datetime.datetime.now()
+        mtime = datetime.datetime.fromtimestamp(fname.stat().st_mtime)
+        diff = now - mtime
+        return diff.total_seconds() < FILE_CACHE_LIFESPAN_SECONDS
+
+    if os.path.exists(path) and is_cached_file_valid():
+        # Another test process already downloaded the file, so don't re-do it
+        with open(path, "r") as f:
+            return json.load(f)
+    try:
+        contents = urlopen(url, timeout=1).read().decode('utf-8')
+        with open(path, "w") as f:
+            f.write(contents)
+        return json.loads(contents)
+    except Exception as e:
+        print(f'Could not download {url} because of error {e}.')
+        return {}
+
+
 slow_tests_dict: Optional[Dict[str, float]] = None
 def check_slow_test_from_stats(test):
     global slow_tests_dict
     if slow_tests_dict is None:
-        url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json'
-        try:
-            contents = urlopen(url, timeout=1).read().decode('utf-8')
-            slow_tests_dict = json.loads(contents)
-        except Exception as e:
-            print(f'Could not download slow test stats because of error {e}. Proceeding with no added slow tests.')
-            slow_tests_dict = {}
+        url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
+        slow_tests_dict = fetch_and_cache(".pytorch-slow-tests", url)
     test_suite = str(test.__class__).split('\'')[1]
     test_name = f'{test._testMethodName} ({test_suite})'
 
@@ -846,7 +876,7 @@ def check_disabled(test_name):
         def read_and_process():
             url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/disabled-tests.json'
             contents = urlopen(url, timeout=1).read().decode('utf-8')
-            the_response = json.loads(contents)
+            the_response = fetch_and_cache(".pytorch-disabled-tests", url)
             for item in the_response['items']:
                 title = item['title']
                 key = 'DISABLED '
@@ -1527,6 +1557,36 @@ class TestCase(expecttest.TestCase):
     def assertExpectedStripMangled(self, s, subname=None):
         s = re.sub(r'__torch__[^ ]+', '', s)
         self.assertExpected(s, subname)
+
+    def assertGreaterAlmostEqual(self, first, second, places=None, msg=None, delta=None):
+        """Assert that ``first`` is greater than or almost equal to ``second``.
+
+        The equality of ``first`` and ``second`` is determined in a similar way to
+        the ``assertAlmostEqual`` function of the standard library.
+        """
+        if delta is not None and places is not None:
+            raise TypeError("specify delta or places not both")
+
+        if first >= second:
+            return
+
+        diff = second - first
+        if delta is not None:
+            if diff <= delta:
+                return
+
+            standardMsg = f"{first} not greater than or equal to {second} within {delta} delta"
+        else:
+            if places is None:
+                places = 7
+
+            if round(diff, places) == 0:
+                return
+
+            standardMsg = f"{first} not greater than or equal to {second} within {places} places"
+
+        msg = self._formatMessage(msg, standardMsg)
+        raise self.failureException(msg)
 
     # run code in subprocess and capture exceptions.
     @staticmethod
