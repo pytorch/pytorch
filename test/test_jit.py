@@ -3443,14 +3443,14 @@ def foo(x):
             with self.capture_stdout() as captured:
                 @torch.jit.script
                 def invalid_prefix_annotation1(a):
-                    # type: (Int) -> Int
+                    #type: (Int) -> Int # noqa: E265
                     return a + 2
 
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
             with self.capture_stdout() as captured:
                 @torch.jit.script
                 def invalid_prefix_annotation2(a):
-                    # type   : (Int) -> Int
+                    #type   : (Int) -> Int # noqa: E265
                     return a + 2
 
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
