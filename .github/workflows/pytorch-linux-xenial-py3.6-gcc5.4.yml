@@ -90,7 +90,7 @@ jobs:
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)../":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
+          docker run --rm -v "$(pwd)/../":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
       - name: Archive artifacts into zip
         run: |
           (cd "${GITHUB_WORKSPACE}/../" && zip -r pytorch/artifacts.zip pytorch/dist pytorch/build custom-op-build/ custom-backend-build/ jit-hook-build/)
