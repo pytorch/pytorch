@@ -26,6 +26,15 @@ C10_EXPORT std::string DeviceTypeName(const int32_t& d) {
   return at::DeviceTypeName(static_cast<at::DeviceType>(d));
 }
 
+void setTotalBytesLimit(::google::protobuf::io::CodedInputStream& stream, int bytes_limit, int warning_threshold) {
+  #if GOOGLE_PROTOBUF_VERSION >= 3011000
+    // Only take one parameter since protobuf 3.11
+    stream.SetTotalBytesLimit(bytes_limit);
+  #else
+    stream.SetTotalBytesLimit(bytes_limit, warning_threshold);
+  #endif
+}
+
 C10_EXPORT int DeviceId(const DeviceOption& option) {
   switch (option.device_type()) {
     case PROTO_CPU:
@@ -136,7 +145,7 @@ C10_EXPORT bool ParseProtoFromLargeString(
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -149,7 +158,7 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
   // Total bytes hard limit / warning limit are set to 2GB and 512MB
   // respectively.
   ::google::protobuf::io::CodedInputStream coded_stream(&stream);
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -200,7 +209,7 @@ C10_EXPORT bool ParseProtoFromLargeString(const string& str, Message* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -244,7 +253,13 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
   std::unique_ptr<CodedInputStream> coded_input(
       new CodedInputStream(raw_input.get()));
   // A hack to manually allow using very large protocol buffers.
-  coded_input->SetTotalBytesLimit(2147483647, 536870912);
+  #if GOOGLE_PROTOBUF_VERSION >= 3011000
+    // Only take one parameter since protobuf 3.11
+    coded_input->SetTotalBytesLimit(2147483647);
+  #else
+    // Total bytes hard limit / warning limit are set to 2GB and 512MB respectively.
+    coded_input->SetTotalBytesLimit(2147483647, 536870912);
+  #endif
   bool success = proto->ParseFromCodedStream(coded_input.get());
   coded_input.reset();
   raw_input.reset();
