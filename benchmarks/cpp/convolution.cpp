@@ -15,7 +15,7 @@ struct ConvParams {
 };
 
 struct xs {
-  xs(const std::vector<int64_t>& v_) : v(v_) {}
+  explicit xs(const std::vector<int64_t>& v_) : v(v_) {}
   const std::vector<int64_t>& v;
 };
 
