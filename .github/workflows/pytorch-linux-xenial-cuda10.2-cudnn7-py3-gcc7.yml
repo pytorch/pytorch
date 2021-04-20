@@ -6,7 +6,7 @@ name: Linux CI (pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-  
+
   push:
     branches:
       - master
