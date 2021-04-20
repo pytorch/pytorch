@@ -601,6 +601,46 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
+def sample_inputs_add(op_info, device, dtype, requires_grad, **kwargs):
+    scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
+    scalar = 1 if dtype is torch.bool else scalar
+    tests_list = [
+        ((S, S, S), (S, S, S), False),
+        ((S, S, S), (S, S), False),
+        ((), (), False),
+        ((S, S, S), (), False),
+        ((S, S, S), scalar, False),
+        ((), scalar, False)
+    ]
+    tests_with_lhs_broadcasting = [
+        ((S, S), (S, S, S), True),
+        ((), (S, S, S), True),
+        ((S, 1, S), (M, S), True),
+    ]
+    test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore
+    samples = []
+    for first_shape, shape_or_scalar, broadcasts_input in test_cases:
+        arg = shape_or_scalar
+        if isinstance(shape_or_scalar, tuple):
+            arg = make_tensor(shape_or_scalar, device=device, dtype=dtype,
+                              requires_grad=requires_grad)
+        samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
+                                               requires_grad=requires_grad),
+                                   args=(arg,),
+                                   broadcasts_input=broadcasts_input))
+    return tuple(samples)
+
+def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
+    args_list = (
+        ((S, M), (M, S)),
+    )
+    inputs = tuple(SampleInput(make_tensor(first_shape, device, dtype,
+                                           requires_grad=requires_grad),
+                               args=(make_tensor(second_shape, device, dtype,
+                                     requires_grad=requires_grad),))
+                   for first_shape, second_shape in args_list)
+    return inputs
+
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     input = SampleInput(
         make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -1279,6 +1319,23 @@ def sample_inputs_reduction_wrapper(supports_multiple_dims):
         return inputs
 
     return fn
+
+def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
+    test_quantiles = (0.5, make_tensor((2,), device, dtype, low=0, high=1))
+    test_interpolations = ['linear', 'midpoint']
+
+    inputs = []
+    for quantiles in test_quantiles:
+        for t in _generate_reduction_inputs(device, dtype, requires_grad):
+            # Add case without dim and keepdim kwargs
+            inputs.append(SampleInput(t, args=(quantiles,)))
+            for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims=False):
+                # Interpolation kwarg for now is only supported when providing both dim and keepdim
+                for interpolation in test_interpolations:
+                    kwargs['interpolation'] = interpolation
+                    inputs.append(SampleInput(t, args=(quantiles,), kwargs=kwargs))
+
+    return inputs
 
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
@@ -2928,6 +2985,11 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients', 'test_method_grad',
                                 device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                    )),
+    OpInfo('add',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_add,
+           supports_inplace_autograd=False),
     OpInfo('addmm',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -3889,6 +3951,12 @@ op_db: List[OpInfo] = [
            # Need to skip out test because one of the overload for mean does not support it
            # TODO(@heitorschueroff) fix this when implementing ReductionInfo
            skips=(SkipInfo('TestCommon', 'test_out'),)),
+    OpInfo('quantile',
+           dtypes=floating_types(),
+           sample_inputs_func=sample_inputs_reduction_quantile),
+    OpInfo('nanquantile',
+           dtypes=floating_types(),
+           sample_inputs_func=sample_inputs_reduction_quantile),
     OpInfo('maximum',
            op=torch.maximum,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -3903,6 +3971,16 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_topk,
            skips=(
                # Topk is not raising a warning when the out is resized
+               SkipInfo('TestCommon', 'test_out'),
+           )),
+    OpInfo('mm',
+           dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_mm,
+           skips=(
+               # mm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('mode',
@@ -4868,16 +4946,6 @@ def ident(x):
 def method_tests():
     set_rng_seed(SEED)
     return [
-        ('add', (S, S, S), ((S, S, S),), '', (True,)),
-        ('add', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
-        ('add', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
-        ('add', (S, 1, S), ((M, S),), 'broadcast_all', (True,)),
-        ('add', (), ((),), 'scalar', (True,)),
-        ('add', (S, S, S), ((),), 'scalar_broadcast_rhs', (True,)),
-        ('add', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
-        ('add', (S, S, S), (3.14,), 'constant', (True,)),
-        ('add', (), (3.14,), 'scalar_constant', (True,)),
-        ('add', (S, S, S), (3.14j,), 'complex_scalar_constant', (True,)),
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
         ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
         ('sub', (S, S, S), ((S, S, S),), '', (True,)),
@@ -5036,24 +5104,6 @@ def method_tests():
         ('kthvalue', (), (1,), 'scalar', (), ()),
         ('kthvalue', (), (1, 0,), 'scalar_dim', (), [1]),
         ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1]),
-        ('quantile', (S, S, S), (0.5,)),
-        ('quantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
-        ('quantile', (S, S, S), (0.5, None, True), 'keepdim'),
-        ('quantile', (S, S, S), (0.5, 0, False), 'linear', (), [1], NO_ARGS, ident, {'interpolation': 'linear'}),
-        ('quantile', (S, S, S), (0.5, 0, False), 'lower', (), [1], NO_ARGS, ident, {'interpolation': 'lower'}),
-        ('quantile', (S, S, S), (0.5, 0, False), 'higher', (), [1], NO_ARGS, ident, {'interpolation': 'higher'}),
-        ('quantile', (S, S, S), (0.5, 0, False), 'midpoint', (), [1], NO_ARGS, ident, {'interpolation': 'midpoint'}),
-        ('quantile', (S, S, S), (0.5, 0, False), 'nearest', (), [1], NO_ARGS, ident, {'interpolation': 'nearest'}),
-        ('quantile', (), (0.5,), 'scalar'),
-        ('nanquantile', (S, S, S), (0.5,)),
-        ('nanquantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
-        ('nanquantile', (S, S, S), (0.5, None, True), 'keepdim'),
-        ('nanquantile', (S, S, S), (0.5, 0, False), 'linear', (), [1], NO_ARGS, ident, {'interpolation': 'linear'}),
-        ('nanquantile', (S, S, S), (0.5, 0, False), 'lower', (), [1], NO_ARGS, ident, {'interpolation': 'lower'}),
-        ('nanquantile', (S, S, S), (0.5, 0, False), 'higher', (), [1], NO_ARGS, ident, {'interpolation': 'higher'}),
-        ('nanquantile', (S, S, S), (0.5, 0, False), 'midpoint', (), [1], NO_ARGS, ident, {'interpolation': 'midpoint'}),
-        ('nanquantile', (S, S, S), (0.5, 0, False), 'nearest', (), [1], NO_ARGS, ident, {'interpolation': 'nearest'}),
-        ('nanquantile', (), (0.5,), 'scalar'),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1,), 'dim_alert_nondeterministic', (), [0],
@@ -5098,7 +5148,6 @@ def method_tests():
          {'beta': 0.2, 'alpha': 0.6}),
         ('dot', (L,), ((L,),), '', (True,)),
         ('vdot', (L,), ((L,),),),
-        ('mm', (S, M), ((M, S),), '', (True,)),
         ('bmm', (M, S, M), ((M, M, S),), '', (True,)),
         ('mv', (S, M), ((M,),), '', (True,)),
         ('mvlgamma', torch.empty(S,).uniform_(0.5, 1), [1], "p=1"),
