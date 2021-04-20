@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <benchmark/benchmark.h>
-#include <c10/util/Array.h>
+#include <c10/core/InferenceMode.h>
 #include <sstream>
 
 struct ConvParams {
@@ -276,7 +276,7 @@ void registerOne(const char* base, const ConvParams& params) {
 }
 
 int main(int argc, char** argv) {
-  at::AutoNonVariableTypeMode nvt(true);
+  c10::InferenceMode guard;
 
 #define BENCH(x)                         \
   for (auto const& params : x##Params) { \
