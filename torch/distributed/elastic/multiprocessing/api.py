@@ -267,7 +267,7 @@ class _nullcontext(AbstractContextManager):
         pass
 
 
-def get_std_cm(std_rd: str, redirect_fn):  # type: ignore
+def get_std_cm(std_rd: str, redirect_fn):
     if IS_WINDOWS or IS_MACOS or not std_rd:
         return _nullcontext()
     else:
