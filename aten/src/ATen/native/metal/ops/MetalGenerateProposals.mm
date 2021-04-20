@@ -58,7 +58,7 @@ std::tuple<torch::Tensor, torch::Tensor> BBoxTransform(
     bool legacy_plus_one_,
     c10::optional<std::vector<torch::Tensor>> /* unused */ = {}) {
   return caffe2::fb::BBoxTransformCPUKernel(
-      roi_in,
+      roi_in.cpu(),
       delta_in.cpu(),
       iminfo_in.cpu(),
       weights_,
@@ -98,8 +98,8 @@ BoxWithNMSLimit(
     c10::optional<std::vector<torch::Tensor>> = {}) {
   return caffe2::fb::BoxWithNMSLimitCPUKernel(
       tscores.cpu(),
-      tboxes,
-      tbatch_splits,
+      tboxes.cpu(),
+      tbatch_splits.cpu(),
       score_thres_,
       nms_thres_,
       detections_per_im_,
@@ -121,7 +121,7 @@ torch::Tensor HeatmapMaxKeypoint(
     bool should_output_softmax_,
     c10::optional<std::vector<torch::Tensor>> = {}) {
   return caffe2::fb::HeatmapMaxKeypointCPUKernel(
-      heatmaps_in_.cpu(), bboxes_in_, should_output_softmax_, {});
+      heatmaps_in_.cpu(), bboxes_in_.cpu(), should_output_softmax_, {});
 }
 
 }

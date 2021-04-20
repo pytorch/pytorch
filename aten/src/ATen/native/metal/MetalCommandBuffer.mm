@@ -75,9 +75,6 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
     };
   }
   // recycle all temporary images manually before flushing the command buffer
-#if DEBUG
-  NSLog(@"[Metal Command Buffer] Recycle images, found: (%ld)\n", _images.count);
-#endif
   for (MPSTemporaryImage* image in _images) {
     [image recycle];
   }
