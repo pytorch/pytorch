@@ -4,9 +4,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import codecs
 import os
+import pickle
 import socket
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 from unittest import TestCase
 
@@ -18,6 +20,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     RendezvousTimeout,
     _NodeDesc,
     _NodeDescGenerator,
+    _RendezvousState,
     create_handler,
 )
 
@@ -81,6 +84,43 @@ class NodeDescGeneratorTest(TestCase):
                 desc = desc_generator.generate()
 
                 self.assertEqual(repr(desc), f"{fqdn}_{pid}_{local_id}")
+
+
+class RendezvousStateTest(TestCase):
+    def test_encoded_size_is_within_expected_limit(self) -> None:
+        state = _RendezvousState()
+        state.round = 1
+        state.complete = True
+        state.deadline = datetime.utcnow()
+        state.closed = True
+
+        # fmt: off
+        expected_max_sizes = (
+            (   5,    2 * (2 ** 10),), #    10 machines -> <=   2KB  # noqa
+            (  50,   12 * (2 ** 10),), #   100 machines -> <=  12KB  # noqa
+            ( 500,  120 * (2 ** 10),), #  1000 machines -> <= 120KB  # noqa
+            (5000, 1400 * (2 ** 10),), # 10000 machines -> <= 1.4MB  # noqa
+        )
+        # fmt: on
+
+        for num_nodes, max_byte_size in expected_max_sizes:
+            with self.subTest(num_nodes=num_nodes, max_byte_size=max_byte_size):
+                for i in range(num_nodes):
+                    node_running = _NodeDesc(f"dummy{i}.dummy1-dummy1-dummy1-dummy1.com", 12345, i)
+                    node_waiting = _NodeDesc(f"dummy{i}.dummy2-dummy2-dummy2-dummy2.com", 67890, i)
+
+                    state.participants[node_running] = i
+
+                    state.wait_list.add(node_waiting)
+
+                    state.last_keep_alives[node_running] = datetime.utcnow()
+                    state.last_keep_alives[node_waiting] = datetime.utcnow()
+
+                bits = pickle.dumps(state)
+
+                base64_bits = codecs.encode(bits, "base64")
+
+                self.assertLessEqual(len(base64_bits), max_byte_size)
 
 
 class DummyStore(Store):
