@@ -658,6 +658,9 @@
 - name: polygamma(int n, Tensor self) -> Tensor
   self: grad * polygamma(n + 1, self)
 
+- name: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
+  self: grad * polygamma(n + 1, self)
+
 - name: log(Tensor self) -> Tensor
   self: grad.div(self.conj())
 
