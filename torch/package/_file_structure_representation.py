@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from typing import Dict, List
 
-from ._glob_group import GlobPattern, _GlobGroup
+from .glob_group import GlobPattern, GlobGroup
 
 
 class Folder:
@@ -70,7 +70,7 @@ def _create_folder_from_file_list(
     include: "GlobPattern" = "**",
     exclude: "GlobPattern" = (),
 ) -> Folder:
-    glob_pattern = _GlobGroup(include, exclude, "/")
+    glob_pattern = GlobGroup(include, exclude=exclude, separator="/")
 
     top_folder = Folder(filename, True)
     for file in file_list:
