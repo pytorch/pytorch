@@ -5,12 +5,14 @@
 # LICENSE file in the root directory of this source tree.
 
 import ipaddress
+import random
 import re
 import socket
+import time
 import weakref
 from datetime import timedelta
 from threading import Event, Thread
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 
 def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
@@ -141,6 +143,21 @@ def _matches_machine_hostname(host: str) -> bool:
             return True
 
     return False
+
+
+def _delay(seconds: Union[float, Tuple[float, float]]) -> None:
+    """Suspends the current thread for ``seconds``.
+
+    Args:
+        seconds:
+            Either the delay, in seconds, or a tuple of a lower and an upper
+            bound within which a random delay will be picked.
+    """
+    if isinstance(seconds, tuple):
+        seconds = random.uniform(*seconds)
+    # Ignore delay requests that are less than 10 milliseconds.
+    if seconds >= 0.01:
+        time.sleep(seconds)
 
 
 class _PeriodicTimer:
