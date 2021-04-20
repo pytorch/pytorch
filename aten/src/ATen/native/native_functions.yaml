@@ -250,8 +250,8 @@
   variants: method
 
 - func: absolute.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: angle(Tensor self) -> Tensor
   common_device_guard: False   # TensorIterator
   variants: function, method
@@ -453,8 +453,8 @@
   variants: function, method
 
 - func: all.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: allclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> bool
   variants: function, method
 
@@ -474,8 +474,8 @@
   variants: function, method
 
 - func: any.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: arange(Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1267,8 +1267,8 @@
   variants: function, method
 
 - func: cummax.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-
   common_device_guard: False   # TensorIterator
+
 - func: _cummax_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
   variants: function
   dispatch:
@@ -1291,8 +1291,8 @@
   variants: function, method
 
 - func: cummin.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-
   common_device_guard: False   # TensorIterator
+
 - func: _cummin_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
   variants: function
   dispatch:
@@ -1327,8 +1327,8 @@
   variants: method
 
 - func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: cumprod_backward(Tensor grad, Tensor input, int dim, Tensor output) -> Tensor
   variants: function
   common_device_guard: False
@@ -1357,8 +1357,8 @@
   variants: method
 
 - func: cumsum.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
 
 # convenience function that converts to intlists for you
@@ -1499,8 +1499,8 @@
   variants: method
 
 - func: true_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
   common_device_guard: False   # TensorIterator
   variants: function, method
@@ -2425,8 +2425,8 @@
   variants: function, method
 
 - func: logsumexp.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
@@ -2486,8 +2486,8 @@
   variants: function, method
 
 - func: max.names_dim_max(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
-
   common_device_guard: False   # TensorIterator
+
 - func: value_selecting_reduction_backward(Tensor grad, int dim, Tensor indices, int[] sizes, bool keepdim) -> Tensor
   variants: function
   common_device_guard: False
@@ -2561,8 +2561,8 @@
   variants: function, method
 
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: median(Tensor self) -> Tensor
   variants: function, method
   dispatch:
@@ -2621,8 +2621,8 @@
   variants: function, method
 
 - func: min.names_dim_min(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
-
   common_device_guard: False   # TensorIterator
+
 - func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
   dispatch:
@@ -3203,11 +3203,11 @@
     CUDA: round_out
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
-
   common_device_guard: False   # TensorIterator
+
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: relu(Tensor self) -> Tensor
   common_device_guard: False   # TensorIterator
   variants: function, method
@@ -3303,11 +3303,11 @@
   common_device_guard: False
 
 - func: selu(Tensor self) -> Tensor
-
   common_device_guard: False   # TensorIterator
+
 - func: selu_(Tensor(a!) self) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
   common_device_guard: False   # TensorIterator
   dispatch:
@@ -3629,8 +3629,8 @@
     CPU, CUDA: sum_out
 
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   dispatch:
@@ -3719,8 +3719,8 @@
   variants: function, method
 
 - func: std.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   common_device_guard: False   # TensorIterator
   variants: function, method
@@ -3743,8 +3743,8 @@
   variants: function, method
 
 - func: prod.Dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: t(Tensor(a) self) -> Tensor(a)
   common_device_guard: False
   variants: function, method
@@ -4006,8 +4006,8 @@
   variants: function, method
 
 - func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   common_device_guard: False   # TensorIterator
   variants: function
@@ -4221,11 +4221,11 @@
   variants: function, method
 
 - func: norm.names_dtype_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: norm.names_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: frexp.Tensor(Tensor self) -> (Tensor mantissa, Tensor exponent)
   variants: method, function
   dispatch:
@@ -6443,22 +6443,24 @@
   variants: method, function
 
 - func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: minimum(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: minimum
 
 - func: minimum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: minimum_out
 
 # binary min, alias for minimum
 # NOTE: min is not an alias for minimum, since there is also unary min
 - func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-
   common_device_guard: False   # TensorIterator
+
 - func: min.other(Tensor self, Tensor other) -> Tensor
   common_device_guard: False   # TensorIterator
   variants: method, function
