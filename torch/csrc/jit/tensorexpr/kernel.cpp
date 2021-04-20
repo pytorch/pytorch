@@ -1217,6 +1217,62 @@ Tensor* TensorExprKernel::computeOperandValue(
             return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
     } break;
+    case aten::masked_fill: {
+      return computeThreeOperand(
+          "aten_masked_fill",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& input,
+             const ExprHandle& mask,
+             const ExprHandle& value) {
+            // value needs to promote to input, not vice versa
+            auto val = promoteToDtype(value, input.dtype().scalar_type());
+            return ifThenElse(mask, val, input);
+          },
+          /*promote_inputs*/ false);
+    }
+    case aten::clamp: {
+      bool noMin = false;
+      bool noMax = false;
+      if (c10::get_if<ArgNone>(&inputs[1])) {
+        noMin = true;
+      }
+
+      if (c10::get_if<ArgNone>(&inputs[2])) {
+        noMax = true;
+      }
+
+      return computeThreeOperand(
+          "aten_clamp",
+          inputs,
+          outputType,
+          outputShape,
+          [noMin, noMax](
+              const ExprHandle& in,
+              const ExprHandle& min,
+              const ExprHandle& max) {
+            auto cast = [&](const ExprHandle& e) {
+              return Cast::make(in.dtype(), e);
+            };
+
+            if (noMin && noMax) {
+              return in;
+            } else if (noMin) {
+              auto cmax = cast(max);
+              return CompareSelect::make(in, cmax, cmax, in, kGT);
+            } else if (noMax) {
+              auto cmin = cast(min);
+              return CompareSelect::make(in, cmin, cmin, in, kLT);
+            } else {
+              auto cmax = cast(max);
+              auto cmin = cast(min);
+              auto mm = CompareSelect::make(in, cmin, cmin, in, kLT);
+              return CompareSelect::make(mm, cmax, cmax, mm, kGT);
+            }
+          },
+          false /* promote_inputs */);
+    } break;
     case aten::addcmul: {
       return computeFourOperand(
           "aten_addcmul",
@@ -1278,6 +1334,65 @@ Tensor* TensorExprKernel::computeOperandValue(
           [](const ExprHandle& a) {
             auto zero = Cast::make(a.dtype(), 0);
             return CompareSelect::make(a, zero, zero, a, kLT);
+          });
+    } break;
+    case aten::batch_norm: {
+      bool hasWeight = true;
+      bool hasBias = true;
+
+      if (c10::get_if<ArgNone>(&inputs[1])) {
+        hasWeight = false;
+      }
+
+      if (c10::get_if<ArgNone>(&inputs[2])) {
+        hasBias = false;
+      }
+
+      return Compute(
+          "aten_batch_norm",
+          c10::fmap<DimArg>(outputShape),
+          [&](const std::vector<VarHandle>& axes) {
+            TORCH_INTERNAL_ASSERT(axes.size() >= 2);
+            // axes: N, C, H, W
+            std::vector<ExprHandle> indices(axes.begin(), axes.end());
+            ExprHandle c = indices[1];
+
+            // Parameter list:
+            // input, weight, bias, mean, var, training, momentum, eps,
+            // cudnn_enabled
+            std::vector<ExprHandle> exprInputs = {
+                tensorOrConstant(inputs[0], indices), // input
+                tensorOrConstant(inputs[3], {c}), // mean
+                tensorOrConstant(inputs[4], {c}), // var
+                constant(inputs[7]) // eps
+            };
+            if (hasWeight) {
+              exprInputs.push_back(tensorOrConstant(inputs[1], {c}));
+            }
+            if (hasBias) {
+              exprInputs.push_back(tensorOrConstant(inputs[2], {c}));
+            }
+            promoteInputs(exprInputs);
+
+            ExprHandle input = exprInputs[0];
+            ExprHandle mean = exprInputs[1];
+            ExprHandle var = exprInputs[2];
+            ExprHandle eps = exprInputs[3];
+            ExprHandle weight = FloatImm::make(1);
+            ExprHandle bias = FloatImm::make(0);
+
+            if (hasWeight) {
+              weight = exprInputs[4];
+            }
+            if (hasBias) {
+              bias = exprInputs[5];
+            }
+
+            auto inv_var = rsqrt(var + eps);
+            auto alpha = inv_var * weight;
+            auto beta = bias - mean * alpha;
+            auto output = input * alpha + beta;
+            return demoteOutput(output, outputType);
           });
     } break;
     case aten::log: {
@@ -1694,62 +1809,6 @@ Tensor* TensorExprKernel::computeOperandValue(
           });
     } break;
 
-    case aten::masked_fill: {
-      return computeThreeOperand(
-          "aten_masked_fill",
-          inputs,
-          outputType,
-          outputShape,
-          [](const ExprHandle& input,
-             const ExprHandle& mask,
-             const ExprHandle& value) {
-            // value needs to promote to input, not vice versa
-            auto val = promoteToDtype(value, input.dtype().scalar_type());
-            return ifThenElse(mask, val, input);
-          },
-          /*promote_inputs*/ false);
-    }
-    case aten::clamp: {
-      bool noMin = false;
-      bool noMax = false;
-      if (c10::get_if<ArgNone>(&inputs[1])) {
-        noMin = true;
-      }
-
-      if (c10::get_if<ArgNone>(&inputs[2])) {
-        noMax = true;
-      }
-
-      return computeThreeOperand(
-          "aten_clamp",
-          inputs,
-          outputType,
-          outputShape,
-          [noMin, noMax](
-              const ExprHandle& in,
-              const ExprHandle& min,
-              const ExprHandle& max) {
-            auto cast = [&](const ExprHandle& e) {
-              return Cast::make(in.dtype(), e);
-            };
-
-            if (noMin && noMax) {
-              return in;
-            } else if (noMin) {
-              auto cmax = cast(max);
-              return CompareSelect::make(in, cmax, cmax, in, kGT);
-            } else if (noMax) {
-              auto cmin = cast(min);
-              return CompareSelect::make(in, cmin, cmin, in, kLT);
-            } else {
-              auto cmax = cast(max);
-              auto cmin = cast(min);
-              auto mm = CompareSelect::make(in, cmin, cmin, in, kLT);
-              return CompareSelect::make(mm, cmax, cmax, mm, kGT);
-            }
-          },
-          false /* promote_inputs */);
-    } break;
     case aten::rand_like: {
       return computeOneOperand(
           "aten_rand_like",
@@ -1801,65 +1860,6 @@ Tensor* TensorExprKernel::computeOperandValue(
             return tensorOrConstant(inputs[0], indices);
           });
     }
-    case aten::batch_norm: {
-      bool hasWeight = true;
-      bool hasBias = true;
-
-      if (c10::get_if<ArgNone>(&inputs[1])) {
-        hasWeight = false;
-      }
-
-      if (c10::get_if<ArgNone>(&inputs[2])) {
-        hasBias = false;
-      }
-
-      return Compute(
-          "aten_batch_norm",
-          c10::fmap<DimArg>(outputShape),
-          [&](const std::vector<VarHandle>& axes) {
-            TORCH_INTERNAL_ASSERT(axes.size() >= 2);
-            // axes: N, C, H, W
-            std::vector<ExprHandle> indices(axes.begin(), axes.end());
-            ExprHandle c = indices[1];
-
-            // Parameter list:
-            // input, weight, bias, mean, var, training, momentum, eps,
-            // cudnn_enabled
-            std::vector<ExprHandle> exprInputs = {
-                tensorOrConstant(inputs[0], indices), // input
-                tensorOrConstant(inputs[3], {c}), // mean
-                tensorOrConstant(inputs[4], {c}), // var
-                constant(inputs[7]) // eps
-            };
-            if (hasWeight) {
-              exprInputs.push_back(tensorOrConstant(inputs[1], {c}));
-            }
-            if (hasBias) {
-              exprInputs.push_back(tensorOrConstant(inputs[2], {c}));
-            }
-            promoteInputs(exprInputs);
-
-            ExprHandle input = exprInputs[0];
-            ExprHandle mean = exprInputs[1];
-            ExprHandle var = exprInputs[2];
-            ExprHandle eps = exprInputs[3];
-            ExprHandle weight = FloatImm::make(1);
-            ExprHandle bias = FloatImm::make(0);
-
-            if (hasWeight) {
-              weight = exprInputs[4];
-            }
-            if (hasBias) {
-              bias = exprInputs[5];
-            }
-
-            auto inv_var = rsqrt(var + eps);
-            auto alpha = inv_var * weight;
-            auto beta = bias - mean * alpha;
-            auto output = input * alpha + beta;
-            return demoteOutput(output, outputType);
-          });
-    } break;
     default: {
       throw std::runtime_error("Unhandled node kind");
       return nullptr;
@@ -1889,12 +1889,15 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::lt:
     case aten::min:
     case aten::max:
+    case aten::masked_fill:
+    case aten::clamp:
     case aten::addcmul:
     case aten::sigmoid:
     case aten::reciprocal:
     case aten::neg:
     case aten::isnan:
     case aten::relu:
+    case aten::batch_norm:
     case aten::log:
     case aten::log10:
     case aten::log1p:
@@ -1930,10 +1933,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::where:
     case aten::frac:
     case aten::lgamma:
-    case aten::clamp:
     case aten::slice:
     case aten::unsqueeze:
-    case aten::batch_norm: {
+     {
       std::vector<ArgValue> argInputs;
       for (auto inp : inputs) {
         argInputs.push_back(jitToArgValue(inp));
