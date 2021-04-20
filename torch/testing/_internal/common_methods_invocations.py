@@ -2911,32 +2911,6 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', 
 
     return samples
 
-def sample_inputs_rbinops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
-    def _make_tensor_helper(shape, low=None, high=None):
-        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
-
-    samples = [
-        SampleInput(_make_tensor_helper((S, S, S)), args=(3.14,)),
-        SampleInput(_make_tensor_helper((S, S, S)), args=(3.14j,)),
-        SampleInput(_make_tensor_helper(()), args=(3.14,)),
-        SampleInput(_make_tensor_helper(()), args=(3.14j,)),
-    ]
-
-    return samples
-
-def sample_inputs_rdiv(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
-    def _make_tensor_helper(shape, low=None, high=None):
-        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
-
-    samples = [
-        SampleInput(_make_tensor_helper((S, S, S)), args=(3.14,)),
-        SampleInput(_make_tensor_helper(()), args=(3.14,)),
-        SampleInput(_make_tensor_helper((S, S, S)), args=(3.14j,)),
-        SampleInput(_make_tensor_helper(()), args=(3.14j,)),
-    ]
-
-    return samples
-
 def sample_inputs_cumulative_ops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -3158,6 +3132,19 @@ def sample_inputs_scatter_add(op_info, device, dtype, requires_grad):
     )
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
+
+def sample_inputs_rbinops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = [
+        SampleInput(_make_tensor_helper((S, S, S)), args=(3.14,)),
+        SampleInput(_make_tensor_helper((S, S, S)), args=(3.14j,)),
+        SampleInput(_make_tensor_helper(()), args=(3.14,)),
+        SampleInput(_make_tensor_helper(()), args=(3.14j,)),
+    ]
+
+    return samples
 
 foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('exp'),
