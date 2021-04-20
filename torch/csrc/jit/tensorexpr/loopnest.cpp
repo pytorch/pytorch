@@ -1659,6 +1659,7 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
 }
 
 void LoopNest::unroll(For* f) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Stmt* unrolled;
   unroll(f, &unrolled);
 }
@@ -1770,6 +1771,7 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
 }
 
 bool LoopNest::flatten(const std::vector<For*>& loops) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* flattened;
   return flatten(loops, &flattened);
 }
