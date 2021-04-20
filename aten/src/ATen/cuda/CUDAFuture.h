@@ -49,11 +49,14 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
       const at::IValue& value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
           dataPtrs) override {
+    // Start by performing all steps that can throw, before setting any field.
+    std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs =
+        dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
+
     currentDevice_ = c10::cuda::current_device();
 
     // Extract them once and cache them for later uses.
-    dataPtrs_ =
-        dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
+    dataPtrs_ = std::move(actualDataPtrs);
 
     std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
     for (const at::DataPtr& data_ptr : dataPtrs_) {
