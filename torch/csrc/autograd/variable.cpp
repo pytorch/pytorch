@@ -670,7 +670,12 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
         TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
       }
 
-      TORCH_CHECK(false, msg);
+      if (creation_meta == CreationMeta::NO_GRAD_MODE) {
+        // TODO: remove this before 1.9 once all code is properly updated
+        TORCH_WARN(msg);
+      } else {
+        TORCH_CHECK(false, msg);
+      }
     }
 
     // We warn only once per view
