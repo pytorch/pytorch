@@ -85,7 +85,6 @@ def _format_arg(arg) -> str:
     else:
         return str(arg)
 
-
 class Node:
     """
     ``Node`` is the data structure that represents individual operations within

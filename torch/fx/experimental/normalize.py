@@ -16,6 +16,10 @@ class NormalizeArgs(Transformer):
     signature and rewritten to exclusively kwargs in positional order.
     Also populates default values. Does not support positional-only
     parameters or varargs parameters (*args, **kwargs).
+
+    If the nodes have 'type' metadata, it will use it to disambiguate
+    overloads. Otherwise, it will throw an error.
+
     Example usage:
         m = torchvision.models.resnet18()
         traced = torch.fx.symbolic_trace(m)

@@ -1,6 +1,7 @@
 import torch
 import torch.fx
 from torch.fx.node import Node, map_aggregate
+from torch.fx.operator_schemas import create_type_hint
 from typing import Any, Tuple, NamedTuple, Optional
 
 class TensorMetadata(NamedTuple):
@@ -117,10 +118,6 @@ class ShapeProp(torch.fx.Interpreter):
         if found_tensor:
             n.meta['tensor_meta'] = meta
 
-        def create_type_hint(x):
-            if isinstance(x, tuple):
-                return Tuple[type(x), ...]
-            return type(x)
         n.meta['type'] = create_type_hint(result)
         return result
 
