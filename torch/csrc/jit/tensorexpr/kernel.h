@@ -18,8 +18,8 @@ bool matmulIsSupported(const Node* node);
 template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
-  for (size_t i = 0; i < t->buf()->ndim(); i++) {
-    sizes.push_back(dynamic_cast<const IntImm*>(t->buf()->dim(i))->value());
+  for (size_t i = 0; i < t->ndim(); i++) {
+    sizes.push_back(dynamic_cast<const IntImm*>(t->dim(i))->value());
   }
   return sizes;
 }
