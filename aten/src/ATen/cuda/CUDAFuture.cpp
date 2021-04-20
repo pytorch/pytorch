@@ -27,9 +27,24 @@ namespace {
 std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
     const at::IValue& value) {
   at::IValue::HashAliasedIValues sub_values;
-  // Prefer getSubValues() over visit() as the latter is a silent no-op for
-  // some unsupported types, whereas the former at least fails loudly.
-  value.getSubValues(sub_values);
+  try {
+    // Prefer getSubValues() over visit() as the latter is a silent no-op for
+    // some unsupported types, whereas the former at least fails loudly.
+    value.getSubValues(sub_values);
+  } catch (const c10::TypeError& err) {
+    // We might not be able to extract subvalues from Python objects (e.g., if
+    // they are custom classes) but we can still extract tensors.
+    if (value.isPyObject()) {
+      std::vector<at::Tensor> tensors =
+          value.toPyObjectHolder()->extractTensors();
+      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+      for (const at::Tensor& tensor : tensors) {
+        data_ptrs.emplace_back(tensor.storage().data_ptr());
+      }
+      return data_ptrs;
+    }
+    throw;
+  }
 
   std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
   for (const at::IValue& sub_value : sub_values) {
