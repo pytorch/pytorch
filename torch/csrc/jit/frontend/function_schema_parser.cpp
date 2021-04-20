@@ -61,9 +61,10 @@ struct SchemaParser {
 
     // check if all arguments are not-default for vararg schemas
     if (is_vararg) {
-      for(const auto& arg: arguments) {
-        if (arg.default_value().has_value()){
-          throw ErrorReport(L.cur()) << "schemas with vararg (...) can't have default value args";
+      for (const auto& arg : arguments) {
+        if (arg.default_value().has_value()) {
+          throw ErrorReport(L.cur())
+              << "schemas with vararg (...) can't have default value args";
         }
       }
     }
