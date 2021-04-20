@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Tuple, Optional
 from torch.fx.node import Argument, Target, Node
 from torch.fx.operator_schemas import normalize_module, normalize_function, create_type_hint
 
-from torch.fx import Transformer
+from torch.fx import Transformer, Proxy
 from .schema_type_annotation import AnnotateTypesWithSchema
 
 class NormalizeArgs(Transformer):
@@ -23,7 +23,7 @@ class NormalizeArgs(Transformer):
     """
     def __init__(self, module : torch.nn.Module):
         super().__init__(module)
-        self.node_map = {}
+        self.node_map: Dict[Proxy, Node] = {}
 
     def run_node(self, n: Node) -> Any:
         args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -34,7 +34,7 @@ class NormalizeArgs(Transformer):
                 return old_meta['type'] if 'type' in old_meta else None
             return create_type_hint(arg)
 
-        arg_types = [get_type(arg) for arg in args]
+        arg_types = tuple([get_type(arg) for arg in args])
         kwarg_types = {k: get_type(v) for k, v in kwargs.items()}
         if n.op == 'call_function':
             out = self.call_function(n.target, args, kwargs, arg_types, kwarg_types)
@@ -43,7 +43,9 @@ class NormalizeArgs(Transformer):
         self.node_map[out] = n
         return out
 
-    def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any], arg_types: Optional[Tuple[Any]] = None, kwarg_types : Optional[Dict[str, Any]] = None):
+    def call_function(
+            self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any],
+            arg_types: Optional[Tuple[Any, ...]] = None, kwarg_types : Optional[Dict[str, Any]] = None):
         assert callable(target)
         new_kwargs = normalize_function(target, args, kwargs, arg_types, kwarg_types)  # type: ignore
         if new_kwargs:
