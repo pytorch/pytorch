@@ -13,10 +13,16 @@ CUDA_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
 
 
 class PyTorchLinuxWorkflow:
-    def __init__(self, build_environment: str, docker_image_base: str):
+    def __init__(
+            self,
+            build_environment: str,
+            docker_image_base: str,
+            on_pull_request: bool=False
+    ):
         self.build_environment = build_environment
         self.docker_image_base = docker_image_base
         self.test_runner_type = CPU_TEST_RUNNER
+        self.on_pull_request = on_pull_request
         if "cuda" in build_environment:
             self.test_runner_type = CUDA_TEST_RUNNER
 
@@ -31,7 +37,10 @@ class PyTorchLinuxWorkflow:
                 workflow_template.render(
                     build_environment=self.build_environment,
                     docker_image_base=self.docker_image_base,
-                    test_runner_type=self.test_runner_type
+                    test_runner_type=self.test_runner_type,
+                    on_pull_request=(
+                        "pull_request:" if self.on_pull_request else ""
+                    )
                 )
             )
             output_file.write('\n')
