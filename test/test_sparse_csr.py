@@ -12,15 +12,17 @@ from torch.testing._internal.common_device_type import \
 load_tests = load_tests
 
 class TestSparseCSR(TestCase):
-    def gen_sparse_csr(self, shape, nnz, dtype, device):
+    def gen_sparse_csr(self, shape, nnz, dtype, device, index_dtype=torch.int64):
         total_values = functools.reduce(operator.mul, shape, 1)
         dense = torch.randn(total_values, dtype=dtype, device=device)
         fills = random.sample(list(range(total_values)), total_values - nnz)
 
         dense[fills] = 0
         dense = dense.reshape(shape)
-
-        return dense.to_sparse_csr()
+        s = dense.to_sparse_csr()
+        return torch.sparse_csr_tensor(torch.tensor(s.crow_indices(), dtype=index_dtype),
+                                       torch.tensor(s.col_indices(), dtype=index_dtype),
+                                       torch.tensor(s.values()), size=shape, dtype=dtype, device=device)
 
     def setUp(self):
         self.index_tensor = lambda *args: torch.tensor(*args, dtype=torch.int32)
@@ -183,23 +185,24 @@ class TestSparseCSR(TestCase):
             sparse = dense.to_sparse_csr()
 
     @onlyCPU
-    @dtypes(torch.double)
+    @dtypes(torch.float, torch.double)
     def test_csr_matvec(self, device, dtype):
         side = 100
-        csr = self.gen_sparse_csr((side, side), 1000, dtype, device)
-        vec = torch.randn(side, dtype=dtype, device=device)
+        for index_dtype in [torch.int32, torch.int64]:
+            csr = self.gen_sparse_csr((side, side), 1000, dtype, device, index_dtype=index_dtype)
+            vec = torch.randn(side, dtype=dtype, device=device)
 
-        res = csr.matmul(vec)
-        expected = csr.to_dense().matmul(vec)
+            res = csr.matmul(vec)
+            expected = csr.to_dense().matmul(vec)
 
-        self.assertEqual(res, expected)
+            self.assertEqual(res, expected)
 
-        bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, "mv: expected"):
-            csr.matmul(bad_vec)
+            bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
+            with self.assertRaisesRegex(RuntimeError, "mv: expected"):
+                csr.matmul(bad_vec)
 
     @onlyCPU
-    @dtypes(torch.double)
+    @dtypes(*torch.testing.floating_and_complex_types())
     def test_coo_csr_conversion(self, device, dtype):
         size = (5, 5)
         dense = torch.randn(size, dtype=dtype, device=device)
