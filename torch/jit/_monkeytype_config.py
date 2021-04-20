@@ -54,13 +54,12 @@ if _IS_MONKEYTYPE_INSTALLED:
         def analyze(self, qualified_name: str) -> Dict:
             # Analyze the types for the given module
             # and create a dictionary of all the types
-            # for arguments and return values this module can take
+            # for arguments.
             records = self.trace_records[qualified_name]
             all_args = defaultdict(set)  # type:  ignore[var-annotated]
             for record in records:
                 for arg, arg_type in record.arg_types.items():
                     all_args[arg].add(arg_type)
-                all_args["return_type"].add(record.return_type)
             return all_args
 
         def consolidate_types(self, qualified_name: str) -> Dict:
@@ -68,8 +67,6 @@ if _IS_MONKEYTYPE_INSTALLED:
             # If there are more types for an argument,
             # then consolidate the type to `Any` and replace the entry
             # by type `Any`.
-            # This currently handles only cases with only one return value
-            # TODO: Consolidate types for multiple return values
             for arg, types in all_args.items():
                 _all_type = " "
                 for _type in types:
