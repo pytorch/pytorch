@@ -73,4 +73,4 @@ clang_tidy:
 	echo "clang-tidy local lint is not yet implemented"
 	exit 1
 
-lint: flake8 mypy quick_checks cmakelint shellcheck-gha generate-gha-workflows
+lint: flake8 mypy quick_checks cmakelint generate-gha-workflows
