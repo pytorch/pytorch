@@ -1250,7 +1250,6 @@ class DistributedDataParallel(Module):
                     assert (
                         self.device_type != "cpu"
                     ), "SyncBatchNorm layers only work with GPU modules"
-                    layer._specify_ddp_gpu_num(1)
 
     def _check_comm_hook(self, hook):
         if not callable(hook):
