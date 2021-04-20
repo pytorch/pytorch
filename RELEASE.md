@@ -55,6 +55,8 @@ Example:
 * https://github.com/pytorch/pytorch/pull/51995
 
  TODO: Create release branch in `builder` repo and pin release CI to use that branch rather than HEAD of builder repo.
+ 
+ Add `release/{MAJOR}.{MINOR}` to list of branches in https://github.com/pytorch/pytorch/blob/fb-config/browser-extension.json for FaceHub integrated setups
 ## Drafting RCs (Release Candidates)
 
 To draft RCs, a user with the necessary permissions can push a git tag to the main `pytorch/pytorch` git repository.
