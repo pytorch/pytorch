@@ -24,7 +24,13 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   return sizes;
 }
 using ArgNone = c10::monostate;
-using ArgValue = c10::variant<tensorexpr::BufHandle, tensorexpr::VarHandle, double, int64_t, bool, ArgNone>;
+using ArgValue = c10::variant<
+    tensorexpr::BufHandle,
+    tensorexpr::VarHandle,
+    double,
+    int64_t,
+    bool,
+    ArgNone>;
 
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
@@ -90,7 +96,8 @@ class TORCH_API TensorExprKernel {
   ExprHandle constant(const ArgValue& v);
   ExprHandle constant(const torch::jit::Value* v);
   ExprHandle broadcast(const Buf* b, const std::vector<ExprHandle>& axes);
-  ExprHandle broadcastBufTemp(  // TODO(chilli): switch over to this when finished refactoring
+  ExprHandle broadcastBufTemp( // TODO(chilli): switch over to this when
+                               // finished refactoring
       BufHandle b,
       const std::vector<ExprHandle>& axes);
   ExprHandle chunk(
@@ -109,14 +116,15 @@ class TORCH_API TensorExprKernel {
       std::vector<ExprHandle>& inputs,
       int typeConstraints = kAllTypes);
 
-  ExprHandle demoteOutput( const ExprHandle& e, const c10::optional<at::ScalarType> type);
+  ExprHandle demoteOutput(
+      const ExprHandle& e,
+      const c10::optional<at::ScalarType> type);
   ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
   ArgValue jitToArgValue(const torch::jit::Value* v) const;
 
-
   ExprHandle tensorOrConstant(
-    const ArgValue& v,
-    const std::vector<ExprHandle>& axes);
+      const ArgValue& v,
+      const std::vector<ExprHandle>& axes);
 
   ExprHandle tensorOrConstant(
       const torch::jit::Value* v,
@@ -129,12 +137,12 @@ class TORCH_API TensorExprKernel {
       const int checkParamTypes = kAllTypes);
 
   Tensor* computeTwoOperand(
-    const std::string& name,
-    const std::vector<ArgValue> inputValues,
-    const c10::optional<at::ScalarType> outputTensorType,
-    const std::vector<ExprHandle> outputShape,
-    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
-        innerExpr);
+      const std::string& name,
+      const std::vector<ArgValue> inputValues,
+      const c10::optional<at::ScalarType> outputTensorType,
+      const std::vector<ExprHandle> outputShape,
+      const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+          innerExpr);
 
   Tensor* computeTwoOperand(
       const std::string& name,
