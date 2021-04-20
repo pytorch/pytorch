@@ -4929,8 +4929,6 @@ class CommTest(MultiProcessTestCase):
                 )
                 self.assertEqual(initial_num + i + 1, seq_num)
 
-        if self.rank == 0:
-            print(f"HAVE WORLD SIZE {dist.get_world_size(process_group)}")
         if dist.get_world_size(process_group) > 2:
             # Test when certain ranks don't call collectives
             if dist.get_rank(process_group) not in [0, 2]:
