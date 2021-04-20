@@ -5354,10 +5354,6 @@
   structured_delegate: digamma.out
   variants: method
 
-- func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
-  common_device_guard: False   # TensorIterator
-  variants: method
-
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
   common_device_guard: False   # TensorIterator
   variants: method
@@ -6186,6 +6182,12 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: polygamma
+
+- func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
+  variants: method
+  dispatch:
+    CompositeExplicitAutograd: polygamma_
 
 - func: erfinv(Tensor self) -> Tensor
   common_device_guard: False   # TensorIterator
@@ -9119,6 +9121,12 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg_lstsq
+
+- func: linalg_lstsq.out(Tensor self, Tensor b, float? cond=None, *, str? driver=None, Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values) -> (Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_lstsq_out
 
 - func: _lstsq_helper_(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float cond, str driver_name) -> Tensor(a!)
   common_device_guard: False
