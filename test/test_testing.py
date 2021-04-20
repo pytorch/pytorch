@@ -774,7 +774,7 @@ class TestAsserts(TestCase):
         ]
 
     def assert_fns_with_inputs(self, actual: Any, expected: Any) -> Iterator[Callable]:
-        """Yields assert functions with with included positional inputs based on two examples.
+        """Yields assert functions with included positional inputs based on two examples.
 
         .. note::
 
@@ -790,28 +790,6 @@ class TestAsserts(TestCase):
         """
         for assert_fn, inputs in itertools.product(self.get_assert_fns(), self.make_inputs(actual, expected)):
             yield functools.partial(assert_fn, *inputs)
-
-    @contextlib.contextmanager
-    def assertRaisesRegexs(self, expected_exception: Type[Exception], *expected_regexs: str) -> Iterator[None]:
-        """Asserts that specific exceptions is raised, where the message must match regular expressions.
-
-        Args:
-            expected_exception (Type[Exception]): Exception type expected to be raised.
-            *expected_regexs (str): Regular expressions expected to be found in error message.
-
-        Raises:
-            AssertionError: If no exception of type :attr:`expected_exception` was raised.
-            AssertionError: If the the message of the raised exceptions does not match all :attr:`expected_exception`'s.
-        """
-        try:
-            yield
-        except expected_exception as error:
-            msg = str(error)
-            for expected_regex in expected_regexs:
-                if re.search(expected_regex, msg) is None:
-                    raise AssertionError(f"'{msg}' does not match regular expression '{expected_regex}'.")
-        else:
-            raise AssertionError(f"{expected_exception.__name__} was not raised.")
 
     @onlyCPU
     def test_complex_support(self, device):
@@ -974,7 +952,6 @@ class TestAsserts(TestCase):
 
         torch.testing.assert_close(actual, expected, rtol=0.0, atol=eps * 2)
 
-    @onlyCPU
     def test_assert_close_nan(self, device):
         a = torch.tensor(float("NaN"), device=device)
         b = torch.tensor(float("NaN"), device=device)
@@ -992,26 +969,66 @@ class TestAsserts(TestCase):
             torch.testing.assert_close(*inputs, equal_nan=True)
 
     @onlyCPU
-    def test_mismatching_values_msg(self, device):
-        actual = torch.full((3, 3), 5, dtype=torch.float32, device=device)
-        expected = actual.clone()
-
-        actual[0, 1] = 1
-        expected[0, 1] = 2
-        expected[1, 2] = 9
-
-        expected_regexs = (
-            r"\s+2\s+",  # absolute number of mismatches
-            r"22([.]2+)?\s*[%]",  # relative number of mismatches
-            r"\s+4[.]0\s+",  # maximum absolute difference
-            r"1,\s*2",  # index of maximum absolute difference
-            r"\s+0[.]5\s+",  # maximum relative difference
-            r"0,\s*1",  # index of maximum relative difference
-        )
+    def test_mismatching_values_msg_mismatches(self, device):
+        actual = torch.tensor([1, 2, 3, 4], device=device)
+        expected = torch.tensor([1, 2, 5, 6], device=device)
 
         for fn in self.assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegexs(AssertionError, *expected_regexs):
+            with self.assertRaisesRegex(AssertionError, re.escape("Mismatched elements: 2 / 4 (50.0%)")):
                 fn()
+
+    @onlyCPU
+    def test_mismatching_values_msg_abs_diff(self, device):
+        actual = torch.tensor([[1, 2], [3, 4]], device=device)
+        expected = torch.tensor([[1, 2], [5, 4]], device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at (1, 0)")):
+                fn()
+
+    @onlyCPU
+    def test_mismatching_values_msg_rel_diff(self, device):
+        actual = torch.tensor([[1, 2], [3, 4]], device=device)
+        expected = torch.tensor([[1, 4], [3, 4]], device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest relative difference: 0.5 at (0, 1)")):
+                fn()
+
+    @onlyCPU
+    def test_assert_close_mismatching_values_msg_rtol(self, device):
+        rtol = 1e-3
+
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
+
+        for inputs in self.make_inputs(actual, expected):
+            with self.assertRaisesRegex(
+                AssertionError, re.escape(f"Greatest relative difference: 0.5 at 0 (up to {rtol} allowed)")
+            ):
+                torch.testing.assert_close(*inputs, rtol=rtol, atol=0.0)
+
+    @onlyCPU
+    def test_assert_close_mismatching_values_msg_atol(self, device):
+        atol = 1e-3
+
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
+
+        for inputs in self.make_inputs(actual, expected):
+            with self.assertRaisesRegex(
+                AssertionError, re.escape(f"Greatest absolute difference: 1 at 0 (up to {atol} allowed)")
+            ):
+                torch.testing.assert_close(*inputs, rtol=0.0, atol=atol)
+
+    @onlyCPU
+    def test_unknown_type(self, device):
+        actual = torch.empty((), device=device)
+        expected = {actual.clone()}
+
+        for fn in self.get_assert_fns():
+            with self.assertRaisesRegex(UsageError, str(type(expected))):
+                fn(actual, expected)
 
     @onlyCPU
     def test_sequence_mismatching_len(self, device):
@@ -1061,7 +1078,7 @@ class TestAsserts(TestCase):
         expected = actual.tolist()
 
         for fn in self.assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegexs(UsageError, str(type(actual)), str(type(expected))):
+            with self.assertRaisesRegex(UsageError, str(type(expected))):
                 fn()
 
     @onlyCPU
@@ -1070,7 +1087,7 @@ class TestAsserts(TestCase):
         expected = "0"
 
         for fn in self.assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegexs(UsageError, str(type(actual))):
+            with self.assertRaisesRegex(UsageError, str(type(actual))):
                 fn()
 
     @onlyCPU

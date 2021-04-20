@@ -5034,9 +5034,6 @@
   structured_delegate: digamma.out
   variants: method
 
-- func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
-  variants: method
-
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
   variants: method
   dispatch:
@@ -5803,6 +5800,11 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: polygamma
+
+- func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CompositeExplicitAutograd: polygamma_
 
 - func: erfinv(Tensor self) -> Tensor
   structured_delegate: erfinv.out
