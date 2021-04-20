@@ -289,8 +289,14 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
             # Replace potentially unsupported type annotations by "Any"
             arg.annotation = unused_def.args.args[0].annotation
 
-    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
+    # If MonkeyType is installed, get all the consolidated type traces
+    # for the arguments from type_trace_db
+    type_trace_db = torch.jit._script._get_type_trace_db()
+    args_and_types = None  # type: ignore[name-defined]
+    if type_trace_db.trace_records:
+        args_and_types = type_trace_db.get_args_types(fn.__qualname__)  # type: ignore[name-defined]
 
+    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name, args_and_types=args_and_types)
 
 class Builder(object):
     def __call__(self, ctx, node):
@@ -306,18 +312,11 @@ def build_class_def(ctx, py_def, methods, properties, self_name, assigns):
     return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties, assigns)
 
 
-def build_def(ctx, py_def, type_line, def_name, self_name=None):
+def build_def(ctx, py_def, type_line, def_name, self_name=None, args_and_types=None):
     body = py_def.body
     r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
                        py_def.col_offset,
                        py_def.col_offset + len("def"))
-
-    # If MonkeyType is installed, get all the consolidated traces for the arguments
-    # and the return types from type_trace_db
-    type_trace_db = torch.jit._script._get_type_trace_db()
-    args_and_types = None  # type: ignore[name-defined]
-    if type_trace_db.trace_records:
-        args_and_types = type_trace_db.get_args_types(def_name)  # type: ignore[name-defined]
 
     param_list = build_param_list(ctx, py_def.args, self_name, args_and_types)
     return_type = None
