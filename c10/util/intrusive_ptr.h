@@ -443,9 +443,28 @@ class intrusive_ptr final {
   }
 
   /**
-   * Turn a **non-owning raw pointer** to an intrusive_ptr.
+   * Turn a new instance of TTarget (e.g., literally allocated
+   * using new TTarget(...) into an intrusive_ptr.  If possible,
+   * use intrusive_ptr::make instead which statically guarantees
+   * that the allocation was done properly.
    *
-   * This method is potentially dangerous (as it can mess up refcount).
+   * At the moment, the only reason this method exists is because
+   * pybind11 holder types expect to be able to allocate in
+   * this way (because pybind11 handles the new allocation itself).
+   */
+  static intrusive_ptr unsafe_steal_from_new(TTarget* raw_ptr) {
+    return intrusive_ptr(raw_ptr);
+  }
+
+  /**
+   * Turn a **non-owning raw pointer** to an intrusive_ptr.  It is
+   * the moral equivalent of enable_shared_from_this on a shared pointer.
+   *
+   * This method is only valid for objects that are already live.  If
+   * you are looking for the moral equivalent of unique_ptr<T>(T*)
+   * constructor, see steal_from_new.
+   *
+   * TODO: https://github.com/pytorch/pytorch/issues/56482
    */
   static intrusive_ptr unsafe_reclaim_from_nonowning(TTarget* raw_ptr) {
     // See Note [Stack allocated intrusive_ptr_target safety]
