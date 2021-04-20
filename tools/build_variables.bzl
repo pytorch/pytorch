@@ -775,6 +775,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/LerpKernel.cpp",
     "aten/src/ATen/native/cpu/LinearAlgebraKernel.cpp",
     "aten/src/ATen/native/cpu/MaxPooling.cpp",
+    "aten/src/ATen/native/cpu/MaxPoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
     "aten/src/ATen/native/cpu/PowKernel.cpp",
