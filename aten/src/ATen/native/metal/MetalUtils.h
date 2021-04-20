@@ -1,15 +1,22 @@
 #include <ATen/Tensor.h>
+#include <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #include <ATen/native/metal/MetalCommandBuffer.h>
 #include <ATen/native/metal/MetalTensorImpl.h>
 #include <ATen/native/metal/MetalTensorImplStorage.h>
 #include <vector>
 
+#if (defined(__ARM_NEON__) || defined(__ARM_NEON))
+typedef float16_t fp16_t;
+#else
+typedef uint16_t fp16_t;
+#endif
+
 namespace at {
 namespace native {
 namespace metal {
 
-std::vector<uint16_t> Fp32ToFp16(const std::vector<float>& src);
-std::vector<float> Fp16ToFp32(const std::vector<uint16_t>& src);
+std::vector<fp16_t> Fp32ToFp16(const std::vector<float>& src);
+std::vector<float> Fp16ToFp32(const std::vector<fp16_t>& src);
 
 std::vector<float> NCHWToNC4(
     const float* src,
@@ -65,6 +72,15 @@ static inline MetalCommandBuffer* getCommandBufferFromTensor(
   MetalCommandBuffer* cmdBuffer = implStorage.texture()->commandBuffer();
   TORCH_CHECK(cmdBuffer);
   return cmdBuffer;
+}
+
+template<typename T>
+id<MTLBuffer>makeMTLBuffer(const std::vector<T>& src) {
+    id<MTLBuffer> buffer = [[MPSCNNContext sharedInstance].device
+          newBufferWithLength:src.size() * sizeof(T)
+                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+    memcpy(buffer.contents, src.data(), src.size() * sizeof(T));
+    return buffer;
 }
 
 } // namespace metal
