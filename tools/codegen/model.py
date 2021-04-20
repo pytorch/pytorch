@@ -1360,6 +1360,9 @@ class ExternalBackendFunction:
         return self.metadata is not None and self.metadata.is_autograd
 
     def __post_init__(self) -> None:
+        if self.metadata is not None:
+            assert self.metadata.operator == self.native_function.func.name, \
+                f'Metadata and native function names do not match: {self.metadata.operator} and {self.native_function.func.name}'
         kind = self.native_function.func.kind()
         if kind == SchemaKind.out or kind == SchemaKind.inplace:
             assert self.metadata is None or not self.metadata.structured, \

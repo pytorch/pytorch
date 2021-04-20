@@ -1047,7 +1047,9 @@
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch: {}
 
-- func: _copy_from_temp(Tensor self, Tensor dst) -> Tensor
+# We need this to be able to properly copy from a CPU to an XLA tensor with different sizes.
+# See https://github.com/pytorch/xla/issues/2881
+- func: _copy_from_and_resize(Tensor self, Tensor dst) -> Tensor
   dispatch: {}
 
 - func: cos(Tensor self) -> Tensor
