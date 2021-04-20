@@ -266,8 +266,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         torch.cuda.init()
 
         # Check local devices in device_maps and devices are all valid.
-        local_devices = rpc_backend_options.devices
-        local_devices = set(local_devices) if local_devices else set()
+        local_devices = set(rpc_backend_options.devices) if rpc_backend_options.devices else set()
         for worker_name in rpc_backend_options.device_maps:
             local_devices.update(rpc_backend_options.device_maps[worker_name].keys())
 
@@ -278,10 +277,10 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
                 f"devices = {rpc_backend_options.devices}"
             )
     else:
-        if all(
+        if all([
             rpc_backend_options.devices is not None,
             len(rpc_backend_options.devices) > 0,
-        ):
+        ]):
             raise ValueError(
                 f"CUDA is not available on {name}, but "
                 f"devices = {rpc_backend_options.devices}"
