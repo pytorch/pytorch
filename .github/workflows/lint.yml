@@ -58,6 +58,10 @@ jobs:
       - name: Ensure canonical include
         run: |
           (! git grep -In $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above lines have include with quotes; please convert them to #include <xxxx>"; false))
+      - name: Ensure no unqualified noqa
+        run: |
+          # shellcheck disable=SC2016
+          (! git grep -InP '# noqa(?!: [A-Z]+\d{3})' -- '**.py' ':(exclude)caffe2' || (echo 'The above lines have unqualified `noqa`; please convert them to `noqa: XXXX`'; false))
       # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
@@ -131,12 +135,12 @@ jobs:
         with:
           fetch-depth: 2 # to allow us to use github.event.pull_request.head.sha
       - name: Prepare output dir with HEAD commit SHA
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           mkdir flake8-output
           cd flake8-output
           echo "$HEAD_SHA" > commit-sha.txt
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Run flake8
         run: |
           set -eux
@@ -147,14 +151,14 @@ jobs:
           cp flake8-output.txt flake8-output/annotations.json
       - name: Translate annotations
         if: github.event_name == 'pull_request'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           tools/translate_annotations.py \
             --file=flake8-output.txt \
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
             --commit="$HEAD_SHA" \
             > flake8-output/annotations.json
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
@@ -179,12 +183,12 @@ jobs:
         with:
           fetch-depth: 0 # to allow tools/clang_tidy.py to do its thing
       - name: Prepare output dir with HEAD commit SHA
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           mkdir clang-tidy-output
           cd clang-tidy-output
           echo "$HEAD_SHA" > commit-sha.txt
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Install dependencies
         run: |
           set -eux
@@ -203,6 +207,9 @@ jobs:
           sudo apt-get install -y clang-tidy-11
           sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-11 1000
       - name: Run clang-tidy
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -eux
           git remote add upstream https://github.com/pytorch/pytorch
@@ -264,9 +271,6 @@ jobs:
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
             --commit="$HEAD_SHA" \
             > clang-tidy-output/annotations.json
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:

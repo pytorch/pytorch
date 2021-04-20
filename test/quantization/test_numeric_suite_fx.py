@@ -365,7 +365,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         results = get_matching_subgraph_pairs(mp, mq)
 
         expected_types = {
-            'base_op_torch.cat_0': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
+            'base_op_torch.cat_0': ((torch.cat, torch.cat), (torch.cat, torch.cat)),
             'base_op_torch.add_0': ((torch.add, torch.add), (toq.add, toq.add)),
             'base_op_torch.add_1': ((torch.add, torch.add), (toq.add, toq.add)),
         }
@@ -927,7 +927,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         m = M().eval()
         expected_occurrence = {
             # 3 dequantize function calls from the 3 dtype casts for [x, x, x]
-            ns.call_function(torch.dequantize): 3,
+            ns.call_module(torch.nn.Identity): 3,
             # 1 dequantize method call for module output
             ns.call_method("dequantize"): 1,
         }
