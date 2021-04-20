@@ -304,7 +304,7 @@ class GaussianNLLLoss(_Loss):
 
     The targets are treated as samples from Gaussian distributions with
     expectations and variances predicted by the neural network. For a
-    ``target`` tensor modelled as having Gaussian distribution with a tensor 
+    ``target`` tensor modelled as having Gaussian distribution with a tensor
     of expectations ``input`` and a tensor of positive variances ``var`` the loss is:
 
     .. math::
@@ -315,7 +315,7 @@ class GaussianNLLLoss(_Loss):
     where :attr:`eps` is used for stability. By default, the constant term of
     the loss function is omitted unless :attr:`full` is ``True``. If ``var`` is not the same
     size as ``input`` (due to a homoscedastic assumption), it must either have a final dimension
-    of 1 or have one fewer dimension (with all other sizes being the same) for correct broadcasting.  
+    of 1 or have one fewer dimension (with all other sizes being the same) for correct broadcasting.
 
     Args:
         full (bool, optional): include the constant term in the loss
