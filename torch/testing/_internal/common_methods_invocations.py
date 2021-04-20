@@ -5698,14 +5698,8 @@ def unpack_variables(args):
 
 
 EXCLUDE_FUNCTIONAL = {
-    'addmm',
-    'addmm_',
     'addbmm',
     'baddbmm',
-    'addmv',
-    'addmv_',
-    'addr',
-    'addr_',
     'reshape',
     'where'  # argument order
 }
@@ -5732,12 +5726,6 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     'test_det_batched_symmetric_psd',
     # `other` expand_as(self, other) is not used in autograd.
     'test_expand_as',
-    'test_logdet',
-    'test_logdet_1x1',
-    'test_logdet_symmetric',
-    'test_logdet_batched',
-    'test_logdet_batched_1x1',
-    'test_logdet_batched_symmetric',
     'test_cdist',
 }
 
@@ -5761,28 +5749,17 @@ def exclude_tensor_method(name, test_name):
         'test_std_mean_dim_1d',
         'test_std_mean_dim',
         'test_std_mean',
-        'test_view_as_real_complex',
-        'test_real_complex',
-        'test_imag_complex',
-        'test_complex'
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {
-        'index_add',
-        'index_copy',
         'index_fill',
-        'masked_fill',
-        'masked_scatter',
         'scatter',
         'scatter_add',
-        'det',
     }
     if test_name in exclude_all_tensor_method_by_test_name:
         return True
     is_magic_method = name[:2] == '__' and name[-2:] == '__'
     is_inplace = name[-1] == "_" and not is_magic_method
     if not is_inplace and name in exclude_outplace_tensor_method:
-        return True
-    if 'fft.' in name:
         return True
     return False
