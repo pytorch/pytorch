@@ -333,7 +333,9 @@ class NativeFunction:
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
 
-        e.pop('__line__')
+        # don't care if it exists or not; make it easier to use this function
+        # with other yaml parsers that aren't setting __line__ in the dict
+        e.pop('__line__', None)
         assert not e, f"leftover entries: {e}"
 
         return NativeFunction(
