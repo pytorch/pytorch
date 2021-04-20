@@ -67,10 +67,10 @@ WORKFLOWS = [
     #     build_environment="pytorch-linux-xenial-py3-clang7-onnx",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-onnx",
     # ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
-    # ),
+    PyTorchLinuxWorkflow(
+        build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
+    ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
