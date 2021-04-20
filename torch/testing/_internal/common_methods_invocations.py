@@ -2976,6 +2976,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addr),
     OpInfo('addcmul',
            dtypes=all_types_and_complex(),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_inplace_autograd=False,
@@ -2985,6 +2986,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
     OpInfo('addcdiv',
            dtypes=floating_and_complex_types(),
+           dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
            skips=(
