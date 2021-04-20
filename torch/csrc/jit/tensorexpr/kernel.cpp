@@ -602,11 +602,11 @@ ExprHandle TensorExprKernel::constant(const ArgValue& v) {
     return LongImm::make(*i);
   } else if (auto b = c10::get_if<bool>(&v)) {
     return BoolImm::make(*b);
-    } else if (c10::get_if<ArgNone>(&v)) {
-      // This is just a placeholder so we don't throw.  None-handling
-      // is operator-specific and should be handled properly in
-      // the operator-specific lowering code.
-      return IntImm::make(0);
+  } else if (c10::get_if<ArgNone>(&v)) {
+    // This is just a placeholder so we don't throw.  None-handling
+    // is operator-specific and should be handled properly in
+    // the operator-specific lowering code.
+    return IntImm::make(0);
   }
   throw unsupported_dtype();
 }
