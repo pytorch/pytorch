@@ -4,22 +4,6 @@
 
 #include <c10/cuda/CUDAException.h>
 
-#if !defined(THC_REAL_IS_BOOL)
-
-void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-  if (!THC_reduceDim<scalar_t>(state, self, src,
-                           thrust::identity<accreal>{},
-                           ReduceMultiply<accreal>{},
-                           thrust::identity<accreal>{},
-                           scalar_cast<accreal>(1),
-                           dimension,
-                           keepdim)) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
@@ -54,8 +38,6 @@ void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar
   THCTensor_(freeCopyTo)(state, self_, self);
   THCTensor_(free)(state, data);
 }
-
-#endif
 
 #endif
 

@@ -32,7 +32,9 @@ from .gen_inplace_or_view_type import (
     ASSIGN_RETURN_VALUE, gen_formals,
 )
 
-from tools.codegen.api.types import Binding, DispatcherSignature
+from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
+                                     tensorT, tensorListT, MutRefCType, OptionalCType,
+                                     ListCType, SpecialArgName, scalarT)
 from tools.codegen.api.autograd import (
     DifferentiableInput, NativeFunctionWithDifferentiabilityInfo,
     SavedAttribute, dispatch_strategy, gen_differentiable_outputs,
@@ -97,7 +99,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill'
+    'index', 'masked_fill', 'cross'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -365,7 +367,7 @@ def gen_variable_type_shard(
         formals = gen_formals(f)
 
         type_definitions.append(METHOD_DEFINITION.substitute(
-            return_type=cpp.returns_type(f.func.returns),
+            return_type=cpp.returns_type(f.func.returns).cpp_type(),
             type_wrapper_name=type_wrapper_name(f),
             type_definition_body=emit_body(fn),
             formals=formals,
@@ -482,7 +484,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 return None
 
             # We really only care about trimming down the amount of tensors we save
-            if arg.type != 'Tensor':
+            if arg.nctype.type != BaseCType(tensorT):
                 return None
 
             # We want to emit simple guards, so we only allow that if checking one
@@ -546,7 +548,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for arg in differentiable_outputs:
             name = arg.name
             # TODO: should be `arg.type.is_tensor_like()`?
-            if arg.cpp_type in ['Tensor', 'TensorList', 'const c10::List<c10::optional<Tensor>> &']:
+            if arg.cpp_type in ['at::Tensor', 'at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &']:
                 body.append(f'throw_error_for_complex_autograd({name}, "{base_name}");')
         return body
 
@@ -577,12 +579,13 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # assign the saved variables to the generated grad_fn
         stmts: List[str] = []
         for arg in saved_variables:
-            name = arg.name
+            name = arg.nctype.name.name if isinstance(arg.nctype.name, SpecialArgName) else arg.nctype.name
+            type = arg.nctype.type
             expr = arg.expr
-            if arg.type == 'Tensor' or arg.type == 'c10::optional<Tensor>' or \
-                    arg.type == 'c10::optional<Tensor>&' or (is_output and arg.type == 'Scalar'):
+            if type == BaseCType(tensorT) or type == OptionalCType(BaseCType(tensorT)) or \
+                    type == MutRefCType(OptionalCType(BaseCType(tensorT))) or (is_output and type == BaseCType(scalarT)):
+                var = name
                 name += '_'
-                var = arg.name
                 if var == 'self' and inplace:
                     var = 'self.clone()'
                     assert not is_output
@@ -592,10 +595,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     expr = f'SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})'
                 else:
                     expr = f'SavedVariable({var}, {str(is_output).lower()})'
-            elif arg.type in ['TensorList', 'c10::List<c10::optional<Tensor>>']:
+            elif type == BaseCType(tensorListT) or type == ListCType(OptionalCType(BaseCType(tensorT))):
+                expr = f'make_saved_variable_list({name})'
                 name += '_'
-                expr = f'make_saved_variable_list({arg.name})'
-            elif arg.type == 'IntArrayRef':
+            elif type == BaseCType(intArrayRefT):
                 expr = expr + ".vec()"
             guard = guard_for(arg)
             if guard is None:
@@ -645,18 +648,18 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         if cpp.name(f.func) not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
             for unpacked_binding in unpacked_bindings:
                 arg = unpacked_binding.name
-                noref_cpp_type = unpacked_binding.ctype.cpp_type(strip_ref=True)
-                if noref_cpp_type == 'TensorList':
+                noref_cpp_type = unpacked_binding.nctype.type.remove_const_ref()
+                if noref_cpp_type == BaseCType(tensorListT):
                     save_ptrs_stmts += [SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                         SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                     enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                                 ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
-                elif noref_cpp_type == 'c10::List<c10::optional<Tensor>>':
+                elif noref_cpp_type == ListCType(OptionalCType(BaseCType(tensorT))):
                     save_ptrs_stmts += [SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                         SAVE_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                     enforce_same_ptrs_stmts += [ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                                 ENFORCE_SAME_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
-                elif noref_cpp_type == 'Tensor':
+                elif noref_cpp_type == BaseCType(tensorT):
                     save_ptrs_stmts += [SAVE_TENSOR_STORAGE.substitute(tensor_name=arg),
                                         SAVE_TENSOR_IMPL.substitute(tensor_name=arg)]
                     enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg),

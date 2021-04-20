@@ -74,6 +74,10 @@ class TestTEFuser(JitTestCase):
         self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
         torch._C._jit_set_te_must_use_llvm_cpu(False)
 
+        # TODO: CPU fuser currently is disabled when multithreading.
+        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
+        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
+
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         self.int_dtypes = [
             torch.int8,
@@ -83,7 +87,8 @@ class TestTEFuser(JitTestCase):
             torch.bool,
         ]
         self.fp_dtypes = [
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
         ]
@@ -100,6 +105,7 @@ class TestTEFuser(JitTestCase):
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -1349,7 +1355,8 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,
@@ -1516,6 +1523,57 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    def test_matmul(self):
+        def fn(x, y):
+            return torch.matmul(x, y)
+
+        devices = ['cpu']  # No cuda support for ext calls yet
+        sizes = [[[128, 128], [128, 128]],
+                 [[10, 10], [10, 10]],
+                 [[1, 16], [16, 128]],
+                 [[128], [128]],
+                 [[128], [128, 128]],
+                 [[3], [3]],
+                 [[3, 4], [4]],
+                 [[10, 3, 4], [4]],
+                 [[10, 3, 4], [10, 4, 5]],
+                 [[10, 3, 4], [4, 5]],
+                 ]
+
+        # Only 2D x 2D matrix multiply is supported. For non-supported sizes we
+        # still want to run results verification to test that we didn't
+        # accidentally fuse it, but we skip the 'is-fused' check.
+        # TODO: add support for other shape combinations and make this set empty:
+        skip_is_fused_check_sizes = ["[[128], [128]]",
+                                     "[[128], [128, 128]]",
+                                     "[[3], [3]]",
+                                     "[[3, 4], [4]]",
+                                     "[[10, 3, 4], [4]]",
+                                     "[[10, 3, 4], [10, 4, 5]]",
+                                     "[[10, 3, 4], [4, 5]]",
+                                     ]
+        for dtype, size, device in product(self.dtypes, sizes, devices):
+            try:
+                size_x, size_y = size
+                x = self.data_for(dtype, device, size=size_x)
+                y = self.data_for(dtype, device, size=size_y)
+                ref = fn(x, y)
+            except Exception as e:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y))
+                t(x, y)
+                self.assertEqual(ref, t(x, y))
+                if not str(size) in skip_is_fused_check_sizes:
+                    self.assertAllFused(t.graph_for(x, y))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), device])
                 )
 
     @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")

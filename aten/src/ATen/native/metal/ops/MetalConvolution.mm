@@ -91,7 +91,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
     MPSCNNClampOp* clampOp =
         [MPSCNNClampOp newWithTextures:@[ Y1, Y2 ] Args:@[ @(min), @(max) ]];
     [clampOp encode:commandBuffer.buffer];
-    mt.texture()->copyFromTexture(Y2);
+    mt.texture()->setTexture(Y2);
   }
   auto output = makeTensor(std::move(mt), input.options());
   return output;
