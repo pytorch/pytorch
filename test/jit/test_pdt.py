@@ -3,7 +3,7 @@ import sys
 import torch
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.jit._monkeytype_config import _IS_MONKEYTYPE_INSTALLED
-from typing import List, Dict, Tuple  # noqa F401
+from typing import List, Dict, Tuple  # noqa: F401
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -143,7 +143,7 @@ class TestPDT(JitTestCase):
 
     def test_class_methods(self):
         class M1:
-            def fn(a):  # noqa B902
+            def fn(a):  # noqa: B902
                 return a
 
         make_global(M1)
@@ -153,7 +153,7 @@ class TestPDT(JitTestCase):
 
     def test_class_methods_all_types(self):
         class M2:
-            def fn(a):  # noqa B902
+            def fn(a):  # noqa: B902
                 assert a is not None
                 return a
 
