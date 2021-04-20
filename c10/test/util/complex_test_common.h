@@ -384,7 +384,7 @@ C10_HOST_DEVICE void test_arithmetic_assign_complex() {
   static_assert(x2.imag() == scalar_t(3), "");
   constexpr c10::complex<scalar_t> x3 = p(scalar_t(2), scalar_t(2), 1.0_id);
   static_assert(x3.real() == scalar_t(2), "");
-#if !defined(CUDA_VERSION) || CUDA_VERSION >= 11200  // compiler bug
+#if !defined(CUDA_VERSION) || CUDA_VERSION >= 11020  // compiler bug
   static_assert(x3.imag() == scalar_t(3), "");
 #endif
 
@@ -393,7 +393,7 @@ C10_HOST_DEVICE void test_arithmetic_assign_complex() {
   static_assert(y2.imag() == scalar_t(1), "");
   constexpr c10::complex<scalar_t> y3 = m(scalar_t(2), scalar_t(2), 1.0_id);
   static_assert(y3.real() == scalar_t(2), "");
-#if !defined(CUDA_VERSION) || CUDA_VERSION >= 11200  // compiler bug
+#if !defined(CUDA_VERSION) || CUDA_VERSION >= 11020  // compiler bug
   static_assert(y3.imag() == scalar_t(1), "");
 #endif
 
