@@ -4226,9 +4226,14 @@ class TestLinalg(TestCase):
     @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
         def check(equation, *operands):
-            ref = np.einsum(equation, *[operand.cpu().numpy() for operand in operands])
+            np_operands = [operand.cpu().numpy() for operand in operands]
+            ref = np.einsum(equation, *np_operands)
             res = torch.einsum(equation, operands)
             self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
+
+            # Test optimize parameter
+            path = np.einsum_path(equation, *np_operands)[0][1:]
+            self.assertEqual(res, torch.einsum(equation, operands, optimize=path))
 
             # Check autograd
             ops = [op.detach().requires_grad_() for op in operands]
@@ -4303,8 +4308,10 @@ class TestLinalg(TestCase):
     @dtypes(torch.double, torch.cdouble)
     def test_einsum_random(self, device, dtype):
         def check(equation, *operands):
-            ref = np.einsum(equation, *[op.cpu().numpy() for op in operands])
-            res = torch.einsum(equation, operands)
+            np_operands = [op.cpu().numpy() for op in operands]
+            path = np.einsum_path(equation, *np_operands)[0]
+            ref = np.einsum(equation, *np_operands, optimize=path)
+            res = torch.einsum(equation, operands, optimize=path[1:])
             self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
 
         for _ in range(20):

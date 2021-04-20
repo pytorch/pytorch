@@ -293,7 +293,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
-def einsum(equation, *operands):
+def einsum(equation, *operands, optimize=None):
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
@@ -404,7 +404,17 @@ def einsum(equation, *operands):
         _operands = operands[0]
         # recurse incase operands contains value that has torch function
         # in the original implementation this line is omitted
-        return einsum(equation, *_operands)
+        return einsum(equation, *_operands, optimize=optimize)
+
+    if optimize is not None:
+        path = []
+        if len(optimize) == 1 and len(optimize[0]) == 1:
+            path.append(optimize[0][0])
+        else:
+            for a, b in optimize:
+                path.append(a)
+                path.append(b)
+        return _VF.einsum(equation, operands, optimize=path)  # type: ignore
 
     return _VF.einsum(equation, operands)  # type: ignore
 

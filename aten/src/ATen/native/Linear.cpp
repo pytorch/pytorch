@@ -149,7 +149,10 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
 // 3. Compute result by multiplying input operands and summing contraction
 //    dimensions We do the last part by reducing to bmm.
-Tensor einsum(std::string equation, TensorList operands) {
+Tensor einsum(
+    std::string equation,
+    TensorList operands,
+    c10::optional<IntArrayRef> optimize) {
   TORCH_CHECK(!operands.empty(), "einsum() must provide at least one operand");
   checkDeviceType("einsum()", operands, operands[0].device().type());
 
@@ -161,6 +164,24 @@ Tensor einsum(std::string equation, TensorList operands) {
   const auto lhs = equation.substr(0, arrow_pos);
 
   const auto num_ops = operands.size();
+
+  if (optimize.has_value()) {
+    if (num_ops == 1) {
+      TORCH_CHECK(
+          optimize->size() == 1,
+          "einsum(): expected contraction path given in optimize parameter to have size ",
+          1,
+          " but got ",
+          optimize->size());
+    } else {
+      TORCH_CHECK(
+          optimize->size() == (num_ops - 1) * 2,
+          "einsum(): expected contraction path given in optimize parameter to have size ",
+          (num_ops - 1) * 2,
+          " but got ",
+          optimize->size());
+    }
+  }
 
   // Convert labels for input operands into an index in [0, 25] and store
   // them in op_labels for each operand along with ELLIPSIS if present.
@@ -227,7 +248,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   // Compute label frequency and number of dimensions covered by ellipsis
   // We do this after parsing labels to make it more readable and simpler
   // to compute the number of dimensions covered by ellipsis.
-  for(const auto i : c10::irange(num_ops)) {
+  for (const auto i : c10::irange(num_ops)) {
     const auto operand = operands[i];
     const auto labels = op_labels[i];
     const int64_t ndims = operand.dim();
@@ -309,8 +330,8 @@ Tensor einsum(std::string equation, TensorList operands) {
               " for the output");
           const auto label = rhs[i] - 'a';
           TORCH_CHECK(
-              // Ensure label appeared at least once for some input operand and at
-              // most once for the output
+              // Ensure label appeared at least once for some input operand and
+              // at most once for the output
               label_count[label] > 0 && label_perm_index[label] == -1,
               "einsum() output subscript ",
               rhs[i],
@@ -343,7 +364,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   // same operand. Finally we permute the operands to align dimensions as
   // per the perm_out_index we computed above.
   std::vector<Tensor> permuted_operands;
-  for (const auto i: c10::irange(num_ops)) {
+  for (const auto i : c10::irange(num_ops)) {
     std::vector<int64_t> perm_shape(perm_index, -1);
     std::vector<int64_t> label_dim(TOTAL_LABELS, -1);
     Tensor operand = operands[i];
@@ -357,7 +378,7 @@ Tensor einsum(std::string equation, TensorList operands) {
         const int64_t num_missing_dim =
             ell_num_dim - (original_sizes.size() - labels.size() + 1);
         for (const auto k : c10::irange(num_missing_dim)) {
-          (void)k; //Suppress unused warning
+          (void)k; // Suppress unused warning
           operand = operand.unsqueeze(j);
         }
         for (const auto k : c10::irange(ell_num_dim)) {
@@ -395,18 +416,21 @@ Tensor einsum(std::string equation, TensorList operands) {
     permuted_operands.push_back(operand.permute(perm_shape));
   }
 
-  // Check if operands broadcast and keep track of last operand with
-  // dimension size != 1 for optimizing reductions
-  std::vector<std::size_t> dim_last_op(perm_index, 0);
+  // Check if operands broadcast and count for each dim the number of operands
+  // with size != 1 for that dim.
+  std::vector<std::size_t> dim_count(perm_index);
   bool has_zero_size_dim = false;
   for (const auto dim : c10::irange(perm_index)) {
     auto broadcast_size = permuted_operands[0].size(dim);
-    for (const auto i: c10::irange(1, num_ops)) {
+    if (broadcast_size > 1) {
+      ++dim_count[dim];
+    }
+    for (const auto i : c10::irange(1, num_ops)) {
       const auto dim_size = permuted_operands[i].size(dim);
       if (broadcast_size != dim_size && broadcast_size != 1 && dim_size != 1) {
         std::ostringstream msg;
         msg << "einsum() operands do not broadcast with remapped shapes [original->remapped]:";
-        for (const auto j: c10::irange(num_ops)) {
+        for (const auto j : c10::irange(num_ops)) {
           msg << " " << operands[j].sizes() << "->"
               << permuted_operands[j].sizes();
         }
@@ -414,68 +438,78 @@ Tensor einsum(std::string equation, TensorList operands) {
       }
       if (dim_size != 1) {
         broadcast_size = dim_size;
-        dim_last_op[dim] = i;
-      }
-    }
-    has_zero_size_dim |= broadcast_size == 0;
-  }
-
-  // Compute result
-  Tensor result = permuted_operands[0];
-
-  // Fast path for when an operand has zero sized dim
-  if (has_zero_size_dim) {
-    std::vector<int64_t> out_shape(out_size);
-    for (const auto i : c10::irange(out_size)) {
-      out_shape[i] = permuted_operands[dim_last_op[i]].size(i);
-    }
-    return at::zeros(out_shape, result.options());
-  }
-
-  // Sum out or squeeze dimensions that are size 1 for all later operands
-  int64_t dim = out_size;
-  for (int64_t i = dim; i < perm_index; ++i, ++dim) {
-    if (dim_last_op[i] == 0) {
-      if (result.size(dim) == 1) {
-        result = result.squeeze(dim--);
-      } else {
-        result = result.sum(dim--);
-      }
-    }
-  }
-
-  for (const auto i: c10::irange(1, num_ops)) {
-    Tensor operand = permuted_operands[i];
-    std::vector<int64_t> sum_dims;
-
-    // Sum out or squeeze dimensions that are size 1 for all later operands
-    dim = out_size;
-    for (int64_t j = dim; j < perm_index; ++j, ++dim) {
-      if (dim_last_op[j] < i) {
-        operand = operand.squeeze(dim);
-        --dim;
-      } else if (dim_last_op[j] == i) {
-        if (result.size(dim) == 1) {
-          operand = operand.sum(dim);
-          result = result.squeeze(dim);
-          --dim;
-        } else {
-          sum_dims.push_back(dim);
+        if (dim_size > 1) {
+          ++dim_count[dim];
         }
+      }
+      if (broadcast_size == 0) {
+        has_zero_size_dim = true;
+      }
+    }
+  }
+
+  const auto path = optimize.value_or(std::vector<int64_t>{});
+  auto it = path.begin();
+
+  while (permuted_operands.size() > 1) {
+    decltype(permuted_operands.size()) i = 0, j = 1;
+
+    if (optimize.has_value()) {
+      if (*it < *(it + 1)) {
+        i = *it++;
+        j = *it++;
+      } else {
+        j = *it++;
+        i = *it++;
+      }
+      TORCH_CHECK(
+          i >= 0 && j < permuted_operands.size(),
+          "einsum(): operand index in contraction (",
+          i,
+          ", ",
+          j,
+          ") is out of bounds");
+    }
+
+    const auto a = permuted_operands[i];
+    const auto b = permuted_operands[j];
+
+    permuted_operands.erase(permuted_operands.begin() + j);
+    permuted_operands.erase(permuted_operands.begin() + i);
+
+    if (has_zero_size_dim) {
+      permuted_operands.emplace_back(a.mul(b));
+      continue;
+    }
+
+    // Contract dimensions for which no other operands have size != 1
+    std::vector<int64_t> sum_dims;
+    for (int64_t dim = out_size; dim < perm_index; ++dim) {
+      if (a.size(dim) > 1) {
+        --dim_count[dim];
+      }
+      if (b.size(dim) > 1) {
+        --dim_count[dim];
+      }
+      if (dim_count[dim] == 0) {
+        sum_dims.emplace_back(dim);
+      } else if (a.size(dim) > 1 || b.size(dim) > 1) {
+        ++dim_count[dim];
       }
     }
 
     // Multiply tensors and sum out dimensions in sum_dims
-    if (sum_dims.empty()) {
-      result = result.mul(operand);
-    } else if (sum_dims.size() == result.sizes().size()) {
-      result = result.flatten().dot(operand.flatten());
-    } else {
-      result = sumproduct_pair(result, operand, sum_dims, false);
-    }
+    const auto result = sumproduct_pair(a, b, sum_dims, true);
+    permuted_operands.emplace_back(result);
   }
 
-  return result;
+  std::vector<int64_t> sum_dims;
+  for (int64_t dim = out_size; dim < perm_index; ++dim) {
+    sum_dims.emplace_back(dim);
+  }
+
+  return sum_dims.empty() ? permuted_operands[0]
+                          : permuted_operands[0].sum(sum_dims);
 }
 
 // _trilinear computes a trilinear einstein sum with an unrolled dimension
