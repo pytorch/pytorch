@@ -581,6 +581,23 @@ void testRecv(const std::string& path) {
   EXPECT_TRUE(recvCompleted);
 }
 
+
+void testStoreSetGet(const std::string& path) {
+  const auto size = 2;
+  auto tests = CollectiveTest::initialize(path, size);
+  // test that get() gets the same value as the one that was set()
+  std::vector<uint8_t> testVector = {1, 1, 1, 1};
+  // Cast to ProcessGroupGloo::GlooStore to test specific GlooStore APIs.
+  auto rank_0_glooStore = static_cast<c10d::ProcessGroupGloo::GlooStore*>(
+      tests[0].getProcessGroup()._getStore().get());
+  auto rank_1_glooStore = static_cast<c10d::ProcessGroupGloo::GlooStore*>(
+      tests[1].getProcessGroup()._getStore().get());
+
+  rank_0_glooStore->setUint("testKey", testVector);
+  auto value = rank_1_glooStore->getUint("testKey");
+  EXPECT_TRUE(value == testVector);
+}
+
 #ifndef _WIN32
 TEST(ProcessGroupGlooTest, testSIGSTOPException) {
   // test SIGSTOP
@@ -658,6 +675,11 @@ TEST(ProcessGroupGlooTest, testRecv) {
     TemporaryFile file;
     testRecv(file.path);
   }
+}
+
+TEST(ProcessGroupGlooTest, testStoreSetGet) {
+  TemporaryFile file;
+  testStoreSetGet(file.path);
 }
 
 TEST(ProcessGroupGlooTest, testWaitDelay) {

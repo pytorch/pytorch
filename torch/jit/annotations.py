@@ -187,7 +187,7 @@ def get_type_line(source):
         if len(wrong_type_lines) > 0:
             raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
                                + " is probably invalid.\nIt must be '# type:'"
-                               + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)" # noqa
+                               + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)"  # noqa: B950
                                + "\nfor examples")
         return None
     elif len(type_lines) == 1:
@@ -209,7 +209,7 @@ def get_type_line(source):
             "Return type line '# type: (...) -> ...' not found on multiline "
             "type annotation\nfor type lines:\n" +
             '\n'.join([line[1] for line in type_lines]) +
-            "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
+            "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")
 
     def get_parameter_type(line):
         item_type = line[line.find(type_comment) + len(type_comment):]
@@ -250,13 +250,9 @@ def try_real_annotations(fn, loc):
     if all(ann is sig.empty for ann in all_annots):
         return None
 
-    def as_ann(ann):
-        # sig.empty is really annoying so convert it to None
-        return ann if ann is not sig.empty else None
-
-    arg_types = [ann_to_type(as_ann(p.annotation), loc)
+    arg_types = [ann_to_type(p.annotation, loc)
                  for p in sig.parameters.values()]
-    return_type = ann_to_type(as_ann(sig.return_annotation), loc)
+    return_type = ann_to_type(sig.return_annotation, loc)
     return arg_types, return_type
 
 
@@ -294,8 +290,10 @@ def is_tensor(ann):
 
 
 def try_ann_to_type(ann, loc):
-    if ann is None:
+    if ann is inspect.Signature.empty:
         return TensorType.getInferred()
+    if ann is None:
+        return NoneType.get()
     if inspect.isclass(ann) and is_tensor(ann):
         return TensorType.get()
     if is_tuple(ann):
