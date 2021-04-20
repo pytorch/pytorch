@@ -432,6 +432,10 @@ protected:
   /// this matches the dtype of the output tensors, but not always!
   ScalarType common_dtype_ = ScalarType::Undefined;
 
+  /// This is currently defined as kCPU, or the device of the first non-CPU
+  /// tensor argument. See TensorIteratorBase::compute_types for details.
+  Device common_device_ = kCPU;
+
   /// Set by split(), see should_accumulate() and is_final_output()
   bool accumulate_ = false;
   bool final_output_ = true;
