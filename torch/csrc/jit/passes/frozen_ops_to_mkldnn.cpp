@@ -182,7 +182,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     auto k = node->kind();
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
         k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
-        k == prim::MKLDNNHardTanh || k == aten::hardtanh) {
+        k == prim::MKLDNNHardTanh) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -855,13 +855,14 @@ class MKLDNNSubgraphSlicer {
       // conversions. from initial testing including it speeds up models
       case aten::max_pool2d:
       case aten::max_pool3d:
-      case aten::adaptive_avg_pool2d:
         return true;
     }
 
-    if (n->kind() == aten::hardtanh) {
+    if (n->kind() == aten::hardtanh && !nonConstantParameters(n)) {
       auto min_val = constant_as<double>(n->namedInput("min_val")).value();
       auto max_val = constant_as<double>(n->namedInput("max_val")).value();
+      // we need to maintain the following invariant `pointwise_func(0) == 0`,
+      // see `createUnaryOp`
       if (min_val <= 0. && max_val >= 0.) {
         return true;
       }
