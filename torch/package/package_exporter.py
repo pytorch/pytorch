@@ -226,7 +226,8 @@ class PackageExporter:
             is_package (bool, optional): If True, this module is treated as a package. Packages are allowed to have submodules
                 (e.g. my_package.my_subpackage.my_subsubpackage), and resources can be saved inside them. Defaults to ``False``.
             dependencies (bool, optional): If True, we scan the source for dependencies.
-            orig_file_name (str, optional): If present, used in logging to identifying where the source came from. Defaults to ``None``.
+            orig_file_name (str, optional): If present, used in logging to identifying where the source came from.
+                Defaults to ``None``.
         """
         self.provided[module_name] = True
         extension = "/__init__.py" if is_package else ".py"
