@@ -1,7 +1,6 @@
-#include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <c10/util/variant.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 
-#include <csignal>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorGeometry.h>
 #include <c10/util/string_utils.h>
@@ -12,6 +11,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
+#include <csignal>
 #include <iostream>
 
 using namespace torch::jit;
@@ -523,7 +523,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       return shape;
     }
 
-
     case aten::unsqueeze: {
       auto const& n = v->node();
       auto shape = sizesForValue(n->input(0));
@@ -585,7 +584,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::slice:
       throw std::runtime_error(
           "Shape info is not implemented for this kind of node");
-
 
     default: {
       GRAPH_DEBUG("Can't infer sizes for the node: ", *v->node());
@@ -855,9 +853,9 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(const ArgValue& v) {
 
 Tensor* TensorExprKernel::computeOneOperand(
     const std::string& name,
-    const std::vector<ArgValue> &inputValues,
-    const c10::optional<at::ScalarType> &outputTensorType,
-    const std::vector<ExprHandle> &outputShape,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<at::ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
     const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
     const int checkParamTypes) {
   return Compute(
@@ -872,7 +870,6 @@ Tensor* TensorExprKernel::computeOneOperand(
         ExprHandle compute = innerExpr(inputs[0]);
         return demoteOutput(compute, outputTensorType);
       });
-
 }
 Tensor* TensorExprKernel::computeOneOperand(
     const std::string& name,
@@ -922,9 +919,9 @@ Tensor* TensorExprKernel::computeTwoOperand(
 }
 Tensor* TensorExprKernel::computeTwoOperand(
     const std::string& name,
-    const std::vector<ArgValue> &inputValues,
-    const c10::optional<at::ScalarType> &outputTensorType,
-    const std::vector<ExprHandle> &outputShape,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<at::ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
   return Compute(
@@ -946,15 +943,16 @@ Tensor* TensorExprKernel::computeTwoOperand(
 
 Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
     const std::string& name,
-    const std::vector<ArgValue> &inputValues,
-    const c10::optional<at::ScalarType> &outputTensorType,
-    const std::vector<ExprHandle> &outputShape,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<at::ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [this, inputValues, outputTensorType, innerExpr](const std::vector<VarHandle>& axes) {
+      [this, inputValues, outputTensorType, innerExpr](
+          const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[0], indices),
@@ -970,16 +968,17 @@ Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
 
 Tensor* TensorExprKernel::computeConditionWithTwoOperand(
     const std::string& name,
-    const std::vector<ArgValue> &inputValues,
-    const c10::optional<at::ScalarType> &outputTensorType,
-    const std::vector<ExprHandle> &outputShape,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<at::ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
     const std::function<
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [this, inputValues, outputTensorType, innerExpr](const std::vector<VarHandle>& axes) {
+      [this, inputValues, outputTensorType, innerExpr](
+          const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[1], indices),
@@ -988,7 +987,8 @@ Tensor* TensorExprKernel::computeConditionWithTwoOperand(
 
         promoteInputs(inputs);
         // First expr is the condition, which we don't promote
-        inputs.emplace(inputs.begin(), tensorOrConstant(inputValues[0], indices));
+        inputs.emplace(
+            inputs.begin(), tensorOrConstant(inputValues[0], indices));
         ExprHandle compute = innerExpr(inputs[0], inputs[1], inputs[2]);
         return demoteOutput(compute, outputTensorType);
       });
@@ -1027,9 +1027,9 @@ Tensor* TensorExprKernel::computeConditionWithTwoOperand(
 
 Tensor* TensorExprKernel::computeThreeOperand(
     const std::string& name,
-    const std::vector<ArgValue> &inputValues,
-    const c10::optional<at::ScalarType> &outputTensorType,
-    const std::vector<ExprHandle> &outputShape,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<at::ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
     const std::function<
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
         innerExpr,
@@ -1037,7 +1037,8 @@ Tensor* TensorExprKernel::computeThreeOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [this, inputValues, outputTensorType, innerExpr, promote_inputs](const std::vector<VarHandle>& axes) {
+      [this, inputValues, outputTensorType, innerExpr, promote_inputs](
+          const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[0], indices),
@@ -1088,9 +1089,9 @@ Tensor* TensorExprKernel::computeThreeOperand(
 
 Tensor* TensorExprKernel::computeFourOperand(
     const std::string& name,
-    const std::vector<ArgValue> &inputValues,
-    const c10::optional<at::ScalarType> &outputTensorType,
-    const std::vector<ExprHandle> &outputShape,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<at::ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
     const std::function<ExprHandle(
         const ExprHandle&,
         const ExprHandle&,
@@ -1099,7 +1100,8 @@ Tensor* TensorExprKernel::computeFourOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [this, inputValues, outputTensorType, innerExpr](const std::vector<VarHandle>& axes) {
+      [this, inputValues, outputTensorType, innerExpr](
+          const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[0], indices),
@@ -1168,38 +1170,52 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   return c10::nullopt;
 }
 
-Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<ArgValue> &inputs, const c10::optional<c10::ScalarType> &outputType, const std::vector<ExprHandle> &outputShape) {
+Tensor* TensorExprKernel::computeBinaryValue(
+    c10::Symbol op,
+    const std::vector<ArgValue>& inputs,
+    const c10::optional<c10::ScalarType>& outputType,
+    const std::vector<ExprHandle>& outputShape) {
   switch (op) {
     case aten::add: {
       auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
         return boolToInteger(lhs) + boolToInteger(rhs);
       };
-      TORCH_INTERNAL_ASSERT(
-          inputs.size() == 2 || inputs.size() == 3);
+      TORCH_INTERNAL_ASSERT(inputs.size() == 2 || inputs.size() == 3);
       return (inputs.size() > 2)
-          ? computeTwoOperandWithAlpha("aten_add", inputs, outputType, outputShape, add_lambda)
-          : computeTwoOperand("aten_add", inputs, outputType, outputShape, add_lambda);
+          ? computeTwoOperandWithAlpha(
+                "aten_add", inputs, outputType, outputShape, add_lambda)
+          : computeTwoOperand(
+                "aten_add", inputs, outputType, outputShape, add_lambda);
     } break;
     case aten::sub: {
       auto sub_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
         // NB: sub isn't supported on boolean, no need to promote to integer.
         return lhs - rhs;
       };
-      TORCH_INTERNAL_ASSERT(
-          inputs.size() == 2 || inputs.size() == 3);
+      TORCH_INTERNAL_ASSERT(inputs.size() == 2 || inputs.size() == 3);
       return (inputs.size() > 2)
-          ? computeTwoOperandWithAlpha("aten_sub", inputs, outputType, outputShape, sub_lambda)
-          : computeTwoOperand("aten_sub", inputs, outputType, outputShape, sub_lambda);
+          ? computeTwoOperandWithAlpha(
+                "aten_sub", inputs, outputType, outputShape, sub_lambda)
+          : computeTwoOperand(
+                "aten_sub", inputs, outputType, outputShape, sub_lambda);
     } break;
     case aten::mul: {
       return computeTwoOperand(
-          "aten_mul", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_mul",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return boolToInteger(lhs) * boolToInteger(rhs);
           });
     } break;
     case aten::div: {
       return computeTwoOperand(
-          "aten_div", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_div",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return promoteIntegerToDefaultType(lhs) /
                 promoteIntegerToDefaultType(rhs);
           });
@@ -1207,89 +1223,141 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
 
     case aten::__and__: {
       return computeTwoOperand(
-          "aten_and", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_and",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return boolToInteger(lhs) & boolToInteger(rhs);
           });
     } break;
 
     case aten::__or__: {
       return computeTwoOperand(
-          "aten_or", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_or",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return boolToInteger(lhs) | boolToInteger(rhs);
           });
     } break;
 
     case aten::__xor__: {
       return computeTwoOperand(
-          "aten_xor", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_xor",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return boolToInteger(lhs) ^ boolToInteger(rhs);
           });
     } break;
 
     case aten::__lshift__: {
       return computeTwoOperand(
-          "aten_lshift", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_lshift",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return lhs << rhs;
           });
     } break;
 
     case aten::__rshift__: {
       return computeTwoOperand(
-          "aten_rshift", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_rshift",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return lhs >> rhs;
           });
     } break;
     case aten::eq: {
       return computeTwoOperand(
-          "aten_eq", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_eq",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs == rhs);
           });
     } break;
 
     case aten::ne: {
       return computeTwoOperand(
-          "aten_ne", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_ne",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs != rhs);
           });
     } break;
     case aten::ge: {
       return computeTwoOperand(
-          "aten_ge", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_ge",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs >= rhs);
           });
     } break;
 
     case aten::gt: {
       return computeTwoOperand(
-          "aten_gt", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_gt",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs > rhs);
           });
     } break;
 
     case aten::le: {
       return computeTwoOperand(
-          "aten_le", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_le",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs <= rhs);
           });
     } break;
 
     case aten::lt: {
       return computeTwoOperand(
-          "aten_lt", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_lt",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return cast<bool>(lhs < rhs);
           });
     } break;
 
     case aten::min: {
       return computeTwoOperand(
-          "aten_min", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_min",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return Min::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
     } break;
 
     case aten::max: {
       return computeTwoOperand(
-          "aten_max", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_max",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
     } break;
@@ -1297,113 +1365,168 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
       return computeFourOperand(
           "aten_addcmul",
           inputs,
-          outputType, outputShape,
+          outputType,
+          outputShape,
           [](const ExprHandle& a0,
              const ExprHandle& a1,
              const ExprHandle& a2,
              const ExprHandle& a3) { return a0 + a3 * a1 * a2; });
     } break;
     case aten::sigmoid: {
-      return computeOneOperand("aten_sigmoid", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return sigmoid(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_sigmoid",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return sigmoid(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::reciprocal: {
-      return computeOneOperand("aten_reciprocal", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return ExprHandle(1.0f) / a;
-      });
+      return computeOneOperand(
+          "aten_reciprocal",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) { return ExprHandle(1.0f) / a; });
     } break;
 
     case aten::neg: {
-      return computeOneOperand("aten_neg", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return ExprHandle(-0) - a;
-      });
+      return computeOneOperand(
+          "aten_neg", inputs, outputType, outputShape, [](const ExprHandle& a) {
+            return ExprHandle(-0) - a;
+          });
     } break;
 
     case aten::isnan: {
-      return computeOneOperand("aten_isnan", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        if (!a.dtype().is_floating_point()) {
-          return IntImm::make(0);
-        }
-        return isnan(a);
-      });
+      return computeOneOperand(
+          "aten_isnan",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            if (!a.dtype().is_floating_point()) {
+              return IntImm::make(0);
+            }
+            return isnan(a);
+          });
     } break;
 
     case aten::relu: {
-      return computeOneOperand("aten_relu", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        auto zero = Cast::make(a.dtype(), 0);
-        return CompareSelect::make(a, zero, zero, a, kLT);
-      });
+      return computeOneOperand(
+          "aten_relu",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            auto zero = Cast::make(a.dtype(), 0);
+            return CompareSelect::make(a, zero, zero, a, kLT);
+          });
     } break;
     case aten::log: {
-      return computeOneOperand("aten_log", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return log(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_log", inputs, outputType, outputShape, [](const ExprHandle& a) {
+            return log(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::log10: {
-      return computeOneOperand("aten_log10", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return log10(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_log10",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return log10(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::log1p: {
-      return computeOneOperand("aten_log1p", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return log1p(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_log1p",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return log1p(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::log2: {
-      return computeOneOperand("aten_log2", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return log2(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_log2",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return log2(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::exp: {
-      return computeOneOperand("aten_exp", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return exp(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_exp", inputs, outputType, outputShape, [](const ExprHandle& a) {
+            return exp(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::expm1: {
-      return computeOneOperand("aten_expm1", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return expm1(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_expm1",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return expm1(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::erf: {
-      return computeOneOperand("aten_erf", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return erf(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_erf", inputs, outputType, outputShape, [](const ExprHandle& a) {
+            return erf(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::erfc: {
-      return computeOneOperand("aten_erfc", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return erfc(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_erfc",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return erfc(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::cos: {
-      return computeOneOperand("aten_cos", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return cos(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_cos", inputs, outputType, outputShape, [](const ExprHandle& a) {
+            return cos(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::sin: {
-      return computeOneOperand("aten_sin", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return sin(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_sin", inputs, outputType, outputShape, [](const ExprHandle& a) {
+            return sin(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::tan: {
-      return computeOneOperand("aten_tan", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return tan(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_tan", inputs, outputType, outputShape, [](const ExprHandle& a) {
+            return tan(promoteIntegerToDefaultType(a));
+          });
     } break;
     case aten::pow: {
       return computeTwoOperand(
-          "aten_pow", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_pow",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             if (!rhs.node()->isConstant()) {
               return pow(lhs, rhs);
             }
@@ -1436,7 +1559,11 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
 
     case aten::fmod: {
       return computeTwoOperand(
-          "aten_fmod", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_fmod",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return fmod(promoteHalfToFloat(lhs), promoteHalfToFloat(rhs));
           });
     } break;
@@ -1444,44 +1571,75 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
     case aten::lerp: {
       return computeThreeOperand(
           "aten_lerp",
-          inputs, outputType, outputShape,
+          inputs,
+          outputType,
+          outputShape,
           [](const ExprHandle& a,
              const ExprHandle& end,
              const ExprHandle& weight) { return a + weight * (end - a); });
     } break;
     case aten::acos: {
-      return computeOneOperand("aten_acos", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return acos(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_acos",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return acos(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::asin: {
-      return computeOneOperand("aten_asin", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return asin(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_asin",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return asin(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::cosh: {
-      return computeOneOperand("aten_cosh", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return cosh(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_cosh",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return cosh(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::sinh: {
-      return computeOneOperand("aten_sinh", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return sinh(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_sinh",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return sinh(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::atan: {
-      return computeOneOperand("aten_atan", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return atan(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_atan",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return atan(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::atan2: {
       return computeTwoOperand(
-          "aten_atan2", inputs, outputType, outputShape, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_atan2",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return atan2(
                 promoteIntegerToDefaultType(lhs),
                 promoteIntegerToDefaultType(rhs));
@@ -1489,15 +1647,22 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
     } break;
 
     case aten::tanh: {
-      return computeOneOperand("aten_tanh", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return tanh(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_tanh",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return tanh(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::hardtanh: {
       return computeThreeOperand(
           "aten_hardtanh",
-          inputs, outputType, outputShape,
+          inputs,
+          outputType,
+          outputShape,
           [](const ExprHandle& a,
              const ExprHandle& min_val,
              const ExprHandle& max_val) {
@@ -1507,21 +1672,33 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
     } break;
 
     case aten::sqrt: {
-      return computeOneOperand("aten_sqrt", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return tensorexpr::sqrt(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_sqrt",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return tensorexpr::sqrt(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::rsqrt: {
-      return computeOneOperand("aten_rsqrt", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return rsqrt(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_rsqrt",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return rsqrt(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::abs: {
       return computeOneOperand(
           "aten_abs",
-          inputs, outputType, outputShape,
+          inputs,
+          outputType,
+          outputShape,
           [](const ExprHandle& a) {
             return tensorexpr::abs(promoteHalfToFloat(a));
           },
@@ -1530,28 +1707,46 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
 
     case aten::ceil: {
       return computeOneOperand(
-          "aten_ceil", inputs, outputType, outputShape, [](const ExprHandle& a) { return ceil(a); });
+          "aten_ceil",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) { return ceil(a); });
     } break;
 
     case aten::floor: {
       return computeOneOperand(
-          "aten_floor", inputs, outputType, outputShape, [](const ExprHandle& a) { return floor(a); });
+          "aten_floor",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) { return floor(a); });
     } break;
 
     case aten::round: {
       return computeOneOperand(
-          "aten_round", inputs, outputType, outputShape, [](const ExprHandle& a) { return round(a); });
+          "aten_round",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) { return round(a); });
     } break;
 
     case aten::trunc: {
       return computeOneOperand(
-          "aten_trunc", inputs, outputType, outputShape, [](const ExprHandle& a) { return trunc(a); });
+          "aten_trunc",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) { return trunc(a); });
     } break;
 
     case aten::threshold: {
       return computeThreeOperand(
           "aten_threshold",
-          inputs, outputType, outputShape,
+          inputs,
+          outputType,
+          outputShape,
           [](const ExprHandle& a,
              const ExprHandle& threshold,
              const ExprHandle& value) {
@@ -1561,7 +1756,9 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
     case aten::where: {
       return computeConditionWithTwoOperand(
           "aten_where",
-          inputs, outputType, outputShape,
+          inputs,
+          outputType,
+          outputShape,
           [](const ExprHandle& a0, const ExprHandle& a1, const ExprHandle& a2) {
             return ifThenElse(a0, a1, a2);
           });
@@ -1570,7 +1767,9 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
     case aten::frac: {
       return computeOneOperand(
           "aten_frac",
-          inputs, outputType, outputShape,
+          inputs,
+          outputType,
+          outputShape,
           [](const ExprHandle& a) {
             auto aa = promoteHalfToFloat(a);
             return aa - floor(aa);
@@ -1579,15 +1778,22 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
     } break;
 
     case aten::lgamma: {
-      return computeOneOperand("aten_lgamma", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return lgamma(promoteIntegerToDefaultType(a));
-      });
+      return computeOneOperand(
+          "aten_lgamma",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return lgamma(promoteIntegerToDefaultType(a));
+          });
     } break;
 
     case aten::masked_fill: {
       return computeThreeOperand(
           "aten_masked_fill",
-          inputs, outputType, outputShape,
+          inputs,
+          outputType,
+          outputShape,
           [](const ExprHandle& input,
              const ExprHandle& mask,
              const ExprHandle& value) {
@@ -1611,7 +1817,8 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
       return computeThreeOperand(
           "aten_clamp",
           inputs,
-          outputType, outputShape,
+          outputType,
+          outputShape,
           [noMin, noMax](
               const ExprHandle& in,
               const ExprHandle& min,
@@ -1679,9 +1886,14 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, const std::vector<A
 
     } break;
     case aten::rand_like: {
-      return computeOneOperand("aten_rand_like", inputs, outputType, outputShape, [](const ExprHandle& a) {
-        return Intrinsics::make(IntrinsicsOp::kRand, a.dtype());
-      });
+      return computeOneOperand(
+          "aten_rand_like",
+          inputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& a) {
+            return Intrinsics::make(IntrinsicsOp::kRand, a.dtype());
+          });
     } break;
     case aten::slice: {
       return Compute(
@@ -1797,12 +2009,13 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::slice:
     case aten::unsqueeze: {
       std::vector<ArgValue> tinputs;
-      for (auto inp: inputs) {
+      for (auto inp : inputs) {
         tinputs.push_back(jitToArgValue(inp));
       }
       auto outputType = getOutputType(v->node()->output());
       auto outputShape = sizesForValue(v);
-      return computeBinaryValue(v->node()->kind(), tinputs, outputType, outputShape);
+      return computeBinaryValue(
+          v->node()->kind(), tinputs, outputType, outputShape);
     } break;
 
     case aten::_cast_Float: {
@@ -1902,15 +2115,14 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           });
     } break;
 
-
-
     case aten::cat: {
       std::vector<ArgValue> inputList;
-      for (auto inp: v->node()->input(0)->node()->inputs()) {
+      for (auto inp : v->node()->input(0)->node()->inputs()) {
         inputList.push_back(jitToArgValue(inp));
       }
       auto outputShape = sizesForValue(v);
-      return computeCat(inputList, jitToArgValue(v->node()->input(1)), outputShape);
+      return computeCat(
+          inputList, jitToArgValue(v->node()->input(1)), outputShape);
     } break;
 
     case aten::sum: {
@@ -2207,71 +2419,77 @@ std::vector<VarHandle> squeezeIndices(
 
 } // namespace
 
-Tensor* TensorExprKernel::computeCat(const std::vector<ArgValue> &inputList, const ArgValue& argDim, const std::vector<ExprHandle> &outputShape) {
-      if (getCatWoConditionals()) {
-        return computeCatWoConditionals(inputList, argDim, outputShape);
-      }
-      return Compute(
-          "aten_cat",
-          c10::fmap<DimArg>(outputShape),
-          [&](const std::vector<VarHandle>& axes) {
-            if (inputList.size() == 0) {
-              throw std::runtime_error(
-                  "Empty input list is passed to aten::cat");
-            }
-            std::vector<BufHandle> bufInputs;
-            for (auto input: inputList) {
-              bufInputs.push_back(c10::get<BufHandle>(input));
-            }
+Tensor* TensorExprKernel::computeCat(
+    const std::vector<ArgValue>& inputList,
+    const ArgValue& argDim,
+    const std::vector<ExprHandle>& outputShape) {
+  if (getCatWoConditionals()) {
+    return computeCatWoConditionals(inputList, argDim, outputShape);
+  }
+  return Compute(
+      "aten_cat",
+      c10::fmap<DimArg>(outputShape),
+      [&](const std::vector<VarHandle>& axes) {
+        if (inputList.size() == 0) {
+          throw std::runtime_error("Empty input list is passed to aten::cat");
+        }
+        std::vector<BufHandle> bufInputs;
+        for (auto input : inputList) {
+          bufInputs.push_back(c10::get<BufHandle>(input));
+        }
 
-            int64_t dim_ = c10::get<int64_t>(argDim);
-            size_t dim = normalizeAndCheckIndex(dim_, axes.size());
-            // Promote input types.
-            // Note that we need to consider all inputs, including empty - they
-            // also affect the resultant dtype.
-            auto to_buf = [](const ArgValue& x) {
-              return c10::get<BufHandle>(x);
-            };
-            auto maybe_dtype = to_buf(inputList[0]).dtype().scalar_type();
-            ScalarType highType = maybe_dtype;
-            for (const auto input : bufInputs) {
-              auto maybe_dtype = to_buf(input).dtype().scalar_type();
-              highType = promoteTypes(highType, maybe_dtype);
-            }
+        int64_t dim_ = c10::get<int64_t>(argDim);
+        size_t dim = normalizeAndCheckIndex(dim_, axes.size());
+        // Promote input types.
+        // Note that we need to consider all inputs, including empty - they
+        // also affect the resultant dtype.
+        auto to_buf = [](const ArgValue& x) { return c10::get<BufHandle>(x); };
+        auto maybe_dtype = to_buf(inputList[0]).dtype().scalar_type();
+        ScalarType highType = maybe_dtype;
+        for (const auto input : bufInputs) {
+          auto maybe_dtype = to_buf(input).dtype().scalar_type();
+          highType = promoteTypes(highType, maybe_dtype);
+        }
 
-            // Now we know the final dtype, we know what inputs are non-empty,
-            // and we know that there is at least one such an input. With all
-            // that we construct a tensor expression performing the
-            // concatenation.
-            // The expression we build here is a cascading if-then-else that
-            // essentially represents:
-            //
-            //              inp1[i, j, k]         if 0   < i < l1,
-            // out[i,j,k] = inp2[i, j-l1, k]      if l1 =< i < l1 + l2,
-            //              ...
-            //              inpN[i, j-l_N_1, k]   if l1+l2+...l_N_1  < i
-            // where l_i is the corresponding size of the i-th input.
-            std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
-            ExprHandle load = promoteToDtype(
-                tensorOrConstant(inputList[0], newAxes), highType);
-            size_t offset = dynamic_cast<const IntImm*>(to_buf(inputList[0]).node()->dim(dim))->value();
-            newAxes[dim] = newAxes[dim] - IntImm::make(offset);
+        // Now we know the final dtype, we know what inputs are non-empty,
+        // and we know that there is at least one such an input. With all
+        // that we construct a tensor expression performing the
+        // concatenation.
+        // The expression we build here is a cascading if-then-else that
+        // essentially represents:
+        //
+        //              inp1[i, j, k]         if 0   < i < l1,
+        // out[i,j,k] = inp2[i, j-l1, k]      if l1 =< i < l1 + l2,
+        //              ...
+        //              inpN[i, j-l_N_1, k]   if l1+l2+...l_N_1  < i
+        // where l_i is the corresponding size of the i-th input.
+        std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
+        ExprHandle load =
+            promoteToDtype(tensorOrConstant(inputList[0], newAxes), highType);
+        size_t offset =
+            dynamic_cast<const IntImm*>(to_buf(inputList[0]).node()->dim(dim))
+                ->value();
+        newAxes[dim] = newAxes[dim] - IntImm::make(offset);
 
-            for (size_t ii = 1; ii < inputList.size(); ++ii) {
-              auto input = inputList[ii];
-              load = ifThenElse(
-                  CompareSelect::make(axes[dim], IntImm::make(offset), kLT),
-                  load,
-                  promoteToDtype(tensorOrConstant(input, newAxes), highType));
+        for (size_t ii = 1; ii < inputList.size(); ++ii) {
+          auto input = inputList[ii];
+          load = ifThenElse(
+              CompareSelect::make(axes[dim], IntImm::make(offset), kLT),
+              load,
+              promoteToDtype(tensorOrConstant(input, newAxes), highType));
 
-              offset += dynamic_cast<const IntImm*>(to_buf(input).node()->dim(dim))->value();
-              newAxes[dim] = axes[dim] - IntImm::make(offset);
-            }
+          offset += dynamic_cast<const IntImm*>(to_buf(input).node()->dim(dim))
+                        ->value();
+          newAxes[dim] = axes[dim] - IntImm::make(offset);
+        }
 
-            return load;
-          });
+        return load;
+      });
 }
-Tensor* TensorExprKernel::computeCatWoConditionals(const std::vector<ArgValue> &inputList, const ArgValue& argDim, const std::vector<ExprHandle> &outputShape) {
+Tensor* TensorExprKernel::computeCatWoConditionals(
+    const std::vector<ArgValue>& inputList,
+    const ArgValue& argDim,
+    const std::vector<ExprHandle>& outputShape) {
   if (inputList.size() == 0) {
     throw std::runtime_error("Empty input list is passed to aten::cat");
   }
@@ -2279,9 +2497,7 @@ Tensor* TensorExprKernel::computeCatWoConditionals(const std::vector<ArgValue> &
   // Promote input types.
   // Note that we need to consider all inputs, including empty - they
   // also affect the resultant dtype.
-  auto to_buf = [](const ArgValue& x) {
-    return c10::get<BufHandle>(x);
-  };
+  auto to_buf = [](const ArgValue& x) { return c10::get<BufHandle>(x); };
   auto maybe_dtype = to_buf(inputList[0]).dtype().scalar_type();
   ScalarType highType = maybe_dtype;
   for (const auto input : inputList) {
@@ -2308,9 +2524,10 @@ Tensor* TensorExprKernel::computeCatWoConditionals(const std::vector<ArgValue> &
   auto output_buf = new Buf("aten_cat", output_sizes_expr, ToDtype(highType));
 
   int64_t concat_dim = c10::get<int64_t>(argDim);
-  size_t norm_concat_dim = normalizeAndCheckIndex(concat_dim, outputShape.size());
+  size_t norm_concat_dim =
+      normalizeAndCheckIndex(concat_dim, outputShape.size());
 
-  auto gen_code_for_input = [&](const ArgValue &inp,
+  auto gen_code_for_input = [&](const ArgValue& inp,
                                 size_t inp_pos,
                                 const Expr* concat_dim_size,
                                 const std::vector<ExprHandle>& dims) {
@@ -2340,7 +2557,8 @@ Tensor* TensorExprKernel::computeCatWoConditionals(const std::vector<ArgValue> &
   Expr* concat_dim_size = nullptr;
   auto block = new Block({});
   for (size_t i = 0; i < inputList.size(); ++i) {
-    auto input_dims = ExprVectorToExprHandleVector(to_buf(inputList[i]).node()->dims());
+    auto input_dims =
+        ExprVectorToExprHandleVector(to_buf(inputList[i]).node()->dims());
     if (concat_dim_size == nullptr) {
       concat_dim_size = new IntImm(0);
     }
