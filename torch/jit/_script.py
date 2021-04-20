@@ -114,6 +114,9 @@ Attribute.__doc__ = """
         Returns `value`
 """
 
+def _get_type_trace_db():
+    # This is a private API. Use of this for external puposes is discouraged.
+    return type_trace_db
 
 # Gets a function from the name of a method on a type
 def _get_function_from_type(cls, name):
@@ -865,12 +868,6 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Opt
         return obj
     if isinstance(obj, ScriptFunction):
         return obj
-
-    if isinstance(obj, torch.nn.Module):
-        obj = call_prepare_scriptable_func(obj)
-        return torch.jit._recursive.create_script_module(
-            obj, torch.jit._recursive.infer_methods_to_compile
-        )
 
     qualified_name = _qualified_name(obj)
 
