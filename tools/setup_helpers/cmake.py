@@ -139,8 +139,13 @@ class CMake:
         command = [self._cmake_command] + args
 
         if self.quiet:
-            command += ["--log-level=ERROR", "-Wno-deprecated", "-Wno-dev", "-DCMAKE_INSTALL_MESSAGE=NEVER", "-DCMAKE_MESSAGE_LOG_LEVEL=ERROR"]
-            # command += ["-DCMAKE_MESSAGE_LOG_LEVEL=STATUS"]
+            command += [
+                "--log-level=ERROR",
+                "-Wno-deprecated",
+                "-Wno-dev",
+                "-DCMAKE_INSTALL_MESSAGE=NEVER",
+                "-DCMAKE_MESSAGE_LOG_LEVEL=ERROR",
+            ]
 
         if len(generator_args) > 0:
             command += ["--"] + generator_args
@@ -357,4 +362,3 @@ class CMake:
         else:
             generator_args = ['-j', max_jobs]
         self.run(build_args, generator_args=generator_args, env=my_env)
-

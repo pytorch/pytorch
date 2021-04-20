@@ -57,7 +57,8 @@ if args.quiet:
     def report(*args, **kwargs):
         pass
 else:
-    report = print
+    def report(*args, **kwargs):
+        print(*args, **kwargs)
 
 
 def write(filename, s):
