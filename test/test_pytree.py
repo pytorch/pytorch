@@ -28,7 +28,7 @@ class TestPytree(TestCase):
 
     def test_flatten_unflatten_list(self):
         def run_test(lst):
-            expected_spec = TreeSpec(list, len(lst), [LeafSpec() for _ in lst])
+            expected_spec = TreeSpec(list, None, [LeafSpec() for _ in lst])
             values, treespec = tree_flatten(lst)
             self.assertTrue(isinstance(values, list))
             self.assertEqual(values, lst)
@@ -44,7 +44,7 @@ class TestPytree(TestCase):
 
     def test_flatten_unflatten_tuple(self):
         def run_test(tup):
-            expected_spec = TreeSpec(tuple, len(tup), [LeafSpec() for _ in tup])
+            expected_spec = TreeSpec(tuple, None, [LeafSpec() for _ in tup])
             values, treespec = tree_flatten(tup)
             self.assertTrue(isinstance(values, list))
             self.assertEqual(values, list(tup))
@@ -104,7 +104,7 @@ class TestPytree(TestCase):
         pytree = (0, [0, 0, 0])
         _, spec = tree_flatten(pytree)
         self.assertEqual(
-            repr(spec), 'TreeSpec(tuple, 2, [*, TreeSpec(list, 3, [*, *, *])])')
+            repr(spec), 'TreeSpec(tuple, None, [*, TreeSpec(list, None, [*, *, *])])')
 
     def test_broadcast_to_and_flatten(self):
         cases = [

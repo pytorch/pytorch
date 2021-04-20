@@ -1,5 +1,6 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 from torch.utils._pytree import TreeSpec
+import torch.fx._pytree as fx_pytree
 
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
 from dataclasses import dataclass
@@ -50,7 +51,7 @@ _register_custom_builtin('nan', 'from math import nan', math.nan)
 _register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
 _register_custom_builtin('torch', 'import torch', torch)
 _register_custom_builtin('device', 'from torch import device', torch.device)
-_register_custom_builtin('pytree', 'import torch.utils._pytree as pytree', torch.utils._pytree)
+_register_custom_builtin('fx_pytree', 'import torch.fx._pytree as fx_pytree', fx_pytree)
 
 
 def _is_magic(x: str) -> bool:
@@ -933,7 +934,7 @@ class Graph:
             if has_orig_self:
                 free_vars.insert(0, 'self')
             if len(free_vars) > 0:  # pytree has no placeholders in it
-                body.insert(0, f"{', '.join(free_vars)}, = pytree.tree_flatten_spec([{', '.join(orig_vars)}], self._in_spec)\n")
+                body.insert(0, f"{', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(orig_vars)}], self._in_spec)\n")
         else:
             orig_vars = free_vars
 

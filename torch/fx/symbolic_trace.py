@@ -339,12 +339,7 @@ class Tracer(TracerBase):
                 default = ()
             else:
                 param = sig.parameters[name]
-<<<<<<< HEAD
                 default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore[assignment]
-=======
-                default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore
-
->>>>>>> 7e4c95a920 (fix issues)
             return self.create_proxy('placeholder', name, default, {},
                                      type_expr=fn_for_analysis.__annotations__.get(name, None))
 
