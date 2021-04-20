@@ -833,12 +833,21 @@ if __name__ == "__main__":
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     def test_integer_parameter_serialization(self):
-        iparam = torch.nn.Parameter(torch.tensor(0, dtype=torch.int64), requires_grad=False)
+        for device in ['cpu', 'cuda']:
+            param = torch.nn.Parameter(
+                torch.tensor(0, dtype=torch.int64, device=device),
+                requires_grad=False
+            )
 
-        ctx = mp.get_context('spawn')
-        p = ctx.Process(target=integer_parameter_serialization, args=(iparam,))
-        p.start()
-        p.join()
+            ctx = mp.get_context('spawn')
+            p = ctx.Process(target=integer_parameter_serialization, args=(param,))
+            p.start()
+            p.join()
+
+            self.assertEqual(
+                0, p.exitcode,
+                msg=f'Failed to serialize successfully for "{device}" device!'
+            )
 
     def test_empty_shared(self):
         t = torch.tensor([])
