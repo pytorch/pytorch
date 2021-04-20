@@ -694,11 +694,18 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
   bool equals(const ivalue::Object& rhs) const;
+  bool has_reference_semantics() const {
+    return has_reference_semantics_;
+  }
+  void enable_reference_semantics() {
+    has_reference_semantics_ = true;
+  }
 
  private:
   void resizeObject(size_t slot);
   StrongTypePtr type_;
   std::vector<IValue> slots_;
+  bool has_reference_semantics_{false};
 };
 
 // virtual ivalue PyObjectHolder that hold a py::object, we make this virtual

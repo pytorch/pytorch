@@ -31,6 +31,8 @@ jobs:
         run: |
           pip install ruamel.yaml==0.17.4
           .github/scripts/lint_native_functions.py
+      - name: Extract scripts from GitHub Actions workflows
+        run: tools/extract_scripts.py --out=.extracted_scripts
       - name: ShellCheck
         # https://github.com/koalaman/shellcheck/tree/v0.7.1#installing-a-pre-compiled-binary
         run: |
@@ -40,9 +42,7 @@ jobs:
           sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
           rm -r "shellcheck-${scversion}"
           shellcheck --version
-          EXTRACT_DIR=.shellcheck_generated
-          tools/extract_scripts.py --out=$EXTRACT_DIR
-          tools/run_shellcheck.sh .jenkins/pytorch $EXTRACT_DIR
+          tools/run_shellcheck.sh .jenkins/pytorch .extracted_scripts
       - name: Ensure correct trailing newlines
         run: |
           (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
@@ -131,12 +131,12 @@ jobs:
         with:
           fetch-depth: 2 # to allow us to use github.event.pull_request.head.sha
       - name: Prepare output dir with HEAD commit SHA
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           mkdir flake8-output
           cd flake8-output
           echo "$HEAD_SHA" > commit-sha.txt
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Run flake8
         run: |
           set -eux
@@ -147,14 +147,14 @@ jobs:
           cp flake8-output.txt flake8-output/annotations.json
       - name: Translate annotations
         if: github.event_name == 'pull_request'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           tools/translate_annotations.py \
             --file=flake8-output.txt \
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
             --commit="$HEAD_SHA" \
             > flake8-output/annotations.json
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
@@ -179,12 +179,12 @@ jobs:
         with:
           fetch-depth: 0 # to allow tools/clang_tidy.py to do its thing
       - name: Prepare output dir with HEAD commit SHA
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           mkdir clang-tidy-output
           cd clang-tidy-output
           echo "$HEAD_SHA" > commit-sha.txt
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Install dependencies
         run: |
           set -eux
@@ -203,6 +203,9 @@ jobs:
           sudo apt-get install -y clang-tidy-11
           sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-11 1000
       - name: Run clang-tidy
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -eux
           git remote add upstream https://github.com/pytorch/pytorch
@@ -264,9 +267,6 @@ jobs:
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
             --commit="$HEAD_SHA" \
             > clang-tidy-output/annotations.json
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:

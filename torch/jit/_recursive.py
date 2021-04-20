@@ -431,6 +431,9 @@ def create_script_class(obj):
     for name, value in obj.__dict__.items():
         cpp_object.setattr(name, value)
 
+    # Enable reference semantics.
+    cpp_object.enable_reference_semantics()
+
     # Wrap the torch._C.ScriptObject in a RecursiveScriptClass instance.
     return wrap_cpp_class(cpp_object)
 

@@ -864,6 +864,9 @@ void initJitScriptBindings(PyObject* module) {
           .def(
               "equals",
               [](Object& self, const Object& rhs) { return self.equals(rhs); })
+          .def(
+              "enable_reference_semantics",
+              [](Object& self) { self.enable_reference_semantics(); })
           .def("__copy__", &Object::copy)
           .def(
               "__hash__",
@@ -1537,7 +1540,13 @@ void initJitScriptBindings(PyObject* module) {
         if (cu->get_type(classname) != nullptr) {
           classname = cu->mangle(classname);
         }
-        auto classType = ClassType::create(classname, cu);
+
+        auto classType = ClassType::create(
+            classname,
+            cu,
+            /* is_module = */ false,
+            /* doc_string = */ "",
+            getUnresolvedClassAttributes(classDef));
         cu->register_type(classType);
         std::vector<ResolverPtr> methodRcbs, propRcbs;
         std::vector<Def> methodDefs;
