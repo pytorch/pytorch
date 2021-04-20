@@ -1,3 +1,4 @@
+#include <torch/csrc/fx/fx_init.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -116,6 +117,9 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
   return Py_None;
 }
 
+at::Tensor addKey(const py::object& tensor) {
+  return at::detail::make_tensor<PythonTensorImpl>(tensor);
+}
 
 void initFx(PyObject* module) {
   static std::array<PyMethodDef, 2> PatchMethods = {{
@@ -137,6 +141,54 @@ void initFx(PyObject* module) {
   if (PyModule_AddObject(module, "_fx", patch) != 0) {
     throw python_error();
   }
+
+  auto m = py::handle(module).cast<py::module>();
+  auto key = m.def_submodule("key");
+  key.def("makePython", &addKey);
+}
+
+
+bool isPythonTensor(at::Tensor tensor) {
+  return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::PythonKey);
+}
+PythonTensorImpl* getPythonImpl(at::Tensor tensor) {
+  return static_cast<PythonTensorImpl*>(tensor.unsafeGetTensorImpl());
+}
+void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  const auto& schema = op.schema();
+  const auto num_returns = schema.returns().size();
+
+  const auto num_arguments = schema.arguments().size();
+  const auto arguments = torch::jit::last(stack, num_arguments);
+  torch::jit::drop(stack, num_arguments);
+  for (int idx = 0; idx< arguments.size(); idx++) {
+    const auto& ivalue = arguments[idx];
+    if (!ivalue.isTensor()) {
+      continue;
+    }
+    const auto& tensor = ivalue.toTensor();
+    if (!isPythonTensor(tensor)) {
+      continue;
+    }
+    const auto* pyTensor = getPythonImpl(tensor);
+
+    py::gil_scoped_acquire g;
+    py::object torch_function = PyObject_FastGetAttrString(pyTensor->value_.ptr(), "__torch_function__");
+
+    std::string func_name = "mul";
+    py::object torch_api_function = PyObject_FastGetAttrString(
+    THPVariableClass, (char*)func_name.c_str());
+
+    py::tuple py_types = py::make_tuple(py::handle(PyObject_Type(pyTensor->value_.ptr())));
+    py::dict kwargs;
+    auto out = PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), 0, kwargs.ptr());
+
+  }
+  torch::jit::push(stack, 5);
+  return;
+}
+TORCH_LIBRARY_IMPL(_, PythonKey, m) {
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonFallBack>());
 }
 } // namespace fx
 } // namespace torch
