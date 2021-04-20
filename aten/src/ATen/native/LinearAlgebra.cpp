@@ -1056,7 +1056,7 @@ Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   Tensor result = at::empty({self.sizes()[0], mat2.sizes()[1]}, self.options());
-  return at::addmm(result, self, mat2, 0, 1);
+  return at::addmm_out(result, result, self, mat2, 0, 1);
 }
 
 template <typename scalar_t, bool is_bmm>
