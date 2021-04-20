@@ -266,7 +266,7 @@ class DataLoader(Generic[T_co]):
                     # Somewhat related: see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
                     sampler = RandomSampler(dataset, generator=generator)  # type: ignore
                 else:
-                    sampler = SequentialSampler(dataset)
+                    sampler = SequentialSampler(dataset)  # type: ignore
 
         if batch_size is not None and batch_sampler is None:
             # auto_collation without custom batch_sampler
