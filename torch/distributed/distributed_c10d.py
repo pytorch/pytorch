@@ -7,7 +7,6 @@ import warnings
 import time
 from torch._six import string_classes
 from datetime import timedelta
-from os import getenv
 from typing import Dict, Optional, Tuple, Union
 
 # This module is wildcard imported from torch.distributed.
