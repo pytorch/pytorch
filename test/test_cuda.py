@@ -1483,10 +1483,10 @@ class TestCuda(TestCase):
     @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
-        self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
+        self._spawn_method(test_method, torch.tensor([1., -1., 1.]))
+        self._spawn_method(test_method, torch.tensor([1., inf, 1.]))
+        self._spawn_method(test_method, torch.tensor([1., -inf, 1.]))
+        self._spawn_method(test_method, torch.tensor([1., 1., nan]))
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -1693,8 +1693,6 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 2)
         self.assertEqual(torch.cuda.current_stream(), default_stream)
 
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_streaming_backwards_multiple_streams(self):
 
         class StreamModel(torch.nn.Module):
@@ -1730,8 +1728,6 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 5)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_streaming_backwards_device_transfer(self):
         # This function must run with non-default current streams on all devices, otherwise it's meaningless.
         # The intention is to test that to()'s backward (CopyBackward) interacts properly with the
@@ -2336,8 +2332,6 @@ torch.cuda.synchronize()
                 self.assertTrue(torch.allclose(c, s, atol=1e-7))
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_grad_scaling_multigpu(self):
         # Same as above, but runs some of the models on device 1.
         # GradScaler should transparently handle losses and gradients on multiple devices.
@@ -3422,6 +3416,46 @@ torch.cuda.synchronize()
             # Tensors used across streams (a and b) were held until just now, so no need to call record_stream on them.
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_record_stream(self):
+        # Makes sure graph capture defers attempting to reclaim allocations used across streams. See
+        # "Q. Why skip process_events if a capture might be underway?" in c10/cuda/CUDACachingAllocator.cpp
+        potential_problem = torch.zeros((3,), device="cuda")
+        a = torch.zeros((3,), device="cuda")
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        s2 = torch.cuda.Stream()
+        g = torch.cuda._Graph()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(s0):
+            potential_problem.record_stream(s0)
+            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
+            potential_problem.fill_(1.)
+        del potential_problem
+
+        with torch.cuda.stream(s1):
+            g.capture_begin()
+            # potential_problem's allocation should still be outstanding. if DeviceCachingAllocator::malloc
+            # mistakenly calls process_events, it will trigger cudaEventQueries on potential_problem's end-of-life
+            # event, which will cause the capture to error.
+            b = a.clone()
+
+            # Let's also see what happens if we record_stream on a tensor during capture.
+            s2.wait_stream(s1)
+            with torch.cuda.stream(s2):
+                b.fill_(1.)
+                b.record_stream(s2)  # dummy record_stream
+                del b
+            s1.wait_stream(s2)
+            g.capture_end()
+        torch.cuda.synchronize()
+
+        # dummy allocation triggers process_events, Hopefully successfully processes b's end-of-life event.
+        c = torch.zeros((3,), device="cuda")
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
