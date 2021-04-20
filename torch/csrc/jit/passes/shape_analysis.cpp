@@ -2114,8 +2114,8 @@ class ShapePropagator {
           tp->sizes().concrete_sizes().value(),
           tp->strides().concrete_sizes().value(),
           node->get<c10::List<int64_t>>(attr::size).value().vec());
-      node->output()->setType(tp->withSizesStrides(
-          sizesAndStrides.sizes, sizesAndStrides.strides));
+      node->output()->setType(
+          tp->withSizesStrides(sizesAndStrides.sizes, sizesAndStrides.strides));
       return true;
     } else if (
         node->matches(
