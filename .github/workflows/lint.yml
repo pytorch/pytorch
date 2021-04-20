@@ -128,7 +128,7 @@ jobs:
         run: |
           set -eux
           export PATH=~/.npm-global/bin:"$PATH"
-          for FILE in {CONTRIBUTING,README}.md; do
+          for FILE in $(git grep -Il '<!-- toc -->' -- '**.md'); do
             markdown-toc --bullets='-' -i "$FILE"
           done
       - name: Assert that regenerating the ToCs didn't change them
