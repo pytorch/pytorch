@@ -2599,10 +2599,6 @@ def gaussian_nll_loss(
             reduction=reduction,
         )
 
-    # Inputs and targets much have same shape
-    if input.size() != target.size():
-        raise ValueError("input and target must have same size")
-
     # Check var size
     # If var.size == input.size, the case is heteroscedastic and no further checks are needed.
     # Otherwise:
