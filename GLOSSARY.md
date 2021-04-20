@@ -1,5 +1,7 @@
 # PyTorch Glossary
 
+<!-- toc -->
+
 - [PyTorch Glossary](#pytorch-glossary)
 - [Operation and Kernel](#operation-and-kernel)
   - [ATen](#aten)
@@ -18,6 +20,8 @@
   - [TorchScript](#torchscript)
   - [Tracing](#tracing)
   - [Scripting](#scripting)
+
+<!-- tocstop -->
 
 # Operation and Kernel
 
