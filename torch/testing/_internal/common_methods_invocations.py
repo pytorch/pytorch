@@ -4739,7 +4739,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,),
     OpInfo('__rsub__',
            op=torch.Tensor.__rsub__,
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
@@ -5720,8 +5720,6 @@ def ident(x):
 def method_tests():
     set_rng_seed(SEED)
     return [
-        ('__rsub__', (S, S, S), (3.14,), 'constant', (True, 'aten::rsub')),
-        ('__rsub__', (), (3.14,), 'scalar_constant', (True, 'aten::rsub')),
         ('div', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
         ('div', (S, S, S), (torch.rand(S, S) + 0.1,), 'broadcast_rhs', (True,)),
         ('div', (S, S), (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),
