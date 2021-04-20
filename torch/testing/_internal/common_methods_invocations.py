@@ -2766,9 +2766,7 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad):
         (_tensor(()), (0, zero.clone().detach(), 2.5)),
     )
 
-    samples = [SampleInput(tensor, args=args) for tensor, args in test_cases]
-
-    return samples
+    return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
 def sample_inputs_scatter_add(op_info, device, dtype, requires_grad):
     def _tensor(shape, dtype=dtype, low=None, high=None):
@@ -2788,9 +2786,7 @@ def sample_inputs_scatter_add(op_info, device, dtype, requires_grad):
         (_tensor(()), (0, zero.clone().detach(), _tensor(()))),
     )
 
-    samples = [SampleInput(tensor, args=args) for tensor, args in test_cases]
-
-    return samples
+    return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
 foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('exp'),
