@@ -601,7 +601,11 @@ class LSTM(RNNBase):
 
     # In the future, we should prevent mypy from applying contravariance rules here.
     # See torch/nn/modules/module.py::_forward_unimplemented
-    def check_forward_args(self, input: Tensor, hidden: Tuple[Tensor, Tensor], batch_sizes: Optional[Tensor]):  # type: ignore[override] # noqa: B950
+    def check_forward_args(self,  # type: ignore[override]
+                           input: Tensor,
+                           hidden: Tuple[Tensor, Tensor],
+                           batch_sizes: Optional[Tensor],
+                           ):
         self.check_input(input, batch_sizes)
         self.check_hidden_size(hidden[0], self.get_expected_hidden_size(input, batch_sizes),
                                'Expected hidden[0] size {}, got {}')
@@ -609,7 +613,10 @@ class LSTM(RNNBase):
                                'Expected hidden[1] size {}, got {}')
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
-    def permute_hidden(self, hx: Tuple[Tensor, Tensor], permutation: Optional[Tensor]) -> Tuple[Tensor, Tensor]:  # type: ignore[override] # noqa: B950
+    def permute_hidden(self,  # type: ignore[override]
+                       hx: Tuple[Tensor, Tensor],
+                       permutation: Optional[Tensor]
+                       ) -> Tuple[Tensor, Tensor]:
         if permutation is None:
             return hx
         return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
