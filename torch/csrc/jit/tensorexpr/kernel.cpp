@@ -1934,8 +1934,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::frac:
     case aten::lgamma:
     case aten::slice:
-    case aten::unsqueeze:
-     {
+    case aten::unsqueeze: {
       std::vector<ArgValue> argInputs;
       for (auto inp : inputs) {
         argInputs.push_back(jitToArgValue(inp));
