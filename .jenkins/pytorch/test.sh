@@ -144,6 +144,16 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_python_gloo_with_tls() {
+  source ./create_test_cert.sh
+  time python test/run_test.py --include test_c10d_gloo --verbose --determine-from="$DETERMINE_FROM"
+  unset GLOO_DEVICE_TRANSPORT
+  unset GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY
+  unset GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT
+  unset GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE
+  assert_git_not_dirty
+}
+
 
 test_aten() {
   # Test ATen
@@ -438,6 +448,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   test_python_shard1
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
+  test_python_gloo_with_tls
   install_torchvision
   test_python_shard2
   test_libtorch
