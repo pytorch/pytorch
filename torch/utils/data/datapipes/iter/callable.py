@@ -1,7 +1,7 @@
 import warnings
 import torch.nn as nn
 from torch.utils.data import IterDataPipe, _utils, functional_datapipe
-from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
+from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar, List
 
 try:
     import dill
@@ -24,9 +24,7 @@ T_co = TypeVar('T_co', covariant=True)
 def default_fn(data):
     return data
 
-
-@functional_datapipe('map')
-class MapIterDataPipe(IterDataPipe[T_co]):
+class _CallableIterDataPipe(IterDataPipe[T_co]):
     r""" :class:`MapIterDataPipe`.
 
     Iterable DataPipe to run a function over each item from the source DataPipe.
@@ -39,7 +37,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         fn_kwargs: Keyword arguments for `fn`
     """
     datapipe: IterDataPipe
-    fn: Callable
+    fn: List[Callable]
 
     def __init__(self,
                  datapipe: IterDataPipe,
@@ -53,13 +51,15 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         if hasattr(fn, '__name__') and fn.__name__ == '<lambda>' and not DILL_AVAILABLE:
             warnings.warn("Lambda function is not supported for pickle, please use "
                           "regular python function or functools.partial instead.")
-        self.fn = fn  # type: ignore
-        self.args = () if fn_args is None else fn_args
-        self.kwargs = {} if fn_kwargs is None else fn_kwargs
+        self.fn = [fn]  # type: ignore
+        self.args = [() if fn_args is None else fn_args]
+        self.kwargs = [{} if fn_kwargs is None else fn_kwargs]
 
     def __iter__(self) -> Iterator[T_co]:
         for data in self.datapipe:
-            yield self.fn(data, *self.args, **self.kwargs)
+            for fn, args, kwargs in zip(self.fn, self.args, self.kwargs):
+                data = fn(data, *args, **kwargs)
+            yield data
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized) and len(self.datapipe) >= 0:
@@ -80,6 +80,20 @@ class MapIterDataPipe(IterDataPipe[T_co]):
             self.fn = dill.loads(dill_function)  # type: ignore
         else:
             self.fn = dill_function  # type: ignore
+
+
+@functional_datapipe('map')
+class MapIterDataPipe(_CallableIterDataPipe):
+    def map(self, fn: Callable = default_fn,
+                 fn_args: Optional[Tuple] = None,
+                 fn_kwargs: Optional[Dict] = None):
+        if hasattr(fn, '__name__') and fn.__name__ == '<lambda>' and not DILL_AVAILABLE:
+            warnings.warn("Lambda function is not supported for pickle, please use "
+                          "regular python function or functools.partial instead.")
+        self.fn.append(fn)
+        self.args.append(() if fn_args is None else fn_args)
+        self.kwargs.append({} if fn_kwargs is None else fn_kwargs)
+        return self
 
 
 @functional_datapipe('collate')
