@@ -1,5 +1,5 @@
 import unittest
-import onnxruntime  # noqa
+import onnxruntime
 import torch
 
 import numpy as np
@@ -971,6 +971,18 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.rand(3, 3).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
+
+    def test_hardsigmoid(self):
+        model = torch.nn.Hardsigmoid()
+
+        x = torch.rand(3, 3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+        # corner cases
+        x = torch.tensor(3).to(dtype=torch.float32)
+        self.run_test(model, x)
+        x = torch.tensor(-3).to(dtype=torch.float32)
+        self.run_test(model, x)
 
     def test_clamp(self):
         class ClampModel(torch.nn.Module):

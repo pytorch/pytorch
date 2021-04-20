@@ -5,7 +5,9 @@ import torch.backends.xnnpack
 import torch.utils.bundled_inputs
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.jit_utils import get_forward, get_forward_graph
-from torch.utils.mobile_optimizer import *
+from torch.utils.mobile_optimizer import (LintCode,
+                                          generate_mobile_module_lints,
+                                          optimize_for_mobile)
 from torch.nn import functional as F
 from torch._C import MobileOptimizerType
 from torch.testing._internal.common_quantized import override_quantized_engine
@@ -54,10 +56,10 @@ class TestOptimizer(TestCase):
         class MyTestModule(torch.nn.Module):
             def __init__(self):
                 super(MyTestModule, self).__init__()
-                self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
-                self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))))
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.conv_weight = torch.nn.Parameter(torch.rand(conv_weight_shape))
+                self.conv_bias = torch.nn.Parameter(torch.rand((conv_bias_shape)))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -121,6 +123,7 @@ class TestOptimizer(TestCase):
         bn_test_module = BNTestModule()
         bn_scripted_module = torch.jit.script(bn_test_module)
         bn_scripted_module.eval()
+
         self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 14)
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                    .run(str(get_forward(bn_scripted_module._c).graph))
@@ -141,8 +144,8 @@ class TestOptimizer(TestCase):
         class MyMobileOptimizedTagTest(torch.nn.Module):
             def __init__(self):
                 super(MyMobileOptimizedTagTest, self).__init__()
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
 
             def forward(self, x):
                 o = F.linear(x, self.linear_weight, self.linear_bias)
@@ -158,8 +161,8 @@ class TestOptimizer(TestCase):
         class MyPreserveMethodsTest(torch.nn.Module):
             def __init__(self):
                 super(MyPreserveMethodsTest, self).__init__()
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
 
             def forward(self, x):
                 o = F.linear(x, self.linear_weight, self.linear_bias)
@@ -200,12 +203,40 @@ class TestOptimizer(TestCase):
         optimized_scripted_model = optimize_for_mobile(m, methods_to_optimize=['foo'])
         optimized_result = optimized_scripted_model.foo(input_data)
 
-
         FileCheck().check_not("dropout.__") \
             .check_count("aten::_add_relu(", 1, exactly=True) \
             .run(optimized_scripted_model.foo.graph)
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
+        class BNTestNoForwardModule(torch.nn.Module):
+            def __init__(self):
+                super(BNTestNoForwardModule, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn.eps = 0.0023
+
+            @torch.jit.export
+            def foo(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        bn_test_no_forward_module = BNTestNoForwardModule()
+        bn_no_forward_scripted_module = torch.jit.script(bn_test_no_forward_module)
+        bn_no_forward_scripted_module.eval()
+
+        self.assertEqual(len(torch.jit.export_opnames(bn_no_forward_scripted_module)), 14)
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+                   .run(bn_no_forward_scripted_module.foo.graph)
+
+        bn_fold_no_foward_scripted_module = optimize_for_mobile(bn_no_forward_scripted_module, methods_to_optimize=['foo'])
+        self.assertEqual(len(torch.jit.export_opnames(bn_fold_no_foward_scripted_module)), 1)
+        bn_input = torch.rand(1, 1, 6, 6)
+        torch.testing.assert_allclose(
+            bn_no_forward_scripted_module.foo(bn_input),
+            bn_fold_no_foward_scripted_module.foo(bn_input),
+            rtol=1e-2,
+            atol=1e-3)
 
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."

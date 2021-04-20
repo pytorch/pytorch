@@ -1201,7 +1201,7 @@ void magmaGels<c10::complex<double>>(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
+static void apply_solve(Tensor& b, Tensor& A, Tensor& infos_out) {
 #ifndef USE_MAGMA
 AT_ERROR("solve: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1214,11 +1214,13 @@ AT_ERROR("solve: MAGMA library not found in "
 
   if (b.dim() == 2) {
     auto ipiv = at::empty({n}, at::kInt);
-    infos = infos.to(at::kCPU);  // magmaSolve requires infos tensor to live on CPU
+    // magmaSolve requires infos tensor to live on CPU
+    Tensor infos = at::empty(infos_out.sizes(), infos_out.options().device(kCPU));
     magmaSolve<scalar_t>(n, nrhs, A_data, lda, ipiv.data_ptr<magma_int_t>(),
                         b_data, lda, infos.data_ptr<magma_int_t>());
+    infos_out.copy_(infos);
   } else {
-    auto infos_data = infos.data_ptr<magma_int_t>();
+    auto infos_data = infos_out.data_ptr<magma_int_t>();
     auto A_mat_stride = matrixStride(A);
     auto b_mat_stride = matrixStride(b);
     magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
@@ -1729,14 +1731,27 @@ static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 }
 
 // This is a type dispatching helper function for 'apply_cholesky_inverse'
-Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) {
-  // This function calculates the inverse matrix in-place
-  // result should be in column major order and contain matrices to invert
-  // the content of result is overwritten by 'apply_cholesky_inverse'
+Tensor& cholesky_inverse_kernel_impl_magma(Tensor &result, Tensor& infos, bool upper) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_inverse_out_cuda", [&]{
     apply_cholesky_inverse<scalar_t>(result, infos, upper);
   });
   return result;
+}
+
+Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) {
+  // This function calculates the inverse matrix in-place
+  // result should be in column major order and contain matrices to invert
+  // the content of result is overwritten by 'apply_cholesky_inverse'
+#ifdef USE_CUSOLVER
+  if (batchCount(result) == 1 || !use_magma_) {
+    return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
+  } else {
+    return cholesky_inverse_kernel_impl_magma(result, infos, upper);
+  }
+#else
+  return cholesky_inverse_kernel_impl_magma(result, infos, upper);
+#endif
+
 }
 
 REGISTER_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
@@ -1933,14 +1948,14 @@ REGISTER_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, int64_t n_columns) {
   // TODO: It is possible to implement efficient batched orgqr for small tau (tau.size(-1) <= 32)
   // using MAGMA, however it fails on Windows because of some illegal memory reads inside MAGMA.
   // See discussions in https://github.com/pytorch/pytorch/pull/51348 for comparison of cuSOLVER-MAGMA
   // and Windows failure.
   // For reference here is the MAGMA-based implementation: https://gist.github.com/IvanYashchuk/2db50002c9d3c1462ff769e6410ad983
   #if defined(USE_CUSOLVER)
-    return orgqr_helper_cuda_lib(result, tau, infos, n_columns); // cusolver
+    return orgqr_helper_cusolver(result, tau, n_columns); // cusolver
   #else
     TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
       "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
@@ -2313,6 +2328,92 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
 }
 
 REGISTER_DISPATCH(eig_stub, &eig_kernel_impl);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/*
+Computes the eigenvalues and eigenvectors of n-by-n matrix 'input'.
+This is an in-place routine, content of 'input', 'values', 'vectors' is overwritten.
+'infos' is an int Tensor containing error codes for each matrix in the batched input.
+For more information see MAGMA's documentation for GEEV routine.
+*/
+template <typename scalar_t>
+void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
+#ifndef USE_MAGMA
+TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
+                   "Either transfer the tensor to the CPU before calling torch.linalg.eig or recompile with MAGMA.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == at::kCPU);
+  if (compute_eigenvectors) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.device() == at::kCPU);
+  }
+
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+
+  magma_vec_t jobvr = compute_eigenvectors ? MagmaVec : MagmaNoVec;
+  magma_vec_t jobvl = MagmaNoVec;  // only right eigenvectors are computed
+  magma_int_t n = magma_int_cast(input.size(-1), "n");
+  auto lda = std::max<magma_int_t>(1, n);
+  auto batch_size = batchCount(input);
+  auto input_matrix_stride = matrixStride(input);
+  auto values_stride = values.size(-1);
+  auto input_data = input.data_ptr<scalar_t>();
+  auto values_data = values.data_ptr<scalar_t>();
+  auto infos_data = infos.data_ptr<magma_int_t>();
+  auto rvectors_data = compute_eigenvectors ? vectors.data_ptr<scalar_t>() : nullptr;
+  scalar_t* lvectors_data = nullptr;  // only right eigenvectors are computed
+  int64_t ldvr = compute_eigenvectors ? lda : 1;
+  int64_t ldvl = 1;
+
+  Tensor rwork;
+  value_t* rwork_data = nullptr;
+  if (input.is_complex()) {
+    ScalarType real_dtype = toValueType(input.scalar_type());
+    rwork = at::empty({lda * 2}, input.options().dtype(real_dtype));
+    rwork_data = rwork.data_ptr<value_t>();
+  }
+
+  // call magmaEig once to get the optimal size of work_data
+  scalar_t work_query;
+  magmaEig<scalar_t, value_t>(jobvl, jobvr, n, input_data, lda, values_data,
+    lvectors_data, ldvl, rvectors_data, ldvr, &work_query, -1, rwork_data, &infos_data[0]);
+
+  magma_int_t lwork = std::max<magma_int_t>(1, static_cast<magma_int_t>(real_impl<scalar_t, value_t>(work_query)));
+  Tensor work = at::empty({lwork}, input.dtype());
+  auto work_data = work.data_ptr<scalar_t>();
+
+  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
+    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    scalar_t* values_working_ptr = &values_data[i * values_stride];
+    scalar_t* rvectors_working_ptr = compute_eigenvectors ? &rvectors_data[i * input_matrix_stride] : nullptr;
+    int* info_working_ptr = &infos_data[i];
+    magmaEig<scalar_t, value_t>(jobvl, jobvr, n, input_working_ptr, lda, values_working_ptr,
+      lvectors_data, ldvl, rvectors_working_ptr, ldvr, work_data, lwork, rwork_data, info_working_ptr);
+  }
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_linalg_eig'
+void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
+  // This function calculates the non-symmetric eigendecomposition in-place
+  // tensors should be in batched column major memory format
+  // the content of eigenvalues, eigenvectors and infos is overwritten by 'apply_linalg_eig'
+
+  // apply_linalg_eig modifies the provided input matrix in-place, therefore we need a copy
+  // MAGMA doesn't have GPU interface for the eigendecomposition and it forces us to transfer 'input' to CPU
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
+  Tensor input_working_copy = at::empty(input.sizes(), input.options().device(kCPU));
+  input_working_copy.transpose_(-2, -1);  // make input_working_copy to have Fortran contiguous memory layout
+  input_working_copy.copy_(input);
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "linalg_eig_out_cuda", [&]{
+    apply_linalg_eig<scalar_t>(eigenvalues, eigenvectors, input_working_copy, infos, compute_eigenvectors);
+  });
+}
+
+REGISTER_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

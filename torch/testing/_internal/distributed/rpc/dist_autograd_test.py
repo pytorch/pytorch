@@ -185,7 +185,8 @@ class ExecMode(Enum):
     RPC_ASYNC = 4  # Run the operation using rpc_async
 
 
-class DistAutogradTest(RpcAgentTestFixture):
+# Common utils for both CPU and CUDA test suites
+class CommonDistAutogradTest(RpcAgentTestFixture):
     def _exec_func_with_dst(self, dst, exec_mode, method, *args):
         if ExecMode.LOCAL == exec_mode:
             if len(args) == 1 and isinstance(args[0], list):
@@ -218,6 +219,32 @@ class DistAutogradTest(RpcAgentTestFixture):
     def _check_rpc_done(self, rank_distance):
         _check_rpc_done(rank_distance)
 
+    def _verify_backwards(self, exec_mode, tensors, context_id, local_grads, *args):
+        if exec_mode == ExecMode.LOCAL:
+            torch.autograd.backward(tensors)
+            return [arg.grad for arg in args]
+        else:
+            self._verify_backwards_remote(tensors, context_id, local_grads, *args)
+
+    def _verify_backwards_remote(self, tensors, context_id, local_grads, *args):
+        dist_autograd.backward(context_id, tensors)
+
+        # Verify grads were accumulated appropriately.
+        grads = dist_autograd.get_gradients(context_id)
+        nargs = len(args)
+        ngrads = 0
+        for i in range(0, nargs):
+            if local_grads[i] is not None:
+                self.assertIn(args[i], grads)
+                self.assertEqual(local_grads[i], grads[args[i]])
+                ngrads += 1
+            else:
+                self.assertNotIn(args[i], grads)
+
+        self.assertEqual(ngrads, len(grads))
+
+
+class DistAutogradTest(CommonDistAutogradTest):
     @dist_init
     def test_autograd_context(self):
         # Verify max possible id.
@@ -848,30 +875,6 @@ class DistAutogradTest(RpcAgentTestFixture):
                 rpc.rpc_sync(
                     worker_name(self._next_rank()), torch.matmul, args=(t1, t2)
                 )
-
-    def _verify_backwards(self, exec_mode, tensors, context_id, local_grads, *args):
-        if exec_mode == ExecMode.LOCAL:
-            torch.autograd.backward(tensors)
-            return [arg.grad for arg in args]
-        else:
-            self._verify_backwards_remote(tensors, context_id, local_grads, *args)
-
-    def _verify_backwards_remote(self, tensors, context_id, local_grads, *args):
-        dist_autograd.backward(context_id, tensors)
-
-        # Verify grads were accumulated appropriately.
-        grads = dist_autograd.get_gradients(context_id)
-        nargs = len(args)
-        ngrads = 0
-        for i in range(0, nargs):
-            if local_grads[i] is not None:
-                self.assertIn(args[i], grads)
-                self.assertEqual(local_grads[i], grads[args[i]])
-                ngrads += 1
-            else:
-                self.assertNotIn(args[i], grads)
-
-        self.assertEqual(ngrads, len(grads))
 
     @dist_init
     def test_backward_no_grad_on_tensor(self):
@@ -2131,6 +2134,8 @@ class DistAutogradTest(RpcAgentTestFixture):
                 )
             )
 
+
+class CudaDistAutogradTest(CommonDistAutogradTest):
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_gpu_simple(self):
@@ -2237,7 +2242,7 @@ class FaultyAgentDistAutogradTest(RpcAgentTestFixture):
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
 
-class TensorPipeDistAutogradTest(RpcAgentTestFixture):
+class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(4)
     def test_device_maps_backward_pass(self):
@@ -2301,8 +2306,8 @@ class TensorPipeDistAutogradTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        remote_compute = rpc.remote(dst, TensorPipeDistAutogradTest.MyRemoteCompute)
-        local_compute = TensorPipeDistAutogradTest.MyLocalCompute(remote_compute)
+        remote_compute = rpc.remote(dst, TensorPipeCudaDistAutogradTest.MyRemoteCompute)
+        local_compute = TensorPipeCudaDistAutogradTest.MyLocalCompute(remote_compute)
         for _ in range(10):
             input = torch.rand([1000, 10000], device=self.rank, requires_grad=True)
             # Run local autograd
