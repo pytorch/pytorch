@@ -1649,15 +1649,11 @@ class TestTEFuser(JitTestCase):
                     "Failed: {} {} {} {}".format(dtype, op.__name__, device, scalar)
                 )
 
-    def test_binary_cuda_only_ops(self):
+    def test_binary_pow(self):
         def apply_with_scalar(fn, scalar):
             return lambda x: fn(x, scalar)
 
         dtypes = [
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
             # FIXME: 'pow' fails with dtype=torch.float16/device=cuda/scalar=0
             # torch.float16,
             torch.float32,
@@ -1667,11 +1663,10 @@ class TestTEFuser(JitTestCase):
         binary_ops = [
             torch.pow,
         ]
-        devices = ['cuda'] if torch.cuda.is_available() else []
         # Maybe we should split this into separate tests to speed it up by
         # only using  scalar values relevant to particular ops
         scalars = [1.5, 3, 0, -2.0, -1]
-        for dtype, op, device, scalar in product(dtypes, binary_ops, devices, scalars):
+        for dtype, op, device, scalar in product(dtypes, binary_ops, self.devices, scalars):
             try:
                 x = self.data_for(dtype, device)
                 fn = apply_with_scalar(op, scalar)
