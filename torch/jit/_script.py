@@ -325,14 +325,14 @@ class ConstMap:
         return self.const_mapping[attr]
 
 
-def reduce_package_script_module(importer: PackageImporter, ts_id: str) -> torch.nn.Module:
+def unpackage_script_module(importer: PackageImporter, script_module_id: str) -> torch.nn.Module:
     """
     Called by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
     Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
     """
     cu = torch._C.CompilationUnit()
     cpp_module = torch._C._import_ir_module_from_package(
-        cu, importer.zip_reader, validate_map_location(importer.last_map_location), ts_id
+        cu, importer.zip_reader, validate_map_location(importer.last_map_location), script_module_id
     )
     return wrap_cpp_module(cpp_module)
 
@@ -418,11 +418,11 @@ if _enabled:
             Returns method to load the ScriptModule from a ``torch.package.PackageImporter``'s
             Pickler's ``persistent_load`` function.
             """
-            ts_id, next_storage_id = exporter.ts_serializer.serialize(
-                self._actual_script_module, exporter.get_storage_id()
+            script_module_id, next_storage_id = exporter.script_module_serializer.serialize(
+                self._c, exporter.get_storage_id()
             )
             exporter._next_storage_id = next_storage_id
-            return (reduce_package_script_module, (str(ts_id),))
+            return (unpackage_script_module, (str(script_module_id),))
 
     class RecursiveScriptModule(ScriptModule):
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
@@ -576,21 +576,6 @@ if _enabled:
             See :func:`torch.jit.save <torch.jit.save>` for details.
             """
             return self._c.save(str(f), **kwargs)
-
-        def __reduce_package__(self, exporter: PackageExporter):
-            """
-            Called by ``torch.package.PackageExporter``'s Pickler's ``persistent_id`` when
-            saving TorchScript objects. Performs act of saving a ScriptModule inside of
-            a ``torch.package`` archive.
-
-            Returns method to load the ScriptModule from a ``torch.package.PackageImporter``'s
-            Pickler's ``persistent_load`` function.
-            """
-            ts_id, next_storage_id = exporter.ts_serializer.serialize(
-                self._c, exporter.get_storage_id()
-            )
-            exporter._next_storage_id = next_storage_id
-            return (reduce_package_script_module, (str(ts_id),))
 
         def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""

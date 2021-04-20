@@ -25,11 +25,14 @@ from pathlib import Path
 packaging_directory = Path(__file__).parent
 
 
-class PackagingTsSerTest(PackageTestCase):
-    """Torchscript saving and loading in torch.Package tests."""
+class PackageScriptModuleTest(PackageTestCase):
+    """ScriptModule saving and loading in torch.Package tests."""
 
-    def test_save_ts(self):
-        # Test basic saving of TS module
+    def test_save_scriptmodule(self):
+        """
+        Test basic saving of ScriptModule
+        """
+
         class ModB(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
@@ -60,15 +63,18 @@ class PackagingTsSerTest(PackageTestCase):
 
         buffer.seek(0)
         importer = PackageImporter(buffer)
-        loaded_mod = importer.load_pickle("res", "mod.pkl")
+        loaded_mod = importer.load_pickle("res", "mod.pkl", map_location="cpu")
         self.assertEqual(loaded_mod("input"), scripted_mod("input"))
 
     @skipIf(
         IS_FBCODE or IS_SANDCASTLE,
         "Tests that use temporary files are disabled in fbcode",
     )
-    def test_save_ts_file(self):
-        # Test basic saving of TS module in file
+    def test_save_scriptmodule_file(self):
+        """
+        Test basic saving of ScriptModule in file
+        """
+
         class ModB(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
@@ -101,9 +107,12 @@ class PackagingTsSerTest(PackageTestCase):
         loaded_mod = importer.load_pickle("res", "mod.pkl")
         self.assertEqual(loaded_mod("input"), scripted_mod("input"))
 
-    def test_save_ts_modules_shared_code(self):
-        #  Test to verify saving multiple modules with same top module
-        #  but different submodules works
+    def test_save_scriptmodules_shared_code(self):
+        """
+        Test to verify saving multiple ScriptModules with same top module
+        but different submodules works
+        """
+
         class ModD(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
@@ -155,8 +164,11 @@ class PackagingTsSerTest(PackageTestCase):
         self.assertEqual(loaded_mod_1("input"), scripted_mod_1("input"))
         self.assertNotEqual(loaded_mod_0("input"), loaded_mod_1("input"))
 
-    def test_save_ts_independent_modules(self):
-        # Test to verify saving multiple modules works
+    def test_save_independent_scriptmodules(self):
+        """
+        Test to verify saving multiple ScriptModules works
+        """
+
         class ModD(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
@@ -201,11 +213,13 @@ class PackagingTsSerTest(PackageTestCase):
         self.assertEqual(loaded_mod_0("input"), scripted_mod("input"))
         self.assertEqual(loaded_mod_1("input"), scripted_mod_foo("input"))
 
-    def test_save_ts_repeat_saving_mod(self):
-        #  Test to verify saving multiple different modules and
-        #  repeats of modules in package works. Also tests that
-        #  PyTorchStreamReader isn't having code hidden from
-        #  PyTorchStreamWriter writing TS code files multiple times.
+    def test_save_repeat_scriptmodules(self):
+        """
+        Test to verify saving multiple different modules and
+        repeats of modules in package works. Also tests that
+        PyTorchStreamReader isn't having code hidden from
+        PyTorchStreamWriter writing ScriptModule code files multiple times.
+        """
 
         class ModD(torch.nn.Module):
             def __init__(self, name: str):
@@ -259,8 +273,11 @@ class PackagingTsSerTest(PackageTestCase):
         self.assertEqual(loaded_mod_1("input"), scripted_mod_d("input"))
         self.assertEqual(loaded_mod_2("input"), scripted_mod_foo("input"))
 
-    def test_save_ts_repeat_save(self):
-        # Test to verify saving and loading same TS object works
+    def test_scriptmodules_repeat_save(self):
+        """
+        Test to verify saving and loading same ScriptModule object works
+        """
+
         class ModFoo(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
@@ -305,9 +322,11 @@ class PackagingTsSerTest(PackageTestCase):
         self.assertEqual(loaded_module_1("input"), scripted_mod_bar("input"))
 
     @skipIfNoTorchVision
-    def test_save_ts_multiple_packages(self):
-        # Test to verify when saving multiple packages with same CU
-        # that packages don't include unnecessary ts code files
+    def test_save_scriptmodule_multiple_packages(self):
+        """
+        Test to verify when saving multiple packages with same CU
+        that packages don't include unnecessary ts code files
+        """
 
         class ModFoo(torch.nn.Module):
             def __init__(self, name: str):
@@ -349,8 +368,11 @@ class PackagingTsSerTest(PackageTestCase):
         self.assertTrue("torchvision" in str(importer_0.file_structure()))
         self.assertFalse("torchvision" in str(importer_1.file_structure()))
 
-    def test_save_ts_in_container(self):
-        # Test saving of TS modules inside of container
+    def test_save_scriptmodules_in_container(self):
+        """
+        Test saving of ScriptModules inside of container
+        """
+
         class ModB(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
@@ -383,9 +405,63 @@ class PackagingTsSerTest(PackageTestCase):
         self.assertEqual(loaded_mod_list[0]("input"), scripted_mod_a("input"))
         self.assertEqual(loaded_mod_list[1]("input"), scripted_mod_b("input"))
 
-    def test_ts_scripting_packaged_mod(self):
-        # Test scripting a module loaded from a package
-        # and saving it in a new package as a script object
+    def test_save_shared_scriptmodules(self):
+        """
+        Test saving of single ScriptModule shared by multiple
+        eager modules (ScriptModule should be saved just once)
+        """
+
+        from package_a.test_module import SimpleTest, Mod
+
+        scripted_mod = torch.jit.script(SimpleTest())
+
+        mod1 = Mod(scripted_mod)
+        mod2 = Mod(scripted_mod)
+        mod3 = Mod(scripted_mod)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as e:
+            e.save_pickle("res", "mod1.pkl", mod1)
+            e.save_pickle("res", "mod2.pkl", mod2)
+            e.save_pickle("res", "mod3.pkl", mod3)
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+        print(importer.file_structure())
+
+        """outputs: Idk if this is the desired behavior '-'
+        ─── <binary>
+            ├── .data
+            │   ├── ts_code
+            │   │   ├── 0
+            │   │   │   ├── constants.pkl
+            │   │   │   └── data.pkl
+            │   │   ├── 1
+            │   │   │   ├── constants.pkl
+            │   │   │   └── data.pkl
+            │   │   ├── 2
+            │   │   │   ├── constants.pkl
+            │   │   │   └── data.pkl
+            │   │   └── code
+            │   │       └── __torch__
+            │   │           └── package_a
+            │   │               ├── test_module.py
+            │   │               └── test_module.py.debug_pkl
+            │   ├── extern_modules
+            │   └── version
+            ├── package_a
+            │   └── test_module.py
+            └── res
+                ├── mod1.pkl
+                ├── mod2.pkl
+                └── mod3.pkl
+    """
+
+    def test_saving_scripting_packaged_mod(self):
+        """
+        Test scripting a module loaded from a package
+        and saving it in a new package as a script object
+        """
         from package_a.test_module import SimpleTest
 
         orig_mod = SimpleTest()
@@ -412,6 +488,88 @@ class PackagingTsSerTest(PackageTestCase):
         loaded_mod_scripted = importer_1.load_pickle("res", "scripted_mod.pkl")
 
         self.assertTrue(torch.allclose(loaded_mod_scripted(input), orig_mod(input)))
+
+    def test_mixing_packaged_and_inline_modules(self):
+        """
+        Test saving inline and imported modules in same package
+        """
+
+        class ModBar(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+                self.tensor = torch.rand(1, 2, 3)
+
+            def forward(self, input: str):
+                input = input + "_modBar:" + self.name
+                return input, (self.tensor * 4)
+
+        inline_mod = ModBar("mod_bar")
+        scripted_inline = torch.jit.script(inline_mod)
+
+        from package_a.test_module import SimpleTest
+
+        imported_mod = SimpleTest()
+        scripted_imported = torch.jit.script(imported_mod)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as e:
+            e.save_pickle("model", "inline.pkl", scripted_inline)
+            e.save_pickle("model", "imported.pkl", scripted_imported)
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+        loaded_inline = importer.load_pickle("model", "inline.pkl")
+        loaded_imported = importer.load_pickle("model", "imported.pkl")
+
+        input = torch.rand(2, 3)
+        self.assertTrue(torch.allclose(loaded_imported(input), imported_mod(input)))
+        self.assertEqual(loaded_inline("input"), inline_mod("input"))
+
+    @skipIfNoTorchVision
+    def test_mixing_packaged_and_inline_modules_shared_code(self):
+        """
+        Test saving inline and imported modules in same package that
+        share code 
+        """
+
+        class TorchVisionTestInline(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tvmod = resnet18()
+
+            def forward(self, x):
+                x = a_non_torch_leaf(x, x)
+                return torch.relu(x + 3.0)
+
+        def a_non_torch_leaf(a, b):
+            return a + b
+
+        inline_mod = TorchVisionTestInline()
+        scripted_inline = torch.jit.script(inline_mod)
+
+        from package_c.test_module import TorchVisionTest
+
+        imported_mod = TorchVisionTest()
+        scripted_imported = torch.jit.script(imported_mod)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as e:
+            e.save_pickle("model", "inline.pkl", scripted_inline)
+            e.save_pickle("model", "imported.pkl", scripted_imported)
+
+        with PackageExporter("test_torch.pt", verbose=False) as e:
+            e.save_pickle("model", "inline.pkl", scripted_inline)
+            e.save_pickle("model", "imported.pkl", scripted_imported)
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+        loaded_inline = importer.load_pickle("model", "inline.pkl")
+        loaded_imported = importer.load_pickle("model", "imported.pkl")
+
+        input = torch.rand(2, 3)
+        self.assertTrue(torch.allclose(loaded_imported(input), imported_mod(input)))
+        self.assertTrue(torch.allclose(loaded_inline(input), inline_mod(input)))
 
 
 if __name__ == "__main__":

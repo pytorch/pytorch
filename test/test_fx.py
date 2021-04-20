@@ -1092,6 +1092,36 @@ class TestFX(JitTestCase):
             if node.op in {'placeholder'}:
                 self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last)
 
+    def test_shape_prop_aggregate(self):
+        class ReturnTwo(torch.nn.Module):
+            def forward(self, x):
+                return (3, torch.sum(x))
+
+        class UnderTest(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rt = ReturnTwo()
+
+            def forward(self, x):
+                return self.rt(x)
+
+        ut = UnderTest()
+
+        class RTTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m, module_qualified_name):
+                return type(m) is ReturnTwo
+
+        graph = RTTracer().trace(ut)
+        mod = torch.fx.GraphModule(ut, graph)
+
+        shape_prop.ShapeProp(mod).propagate(torch.rand(3, 4))
+
+        for node in mod.graph.nodes:
+            if node.op == 'call_module':
+                assert 'tensor_meta' in node.meta
+                tensor_meta = node.meta['tensor_meta']
+                assert tensor_meta[0] == 3
+                assert tensor_meta[1].shape == torch.Size([])
 
     def test_shape_prop_layout_3d(self):
         class ConvTest3d(torch.nn.Module):
