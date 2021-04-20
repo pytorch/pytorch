@@ -1072,7 +1072,6 @@ class TestAsserts(TestCase, _TestAssertsMixin):
 
 
 class TestAssertsMultiDevice(TestCase, _TestAssertsMixin):
-    @onlyCUDA
     def test_mismatching_device(self, device):
         actual = torch.empty((), device=device)
         expected = actual.clone().cpu()
@@ -1081,7 +1080,6 @@ class TestAssertsMultiDevice(TestCase, _TestAssertsMixin):
             with self.assertRaisesRegex(AssertionError, "device"):
                 fn()
 
-    @onlyCUDA
     def test_mismatching_device_no_check(self, device):
         actual = torch.rand((), device=device)
         expected = actual.clone().cpu()
@@ -1090,7 +1088,7 @@ class TestAssertsMultiDevice(TestCase, _TestAssertsMixin):
             fn(check_device=False)
 
 
-instantiate_device_type_tests(TestAssertsMultiDevice, globals())
+instantiate_device_type_tests(TestAssertsMultiDevice, globals(), only_for="cuda")
 
 
 if __name__ == '__main__':
