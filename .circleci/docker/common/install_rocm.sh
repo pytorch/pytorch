@@ -5,8 +5,8 @@ set -ex
 install_magma() {
     # "install" hipMAGMA into /opt/rocm/magma by copying after build
     git clone https://bitbucket.org/icl/magma.git
-    git checkout 878b1ce02e9cfe4a829be22c8f911e9c0b6bd88f
     pushd magma
+    git checkout 878b1ce02e9cfe4a829be22c8f911e9c0b6bd88f
     cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
     echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
     echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
