@@ -89,14 +89,16 @@ class TestPDT(JitTestCase):
         self.assertEqual(scripted_fn_int([1, 2, 3]), test_list_and_tuple([1, 2, 3]))
 
     def test_pdt_tuple(self):
-        scripted_fn_float = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((4.9, 8.9),)])
-        self.assertEqual(scripted_fn_float((11.9, 7.6)), test_list_and_tuple((11.9, 7.6)))
+        scripted_fn_float = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((4.9, 8.9),)])  # type: ignore[name-defined]
+        self.assertEqual(scripted_fn_float((11.9, 7.6)), test_list_and_tuple((11.9, 7.6)))  # type: ignore[name-defined]
 
-        scripted_fn_bool = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((True, False, True),)])
-        self.assertEqual(scripted_fn_bool((True, True, True)), test_list_and_tuple((True, True, True)))
+        scripted_fn_bool = torch.jit._script_pdt(test_list_and_tuple,
+                                                 example_inputs=[((True, False, True),)])  # type: ignore[name-defined]
+        self.assertEqual(scripted_fn_bool((True, True, True)),
+                         test_list_and_tuple((True, True, True)))  # type: ignore[name-defined]
 
-        scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((3, 4, 5), )])
-        self.assertEqual(scripted_fn_int((1, 2, 3)), test_list_and_tuple((1, 2, 3)))
+        scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((3, 4, 5), )])  # type: ignore[name-defined]
+        self.assertEqual(scripted_fn_int((1, 2, 3)), test_list_and_tuple((1, 2, 3)))  # type: ignore[name-defined]
 
     def test_pdt_dict(self):
         def test_dict(a):
@@ -167,3 +169,10 @@ class TestPDT(JitTestCase):
         self.assertEqual(scripted_fn(M2.fn(2)), M2.fn(2))  # type: ignore[arg-type]
         self.assertEqual(scripted_fn(M2.fn(False)), M2.fn(False))  # type: ignore[arg-type]
         self.assertEqual(scripted_fn(M2.fn({"a": [1]})), M2.fn({"a": [1]}))  # type: ignore[arg-type]
+
+    def test_two_classes_with_same_func_name(self):
+        scripted_fn = torch.jit._script_pdt(M1.fn, example_inputs=[(10, )])  # type: ignore[name-defined]
+        self.assertEqual(scripted_fn(M1.fn(2)), M1.fn(2))  # type: ignore[arg-type, name-defined]
+
+        scripted_fn_2 = torch.jit._script_pdt(M2.fn, example_inputs=[(10, ), (True, ), ])  # type: ignore[name-defined]
+        self.assertEqual(scripted_fn_2(M2.fn(2)), M2.fn(2))  # type: ignore[arg-type, name-defined]
