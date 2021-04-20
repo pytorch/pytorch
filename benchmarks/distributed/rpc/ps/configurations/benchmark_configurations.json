@@ -11,18 +11,22 @@
     "3":{
         "backend":"nccl",
         "hook_id":4,
-        "ddp_trainers":2
+        "ddp_trainers":2,
+        "gradient_servers": 1
     },
     "4":{
         "backend":"nccl",
         "hook_id":2,
-        "ddp_trainers":2
+        "ddp_trainers":1,
+        "gradient_servers": 1
     },
     "5":{
         "backend":"nccl",
         "hook_id":2,
         "ddp_trainers":2,
-        "use_cuda_rpc": true
+        "use_cuda_rpc": true,
+        "iterations": 10,
+        "gradient_servers": 2
     },
     "6":{
         "backend":"nccl",
