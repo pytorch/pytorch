@@ -5,6 +5,57 @@
 
 
 namespace at {
+namespace meta {
+TORCH_META_FUNC(adaptive_max_pool3d) (const Tensor& input, IntArrayRef output_size) {
+  for (int64_t i = 0; i < input.ndimension(); i++) {
+    TORCH_CHECK(
+        input.size(i) > 0,
+        "adaptive_max_pool3d: expected input to have non-empty spatial dimensions, "
+        "but input has sizes ",
+        input.sizes(),
+        " with dimension ",
+        i,
+        " being "
+        "empty");
+  }
+
+  TORCH_CHECK(
+      (input.ndimension() == 4 || input.ndimension() == 5),
+      "non-empty 4D or 5D (batch mode) tensor expected for input");
+
+  TORCH_CHECK(
+      output_size.size() == 3,
+      "adaptive_max_pool3d: internal error: output_size.size() must be 3");
+
+  int dimD = 0;
+  int64_t sizeB = 1;
+  int64_t sizeD = 0;
+
+  if (input.ndimension() == 5) {
+    sizeB = input.size(0);
+    dimD++;
+  }
+
+  /* sizes */
+  sizeD = input.size(dimD);
+
+  int64_t osizeT = output_size[0];
+  int64_t osizeH = output_size[1];
+  int64_t osizeW = output_size[2];
+
+  /* resize output */
+  if (input.ndimension() == 4) {
+    set_output(0, {sizeD, osizeT, osizeH, osizeW}, input.options());
+    /* indices will contain max input locations for each output point */
+    set_output(1, {sizeD, osizeT, osizeH, osizeW}, input.options().dtype(kLong));
+  } else {
+    set_output(0, {sizeB, sizeD, osizeT, osizeH, osizeW}, input.options());
+    /* indices will contain max input locations for each output point */
+    set_output(1, {sizeB, sizeD, osizeT, osizeH, osizeW}, input.options().dtype(kLong));
+  }
+}
+} // namespace meta
+
 namespace native {
 
 namespace {
@@ -393,31 +444,97 @@ Tensor& adaptive_max_pool3d_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> adaptive_max_pool3d_out_cpu(const Tensor& input,
-  IntArrayRef output_size,
-  Tensor& output,
-  Tensor& indices)
-{
-  adaptive_max_pool3d_out_cpu_template(
-    output,
-    indices,
-    input,
-    output_size);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
-}
+TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cpu)
+(const Tensor& input, IntArrayRef output_size, const Tensor& output, const Tensor& indices) {
+  int dimD = 0;
+  int dimT = 1;
+  int dimH = 2;
+  int dimW = 3;
+  int64_t sizeB = 1;
+  int64_t sizeD = 0;
+  int64_t isizeT = 0;
+  int64_t isizeH = 0;
+  int64_t isizeW = 0;
 
-std::tuple<Tensor, Tensor> adaptive_max_pool3d_cpu(
-  const Tensor& input,
-  IntArrayRef output_size)
-{
-  Tensor output = at::empty({0}, input.options());
-  Tensor indices = at::empty({0}, input.options().dtype(kLong));
-  adaptive_max_pool3d_out_cpu_template(
-    output,
-    indices,
-    input,
-    output_size);
-  return std::tuple<Tensor, Tensor>(output, indices);
+  int64_t istrideB = 0;
+  int64_t istrideD = 0;
+  int64_t istrideT = 0;
+  int64_t istrideH = 0;
+  int64_t istrideW = 0;
+
+  if (input.ndimension() == 5) {
+    istrideB = input.stride(0);
+    sizeB = input.size(0);
+    dimD++;
+    dimT++;
+    dimH++;
+    dimW++;
+  }
+
+  /* sizes */
+  sizeD = input.size(dimD);
+  isizeT = input.size(dimT);
+  isizeH = input.size(dimH);
+  isizeW = input.size(dimW);
+  /* strides */
+  istrideD = input.stride(dimD);
+  istrideT = input.stride(dimT);
+  istrideH = input.stride(dimH);
+  istrideW = input.stride(dimW);
+
+  int64_t osizeT = output_size[0];
+  int64_t osizeH = output_size[1];
+  int64_t osizeW = output_size[2];
+
+  if (input.ndimension() == 4) {
+    AT_DISPATCH_FLOATING_TYPES(
+        input.scalar_type(), "adaptive_max_pool3d_cpu", [&] {
+          auto input_data = input.data_ptr<scalar_t>();
+          auto output_data = output.data_ptr<scalar_t>();
+          auto indices_data = indices.data_ptr<int64_t>();
+
+          adaptive_max_pool3d_single_out_frame<scalar_t>(
+              input_data,
+              output_data,
+              indices_data,
+              sizeD,
+              isizeT,
+              isizeH,
+              isizeW,
+              osizeT,
+              osizeH,
+              osizeW,
+              istrideD,
+              istrideT,
+              istrideH,
+              istrideW);
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(
+        input.scalar_type(), "adaptive_max_pool3d_cpu", [&] {
+          auto input_data = input.data_ptr<scalar_t>();
+          auto output_data = output.data_ptr<scalar_t>();
+          auto indices_data = indices.data_ptr<int64_t>();
+
+          adaptive_max_pool3d_out_frame<scalar_t>(
+              input_data,
+              output_data,
+              indices_data,
+              sizeB,
+              sizeD,
+              isizeT,
+              isizeH,
+              isizeW,
+              osizeT,
+              osizeH,
+              osizeW,
+              istrideB,
+              istrideD,
+              istrideT,
+              istrideH,
+              istrideW);
+        });
+  }
 }
 
 Tensor& adaptive_max_pool3d_backward_out_cpu(const Tensor& gradOutput_,
