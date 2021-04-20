@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
@@ -1381,8 +1382,8 @@ struct DropoutState {
 #if CUDA_VERSION >= 11000
   // cudaStreamGetCaptureInfo will never give back a capture id of 0, so 0 can serve
   // as a sentinel value that capture was not underway.
-  CaptureId_t capture_id_last_lock = 0;
-  CaptureId_t capture_id_last_unlock = 0;
+  cuda::CaptureId_t capture_id_last_lock = 0;
+  cuda::CaptureId_t capture_id_last_unlock = 0;
 #endif
 
   // Every time we use a dropout state, we need to synchronize with its event,
@@ -1395,40 +1396,40 @@ struct DropoutState {
     // NB: We can't ignore the lock even when event is undefined, because someone
     // could then define it before we get to unlock().
     mutex.lock();
+    if (event) {
 #if CUDA_VERSION >= 11000
-    cudaStreamCaptureStatus status;
-    AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
-                                           &status,
-                                           &capture_id_last_unlock));
-    if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
-      capture_id_last_lock = 0;
-    }
+      cudaStreamCaptureStatus status;
+      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
+                                             &status,
+                                             &capture_id_last_unlock));
+      if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
+        capture_id_last_lock = 0;
+      }
+      // Only wait on the last usage if we're not capturing this call in a CUDA graph
+      // or if we're in the same capture as the last usage.
+      if (capture_id_last_lock == capture_id_last_unlock) {
 #endif
-    if (event
+        event->block(cuda::getCurrentCUDAStream());
 #if CUDA_VERSION >= 11000
-        // Only wait on the last usage if we're not capturing this call in a CUDA graph
-        // or if we're in the same capture as the last usage.
-        && capture_id_last_lock == capture_id_last_unlock;
+      }
 #endif
-    ) {
-      event->block(cuda::getCurrentCUDAStream());
     }
   }
 
   void unlock() {
     if (event) {
       event->record();
-    }
 #if CUDA_VERSION >= 11000
-    cudaStreamCaptureStatus status;
-    AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
-                                           &status,
-                                           &capture_id_last_unlock));
-    if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
-      capture_id_last_unlock = 0;
-    }
-    TORCH_INTERNAL_ASSERT(capture_id_last_unlock == capture_id_last_lock);
+      cudaStreamCaptureStatus status;
+      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
+                                             &status,
+                                             &capture_id_last_unlock));
+      if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
+        capture_id_last_unlock = 0;
+      }
+      TORCH_INTERNAL_ASSERT(capture_id_last_unlock == capture_id_last_lock);
 #endif
+    }
     mutex.unlock();
   }
 };

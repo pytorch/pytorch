@@ -3473,9 +3473,9 @@ torch.cuda.synchronize()
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
-           g.capture_begin()
-           y = model(x)
-           g.capture_end()
+            g.capture_begin()
+            y = model(x)
+            g.capture_end()
         torch.cuda.current_stream().wait_stream(s)
 
         y = model(x)
