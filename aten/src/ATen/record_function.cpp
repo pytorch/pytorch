@@ -343,22 +343,6 @@ namespace {
   }
 } // namespace
 
-RecordFunctionCallbacks _getTLSCallbacks() {
-  return rf_tls_.sorted_tls_callbacks_;
-}
-
-void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks) {
-  // keep the original handles
-  rf_tls_.sorted_tls_callbacks_ = callbacks;
-  std::sort(
-      rf_tls_.sorted_tls_callbacks_.begin(),
-      rf_tls_.sorted_tls_callbacks_.end(),
-      [](const std::pair<RecordFunctionCallback, CallbackHandle>& l,
-          const std::pair<RecordFunctionCallback, CallbackHandle>& r) {
-        return l.second < r.second;
-  });
-}
-
 bool hasCallbacks() {
   auto& m = manager();
   return m.hasGlobalCallbacks() || m.hasThreadLocalCallbacks();
