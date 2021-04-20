@@ -24,12 +24,6 @@ class TestPDT(JitTestCase):
     """
     A suite of tests for profile directed typing in TorchScript.
     """
-    def setUp(self):
-        super(TestPDT, self).setUp()
-
-    def tearDown(self):
-        super(TestPDT, self).tearDown()
-
     def test_pdt(self):
         def test_sum(a, b):
             return a + b
