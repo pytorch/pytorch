@@ -5,8 +5,10 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
+import pickle
 import socket
 import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -14,7 +16,7 @@ from typing import Any, Dict, Optional, Set, Tuple
 
 from torch.distributed import Store
 
-from .api import RendezvousHandler, RendezvousParameters
+from .api import RendezvousHandler, RendezvousParameters, RendezvousStateError
 
 
 Token = Any
@@ -241,6 +243,92 @@ class _RendezvousState:
         self.participants = {}
         self.wait_list = set()
         self.last_keep_alives = {}
+
+
+class _RendezvousStateHolder:
+    """Holds the rendezvous state synced with other nodes."""
+
+    backend: RendezvousBackend
+    settings: RendezvousSettings
+    cache_duration: int
+    state: _RendezvousState
+    _token: Token
+    _dirty: bool
+    _last_sync_time: float
+
+    def __init__(
+        self, backend: RendezvousBackend, settings: RendezvousSettings, cache_duration: int = 0
+    ) -> None:
+        self.backend = backend
+        self.settings = settings
+        self.cache_duration = cache_duration
+        self.state = _RendezvousState()
+        self._token = None
+        self._dirty = False
+        self._last_sync_time = 0.0
+
+    def sync(self) -> None:
+        if self._dirty:
+            state_bits = pickle.dumps(self.state)
+
+            response = self.backend.set_state(state_bits, self._token)
+        else:
+            if self.cache_duration > 0:
+                # Avoid overloading the backend if we are asked to retrieve the
+                # state repeatedly. Try to serve the cached state.
+                if self._last_sync_time > max(time.monotonic() - self.cache_duration, 0):
+                    return
+
+            response = self.backend.get_state()
+
+        if response:
+            state_bits, token = response
+
+            try:
+                self.state = pickle.loads(state_bits)
+            except pickle.PickleError as exc:
+                raise RendezvousStateError(
+                    "The rendezvous state is corrupt. See inner exception for details."
+                ) from exc
+        else:
+            token = None
+
+            self.state = _RendezvousState()
+
+        self._token = token
+        self._dirty = False
+
+        self._last_sync_time = time.monotonic()
+
+        self._sanitize()
+
+    def _sanitize(self) -> None:
+        expire_time = datetime.utcnow() - (
+            self.settings.keep_alive_interval * self.settings.keep_alive_max_attempt
+        )
+
+        # Filter out the dead nodes.
+        dead_nodes = [
+            node
+            for node, last_keep_alive in self.state.last_keep_alives.items()
+            if last_keep_alive < expire_time
+        ]
+
+        for dead_node in dead_nodes:
+            del self.state.last_keep_alives[dead_node]
+
+            try:
+                del self.state.participants[dead_node]
+            except KeyError:
+                pass
+
+            try:
+                self.state.wait_list.remove(dead_node)
+            except KeyError:
+                pass
+
+    def mark_dirty(self) -> None:
+        self._dirty = True
 
 
 class DynamicRendezvousHandler(RendezvousHandler):
