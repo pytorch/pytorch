@@ -714,14 +714,19 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
             else:
                 return a*2
 
-    FX can typically not trace through this due to the presence of control flow. However, we can use `concrete_args` to specialize on the value of `b` to trace through this.
+    FX can typically not trace through this due to the presence of control
+    flow. However, we can use `concrete_args` to specialize on the value of
+    `b` to trace through this.
 
         f = fx.symbolic_trace(f, concrete_args={'b': False})
         assert f(3, False)  == 6
 
     Note that although you can still pass in different values of `b`, they will be ignored.
 
-    We can also use `concrete_args` to eliminate data-structure handling from our function. This will use pytrees to flatten your input. To avoid overspecializing, pass in `fx.PH` for values that shouldn't be specialized. For example::
+    We can also use `concrete_args` to eliminate data-structure handling from
+    our function. This will use pytrees to flatten your input. To avoid
+    overspecializing, pass in `fx.PH` for values that shouldn't be
+    specialized. For example::
 
         def f(x):
             out = 0
