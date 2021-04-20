@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/api/Descriptor.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
@@ -99,7 +100,7 @@ void allocate_descriptor_sets(
     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
     nullptr,
     descriptor_pool,
-    descriptor_set_layouts.size(),
+    utils::safe_downcast<uint32_t>(descriptor_set_layouts.size()),
     descriptor_set_layouts.data(),
   };
 
