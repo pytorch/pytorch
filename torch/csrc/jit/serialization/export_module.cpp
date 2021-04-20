@@ -117,8 +117,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
 
   // TODO: to use it for mobile, you need to enable it here.
   // torch::jit::Code code(graph, func.name(), true);
-  torch::jit::Code code(graph, func.name());
-
+  torch::jit::MobileCode code(graph, func.name());
   auto instructions_copy = code.instructions();
 
   // operator names
