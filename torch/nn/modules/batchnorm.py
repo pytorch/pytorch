@@ -1,6 +1,5 @@
 from typing import Optional, Any
 
-import logging
 import torch
 from torch import Tensor
 from torch.nn.parameter import Parameter, UninitializedParameter, UninitializedBuffer
@@ -658,12 +657,6 @@ class SyncBatchNorm(_BatchNorm):
             raise ValueError(
                 "SyncBatchNorm number of input channels should be non-zero"
             )
-
-    def _specify_ddp_gpu_num(self, gpu_size):
-        if gpu_size > 1:
-            raise ValueError('SyncBatchNorm is only supported for DDP with single GPU per process')
-        logging.warning("WARNING: Since DDP single-process-multiple-device mode is retired, "
-                        "no longer need to call method `_specify_ddp_gpu_num`. The input arg `gpu_size` is ignored.")
 
     def forward(self, input: Tensor) -> Tensor:
         # currently only GPU input is supported
