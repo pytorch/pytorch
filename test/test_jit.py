@@ -288,6 +288,7 @@ def get_grad_executor(plan_state, diff_graph_idx=None, skip_check=False):
     grad_executors = list(plan_state.code.grad_executor_states())
     return grad_executors[diff_graph_idx or 0]
 
+
 def all_backward_graphs(script_module, diff_graph_idx=None):
     # Note: for Python 2 the order seems to be unstable
     ge_state = script_module.get_debug_state()
@@ -12779,6 +12780,7 @@ dedent """
         # jank way to test if there is no error
         self.assertTrue(isinstance(f, torch.jit.ScriptModule))
         self.assertTrue(isinstance(f.call(), property))
+
 
     def test_pass(self):
         def foo(x):
