@@ -84,14 +84,11 @@ class Linear(Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
-        if 0 not in self.weight.shape:
-            init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-            if self.bias is not None:
-                fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-                bound = 1 / math.sqrt(fan_in)
-                init.uniform_(self.bias, -bound, bound)
-        else:
-            init.zeros(self.bias)
+        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+            init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.linear(input, self.weight, self.bias)

@@ -10606,7 +10606,17 @@ class TestNNInit(TestCase):
             with self.assertRaises(ValueError):
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1)
                 init.kaiming_normal_(tensor)
+    
+    def test_kaiming_uniform_warning_on_0element_tensor(self):
+        tensor = self.empty(0, 1):
+        with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op")
+            _ = init.kaiming_uniform_(tensor)
 
+    def test_kaiming_normal_warning_on_0element_tensor(self):
+        tensor = self.empty(0, 1):
+        with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op")
+            _ = init.kaiming_normal_(tensor)
+            
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_uniform(self):
         for use_a in [True, False]:
