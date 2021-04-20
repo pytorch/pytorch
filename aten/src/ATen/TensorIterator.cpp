@@ -619,7 +619,7 @@ int TensorIteratorBase::num_reduce_dims() const {
 }
 
 void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
-  DeviceGuard device_guard(common_device_);
+  OptionalDeviceGuard device_guard(common_device_.is_cpu() ? nullopt : c10::optional<Device>(common_device_));
 
   int64_t numel = this->numel();
   if (numel == 0) {

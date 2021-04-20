@@ -6428,11 +6428,13 @@
     CPU, CUDA: fmax_out
 
 - func: maximum(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: maximum
 
 - func: maximum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: maximum_out
 
