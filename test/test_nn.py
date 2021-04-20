@@ -13272,7 +13272,8 @@ class TestNNDeviceType(NNTestCase):
                     for dim in [0, 1]:
                         ref_output = fn(ref_input, dtype=torch.float, dim=dim)
                         output = fn(input, dtype=torch.float, dim=dim)
-                        grad_output = torch.rand_like(output)
+                        grad_output = torch.rand(size, device=device, dtype=dtype)
+                        grad_output = grad_output[shift[0]:, shift[1]:]
                         ref_grad_output = grad_output.clone().cpu().detach()
                         grad_input, = torch.autograd.grad(output, input, grad_outputs=(grad_output), create_graph=True)
                         ref_grad_input, = torch.autograd.grad(ref_output, ref_input,
