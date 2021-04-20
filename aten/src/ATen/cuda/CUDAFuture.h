@@ -22,7 +22,7 @@
 namespace at {
 namespace cuda {
 
-struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
+struct TORCH_CUDA_CPP_API CUDAFuture final : at::ivalue::Future {
  public:
   CUDAFuture(at::TypePtr type) : at::ivalue::Future(std::move(type)) {
     // Use current device to initialize currentDevice_. This is necessary
@@ -129,7 +129,8 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
     }
   }
 
-  virtual std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
+ private:
+  std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
       const at::IValue& value) {
     at::IValue::HashAliasedIValues sub_values;
     // Prefer getSubValues() over visit() as the latter is a silent no-op for
@@ -145,7 +146,6 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
     return data_ptrs;
   }
 
- private:
   // The device that was current when markCompleted was called, which we'll
   // restore when invoking callbacks.
   c10::DeviceIndex currentDevice_;
