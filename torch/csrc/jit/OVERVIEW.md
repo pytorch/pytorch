@@ -14,8 +14,8 @@ Sections start with a reference to the source file where the code related to the
 
 ## Table of Contents
 
-- [JIT Technical Overview](#jit-technical-overview)
-  - [Table of Contents](#table-of-contents)
+<!-- toc -->
+
 - [Core Program Representation](#core-program-representation)
   - [Modules](#modules)
   - [Parameters](#parameters)
@@ -26,6 +26,7 @@ Sections start with a reference to the source file where the code related to the
   - [Block](#block)
     - [If](#if)
     - [Loops](#loops)
+    - [With](#with)
   - [Value](#value)
   - [Type](#type)
 - [Generating Programs](#generating-programs)
@@ -37,11 +38,12 @@ Sections start with a reference to the source file where the code related to the
   - [Lexer](#lexer)
   - [Tokens](#tokens)
   - [Parser](#parser)
-  - [Compiler](#compiler)
+  - [IR Emitter](#ir-emitter)
   - [SugaredValue](#sugaredvalue)
   - [Resolver](#resolver)
   - [Environment](#environment)
-  - [SSA Conversion](#convert_to_ssa)
+  - [Conversion To SSA](#conversion-to-ssa)
+  - [Exit Transform](#exit-transform)
   - [Python-Compiler Interaction](#python-compiler-interaction)
 - [Executing Programs](#executing-programs)
   - [Evaluation Semantics](#evaluation-semantics)
@@ -59,7 +61,7 @@ Sections start with a reference to the source file where the code related to the
     - [Aliasing and mutation in the PyTorch API](#aliasing-and-mutation-in-the-pytorch-api)
     - [Aliasing and mutation annotations in FunctionSchema](#aliasing-and-mutation-annotations-in-functionschema)
     - [Alias Analysis in the IR](#alias-analysis-in-the-ir)
-    - [Writing optimization passes with AliasDb](#writing-optimization-passes-with-aliasdb)
+    - [Writing optimization passes with `AliasDb`](#writing-optimization-passes-with-aliasdb)
 - [Profiling Programs](#profiling-programs)
 - [Saving Programs](#saving-programs)
 - [Testing Programs](#testing-programs)
@@ -67,6 +69,7 @@ Sections start with a reference to the source file where the code related to the
   - [Python Printer](#python-printer)
 - [Python Bindings](#python-bindings)
 
+<!-- tocstop -->
 
 # Core Program Representation
 
