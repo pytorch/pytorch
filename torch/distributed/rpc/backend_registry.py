@@ -280,10 +280,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
                 f"devices = {rpc_backend_options.devices}"
             )
     else:
-        if all([
-            rpc_backend_options.devices is not None,
-            len(rpc_backend_options.devices) > 0,
-        ]):
+        if len(rpc_backend_options.devices) > 0:
             raise ValueError(
                 f"CUDA is not available on {name}, but "
                 f"devices = {rpc_backend_options.devices}"
