@@ -85,8 +85,8 @@ class _CallableIterDataPipe(IterDataPipe[T_co]):
 @functional_datapipe('map')
 class MapIterDataPipe(_CallableIterDataPipe):
     def map(self, fn: Callable = default_fn,
-                 fn_args: Optional[Tuple] = None,
-                 fn_kwargs: Optional[Dict] = None):
+            fn_args: Optional[Tuple] = None,
+            fn_kwargs: Optional[Dict] = None):
         if hasattr(fn, '__name__') and fn.__name__ == '<lambda>' and not DILL_AVAILABLE:
             warnings.warn("Lambda function is not supported for pickle, please use "
                           "regular python function or functools.partial instead.")
