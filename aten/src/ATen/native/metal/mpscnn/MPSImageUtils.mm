@@ -25,7 +25,7 @@ MPSImage* createStaticImage(const std::vector<int64_t>& sizes) {
 }
 
 MPSImage* createStaticImage(
-    const uint16_t* src,
+    const fp16_t* src,
     const std::vector<int64_t>& sizes) {
   int64_t N = sizes[0];
   int64_t C = sizes[1];
@@ -45,7 +45,7 @@ MPSImage* createStaticImage(
 
   int64_t slices = (C + 3) / 4 * N;
   int64_t numComponents = image.featureChannels < 3 ? image.featureChannels : 4;
-  int64_t bytesPerRow = W * numComponents * sizeof(uint16_t);
+  int64_t bytesPerRow = W * numComponents * sizeof(fp16_t);
   uint8_t* ptr = (uint8_t*)src;
   for (int i = 0; i < slices; ++i) {
     [image.texture replaceRegion:MTLRegionMake2D(0, 0, W, H)
@@ -256,7 +256,7 @@ void copyToHost(float* dst, MPSImage* image) {
   memcpy(dst, buffer.contents, buffer.length);
 }
 
-std::vector<uint16_t> staticImageToFp16Array(MPSImage* image) {
+std::vector<fp16_t> staticImageToFp16Array(MPSImage* image) {
   if (image.pixelFormat == MTLPixelFormatR16Float ||
       image.pixelFormat == MTLPixelFormatRG16Float ||
       image.pixelFormat == MTLPixelFormatRGBA16Float) {
@@ -265,8 +265,8 @@ std::vector<uint16_t> staticImageToFp16Array(MPSImage* image) {
     int64_t numComponents =
         image.featureChannels < 3 ? image.featureChannels : 4;
     int64_t count = image.width * image.height * image.numberOfImages * C;
-    std::vector<uint16_t> output(count, 0);
-    int64_t bytesPerRow = image.width * numComponents * sizeof(uint16_t);
+    std::vector<fp16_t> output(count, 0);
+    int64_t bytesPerRow = image.width * numComponents * sizeof(fp16_t);
     uint8_t* buffer = (uint8_t*)output.data();
     for (int i = 0; i < slices * image.numberOfImages; ++i) {
       [image.texture getBytes:buffer
@@ -285,8 +285,8 @@ std::vector<uint16_t> staticImageToFp16Array(MPSImage* image) {
 
 at::Tensor staticImageToTensor(MPSImage* image) {
   auto outputSize = [image sizes];
-  std::vector<uint16_t> fp16 = staticImageToFp16Array(image);
-  auto fp32 = metal::Fp16ToFp32(fp16);
+  std::vector<fp16_t> fp16Array = staticImageToFp16Array(image);
+  auto fp32 = metal::Fp16ToFp32(fp16Array);
   std::vector<float> fp32_nchw = metal::NC4ToNCHW(fp32.data(), outputSize);
   auto tensor = at::empty(outputSize);
   int64_t size_bytes = c10::multiply_integers(outputSize) * sizeof(float);
