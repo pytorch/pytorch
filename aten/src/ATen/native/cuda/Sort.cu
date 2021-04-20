@@ -99,7 +99,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
       indices.resize_as_(self);
       indices.zero_();
     }
-    return {values, indices};
+    return std::forward_as_tuple(values, indices);
   }
 
   Tensor self_;
@@ -153,7 +153,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   }
 
   if (numel == 0) {
-    return {values, indices};
+    return std::forward_as_tuple(values, indices);
   }
 
   int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
@@ -206,7 +206,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   if (indices_tmp.defined()) {
     indices.copy_(indices_tmp);
   }
-  return {values, indices};
+  return std::forward_as_tuple(values, indices);
 }
 
 std::tuple<Tensor &,Tensor &> sort_out_cuda(const Tensor & self, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
