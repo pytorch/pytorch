@@ -4080,7 +4080,7 @@ class TestAutograd(TestCase):
                 y = x.clone()
                 y.register_hook(lambda x: x + 1e-2)
                 return y
-            x = torch.ones(1,  dtype=torch.double, requires_grad=True)
+            x = torch.ones(1, dtype=torch.double, requires_grad=True)
             with self.assertRaisesRegex(RuntimeError, 'backward not multiplied by grad_output'):
                 gradcheck(fn2, (x,), atol=1e-1, fast_mode=fast_mode)
             self.assertFalse(gradcheck(fn2, (x,), atol=1e-1, raise_exception=False, fast_mode=fast_mode))
@@ -4090,7 +4090,7 @@ class TestAutograd(TestCase):
                 y = x.clone().to_dense()
                 y.register_hook(lambda x: x + 1e-2)
                 return y
-            x = torch.ones(1,  dtype=torch.double, requires_grad=True).to_sparse()
+            x = torch.ones(1, dtype=torch.double, requires_grad=True).to_sparse()
             with self.assertRaisesRegex(RuntimeError, 'backward not multiplied by grad_output'):
                 gradcheck(fn3, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False, fast_mode=fast_mode)
             self.assertFalse(gradcheck(fn3, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False,
@@ -6283,7 +6283,8 @@ class TestAutogradFunctional(TestCase):
         def add_exp_reducer(x, y):
             return (x + y).exp().sum(dim=1)
 
-        inputs = (torch.rand(4, 4, dtype=torch.double, requires_grad=True), torch.rand(4, 4, dtype=torch.double, requires_grad=True))
+        inputs = (torch.rand(4, 4, dtype=torch.double, requires_grad=True),
+                  torch.rand(4, 4, dtype=torch.double, requires_grad=True))
         res = autogradF.jacobian(add_exp_reducer, inputs, create_graph=True, vectorize=vectorize)
         self._assert_interleaved_struct(res, add_exp_reducer(*inputs), inputs)
         self.assertIsNotNone(res[0].grad_fn)
@@ -6593,7 +6594,8 @@ class TestAutogradFunctional(TestCase):
         def add_pow_reducer(x, y):
             return (x + y).pow(3).sum()
 
-        inputs = (torch.rand(2, 2, dtype=torch.double, requires_grad=True), torch.rand(2, 2, dtype=torch.double, requires_grad=True))
+        inputs = (torch.rand(2, 2, dtype=torch.double, requires_grad=True),
+                  torch.rand(2, 2, dtype=torch.double, requires_grad=True))
         res = autogradF.hessian(add_pow_reducer, inputs, create_graph=True, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
         self.assertIsNotNone(res[0][0].grad_fn)
@@ -8237,10 +8239,10 @@ class TestAutogradDeviceType(TestCase):
 
     @onlyCUDA
     def test_gradcheck_input_output_different_device(self, device):
-        x = torch.ones((1,), device="cuda", requires_grad=True)
+        x = torch.ones((1,), dtype=torch.double, device="cuda", requires_grad=True)
         gradcheck(lambda x: x.to("cpu"), (x,))
 
-        x = torch.ones((1,), device="cpu", requires_grad=True)
+        x = torch.ones((1,), dtype=torch.double, device="cpu", requires_grad=True)
         gradcheck(lambda x: x.to("cuda"), (x,))
 
     def test_logcumsumexp_large_value(self, device):
