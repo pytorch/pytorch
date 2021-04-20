@@ -40,11 +40,11 @@ bool available(
          (4 == weight.ndimension()) &&
          (weight.size(Layout::Filter::height) > 0) &&
          (weight.size(Layout::Filter::width) > 0) &&
-         (c10::DeviceType::CPU == weight.device().type()) &&
+         (weight.device().is_cpu()) &&
          (kFloat == weight.scalar_type()) &&
          // Bias
          ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
-                                       (c10::DeviceType::CPU == bias->device().type()) &&
+                                       (bias->device().is_cpu()) &&
                                        (kFloat == bias->scalar_type()) &&
                                        ((transposed ? (weight.size(Layout::Filter::input) == (bias->size(0) / groups))
                                                     : (weight.size(Layout::Filter::output) == (bias->size(0))))))
@@ -75,7 +75,7 @@ bool available(
 bool usable(const Tensor& input) {
        // Input
   return (4 == input.ndimension()) &&
-         (c10::DeviceType::CPU == input.device().type()) &&
+         (input.device().is_cpu()) &&
          (kFloat == input.scalar_type()) &&
          (input.size(Layout::Activation4D::batch) >= 0) &&
          (input.size(Layout::Activation4D::channels) > 0) &&
@@ -388,8 +388,8 @@ c10::intrusive_ptr<xnnpack::Conv2dOpContext>
         std::vector<int64_t> padding,
         std::vector<int64_t> dilation,
         int64_t groups,
-        c10::optional<Scalar> output_min,
-        c10::optional<Scalar> output_max) {
+        const c10::optional<Scalar>& output_min,
+        const c10::optional<Scalar>& output_max) {
       return xnnpack::XNNPackConv2dOpContext::create_context(
           std::move(weight),
           std::move(bias),
@@ -410,8 +410,8 @@ c10::intrusive_ptr<xnnpack::TransposeConv2dOpContext>
         std::vector<int64_t> output_padding,
         std::vector<int64_t> dilation,
         int64_t groups,
-        c10::optional<Scalar> output_min,
-        c10::optional<Scalar> output_max) {
+        const c10::optional<Scalar>& output_min,
+        const c10::optional<Scalar>& output_max) {
       return xnnpack::XNNPackTransposeConv2dOpContext::create_context(
           std::move(weight),
           std::move(bias),

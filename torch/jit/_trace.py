@@ -20,9 +20,11 @@ from typing import Any, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
-from torch._jit_internal import _qualified_name, get_callable_argument_names
+from torch._jit_internal import _qualified_name, is_scripting, get_callable_argument_names
 from torch.autograd import function
 from torch.nn import Module
+
+from torch.testing._core import _get_default_tolerance
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -487,7 +489,7 @@ def _check_trace(
                         orig.double(),
                         ref.double(),
                         rtol=check_tolerance,
-                        atol=torch.testing._get_default_tolerance(orig, ref)[1],
+                        atol=_get_default_tolerance(orig, ref)[1],
                     )
                 except AssertionError as e:
                     maybe_warn_nondeterministic()
@@ -993,6 +995,8 @@ def is_tracing():
     Returns ``True`` in tracing (if a function is called during the tracing of
     code with ``torch.jit.trace``) and ``False`` otherwise.
     """
+    if is_scripting():
+        return False
     return torch._C._is_tracing()
 
 

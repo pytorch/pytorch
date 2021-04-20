@@ -408,7 +408,7 @@ const std::vector<std::string> functions = {
                    weight : Tensor,
                    bias : Optional[Tensor]):
             result = torch.linear(input, weight, bias)
- 
+
             def backward(grad_output):
                 if bias is not None:
                    grad_bias = grad_output._grad_sum_to_size(bias.size())
@@ -418,7 +418,11 @@ const std::vector<std::string> functions = {
                 weight_size = weight.size()
                 grad_input = torch.matmul(grad_output, weight)
                 grad_weight = torch.matmul(grad_output.reshape(-1, weight_size[0]).t(), input.reshape(-1, weight_size[1]))
-                return grad_input, grad_weight, grad_bias
+                # Note: calling unchecked_unwrap_optional is only safe, when we
+                #       directly return grad_bias directly back to bias.
+                #       Because in the case where `bias is None`, unwrapped
+                #       grad_bias would just be pruned away.
+                return grad_input, grad_weight, grad_bias.unchecked_unwrap_optional
             return result, backward
     )",
     R"(
@@ -512,11 +516,14 @@ const std::vector<std::string> functions = {
             result = torch.lerp(self, end, weight)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             end_size = torch._size_if_not_equal(end.size(), result.size())
+            weight_size = torch._size_if_not_equal(weight.size(), result.size())
 
             def backward(grad_output):
                 grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self_size)
                 grad_end = (grad_output * weight)._grad_sum_to_size(end_size)
-                return grad_self, grad_end, None
+                grad_weight = (grad_output * (end - self))._grad_sum_to_size(weight_size)
+                return grad_self, grad_end, grad_weight
+
             return result, backward
 
         def reshape(self,
@@ -779,11 +786,11 @@ const std::vector<std::string> functions = {
                 return grad_output / other, None
             return self / other, backward
 
-        def div_2(self, other, *, rounding_mode: str):
+        def div_2(self, other, *, rounding_mode: Optional[str]):
             result = torch.div(self, other, rounding_mode=rounding_mode)
             self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)
             def backward(grad_output):
-                if rounding_mode == "true":
+                if rounding_mode is None:
                     grad_self = (grad_output / other)._grad_sum_to_size(self_size)
                     grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other_size)
                 else:
@@ -794,10 +801,10 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
-        def div_3(self, other: number, *,  rounding_mode: str):
+        def div_3(self, other: number, *, rounding_mode: Optional[str]):
             result = torch.div(self, other, rounding_mode=rounding_mode)
             def backward(grad_output):
-                if rounding_mode == "true":
+                if rounding_mode is None:
                     grad_self = (grad_output / other)
                 else:
                     grad_self = torch.zeros_like(self, memory_format=1)
@@ -1188,6 +1195,17 @@ const std::vector<std::string> functions = {
             return result, backward
     )",
     R"(
+        def AD_adaptive_avg_pool3d_backward(grad,
+                                            self,
+                                            output_size: List[int]):
+            if output_size[0] == 1 and output_size[1] == 1 and output_size[2] == 1:
+                self_size = self.size()
+                grad_self = grad.expand(self.size()) / (self_size[-1] * self_size[-2] * self_size[-3])
+            else:
+                grad_self = torch._adaptive_avg_pool3d_backward(grad, self)
+
+            return grad_self
+
         def AD_adaptive_avg_pool2d_backward(grad,
                                             self,
                                             output_size: List[int]):
@@ -1225,7 +1243,7 @@ const std::vector<std::string> functions = {
         def adaptive_avg_pool3d(self,
                                 output_size: List[int]):
             def backward(grad_output):
-                grad_self = torch.adaptive_avg_pool3d_backward(grad_output, self)
+                grad_self = AD_adaptive_avg_pool3d_backward(grad_output, self, output_size)
                 return grad_self, None
 
             return torch.adaptive_avg_pool3d(self, output_size), backward

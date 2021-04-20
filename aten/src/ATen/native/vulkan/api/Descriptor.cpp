@@ -180,7 +180,7 @@ Descriptor::Set& Descriptor::Set::bind(
       "This descriptor set is in an invalid state! "
       "Potential reason: This descriptor set is moved from.");
 
-  update({
+  update(Item{
       binding,
       shader_layout_signature_[binding],
       {

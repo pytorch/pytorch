@@ -237,18 +237,7 @@ class TestModuleContainers(JitTestCase):
             def forward(self, v):
                 return self.mods[-11].forward(v)
 
-        with self.assertRaisesRegex(Exception, "Index -11 out of range"):
-            torch.jit.script(M2())
-
-
-        class M2(M):
-            def __init__(self):
-                super(M2, self).__init__()
-
-            def forward(self, v):
-                return self.mods[-11].forward(v)
-
-        with self.assertRaisesRegex(Exception, "Index -11 out of range"):
+        with self.assertRaisesRegexWithHighlight(Exception, "Index -11 out of range", "self.mods[-11]"):
             torch.jit.script(M2())
 
         class M3(M):
@@ -259,7 +248,7 @@ class TestModuleContainers(JitTestCase):
                 i = 3
                 return self.mods[i].forward(v)
 
-        with self.assertRaisesRegex(Exception, "Enumeration is supported"):
+        with self.assertRaisesRegexWithHighlight(Exception, "Enumeration is supported", "self.mods[i]"):
             torch.jit.script(M3())
 
     def test_module_interface_special_methods(self):
@@ -386,7 +375,7 @@ class TestModuleContainers(JitTestCase):
             def forward(self, input):
                 assert self.moduledict['blah'] == "blah", "this is a keyerror"
 
-        with self.assertRaisesRegex(RuntimeError, "Key Error, blah"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Key Error, blah", "self.moduledict['b"):
             b = BadModule()
             torch.jit.script(b)
 
@@ -400,8 +389,9 @@ class TestModuleContainers(JitTestCase):
                 idx = 'blah'
                 assert self.moduledict[idx] == "blah", "this is a string literal error"
 
-        with self.assertRaisesRegex(RuntimeError, "Unable to extract string literal index. "
-                                                  "ModuleDict indexing is only supported with string literals."):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Unable to extract string literal index. "
+                                                               "ModuleDict indexing is only supported with string literals.",
+                                                               "self.moduledict[idx]"):
             b = AnotherBadModule()
             torch.jit.script(b)
 
@@ -419,30 +409,7 @@ class TestModuleContainers(JitTestCase):
                 return len(self.a)
 
         error_msg = "Could not infer type of list element: Cannot infer concrete type of torch.nn.Module"
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            torch.jit.script(Mod())
-
-    def test_unannotated_module_attribute_error(self):
-        """
-        Test that an attempt to script a module with an unannotated attribute
-        whose type cannot be inferred fails with a relevant error message
-        suggesting annotating the attribute.
-        """
-        class JitClass:  # noqa: B903
-            def __init__(self, v: int):
-                self.v = v
-
-        class Mod(torch.nn.Module):
-            # Adding following line makes the case pass
-            # v: JitClass
-            def __init__(self):
-                super().__init__()
-                self.v = JitClass(2)
-
-            def forward(self):
-                return self.v
-
-        with self.assertRaisesRegex(RuntimeError, "try adding a type annotation for the attribute"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, error_msg, "self.a"):
             torch.jit.script(Mod())
 
     def test_empty_dict_override_contains(self):
@@ -491,7 +458,6 @@ class TestModuleContainers(JitTestCase):
                 return torch.max(inp, dim=0)
 
         # Test annotation of submodule.
-
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -527,5 +493,171 @@ class TestModuleContainers(JitTestCase):
                 submodule: ModuleInterface = self.d[key]
                 return submodule.forward(x)
 
-        with self.assertRaisesRegex(RuntimeError, r"Attribute module is not of annotated type"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"Attribute module is not of annotated type", "self.d[key]"):
             torch.jit.script(ModWithWrongAnnotation())
+
+    def test_typed_module_list(self):
+        """
+        Test that a type annotation can be provided for a ModuleList that allows
+        non-static indexing.
+        """
+        @torch.jit.interface
+        class ModuleInterface(torch.nn.Module):
+            def forward(self, inp: Any) -> Any:
+                pass
+
+        class ImplementsInterface(torch.nn.Module):
+            def forward(self, inp: Any) -> Any:
+                if isinstance(inp, torch.Tensor):
+                    return torch.max(inp, dim=0)
+
+                return inp
+
+        class DoesNotImplementInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                return torch.max(inp, dim=0)
+
+        # Test annotation of submodule.
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.ModuleList([ImplementsInterface()])
+
+            def forward(self, x: torch.Tensor, idx: int) -> Any:
+                value: ModuleInterface = self.l[idx]
+                return value.forward(x)
+
+        m = Mod()
+        self.checkModule(m, (torch.randn(2, 2), 0))
+
+        # Test annotation of self.
+        class ModList(torch.nn.ModuleList):
+            def __init__(self):
+                super().__init__([ImplementsInterface()])
+
+            def forward(self, x: torch.Tensor, idx: int) -> Any:
+                submodule: ModuleInterface = self[idx]
+                return submodule.forward(x)
+
+        m = ModList()
+        self.checkModule(m, (torch.randn(2, 2), 0))
+
+        # Test error message thrown when annotated attribute does not comply with the
+        # annotation.
+        class ModWithWrongAnnotation(torch.nn.ModuleList):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.ModuleList([DoesNotImplementInterface()])
+
+            def forward(self, x: torch.Tensor, idx: int) -> Any:
+                submodule: ModuleInterface = self.l[idx]
+                return submodule.forward(x)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"Attribute 0 is not of annotated type", "self.l[idx]"):
+            torch.jit.script(ModWithWrongAnnotation())
+
+    def test_module_properties(self):
+        class ModuleWithProperties(torch.nn.Module):
+            __jit_unused_properties__ = ["ignored_attr"]
+
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr = a + b
+                return self.attr
+
+            @property
+            def attr(self):
+                return self.a
+
+            @property
+            def ignored_attr(self):
+                return sum([self.a])
+
+            @torch.jit.unused
+            @property
+            def ignored_attr_2(self):
+                return sum([self.a])
+
+            @ignored_attr_2.setter
+            def ignored_attr_2(self, value):
+                self.a = sum([self.a])
+
+            @attr.setter
+            def attr(self, a: int):
+                if a > 0:
+                    self.a = a
+                else:
+                    self.a = 0
+
+        class ModuleWithNoSetter(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr + a + b
+
+            @property
+            def attr(self):
+                return self.a + 1
+
+        self.checkModule(ModuleWithProperties(5), (5, 6,))
+        self.checkModule(ModuleWithProperties(5), (-5, -6,))
+        self.checkModule(ModuleWithNoSetter(5), (5, 6,))
+        self.checkModule(ModuleWithNoSetter(5), (-5, -6,))
+
+        mod = ModuleWithProperties(3)
+        scripted_mod = torch.jit.script(mod)
+
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
+            scripted_mod.ignored_attr
+
+    def test_module_inplace_construct(self):
+        class M(nn.Module):
+            def __init__(self, start: int):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.attribute = start
+                self.parameter = nn.Parameter(torch.tensor(3, dtype=torch.float))
+
+            def method(self) -> int:
+                return self.attribute
+
+            @torch.jit.unused
+            def unused_method(self):
+                return self.attribute + self.attribute
+
+            def forward(self, x):
+                return self.linear(self.linear(x))
+
+
+        class N(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(4, 4)
+
+            @torch.jit.ignore
+            def ignored_method(self, x):
+                return x
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = torch.jit.script(M(3))
+        n = torch.jit.script(N())
+
+        n._reconstruct(m._c)
+
+        inp = torch.rand((3))
+
+        # Check that both modules produce the same output.
+        with torch.no_grad():
+            m_out = m(inp)
+            n_out = n(inp)
+            self.assertEqual(m_out, n_out)
+
+        # Check that ignored method is still intact.
+        self.assertEqual(inp, n.ignored_method(inp))

@@ -15,7 +15,8 @@ all_operators_with_namedtuple_return = {
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
     '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
-    'fake_quantize_per_channel_affine_cachemask',
+    'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig',
+    'frexp'
 }
 
 
@@ -25,7 +26,7 @@ class TestNamedTupleAPI(TestCase):
         operators_found = set()
         regex = re.compile(r"^(\w*)(\(|\.)")
         file = open(aten_native_yaml, 'r')
-        for f in yaml.load(file.read()):
+        for f in yaml.safe_load(file.read()):
             f = f['func']
             ret = f.split('->')[1].strip()
             name = regex.findall(f)[0][0]
@@ -69,6 +70,7 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
             op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
+            op(operators=['linalg_eig'], input=(), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
             op(operators=['fake_quantize_per_tensor_affine_cachemask'],
@@ -77,6 +79,8 @@ class TestNamedTupleAPI(TestCase):
                input=(per_channel_scale, per_channel_zp, 1, 0, 255),
                names=('output', 'mask',), hasout=False),
             op(operators=['_unpack_dual'], input=(0,), names=('primal', 'tangent'), hasout=False),
+            op(operators=['linalg_lstsq'], input=(a,), names=('solution', 'residuals', 'rank', 'singular_values'), hasout=False),
+            op(operators=['frexp'], input=(), names=('mantissa', 'exponent'), hasout=True),
         ]
 
         def get_func(f):

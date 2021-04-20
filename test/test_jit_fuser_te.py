@@ -37,8 +37,7 @@ def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
 
-def warmup_forward(f, *args):
-    profiling_count = 2
+def warmup_forward(f, *args, profiling_count=2):
     for i in range(profiling_count):
         results = f(*args)
 
@@ -72,6 +71,13 @@ class TestTEFuser(JitTestCase):
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
 
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
+
+        # TODO: CPU fuser currently is disabled when multithreading.
+        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
+        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
+
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         self.int_dtypes = [
             torch.int8,
@@ -81,7 +87,8 @@ class TestTEFuser(JitTestCase):
             torch.bool,
         ]
         self.fp_dtypes = [
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
         ]
@@ -97,6 +104,8 @@ class TestTEFuser(JitTestCase):
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -118,6 +127,26 @@ class TestTEFuser(JitTestCase):
         a = torch.randn(5, device=device)
         scripted = self.checkScript(func, (a,))
         self.assertLastGraphAllFused()
+
+    def test_typecheck(self):
+        a = torch.ones(1)
+
+        def fused_kernel(a, b):
+            return (a + b) * 2.
+
+        scripted = self.checkScript(fused_kernel, (a, a))
+        graph = scripted.graph_for(a, a)
+        # double check we fused
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        # we use a bigger tensor now (size 2)
+        # if we won't trigger a recompilation
+        # we will still create a tensor up to (size 1)
+        # if the type check fails
+        a = torch.ones(2)
+        # shape changed if we don't trigger recompilation
+        # we would compute the wrong result silently
+        self.assertEqual(scripted(a, a), fused_kernel(a, a))
 
     def test_sum_simple(self):
         def func(x):
@@ -690,8 +719,8 @@ class TestTEFuser(JitTestCase):
         scripted_f = torch.jit.script(test_fuse)
         x = torch.ones(1, requires_grad=True, device='cuda')
         y = torch.ones(1, requires_grad=True, device='cuda')
-        warmup_forward(scripted_f, x, y)
-        g = torch.jit.last_executed_optimized_graph()
+        warmup_forward(scripted_f, x, y, profiling_count=3)
+        g = scripted_f.graph_for(x, y)
         diff_nodes = g.findAllNodes('prim::DifferentiableGraph')
         self.assertEqual(len(diff_nodes), 1)
         g = diff_nodes[0].g('Subgraph')
@@ -814,6 +843,8 @@ class TestTEFuser(JitTestCase):
                 return p * (x * x + x)
 
             scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
+            out = scripted(x, p)
+            out = scripted(x, p)
             out = scripted(x, p)
             self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                       "aten::_size_if_not_equal"))
@@ -947,7 +978,7 @@ class TestTEFuser(JitTestCase):
         for device in self.devices:
             inputs = get_lstm_inputs(device, training=True)
             module = self.checkScript(LSTMCellS, inputs)
-            self.assertLastGraphAllFused()
+            self.assertAllFused(module.graph_for(inputs))
 
     def test_lstm_concat(self):
         # single fusion node causes error
@@ -1049,10 +1080,10 @@ class TestTEFuser(JitTestCase):
                 return F.relu(torch.erf(x) - torch.erfc(x))
 
             x = torch.randn(4, 4, dtype=torch.float, device=device)
-            ge = self.checkTrace(fn_test_erf, (x,))
+            ge = self.checkScript(fn_test_erf, (x,), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(ge.graph_for(x))
             x.requires_grad_(True)
-            ge = self.checkTrace(fn_test_erf, (x,))
+            ge = self.checkScript(fn_test_erf, (x,), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes",
                                                              "aten::_size_if_not_equal"))
 
@@ -1289,7 +1320,8 @@ class TestTEFuser(JitTestCase):
         dtypes = [
             torch.bool,
             torch.int,
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
         ]
@@ -1323,7 +1355,8 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,
@@ -1358,7 +1391,8 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,
@@ -1408,6 +1442,7 @@ class TestTEFuser(JitTestCase):
             torch.sinh,
             torch.atan,
             torch.tanh,
+            F.hardtanh,
             torch.sqrt,
             torch.rsqrt,
             torch.abs,
@@ -1488,6 +1523,57 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    def test_matmul(self):
+        def fn(x, y):
+            return torch.matmul(x, y)
+
+        devices = ['cpu']  # No cuda support for ext calls yet
+        sizes = [[[128, 128], [128, 128]],
+                 [[10, 10], [10, 10]],
+                 [[1, 16], [16, 128]],
+                 [[128], [128]],
+                 [[128], [128, 128]],
+                 [[3], [3]],
+                 [[3, 4], [4]],
+                 [[10, 3, 4], [4]],
+                 [[10, 3, 4], [10, 4, 5]],
+                 [[10, 3, 4], [4, 5]],
+                 ]
+
+        # Only 2D x 2D matrix multiply is supported. For non-supported sizes we
+        # still want to run results verification to test that we didn't
+        # accidentally fuse it, but we skip the 'is-fused' check.
+        # TODO: add support for other shape combinations and make this set empty:
+        skip_is_fused_check_sizes = ["[[128], [128]]",
+                                     "[[128], [128, 128]]",
+                                     "[[3], [3]]",
+                                     "[[3, 4], [4]]",
+                                     "[[10, 3, 4], [4]]",
+                                     "[[10, 3, 4], [10, 4, 5]]",
+                                     "[[10, 3, 4], [4, 5]]",
+                                     ]
+        for dtype, size, device in product(self.dtypes, sizes, devices):
+            try:
+                size_x, size_y = size
+                x = self.data_for(dtype, device, size=size_x)
+                y = self.data_for(dtype, device, size=size_y)
+                ref = fn(x, y)
+            except Exception as e:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y))
+                t(x, y)
+                self.assertEqual(ref, t(x, y))
+                if not str(size) in skip_is_fused_check_sizes:
+                    self.assertAllFused(t.graph_for(x, y))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), device])
                 )
 
     @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
@@ -1634,6 +1720,36 @@ class TestTEFuser(JitTestCase):
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
+
+    def test_ternary_norm_ops(self):
+        def apply(fn):
+            return lambda x, y, z: fn(x, y, z)
+
+        ternary_ops = [
+            F.batch_norm,
+        ]
+        devices = self.devices
+        for dtype, op, device in product(self.dtypes, ternary_ops, devices):
+            try:
+                x = self.data_for(dtype, device, size=[5, 3, 128, 128])
+                y = self.data_for(dtype, device, size=[3])
+                z = self.data_for(dtype, device, size=[3])
+                fn = apply(op)
+                ref = fn(x, y, z)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y, z))
+                self.assertEqual(ref, t(x, y, z))
+                self.assertAllFused(t.graph_for(x, y, z))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
 
     @unittest.skip("FIXME: fuser doesn't include ListConstruct nodes to the group causing a failure")
     def test_list_ops(self):
@@ -1810,6 +1926,28 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(script.graph_for(a, s))
         script = self.checkScript(eager_st, (s, b))
         self.assertAllFused(script.graph_for(s, b))
+
+    def test_conv2d_depthwise(self):
+        def eager(input, weight, bias):
+            return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=72)
+
+        input = torch.rand((1, 72, 56, 56), dtype=torch.float)
+        weight = torch.rand((72, 1, 3, 3), dtype=torch.float)
+        bias = torch.rand((72), dtype=torch.float)
+
+        script = self.checkScript(eager, (input, weight, bias))
+        self.assertAllFused(script.graph_for(input, weight, bias))
+
+    def test_conv2d(self):
+        def eager(input, weight, bias):
+            return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=1)
+
+        input = torch.rand((1, 64, 56, 56), dtype=torch.float)
+        weight = torch.rand((64, 64, 3, 3), dtype=torch.float)
+        bias = torch.rand((64), dtype=torch.float)
+
+        script = self.checkScript(eager, (input, weight, bias))
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
 
 if __name__ == '__main__':
     run_tests()

@@ -2,7 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/ATen.h>
+#include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 #include <c10/util/accumulate.h>
 
@@ -325,6 +326,11 @@ class vTensor final {
       Component::Flags available_;
       Component::Flags dirty_;
       Bundle bundle_;
+
+     private:
+     #ifdef VULKAN_TENSOR_DEBUG
+      friend class View;
+     #endif /* VULKAN_TENSOR_DEBUG */
     };
 
     typedef State::Component Component;
@@ -363,10 +369,12 @@ class vTensor final {
     c10::SmallVector<int64_t, 6u> strides_;
 
    private:
-    // Debug
+   #ifdef VULKAN_TENSOR_DEBUG
+    friend class vTensor;
     friend std::ostream& operator<<(
       std::ostream&,
       const View::State::Bundle&);
+   #endif /* VULKAN_TENSOR_DEBUG */
   };
 
   // Even at the cost of a heap allocation plus the resulting negative impact
@@ -390,10 +398,11 @@ class vTensor final {
   std::shared_ptr<View> view_;
 
  private:
-  // Debug
+ #ifdef VULKAN_TENSOR_DEBUG
   friend std::ostream& operator<<(
       std::ostream&,
       const View::State::Bundle&);
+ #endif /* VULKAN_TENSOR_DEBUG */
 };
 
 const vTensor& convert(const Tensor& tensor);

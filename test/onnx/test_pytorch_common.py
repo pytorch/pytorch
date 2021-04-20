@@ -8,7 +8,7 @@ import torch.autograd.function as function
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(-1, pytorch_test_dir)
 
-from torch.testing._internal.common_utils import *  # noqa: F401
+from torch.testing._internal.common_utils import *  # noqa: F401,F403
 
 torch.set_default_tensor_type('torch.FloatTensor')
 
@@ -75,17 +75,6 @@ def disableScriptTest():
     def script_dec(func):
         def wrapper(self):
             self.is_script_test_enabled = False
-            return func(self)
-        return wrapper
-    return script_dec
-
-
-# Disable tests for old jit passes.
-def disableOldJitPassesTest():
-    def script_dec(func):
-        def wrapper(self):
-            if not self.use_new_jit_passes:
-                raise unittest.SkipTest("Skip test for old jit API.")
             return func(self)
         return wrapper
     return script_dec

@@ -58,6 +58,7 @@ Features described in this documentation are classified by release status:
    torch.cuda.amp <amp>
    torch.backends <backends>
    torch.distributed <distributed>
+   torch.distributed.optim <distributed.optim>
    torch.distributions <distributions>
    torch.fft <fft>
    futures
@@ -65,7 +66,9 @@ Features described in this documentation are classified by release status:
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
+   torch.special <special>
    torch.overrides
+   torch.package <package>
    profiler
    nn.init
    onnx

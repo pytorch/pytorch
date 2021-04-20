@@ -1,14 +1,18 @@
 import torch
 
 import math
-from pathlib import PurePosixPath
+import os
+import random
+import unittest
+import numpy as np
 
 from torch.testing._internal.common_utils import \
-    (TestCase, make_tensor, run_tests, slowTest)
+    (IS_SANDCASTLE, IS_WINDOWS, TestCase, make_tensor, run_tests, skipIfRocm, slowTest)
+from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
-from torch.testing._internal import mypy_wrapper
-from torch.testing._internal import print_test_stats
+    (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyOnCPUAndCUDA)
+from torch.testing._asserts import UsageError
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -435,6 +439,36 @@ class TestTesting(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
+    @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
+    def test_make_tensor(self, device, dtype):
+        def check(size, low, high, requires_grad, noncontiguous):
+            t = make_tensor(size, device, dtype, low=low, high=high,
+                            requires_grad=requires_grad, noncontiguous=noncontiguous)
+
+            self.assertEqual(t.shape, size)
+            self.assertEqual(t.device, torch.device(device))
+            self.assertEqual(t.dtype, dtype)
+
+            low = -9 if low is None else low
+            high = 9 if high is None else high
+
+            if t.numel() > 0 and dtype in [torch.long, torch.float]:
+                self.assertTrue(t.le(high).logical_and(t.ge(low)).all().item())
+
+            if dtype in [torch.float, torch.cfloat]:
+                self.assertEqual(t.requires_grad, requires_grad)
+            else:
+                self.assertFalse(t.requires_grad)
+
+            if t.numel() > 1:
+                self.assertEqual(t.is_contiguous(), not noncontiguous)
+            else:
+                self.assertTrue(t.is_contiguous())
+
+        for size in (tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)):
+            check(size, None, None, False, False)
+            check(size, 2, 4, True, True)
+
     def test_assert_messages(self, device):
         self.assertIsNone(self._get_assert_msg(msg=None))
         self.assertEqual("\nno_debug_msg", self._get_assert_msg("no_debug_msg"))
@@ -560,566 +594,369 @@ if __name__ == '__main__':
 instantiate_device_type_tests(TestTesting, globals())
 
 
-class TestMypyWrapper(TestCase):
-    def test_glob(self):
-        # can match individual files
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename=PurePosixPath('test/test_torch.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename=PurePosixPath('test/test_testing.py'),
-        ))
+class TestFrameworkUtils(TestCase):
+    tests = [
+        'super_long_test',
+        'long_test1',
+        'long_test2',
+        'normal_test1',
+        'normal_test2',
+        'normal_test3',
+        'short_test1',
+        'short_test2',
+        'short_test3',
+        'short_test4',
+        'short_test5',
+    ]
 
-        # dir matters
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/codegen/utils.py',
-            filename=PurePosixPath('torch/nn/modules.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename=PurePosixPath('setup.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename=PurePosixPath('foo/setup.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='foo/setup.py',
-            filename=PurePosixPath('foo/setup.py'),
-        ))
-
-        # can match dirs
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('torch/random.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('torch/nn/cpp.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('tools/fast_nvcc/fast_nvcc.py'),
-        ))
-
-        # can match wildcards
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename=PurePosixPath('tools/autograd/gen_autograd.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename=PurePosixPath('tools/autograd/deprecated.yaml'),
-        ))
-
-
-def fakehash(char):
-    return char * 40
-
-
-def makecase(name, seconds, *, errored=False, failed=False, skipped=False):
-    return {
-        'name': name,
-        'seconds': seconds,
-        'errored': errored,
-        'failed': failed,
-        'skipped': skipped,
+    test_times = {
+        'super_long_test': 55,
+        'long_test1': 22,
+        'long_test2': 18,
+        'normal_test1': 9,
+        'normal_test2': 7,
+        'normal_test3': 5,
+        'short_test1': 1,
+        'short_test2': 0.6,
+        'short_test3': 0.4,
+        'short_test4': 0.3,
+        'short_test5': 0.01,
     }
 
-
-def makereport(tests):
-    suites = {
-        suite_name: {
-            'total_seconds': sum(case['seconds'] for case in cases),
-            'cases': cases,
-        }
-        for suite_name, cases in tests.items()
-    }
-    return {
-        'total_seconds': sum(s['total_seconds'] for s in suites.values()),
-        'suites': suites,
-    }
+    def test_calculate_2_shards_with_complete_test_times(self):
+        expected_shards = [
+            (60, ['super_long_test', 'normal_test3']),
+            (58.31, ['long_test1', 'long_test2', 'normal_test1', 'normal_test2', 'short_test1', 'short_test2',
+                     'short_test3', 'short_test4', 'short_test5'])
+        ]
+        self.assertEqual(expected_shards, calculate_shards(2, self.tests, self.test_times))
 
 
-class TestPrintTestStats(TestCase):
-    maxDiff = None
-
-    def test_analysis(self):
-        head_report = makereport({
-            # input ordering of the suites is ignored
-            'Grault': [
-                # not printed: status same and time similar
-                makecase('test_grault0', 4.78, failed=True),
-                # status same, but time increased a lot
-                makecase('test_grault2', 1.473, errored=True),
-            ],
-            # individual tests times changed, not overall suite
-            'Qux': [
-                # input ordering of the test cases is ignored
-                makecase('test_qux1', 0.001, skipped=True),
-                makecase('test_qux6', 0.002, skipped=True),
-                # time in bounds, but status changed
-                makecase('test_qux4', 7.158, failed=True),
-                # not printed because it's the same as before
-                makecase('test_qux7', 0.003, skipped=True),
-                makecase('test_qux5', 11.968),
-                makecase('test_qux3', 23.496),
-            ],
-            # new test suite
-            'Bar': [
-                makecase('test_bar2', 3.742, failed=True),
-                makecase('test_bar1', 50.447),
-            ],
-            # overall suite time changed but no individual tests
-            'Norf': [
-                makecase('test_norf1', 3),
-                makecase('test_norf2', 3),
-                makecase('test_norf3', 3),
-                makecase('test_norf4', 3),
-            ],
-            # suite doesn't show up if it doesn't change enough
-            'Foo': [
-                makecase('test_foo1', 42),
-                makecase('test_foo2', 56),
-            ],
-        })
-
-        base_reports = {
-            # bbbb has no reports, so base is cccc instead
-            fakehash('b'): [],
-            fakehash('c'): [
-                makereport({
-                    'Baz': [
-                        makecase('test_baz2', 13.605),
-                        # no recent suites have & skip this test
-                        makecase('test_baz1', 0.004, skipped=True),
-                    ],
-                    'Foo': [
-                        makecase('test_foo1', 43),
-                        # test added since dddd
-                        makecase('test_foo2', 57),
-                    ],
-                    'Grault': [
-                        makecase('test_grault0', 4.88, failed=True),
-                        makecase('test_grault1', 11.967, failed=True),
-                        makecase('test_grault2', 0.395, errored=True),
-                        makecase('test_grault3', 30.460),
-                    ],
-                    'Norf': [
-                        makecase('test_norf1', 2),
-                        makecase('test_norf2', 2),
-                        makecase('test_norf3', 2),
-                        makecase('test_norf4', 2),
-                    ],
-                    'Qux': [
-                        makecase('test_qux3', 4.978, errored=True),
-                        makecase('test_qux7', 0.002, skipped=True),
-                        makecase('test_qux2', 5.618),
-                        makecase('test_qux4', 7.766, errored=True),
-                        makecase('test_qux6', 23.589, failed=True),
-                    ],
-                }),
-            ],
-            fakehash('d'): [
-                makereport({
-                    'Foo': [
-                        makecase('test_foo1', 40),
-                        # removed in cccc
-                        makecase('test_foo3', 17),
-                    ],
-                    'Baz': [
-                        # not skipped, so not included in stdev
-                        makecase('test_baz1', 3.14),
-                    ],
-                    'Qux': [
-                        makecase('test_qux7', 0.004, skipped=True),
-                        makecase('test_qux2', 6.02),
-                        makecase('test_qux4', 20.932),
-                    ],
-                    'Norf': [
-                        makecase('test_norf1', 3),
-                        makecase('test_norf2', 3),
-                        makecase('test_norf3', 3),
-                        makecase('test_norf4', 3),
-                    ],
-                    'Grault': [
-                        makecase('test_grault0', 5, failed=True),
-                        makecase('test_grault1', 14.325, failed=True),
-                        makecase('test_grault2', 0.31, errored=True),
-                    ],
-                }),
-            ],
-            fakehash('e'): [],
-            fakehash('f'): [
-                makereport({
-                    'Foo': [
-                        makecase('test_foo3', 24),
-                        makecase('test_foo1', 43),
-                    ],
-                    'Baz': [
-                        makecase('test_baz2', 16.857),
-                    ],
-                    'Qux': [
-                        makecase('test_qux2', 6.422),
-                        makecase('test_qux4', 6.382, errored=True),
-                    ],
-                    'Norf': [
-                        makecase('test_norf1', 0.9),
-                        makecase('test_norf3', 0.9),
-                        makecase('test_norf2', 0.9),
-                        makecase('test_norf4', 0.9),
-                    ],
-                    'Grault': [
-                        makecase('test_grault0', 4.7, failed=True),
-                        makecase('test_grault1', 13.146, failed=True),
-                        makecase('test_grault2', 0.48, errored=True),
-                    ],
-                }),
-            ],
-        }
-
-        simpler_head = print_test_stats.simplify(head_report)
-        simpler_base = {}
-        for commit, reports in base_reports.items():
-            simpler_base[commit] = [print_test_stats.simplify(r) for r in reports]
-        analysis = print_test_stats.analyze(
-            head_report=simpler_head,
-            base_reports=simpler_base,
-        )
-
-        self.assertEqual(
-            '''\
-
-- class Baz:
--     # was   15.23s ±   2.30s
--
--     def test_baz1: ...
--         # was   0.004s           (skipped)
--
--     def test_baz2: ...
--         # was  15.231s ±  2.300s
+    def test_calculate_5_shards_with_complete_test_times(self):
+        expected_shards = [
+            (55, ['super_long_test']),
+            (22, ['long_test1', ]),
+            (18, ['long_test2', ]),
+            (11.31, ['normal_test1', 'short_test1', 'short_test2', 'short_test3', 'short_test4', 'short_test5']),
+            (12, ['normal_test2', 'normal_test3']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(5, self.tests, self.test_times))
 
 
-  class Grault:
-      # was   48.86s ±   1.19s
-      # now    6.25s
-
-    - def test_grault1: ...
-    -     # was  13.146s ±  1.179s (failed)
-
-    - def test_grault3: ...
-    -     # was  30.460s
+    def test_calculate_2_shards_with_incomplete_test_times(self):
+        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
+        expected_shards = [
+            (22, ['long_test1', 'long_test2', 'normal_test3', 'short_test3', 'short_test5']),
+            (10, ['normal_test1', 'short_test1', 'super_long_test', 'normal_test2', 'short_test2', 'short_test4']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(2, self.tests, incomplete_test_times))
 
 
-  class Qux:
-      # was   41.66s ±   1.06s
-      # now   42.63s
+    def test_calculate_5_shards_with_incomplete_test_times(self):
+        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
+        expected_shards = [
+            (22, ['long_test1', 'normal_test2', 'short_test5']),
+            (9, ['normal_test1', 'normal_test3']),
+            (1, ['short_test1', 'short_test2']),
+            (0, ['super_long_test', 'short_test3']),
+            (0, ['long_test2', 'short_test4']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(5, self.tests, incomplete_test_times))
 
-    - def test_qux2: ...
-    -     # was   6.020s ±  0.402s
+    def test_calculate_2_shards_against_optimal_shards(self):
+        for _ in range(100):
+            random.seed(120)
+            random_times = {k: random.random() * 10 for k in self.tests}
+            # all test times except first two
+            rest_of_tests = [i for k, i in random_times.items() if k != 'super_long_test' and k != 'long_test1']
+            sum_of_rest = sum(rest_of_tests)
+            random_times['super_long_test'] = max(sum_of_rest / 2, max(rest_of_tests))
+            random_times['long_test1'] = sum_of_rest - random_times['super_long_test']
+            # An optimal sharding would look like the below, but we don't need to compute this for the test:
+            # optimal_shards = [
+            #     (sum_of_rest, ['super_long_test', 'long_test1']),
+            #     (sum_of_rest, [i for i in self.tests if i != 'super_long_test' and i != 'long_test1']),
+            # ]
+            calculated_shards = calculate_shards(2, self.tests, random_times)
+            max_shard_time = max(calculated_shards[0][0], calculated_shards[1][0])
+            if sum_of_rest != 0:
+                # The calculated shard should not have a ratio worse than 7/6 for num_shards = 2
+                self.assertGreaterEqual(7.0 / 6.0, max_shard_time / sum_of_rest)
+                sorted_tests = sorted(self.tests)
+                sorted_shard_tests = sorted(calculated_shards[0][1] + calculated_shards[1][1])
+                # All the tests should be represented by some shard
+                self.assertEqual(sorted_tests, sorted_shard_tests)
 
-    ! def test_qux3: ...
-    !     # was   4.978s           (errored)
-    !     # now  23.496s
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+    @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+    def test_filtering_env_var(self):
+        # Test environment variable selected device type test generator.
+        test_filter_file_template = """\
+#!/usr/bin/env python
 
-    ! def test_qux4: ...
-    !     # was   7.074s ±  0.979s (errored)
-    !     # now   7.158s           (failed)
+import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
-    ! def test_qux6: ...
-    !     # was  23.589s           (failed)
-    !     # now   0.002s           (skipped)
+class TestEnvironmentVariable(TestCase):
 
-    + def test_qux1: ...
-    +     # now   0.001s           (skipped)
+    def test_trivial_passing_test(self, device):
+        x1 = torch.tensor([0., 1.], device=device)
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
 
-    + def test_qux5: ...
-    +     # now  11.968s
+instantiate_device_type_tests(
+    TestEnvironmentVariable,
+    globals(),
+)
 
+if __name__ == '__main__':
+    run_tests()
+"""
+        test_bases_count = len(get_device_type_test_bases())
+        # Test without setting env var should run everything.
+        env = dict(os.environ)
+        for k in ['IN_CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
+            if k in env.keys():
+                del env[k]
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn(f'Ran {test_bases_count} test', stderr.decode('ascii'))
 
-+ class Bar:
-+     # now   54.19s
-+
-+     def test_bar1: ...
-+         # now  50.447s
-+
-+     def test_bar2: ...
-+         # now   3.742s           (failed)
+        # Test with setting only_for should only run 1 test.
+        env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn('Ran 1 test', stderr.decode('ascii'))
 
-''',
-            print_test_stats.anomalies(analysis),
-        )
+        # Test with setting except_for should run 1 less device type from default.
+        del env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY]
+        env[PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn(f'Ran {test_bases_count-1} test', stderr.decode('ascii'))
 
-    def test_graph(self):
-        # HEAD is on master
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    * aaaaaaaaaa (HEAD)              total time   502.99s
-    * bbbbbbbbbb (base)   1 report,  total time    47.84s
-    * cccccccccc          1 report,  total time   332.50s
-    * dddddddddd          0 reports
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=502.99,
-                base_seconds={
-                    fakehash('b'): [47.84],
-                    fakehash('c'): [332.50],
-                    fakehash('d'): [],
-                },
-                on_master=True,
-            )
-        )
-
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time  9988.77s
-    |/
-    * bbbbbbbbbb (base) 121 reports, total time  7654.32s ±   55.55s
-    * cccccccccc         20 reports, total time  5555.55s ±  253.19s
-    * dddddddddd          1 report,  total time  1234.56s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=9988.77,
-                base_seconds={
-                    fakehash('b'): [7598.77] * 60 + [7654.32] + [7709.87] * 60,
-                    fakehash('c'): [5308.77] * 10 + [5802.33] * 10,
-                    fakehash('d'): [1234.56],
-                },
-                on_master=False,
-            )
-        )
-
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time    25.52s
-    | |
-    | : (5 commits)
-    |/
-    * bbbbbbbbbb          0 reports
-    * cccccccccc          0 reports
-    * dddddddddd (base)  15 reports, total time    58.92s ±   25.82s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=25.52,
-                base_seconds={
-                    fakehash('b'): [],
-                    fakehash('c'): [],
-                    fakehash('d'): [52.25] * 14 + [152.26],
-                },
-                on_master=False,
-                ancestry_path=5,
-            )
-        )
-
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     0.08s
-    |/|
-    | : (1 commit)
-    |
-    * bbbbbbbbbb          0 reports
-    * cccccccccc (base)   1 report,  total time     0.09s
-    * dddddddddd          3 reports, total time     0.10s ±    0.05s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=0.08,
-                base_seconds={
-                    fakehash('b'): [],
-                    fakehash('c'): [0.09],
-                    fakehash('d'): [0.05, 0.10, 0.15],
-                },
-                on_master=False,
-                other_ancestors=1,
-            )
-        )
-
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     5.98s
-    | |
-    | : (1 commit)
-    |/|
-    | : (7 commits)
-    |
-    * bbbbbbbbbb (base)   2 reports, total time     6.02s ±    1.71s
-    * cccccccccc          0 reports
-    * dddddddddd         10 reports, total time     5.84s ±    0.92s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=5.98,
-                base_seconds={
-                    fakehash('b'): [4.81, 7.23],
-                    fakehash('c'): [],
-                    fakehash('d'): [4.97] * 5 + [6.71] * 5,
-                },
-                on_master=False,
-                ancestry_path=1,
-                other_ancestors=7,
-            )
-        )
-
-    def test_regression_info(self):
-        self.assertEqual(
-            '''\
------ Historic stats comparison result ------
-
-    job: foo_job
-    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        # Test with setting both should throw exception
+        env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertNotIn('OK', stderr.decode('ascii'))
 
 
-  class Foo:
-      # was   42.50s ±   2.12s
-      # now    3.02s
+class TestAsserts(TestCase):
+    def assert_fns(self):
+        return [torch.testing.assert_tensors_equal, torch.testing.assert_tensors_close]
 
-    - def test_bar: ...
-    -     # was   1.000s
+    @onlyCPU
+    def test_not_tensors(self, device):
+        a = torch.empty((), device=device)
+        b = np.empty(())
 
-    ! def test_foo: ...
-    !     # was  41.500s ±  2.121s
-    !     # now   0.020s           (skipped)
+        for fn in self.assert_fns():
+            with self.assertRaises(AssertionError):
+                fn(a, b)
 
-    + def test_baz: ...
-    +     # now   3.000s
+    @onlyCPU
+    def test_complex_support(self, device):
+        a = torch.ones(1, dtype=torch.float32, device=device)
+        b = torch.ones(1, dtype=torch.complex64, device=device)
+
+        for fn in self.assert_fns():
+            with self.assertRaises(UsageError):
+                fn(a, b, check_dtype=False)
+
+    @onlyCPU
+    def test_sparse_support(self, device):
+        a = torch.empty((), device=device)
+        b = torch.sparse_coo_tensor(size=(), device=device)
+
+        for fn in self.assert_fns():
+            with self.assertRaises(UsageError):
+                fn(a, b)
+
+    @onlyCPU
+    def test_quantized_support(self, device):
+        val = 1
+        a = torch.tensor([val], dtype=torch.int32, device=device)
+        b = torch._empty_affine_quantized(a.shape, scale=1, zero_point=0, dtype=torch.qint32, device=device)
+        b.fill_(val)
+
+        for fn in self.assert_fns():
+            with self.assertRaises(UsageError):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_shape(self, device):
+        a = torch.empty((), device=device)
+        b = a.clone().reshape((1,))
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, "shape"):
+                fn(a, b)
+
+    @onlyCUDA
+    def test_mismatching_device(self, device):
+        a = torch.empty((), device=device)
+        b = a.clone().cpu()
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, "device"):
+                fn(a, b)
+
+    @onlyCUDA
+    def test_mismatching_device_no_check(self, device):
+        a = torch.rand((), device=device)
+        b = a.clone().cpu()
+
+        for fn in self.assert_fns():
+            fn(a, b, check_device=False)
+
+    @onlyCPU
+    def test_mismatching_dtype(self, device):
+        a = torch.empty((), dtype=torch.float, device=device)
+        b = a.clone().to(torch.int)
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, "dtype"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_dtype_no_check(self, device):
+        a = torch.ones((), dtype=torch.float, device=device)
+        b = a.clone().to(torch.int)
+
+        for fn in self.assert_fns():
+            fn(a, b, check_dtype=False)
+
+    @onlyCPU
+    def test_mismatching_stride(self, device):
+        a = torch.empty((2, 2), device=device)
+        b = torch.as_strided(a.clone().t().contiguous(), a.shape, a.stride()[::-1])
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, "stride"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_stride_no_check(self, device):
+        a = torch.rand((2, 2), device=device)
+        b = torch.as_strided(a.clone().t().contiguous(), a.shape, a.stride()[::-1])
+
+        for fn in self.assert_fns():
+            fn(a, b, check_stride=False)
+
+    @onlyCPU
+    def test_mismatching_values(self, device):
+        a = torch.tensor(1, device=device)
+        b = torch.tensor(2, device=device)
+
+        for fn in self.assert_fns():
+            with self.assertRaises(AssertionError):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_values_msg_abs_mismatches(self, device):
+        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
+        b = a.clone()
+        b[2, 3] = 9
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"\s+1\s+"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_values_msg_rel_mismatches(self, device):
+        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
+        b = a.clone()
+        b[2, 3] = 9
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"8([.]3+)?\s*[%]"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_values_msg_index(self, device):
+        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
+        b = a.clone()
+        b[2, 3] = 9
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"2,\s*3"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_values_msg_max_diff(self, device):
+        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
+        b = a.clone()
+        b[2, 3] = 9
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"\s+4[.]0\s+"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_assert_tensors_equal(self, device):
+        a = torch.tensor(1, device=device)
+        b = a.clone()
+
+        torch.testing.assert_tensors_equal(a, b)
+
+    @onlyCPU
+    def test_assert_tensors_close(self, device):
+        a = torch.tensor(1.0, device=device)
+        b = a.clone()
+
+        torch.testing.assert_tensors_close(a, b)
+
+    @onlyCPU
+    def test_assert_tensors_close_only_rtol(self, device):
+        a = torch.empty((), device=device)
+        b = a.clone()
+
+        with self.assertRaises(UsageError):
+            torch.testing.assert_tensors_close(a, b, rtol=0.0)
+
+    @onlyCPU
+    def test_assert_tensors_close_only_atol(self, device):
+        a = torch.empty((), device=device)
+        b = a.clone()
+
+        with self.assertRaises(UsageError):
+            torch.testing.assert_tensors_close(a, b, atol=0.0)
+
+    @onlyCPU
+    def test_assert_tensors_close_mismatching_values_rtol(self, device):
+        eps = 1e-3
+        a = torch.tensor(1.0, device=device)
+        b = torch.tensor(1.0 + eps, device=device)
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_tensors_close(a, b, rtol=eps / 2, atol=0.0)
+
+    @onlyCPU
+    def test_assert_tensors_close_matching_values_rtol(self, device):
+        eps = 1e-3
+        a = torch.tensor(1.0, device=device)
+        b = torch.tensor(1.0 + eps, device=device)
+
+        torch.testing.assert_tensors_close(a, b, rtol=eps * 2, atol=0.0)
+
+    @onlyCPU
+    def test_assert_tensors_close_mismatching_values_atol(self, device):
+        eps = 1e-3
+        a = torch.tensor(0.0, device=device)
+        b = torch.tensor(eps, device=device)
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_tensors_close(a, b, rtol=0.0, atol=eps / 2)
+
+    @onlyCPU
+    def test_assert_tensors_close_matching_values_atol(self, device):
+        eps = 1e-3
+        a = torch.tensor(0.0, device=device)
+        b = torch.tensor(eps, device=device)
+
+        torch.testing.assert_tensors_close(a, b, rtol=0.0, atol=eps * 2)
 
 
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     3.02s
-    |/
-    * bbbbbbbbbb (base)   1 report,  total time    41.00s
-    * cccccccccc          1 report,  total time    43.00s
-    |
-    :
-
-Removed  (across    1 suite)      1 test,  totaling -   1.00s
-Modified (across    1 suite)      1 test,  totaling -  41.48s ±   2.12s
-Added    (across    1 suite)      1 test,  totaling +   3.00s
-''',
-            print_test_stats.regression_info(
-                head_sha=fakehash('a'),
-                head_report=makereport({
-                    'Foo': [
-                        makecase('test_foo', 0.02, skipped=True),
-                        makecase('test_baz', 3),
-                    ]}),
-                base_reports={
-                    fakehash('b'): [
-                        makereport({
-                            'Foo': [
-                                makecase('test_foo', 40),
-                                makecase('test_bar', 1),
-                            ],
-                        }),
-                    ],
-                    fakehash('c'): [
-                        makereport({
-                            'Foo': [
-                                makecase('test_foo', 43),
-                            ],
-                        }),
-                    ],
-                },
-                job_name='foo_job',
-                on_master=False,
-                ancestry_path=0,
-                other_ancestors=0,
-            )
-        )
-
-    def test_regression_info_new_job(self):
-        self.assertEqual(
-            '''\
------ Historic stats comparison result ------
-
-    job: foo_job
-    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-
-
-+ class Foo:
-+     # now    3.02s
-+
-+     def test_baz: ...
-+         # now   3.000s
-+
-+     def test_foo: ...
-+         # now   0.020s           (skipped)
-
-
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     3.02s
-    | |
-    | : (3 commits)
-    |/|
-    | : (2 commits)
-    |
-    * bbbbbbbbbb          0 reports
-    * cccccccccc          0 reports
-    |
-    :
-
-Removed  (across    0 suites)     0 tests, totaling     0.00s
-Modified (across    0 suites)     0 tests, totaling     0.00s
-Added    (across    1 suite)      2 tests, totaling +   3.02s
-''',
-            print_test_stats.regression_info(
-                head_sha=fakehash('a'),
-                head_report=makereport({
-                    'Foo': [
-                        makecase('test_foo', 0.02, skipped=True),
-                        makecase('test_baz', 3),
-                    ]}),
-                base_reports={
-                    fakehash('b'): [],
-                    fakehash('c'): [],
-                },
-                job_name='foo_job',
-                on_master=False,
-                ancestry_path=3,
-                other_ancestors=2,
-            )
-        )
+instantiate_device_type_tests(TestAsserts, globals())
 
 
 if __name__ == '__main__':

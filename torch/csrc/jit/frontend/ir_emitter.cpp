@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/hash.h>
 
 #include <atomic>
 #include <climits>
@@ -444,6 +445,10 @@ struct Environment {
            makeMagic(
                "__float__",
                std::make_shared<CastValue>(FloatType::get(), aten::Float))},
+          {"complex",
+           makeMagic(
+               "__complex__",
+               std::make_shared<CastValue>(ComplexType::get(), aten::Complex))},
           {"int",
            makeMagic(
                "__int__",
@@ -485,13 +490,16 @@ struct Environment {
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
+          {"any", std::make_shared<BuiltinFunction>(aten::any, at::nullopt)},
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
+          {"sum", std::make_shared<BuiltinFunction>(aten::sum, at::nullopt)},
           {"list", SpecialFormValue::create(prim::list)},
           {"dict", SpecialFormValue::create(prim::dict)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
+          {"pow", std::make_shared<BuiltinFunction>(aten::pow, at::nullopt)},
           {"range", SpecialFormValue::create(prim::range)},
           {"zip", SpecialFormValue::create(prim::zip)},
           {"enumerate", SpecialFormValue::create(prim::enumerate)},
@@ -567,12 +575,12 @@ struct Environment {
   ValueTable value_table;
 };
 
-template <class T>
+template <class T, class Hash>
 static Value* materializeConstant(
     T val,
     Graph& graph,
     const SourceRange& r,
-    std::unordered_map<T, Value*>& map) {
+    std::unordered_map<T, Value*, Hash>& map) {
   auto existing_constant = map.find(val);
   if (existing_constant != map.end()) {
     return existing_constant->second;
@@ -659,8 +667,13 @@ struct to_ir {
   Function& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
-  std::unordered_map<int64_t, Value*> integral_constants;
-  std::unordered_map<double, Value*> fp_constants;
+  std::unordered_map<int64_t, Value*, std::hash<int64_t>> integral_constants;
+  std::unordered_map<double, Value*, std::hash<double>> fp_constants;
+  std::unordered_map<
+      c10::complex<double>,
+      Value*,
+      c10::hash<c10::complex<double>>>
+      complex_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
   LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;
@@ -1890,13 +1903,13 @@ struct to_ir {
       auto* rhs = emitExpr(e);
       auto* n = graph->insertNode(graph->create(prim::Enter, {rhs}));
       entered.push(rhs);
-      auto rhsClass = rhs->type()->expect<ClassType>();
 
-      if (!rhsClass) {
+      if (rhs->type()->kind() != TypeKind::ClassType) {
         throw ErrorReport(e.range())
-            << "With item expression does not return a class type";
+            << "With item expression must return an object";
       }
 
+      auto rhsClass = rhs->type()->expect<ClassType>();
       auto* enterMethod = rhsClass->findMethod("__enter__");
       auto* exitMethod = rhsClass->findMethod("__exit__");
 
@@ -1915,13 +1928,8 @@ struct to_ir {
       // Check the schema of __exit__.
       auto& exitSchema = exitMethod->getSchema();
       if (exitSchema.arguments().size() != 4) {
-        throw ErrorReport(e.range())
-            << "__exit__ must have four arguments and no return value";
+        throw ErrorReport(e.range()) << "__exit__ must have four arguments";
       } else {
-        if (exitSchema.returns().at(0).type() != NoneType::get()) {
-          throw ErrorReport(e.range()) << "__exit__ must have no return value";
-        }
-
         for (unsigned i = 1; i < 4; ++i) {
           if (exitSchema.arguments().at(i).type() != AnyType::get()) {
             throw ErrorReport(e.range())
@@ -2022,7 +2030,7 @@ struct to_ir {
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
       if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT ||
-          assignee.kind() == TK_TUPLE_LITERAL) {
+          assignee.kind() == TK_TUPLE_LITERAL || assignee.kind() == '.') {
         num_normal_assign++;
       } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
@@ -2290,13 +2298,14 @@ struct to_ir {
   NamedValue emitValueToTensor(
       const NamedValue& value,
       const NamedValue& matchTypeOf) {
-    // Add implicit conversion of int/float/bool/number types to tensors
+    // Add implicit conversion of int/float/complex/bool/number types to tensors
     // Used in emitSubscriptAssign to convert:
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
     if (kind == c10::TypeKind::NumberType || kind == c10::TypeKind::IntType ||
-        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType) {
+        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType ||
+        kind == c10::TypeKind::ComplexType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
@@ -2338,7 +2347,7 @@ struct to_ir {
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
 
-      // rhs must be a tensor, implicitly convert int/float/bool
+      // rhs must be a tensor, implicitly convert int/float/complex/bool
       const auto convertedRhs = emitValueToTensor(rhs, slicedArg);
 
       if (tensorIndices.size() == 0) {
@@ -2473,6 +2482,10 @@ struct to_ir {
               sub_starred_unpack);
           i++;
         } break;
+        case '.': {
+          emitSelectAssign(assignee, outputs.at(i), rhs_loc);
+          i++;
+        } break;
         default:
           throw ErrorReport(assignee)
               << "unexpected expression on the left-hand side";
@@ -2585,6 +2598,16 @@ struct to_ir {
     const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1, type_hint)
                               ->asValue(stmt.rhs().range(), method);
     lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
+  }
+
+  void emitSelectAssign(
+      const Expr& lhs,
+      SugaredValuePtr rhs,
+      const SourceRange& loc) {
+    const auto lhs_select = Select(lhs);
+    auto lhs_sv = emitSugaredExpr(lhs_select.value(), 1);
+    const auto rhs_value = rhs->asValue(loc, method);
+    lhs_sv->setAttr(loc, method, lhs_select.selector().name(), rhs_value);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -3475,6 +3498,21 @@ struct to_ir {
       // checked is second)
       std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
     }
+
+    // if this is adding two tuples, we deal with it here.
+    // the reason is we can't specify the length of tuples
+    // when registering custom aten::add.
+    if (named_values[0].type()->kind() == TupleType::Kind &&
+        named_values[1].type()->kind() == TupleType::Kind &&
+        kind == aten::add) {
+      auto first_tuple = createTupleUnpack(named_values[0].value(*graph)).vec();
+      auto second_tuple =
+          createTupleUnpack(named_values[1].value(*graph)).vec();
+      first_tuple.insert(
+          first_tuple.end(), second_tuple.begin(), second_tuple.end());
+      return graph->insertNode(graph->createTuple(first_tuple))->output();
+    }
+
     return asSimple(
         makeMagic(
             overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
@@ -3677,6 +3715,9 @@ struct to_ir {
     if (c.isFloatingPoint())
       return materializeConstant(
           c.asFloatingPoint(), *graph, c.range(), fp_constants);
+    else if (c.isComplex())
+      return materializeConstant(
+          c.asComplex(), *graph, c.range(), complex_constants);
     else
       return materializeConstant(
           c.asIntegral(), *graph, c.range(), integral_constants);
