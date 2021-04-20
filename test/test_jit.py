@@ -12427,6 +12427,11 @@ dedent """
         def bar(x):  # type: ignore[no-redef]
             return x
 
+        # test that noqa comment is allowed after type ignore comment
+        @torch.jit.script
+        def baz(x): # type: ignore[no-redef] # noqa: E261
+            return x
+
     def test_method_casts_script(self):
         cast_types = [
             'byte', 'char', 'double', 'float', 'int', 'long', 'short'
