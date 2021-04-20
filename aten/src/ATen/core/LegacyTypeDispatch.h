@@ -32,16 +32,9 @@ namespace at {
 // again inside your VariableType handler, you'll dispatch back to
 // VariableType, which is not what we want.
 //
-// The solution to the above problem is to add `at::NonVariableTypeMode`, which
+// The solution to the above problem is to add `at::AutoDispatchBelowAutograd`, which
 // when enabled will cause `legacyTensorType()` and `getType()` to always return
 // non-Variable type, even if the tensor being called on is a variable.
-//
-// Since `torch::NoGradGuard` serves almost the same purpose in libtorch,
-// we can potentially merge these two thread-local guards.  However, NoGradGuard does
-// something subtly different: it turns off gradient recording, but DOES NOT
-// skip VariableType implementation (as we still might need to profile or
-// trace). The unified user facing API is `c10::InferneceMode` which turns off
-// gradient tracking as well as skips Autograd kernels.
 
 /* Note [AutoDispatchBelowAutograd]
  * AutoDispatchBelowAutograd is **INTERNAL ONLY** that it should be used
