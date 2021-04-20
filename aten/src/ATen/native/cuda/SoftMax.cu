@@ -669,7 +669,7 @@ cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *grad
   const int grad_output_shift = ((uint64_t)gradOutput) % ALIGN_BYTES / sizeof(outscalar_t);
 
   accscalar_t threadSum = ilpReduce<AddFloat, ILP, outscalar_t, accscalar_t>(
-      shift, gradOutput, classes, AddFloat<outscalar_t, accscalar_t>(), accscalar_t(0));
+      grad_output_shift, gradOutput, classes, AddFloat<outscalar_t, accscalar_t>(), accscalar_t(0));
   accscalar_t sum_k = blockReduce<Add, accscalar_t>(
         sdata, threadSum, Add<accscalar_t>(), accscalar_t(0));
 
