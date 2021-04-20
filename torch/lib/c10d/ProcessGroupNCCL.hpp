@@ -186,14 +186,12 @@ class ProcessGroupNCCL : public ProcessGroup {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
     explicit Options(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
         bool is_high_priority_stream = false);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
         bool is_high_priority_stream = false) {
-      return c10::make_intrusive<Options>(timeout, is_high_priority_stream);
+      return c10::make_intrusive<Options>(is_high_priority_stream);
     }
 
     // Schedule NCCL operations on high priority CUDA streams

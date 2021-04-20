@@ -463,9 +463,6 @@ def init_process_group(backend,
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams.
 
-    .. note:: Note that if passing in pg_options and set the ``pg_options.timeout``,
-        it will override the default timeout of the ``timeout`` argument.
-
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.
 
@@ -575,11 +572,6 @@ def _new_process_group_helper(world_size,
         raise RuntimeError("Expected timeout argument to be of type"
                            "datetime.timedelta")
 
-    if pg_options is not None and timeout != default_pg_timeout and pg_options.timeout != timeout:
-        raise RuntimeError("The timeout argument and timeout value defined in pg_options"
-                           " are conflicting, they have to be the same when manually"
-                           " passing in both arguments.")
-
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = (len(group_ranks) == 0)
 
@@ -610,31 +602,12 @@ def _new_process_group_helper(world_size,
 
         if backend == Backend.GLOO:
             if pg_options is not None:
-                assert isinstance(pg_options, ProcessGroupGloo.Options), \
-                    "Expected pg_options argument to be of type ProcessGroupGloo.Options"
-            else:
-                pg_options = ProcessGroupGloo.Options()
-                pg_options.timeout = timeout
-
-            # If user forget to set devices, we should do it by default
-            if not pg_options._devices:
-                ifname_env = getenv("GLOO_SOCKET_IFNAME")
-                if ifname_env is not None:
-                    pg_options._devices = [ProcessGroupGloo.create_device(interface=iface) for iface in ifname_env.split(",")]
-                else:
-                    pg_options._devices = [ProcessGroupGloo.create_default_device()]
-
-                # user pass in threads but not devices, error that both are required
-                if pg_options._threads != 2:
-                    raise RuntimeError("ProcessGroupGloo.Options threads and devices must be passed in together")
-                else:
-                    pg_options._threads = len(pg_options._devices) * 2
-
+                raise RuntimeError("GLOO options not supported")
             pg = ProcessGroupGloo(
                 prefix_store,
                 rank,
                 world_size,
-                pg_options)
+                timeout=timeout)
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif backend == Backend.NCCL:
@@ -648,7 +621,7 @@ def _new_process_group_helper(world_size,
                 # default pg_options for NCCL
                 pg_options = ProcessGroupNCCL.Options()
                 pg_options.is_high_priority_stream = False
-                pg_options.timeout = timeout
+                pg_options._timeout = timeout
 
             pg = ProcessGroupNCCL(
                 prefix_store,
