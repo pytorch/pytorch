@@ -1,4 +1,4 @@
-from typing import cast, Callable, Generic, List, Type, TypeVar
+from typing import cast, Callable, Generic, List, Optional, Type, TypeVar, Union
 
 import torch
 from torch._six import PY37
@@ -22,6 +22,25 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
     also exposes a set of APIs to add callback functions and set results.
     """
+
+    def __init__(self, devices: Optional[List[Union[int, str, torch.device]]] = None):
+        r"""
+        Create a ``Future`` that is allowed to use (a subset of) the given
+        devices. All devices must be CUDA devices (if PyTorch supports CUDA).
+        This is needed to ensure proper CUDA stream synchronization. The child
+        futures, returned by the ``then`` method, will inherit these devices.
+        """
+        if devices is None:
+            devices = []
+        device_indices = []
+        for d in devices:
+            d = torch.device(d)
+            if d.type == "cpu":
+                continue
+            if d.type != "cuda":
+                raise ValueError(f"Expected CPU or CUDA devices, got {d}")
+            device_indices.append(d.index)
+        super().__init__(device_indices)
 
     def done(self) -> bool:
         r"""
