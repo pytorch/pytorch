@@ -329,9 +329,9 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
 }
 
 ArgValue TensorExprKernel::jitToArgValue(const torch::jit::Value* v) const {
-  auto ti = tensors_.find(v);
-  if (ti != tensors_.end()) {
-    return BufHandle(ti->second->buf());
+  auto ti = bufs_.find(v);
+  if (ti != bufs_.end()) {
+    return BufHandle(ti->second);
   }
   if (v->node()->kind() == prim::Constant) {
     const auto val = toIValue(v).value();
