@@ -49,6 +49,7 @@
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/utils/crash_handler.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
@@ -925,6 +926,10 @@ PyObject* initModule() {
 
   // Automatically translate errors thrown from pybind11 functions
   py::register_exception_translator([](std::exception_ptr e) { // NOLINT
+    if (torch::crash_handler::is_enabled()) {
+      torch::crash_handler::write_minidump();
+    }
+
     try {
       if (e) {
         std::rethrow_exception(e);
