@@ -16,3 +16,6 @@ def enable_minidump_collection(directory=DEFAULT_MINIDUMP_DIR):
         raise RuntimeError(f"Directory does not exist: {directory}")
 
     torch._C._enable_minidump_collection(directory)  # type: ignore
+
+def disable_minidump_collection():
+    torch._C._disable_minidump_collection()  # type: ignore
