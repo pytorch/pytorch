@@ -100,12 +100,10 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
 Tensor conv2d_prepack_run(
     const Tensor& input,
     const c10::intrusive_ptr<Conv2dOpContext>& op_context) {
-    
   return conv2d(input, *op_context);
 }
 
 } // namespace prepack
-
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl("conv2d", TORCH_FN(conv2d));
