@@ -2,7 +2,6 @@
 
 <!-- toc -->
 
-- [PyTorch Glossary](#pytorch-glossary)
 - [Operation and Kernel](#operation-and-kernel)
   - [ATen](#aten)
   - [Operation](#operation)
