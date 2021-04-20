@@ -365,14 +365,15 @@ def gen_variable_type_shard(
     for fn in filtered_fns_with_diff_infos:
         f = fn.func
         with native_function_manager(f):
-            name = cpp.name(f.func) formals = gen_formals(f)
+            name = cpp.name(f.func)
+            formals = gen_formals(f)
 
             type_definitions.append(METHOD_DEFINITION.substitute(
                 return_type=cpp.returns_type(f.func.returns).cpp_type(),
                 type_wrapper_name=type_wrapper_name(f),
                 type_definition_body=emit_body(fn), formals=formals,
                 ))
-                wrapper_registrations.append(gen_wrapper_registration(f))
+            wrapper_registrations.append(gen_wrapper_registration(f))
 
         # See Note [Manual Backend kernels]
         assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
