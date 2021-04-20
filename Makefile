@@ -32,14 +32,15 @@ generate-gha-workflows:
 	$(MAKE) shellcheck-gha
 
 setup_lint:
-	python scripts/actions_local_runner.py --file .github/workflows/lint.yml \
+	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
 	 	--job 'flake8-py3' --step 'Install dependencies'
-	python scripts/actions_local_runner.py --file .github/workflows/lint.yml \
+	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
 	 	--job 'cmakelint' --step 'Install dependencies'
+	pip install jinja2
 
 quick_checks:
 # TODO: This is broken when 'git config submodule.recurse' is 'true'
-	python scripts/actions_local_runner.py \
+	@python tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--job 'quick-checks' \
 		--step 'Ensure no trailing spaces' \
@@ -51,19 +52,19 @@ quick_checks:
 		--step 'Ensure correct trailing newlines'
 
 flake8:
-	python scripts/actions_local_runner.py \
+	@python tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--job 'flake8-py3' \
 		--step 'Run flake8'
 
 mypy:
-	python scripts/actions_local_runner.py \
+	@python tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--job 'mypy' \
 		--step 'Run mypy'
 
 cmakelint:
-	python scripts/actions_local_runner.py \
+	@python tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--job 'cmakelint' \
 		--step 'Run cmakelint'
@@ -72,4 +73,4 @@ clang_tidy:
 	echo "clang-tidy local lint is not yet implemented"
 	exit 1
 
-lint: flake8 mypy quick_checks cmakelint
+lint: flake8 mypy quick_checks cmakelint shellcheck-gha generate-gha-workflows
