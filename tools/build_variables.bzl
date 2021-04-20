@@ -282,6 +282,8 @@ core_sources_full_mobile = [
 ]
 
 core_sources_full = core_sources_full_mobile + [
+    "torch/csrc/jit/runtime/interpreter/frame.cpp",
+    "torch/csrc/jit/runtime/interpreter/preprocess_graph.cpp",
     "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
