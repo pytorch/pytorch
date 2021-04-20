@@ -12216,7 +12216,6 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA   # Test if CPU and GPU results match
     def test_ReflectionPad2d_large(self, device):
         shapes = ([2, 65736, 6, 6], [65736, 2, 6, 6])
-        # shapes = ([2, 4, 6, 6], [4, 2, 6, 6])
         pad = (1, 2, 3, 4)
         for shape in shapes:
             x = torch.randn(shape, device=device, requires_grad=True)
