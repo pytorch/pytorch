@@ -12,8 +12,8 @@ from execution.work import WorkOrder
 
 
 REPEATS = 5
-TIMEOUT = 600  # Seconds
-RETRIES = 3
+TIMEOUT = 300  # Seconds
+RETRIES = 20
 
 VERSION = 0
 MD5 = "4d55e8abf881ad38bb617a96714c1296"
