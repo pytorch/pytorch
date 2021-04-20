@@ -21,8 +21,9 @@ install_nvidia_driver() {
     (
         set -x
         sudo yum groupinstall -y "Development Tools"
-        curl -fsL -o nvidia_driver "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
-        sudo /bin/bash nvidia_driver -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
+        sudo curl -fsL -o /tmp/nvidia_driver "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
+        sudo /bin/bash /tmp/nvidia_driver -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
+        sudo rm -fv /tmp/nvidia_driver
         nvidia-smi
     )
 }
