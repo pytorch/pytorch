@@ -137,9 +137,10 @@ class TCPStore(Store):
         self,
         host_name: str,
         port: int,
-        world_size: int,
-        is_master: bool,
-        timeout: timedelta,
+        world_size: int = ...,
+        is_master: bool = ...,
+        timeout: timedelta = ...,
+        wait_for_workers: bool = ...
     ): ...
 
 class PrefixStore(Store):
