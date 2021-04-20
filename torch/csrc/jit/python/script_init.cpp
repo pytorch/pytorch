@@ -1501,7 +1501,13 @@ void initJitScriptBindings(PyObject* module) {
         if (cu->get_type(classname) != nullptr) {
           classname = cu->mangle(classname);
         }
-        auto classType = ClassType::create(classname, cu);
+
+        auto classType = ClassType::create(
+            classname,
+            cu,
+            /* is_module = */ false,
+            /* doc_string = */ "",
+            getUnresolvedClassAttributes(classDef));
         cu->register_type(classType);
         std::vector<ResolverPtr> methodRcbs, propRcbs;
         std::vector<Def> methodDefs;
