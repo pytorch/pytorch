@@ -45,6 +45,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_win32,
     create_device,
     with_dist_debug_levels,
+    create_tcp_store
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -169,26 +170,9 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
         return c10d.PrefixStore(self.prefix, self.filestore)
 
 
-def create_tcp_store(addr, world_size=1, wait_for_workers=True):
-    """
-    Creates a TCP store. Retries if the chosen port is already in use.
-    """
-    ports = []
-    for _ in range(10):
-        try:
-            port = common.find_free_port()
-            ports.append(port)
-            return c10d.TCPStore(addr, port, world_size, True, wait_for_workers=wait_for_workers)
-        except RuntimeError as error:
-            if str(error) == "Address already in use":
-                continue
-            raise
-    raise RuntimeError("Unable to find free port (tried %s)" % ", ".join(ports))
-
-
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
-        store = create_tcp_store("localhost")
+        store = create_tcp_store()
         store.set_timeout(timedelta(seconds=300))
         return store
 
@@ -198,7 +182,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         else:
             err_msg_reg = "^Address already in use$"
         with self.assertRaisesRegex(RuntimeError, err_msg_reg):
-            addr = "localhost"
+            addr = DEFAULT_HOSTNAME
             port = common.find_free_port()
 
             # Use noqa to silence flake8.
@@ -287,7 +271,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super(PrefixTCPStoreTest, self).setUp()
-        self.tcpstore = create_tcp_store("localhost")
+        self.tcpstore = create_tcp_store()
         self.prefix = "test_prefix"
         self.tcpstore.set_timeout(timedelta(seconds=300))
 
@@ -403,7 +387,7 @@ class RendezvousFileTest(TestCase):
 @skip_if_win32()
 class RendezvousTCPTest(TestCase):
     def create_tcp_url(self):
-        addr = "localhost"
+        addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
         url = "tcp://%s:%d?world_size=%d" % (addr, port, 1)
         return url
