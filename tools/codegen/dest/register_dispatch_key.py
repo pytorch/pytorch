@@ -1,5 +1,4 @@
 from typing import List, Optional, Union
-import itertools
 from typing_extensions import Literal
 from dataclasses import dataclass
 
