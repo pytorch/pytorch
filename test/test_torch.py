@@ -3909,12 +3909,9 @@ else:
 
         backward_func(self, device)
 
-    # TODO: Documentation incorrectly claims that the backward
-    # has the error, but it's actuall the forward. Should fix
-    # it in this PR
     def test_nondeterministic_alert_NLLLoss(self, device):
         module = torch.nn.NLLLoss()
-        input = torch.randn(2, 3, 5, 5, device=device, requires_grad=True)
+        input = torch.randn(2, 3, 5, 5, device=device)
         target = torch.rand(2, 5, 5, device=device).mul(3).floor().long()
 
         @expectedAlertNondeterministic('SpatialClassNLLCriterion_updateOutput', 'cuda')
@@ -4134,8 +4131,6 @@ else:
         test_func(torch.gather)
         test_func(torch.Tensor.gather)
 
-    # TODO: This operation is not documented as nondeterministic. Need
-    #       to fix that in this PR
     def test_nondeterministic_alert_grid_sample_2d(self, device):
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, device=device)

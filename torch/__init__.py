@@ -405,7 +405,7 @@ def use_deterministic_algorithms(mode):
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.NLLLoss` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
@@ -423,6 +423,7 @@ def use_deterministic_algorithms(mode):
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.gather` when ``input`` dimension is larger than one
           and called on a CUDA tensor that requires grad
+        * :func:`torch.grid_sample` when attempting to differentiate a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
