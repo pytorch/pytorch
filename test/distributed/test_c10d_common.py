@@ -1,23 +1,15 @@
 import copy
-import logging
-import math
-import operator
 import os
 import random
-import signal
 import sys
 import tempfile
 import threading
 import time
 import traceback
 import unittest
-from unittest import mock
-from contextlib import contextmanager
 from datetime import timedelta
-from functools import reduce
-from itertools import groupby, product
+from itertools import product
 from sys import platform
-import numpy
 
 import torch
 import torch.distributed as c10d
@@ -27,7 +19,6 @@ if not c10d.is_available():
     sys.exit(0)
 
 import torch.distributed as dist
-import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.multiprocessing as mp
 import torch.nn.functional as F
@@ -35,16 +26,9 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._six import string_classes
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    skip_if_lt_x_gpu,
-    get_timeout,
-    skip_if_rocm,
-    simple_sparse_reduce_tests,
     skip_if_win32,
-    create_device,
-    with_dist_debug_levels,
     create_tcp_store
 )
 from torch.testing._internal.common_utils import (
@@ -58,11 +42,9 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
 )
 
-
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
 
 if platform == "darwin":
     LOOPBACK = "lo0"
@@ -83,7 +65,7 @@ def gpus_for_rank(world_size):
     gpus_for_rank = []
     for rank in range(world_size):
         gpus_for_rank.append(
-            visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
+            visible_devices[rank * gpus_per_process: (rank + 1) * gpus_per_process]
         )
     return gpus_for_rank
 
@@ -148,6 +130,7 @@ class FileStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+
 @skip_if_win32()
 class HashStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -157,6 +140,7 @@ class HashStoreTest(TestCase, StoreTestBase):
         store = c10d.HashStore()
         store.set_timeout(timedelta(seconds=300))
         return store
+
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -622,12 +606,12 @@ class AbstractDistributedDataParallelTest(object):
         return 2
 
     def _prepare_single_device_module(
-        self,
-        process_group,
-        devices,
-        device_ids,
-        global_batch_size,
-        gradient_as_bucket_view=False,
+            self,
+            process_group,
+            devices,
+            device_ids,
+            global_batch_size,
+            gradient_as_bucket_view=False,
     ):
         model = Net()
         device = devices[0] if devices else torch.device("cuda:%d" % self.rank)
@@ -647,12 +631,12 @@ class AbstractDistributedDataParallelTest(object):
         return model, ddp_model, input, target
 
     def _prepare_multi_device_module(
-        self,
-        process_group,
-        devices,
-        device_ids,
-        global_batch_size,
-        gradient_as_bucket_view=False,
+            self,
+            process_group,
+            devices,
+            device_ids,
+            global_batch_size,
+            gradient_as_bucket_view=False,
     ):
         self.assertTrue(
             len(devices) == 2 or len(devices) == 4,
@@ -677,12 +661,12 @@ class AbstractDistributedDataParallelTest(object):
         return model, ddp_model, input, target
 
     def _test_ddp_with_process_group(
-        self,
-        process_group,
-        devices,
-        device_ids,
-        multi_device=False,
-        gradient_as_bucket_view=False,
+            self,
+            process_group,
+            devices,
+            device_ids,
+            multi_device=False,
+            gradient_as_bucket_view=False,
     ):
         """
         Note: we pass down `device_ids` all the way to DistributedDataParallel
@@ -736,10 +720,10 @@ class AbstractDistributedDataParallelTest(object):
             step_model(
                 ddp_model,
                 input[
-                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
+                self.rank * local_batch_size: (self.rank + 1) * local_batch_size
                 ],
                 target[
-                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
+                self.rank * local_batch_size: (self.rank + 1) * local_batch_size
                 ],
             )
 
@@ -757,7 +741,7 @@ class AbstractDistributedDataParallelTest(object):
             input = input[torch.randperm(global_batch_size)]
 
     def _gpu_model_with_ddp_comm_hook(
-        self, process_group, hook=None, gradient_as_bucket_view=False, state=None
+            self, process_group, hook=None, gradient_as_bucket_view=False, state=None
     ):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
@@ -774,7 +758,7 @@ class AbstractDistributedDataParallelTest(object):
         return gpu_model
 
     def _gpu_model_with_builtin_ddp_comm_hook(
-        self, process_group, hook=None, gradient_as_bucket_view=False
+            self, process_group, hook=None, gradient_as_bucket_view=False
     ):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
@@ -800,7 +784,7 @@ class AbstractDistributedDataParallelTest(object):
         [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
 
     def _simple_hook(
-        self, state: object, bucket: dist.GradBucket
+            self, state: object, bucket: dist.GradBucket
     ) -> torch.futures.Future:
         fut = torch.futures.Future()
         fut.set_result([torch.ones_like(bucket.get_tensor())])
@@ -827,14 +811,14 @@ class DistributedDataParallelTest(AbstractDistributedDataParallelTest, MultiProc
 
     def test_invalid_powerSGD_state(self):
         for start_powerSGD_iter, use_error_feedback, warm_start in product(
-            [0, 1], [True, False], [True, False]
+                [0, 1], [True, False], [True, False]
         ):
             if not use_error_feedback and not warm_start:
                 continue
             with self.assertRaisesRegex(
-                ValueError,
-                "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
-                "because PowerSGD can only be applied after the first two iterations in DDP.",
+                    ValueError,
+                    "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
+                    "because PowerSGD can only be applied after the first two iterations in DDP.",
             ):
                 state = powerSGD.PowerSGDState(
                     process_group=None,
@@ -946,6 +930,7 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
             with self.assertRaisesRegex(RuntimeError, "to be one of"):
                 dist._get_debug_mode()
+
 
 if __name__ == "__main__":
     assert (

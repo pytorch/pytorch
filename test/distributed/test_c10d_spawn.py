@@ -1,21 +1,11 @@
-import copy
-import os
 import sys
 import tempfile
-import unittest
 
 import torch
 import torch.distributed as c10d
 import torch.multiprocessing as mp
-import torch.nn as nn
-
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_distributed import \
-    create_device, MultiProcessTestCase, skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import TestCase, load_tests, \
-    run_tests
-from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_WITH_TSAN
-
+from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN
+from torch.testing._internal.common_utils import load_tests
 
 # Torch distributed.nn is not available in windows
 # check #42095, it errors on import.
@@ -25,7 +15,6 @@ try:
 except ImportError:
     _torch_dist_nn_available = False
 
-
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -34,14 +23,12 @@ if not c10d.is_available():
     print('c10d not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
-
 if NO_MULTIPROCESSING_SPAWN:
     print('spawn not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
 
 class AbstractProcessGroupShareTensorTest(object):
-
     world_size = 2
 
     def _test_multiprocess(self, f, shared_tensors, init_pg, n_output):

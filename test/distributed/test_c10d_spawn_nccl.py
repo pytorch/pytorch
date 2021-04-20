@@ -1,24 +1,10 @@
-import copy
-import os
-import sys
-import tempfile
 import unittest
 
+import test_c10d_spawn
 import torch
 import torch.distributed as c10d
-import torch.multiprocessing as mp
-import torch.nn as nn
-
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_distributed import \
-    create_device, MultiProcessTestCase, skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import TestCase, load_tests, \
-    run_tests
-from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_WITH_TSAN
-
-import test_c10d_spawn
-from test_c10d_spawn import _torch_dist_nn_available
-
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 
