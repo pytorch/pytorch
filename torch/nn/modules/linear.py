@@ -72,15 +72,13 @@ class Linear(Module):
     out_features: int
     weight: Tensor
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = Parameter(torch.empty((out_features, in_features), **factory_kwargs))
+        self.weight = Parameter(torch.empty(out_features, in_features))
         if bias:
-            self.bias = Parameter(torch.empty(out_features, **factory_kwargs))
+            self.bias = Parameter(torch.empty(out_features))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -154,17 +152,15 @@ class Bilinear(Module):
     out_features: int
     weight: Tensor
 
-    def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True) -> None:
         super(Bilinear, self).__init__()
         self.in1_features = in1_features
         self.in2_features = in2_features
         self.out_features = out_features
-        self.weight = Parameter(torch.empty((out_features, in1_features, in2_features), **factory_kwargs))
+        self.weight = Parameter(torch.empty(out_features, in1_features, in2_features))
 
         if bias:
-            self.bias = Parameter(torch.empty(out_features, **factory_kwargs))
+            self.bias = Parameter(torch.empty(out_features))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -217,16 +213,14 @@ class LazyLinear(LazyModuleMixin, Linear):
     weight: UninitializedParameter
     bias: UninitializedParameter  # type: ignore[assignment]
 
-    def __init__(self, out_features: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(self, out_features: int, bias: bool = True) -> None:
         # bias is hardcoded to False to avoid creating tensor
         # that will soon be overwritten.
         super().__init__(0, 0, False)
-        self.weight = UninitializedParameter(**factory_kwargs)
+        self.weight = UninitializedParameter()
         self.out_features = out_features
         if bias:
-            self.bias = UninitializedParameter(**factory_kwargs)
+            self.bias = UninitializedParameter()
 
     def reset_parameters(self) -> None:
         if not self.has_uninitialized_params() and self.in_features != 0:

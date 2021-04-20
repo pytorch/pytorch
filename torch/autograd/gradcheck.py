@@ -328,7 +328,7 @@ def get_jvp_wrt_specific_input(fn, input_idx, inputs, outputs, u, eps, grad_out)
 
 
 def check_jacobians_equal(j1, j2, atol):
-    # Check whether the max diff betwen two jacobians are within some tolerance `atol`
+    # Check whether the max diff between two jacobians are within some tolerance `atol`
     for j1_x, j2_x in zip(j1, j2):
         if j1_x.numel() != 0 and (j1_x - j2_x).abs().max() > atol:
             return False
