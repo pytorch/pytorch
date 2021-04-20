@@ -58,6 +58,7 @@ void initCrashHandlerBindings(PyObject* module) {
   auto m = pybind11::handle(module).cast<pybind11::module>();
 
   m.def("_enable_minidump_collection", _enable_minidump_collection)
+      .def("_disable_minidump_collection", _disable_minidump_collection)
       .def("_get_minidump_directory", _get_minidump_directory);
 }
 } // namespace crash_handler
