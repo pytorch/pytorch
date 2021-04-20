@@ -891,14 +891,8 @@ TORCH_IMPL_FUNC(addmm_cpu_out)(const Tensor& self, const Tensor& m1,
     return;
   }
 
-  if (&result != &self) {
-    self_ = expand_size(self, {m1_sizes[0], m2_sizes[1]}, "addmm");
-  } else {
-    self_ = c10::MaybeOwned<Tensor>::borrowed(self);
-  }
-
-  if ((&result != &self) && (betaval != 0.0)) {
-      at::native::copy_(const_cast<Tensor&>(result), *self_);
+  if (!self.is_same(result) && (betaval != 0.0)) {
+    at::native::copy_(const_cast<Tensor&>(result), *self_);
   }
 
   bool transpose_c = false;
