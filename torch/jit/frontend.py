@@ -2,7 +2,6 @@ import os
 import torch
 import sys
 import ast
-import astunparse
 import inspect
 import string
 from textwrap import dedent
@@ -159,6 +158,23 @@ def get_class_properties(cls, self_name):
     return properties
 
 
+def get_class_assigns(ctx, cls_ast):
+    assigns = []
+
+    def maybe_build_assign(builder, entry):
+        nonlocal assigns
+        try:
+            assigns.append(builder(ctx, entry))
+        except NotSupportedError:
+            pass
+    for entry in cls_ast.body:
+        if isinstance(entry, ast.Assign):
+            maybe_build_assign(StmtBuilder.build_Assign, entry)
+        elif isinstance(entry, ast.AnnAssign):
+            maybe_build_assign(StmtBuilder.build_AnnAssign, entry)
+    return assigns
+
+
 def get_jit_class_def(cls, self_name):
     # Get defs for each method within the current class independently
     # TODO: proper overriding analysis when implementing class inheritance
@@ -172,10 +188,10 @@ def get_jit_class_def(cls, self_name):
     def is_classmethod(fn):
         return inspect.ismethod(fn) and getattr(fn, "__self__", None) == cls
 
-    methods = [get_jit_def(method[1],
-                           method[0],
+    methods = [get_jit_def(obj,
+                           name,
                            self_name=self_name,
-                           is_classmethod=is_classmethod(method[1])) for method in methods]
+                           is_classmethod=is_classmethod(obj)) for (name, obj) in methods]
 
     properties = get_class_properties(cls, self_name)
 
@@ -185,7 +201,11 @@ def get_jit_class_def(cls, self_name):
     py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
-    return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
+    class_ast = py_ast.body[0]
+    assert isinstance(class_ast, ast.ClassDef)
+    assigns = get_class_assigns(ctx, class_ast)
+
+    return build_class_def(ctx, class_ast, methods, properties, self_name, assigns)
 
 
 def normalize_source_lines(sourcelines: List[str]) -> List[str]:
@@ -281,10 +301,10 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_class_def(ctx, py_def, methods, properties, self_name):
+def build_class_def(ctx, py_def, methods, properties, self_name, assigns):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties)
+    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties, assigns)
 
 
 def build_def(ctx, py_def, type_line, def_name, self_name=None):
@@ -346,6 +366,8 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
 
 def build_ignore_context_manager(ctx, stmt):
     def process_ins_outs(args):
+        # parse the context manager to figure out inputs and outputs
+        # with their annotated types
         inputs = []
         outputs = []
         for arg in args:
@@ -359,13 +381,17 @@ def build_ignore_context_manager(ctx, stmt):
         return inputs, outputs
 
     def create_unique_name_ext(ctx, stmt):
+        # extension will be based on the filename plus the line number
+        # of original context manager
         return os.path.basename(ctx.filename).replace(".", "_") + "_" + str(stmt.lineno)
 
     def build_return_ann_stmt(outputs):
         return_type_ann = ""
         return_statement_str = "return "
+        if len(outputs) == 0:
+            return_type_ann += " -> None: pass"
         if len(outputs) == 1:
-            return_type_ann = outputs[0][1]
+            return_type_ann = " -> " + outputs[0][1] + ": pass"
             return_statement_str += outputs[0][0]
         if len(outputs) > 1:
             return_type_ann = "Tuple["
@@ -373,7 +399,7 @@ def build_ignore_context_manager(ctx, stmt):
                 var_name, var_ann = var
                 return_type_ann += var_ann + ", "
                 return_statement_str += var_name + ", "
-            return_type_ann = return_type_ann[:-2] + "]"
+            return_type_ann = " -> " + return_type_ann[:-2] + "]" + ": pass"
             return_statement_str = return_statement_str[:-2]
         return return_type_ann, return_statement_str
 
@@ -396,11 +422,7 @@ def build_ignore_context_manager(ctx, stmt):
     ignore_function_str = ignore_function_str[:-2] + ")"
 
     return_ann, return_stmt = build_return_ann_stmt(outputs)
-
-    if len(outputs) == 0:
-        ignore_function_str += " -> None: pass"
-    else:
-        ignore_function_str += " -> " + return_ann + ": pass"
+    ignore_function_str += return_ann
 
     # first create the functionDef object from just declaration
     ignore_function = ast.parse(ignore_function_str).body[0]
@@ -413,22 +435,21 @@ def build_ignore_context_manager(ctx, stmt):
     ignore_function.body.append(return_stmt)
 
     # registers the custom function in the global context
-    ignore_func_str = astunparse.unparse(ignore_function)
+    ignore_func_str = ast.unparse(ignore_function)
     ignore_func_str += "\nglobals()[\"{}\"] = {}".format(ignore_function_name, ignore_function_name)
     ignore_func_str += "\nglobals()[\"{}\"]._torchscript_modifier = FunctionModifiers.IGNORE".format(ignore_function_name)
-    print("IG: ", ignore_func_str)
     exec(ignore_func_str)  # noqa P204
 
     # build the statements as:
     # <out_1>, <out_2>, ... = torch.jit.frontend.<func>(<in_1>, <in_2>)
     assign_str_lhs = build_args(outputs)
+    # this function will be registered in torch.jit.frontend module by default
     assign_str_rhs = "torch.jit.frontend.{}(".format(ignore_function_name) + build_args(inputs) + ")"
 
     if len(outputs) > 0:
         assign_str = assign_str_lhs + " = " + assign_str_rhs
     else:
         assign_str = assign_str_rhs
-    print(assign_str_rhs)
 
     assign_ast = ast.parse(assign_str).body[0]
     return assign_ast
@@ -615,6 +636,8 @@ class StmtBuilder(Builder):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
         # Handle ignore context manager
         if isinstance(stmt.items[0].context_expr, ast.Call):
+            if sys.version_info < (3, 9):
+                raise RuntimeError("Custom context manager is not supported")
             context_manager_name = stmt.items[0].context_expr.func.id
             if context_manager_name == "objmode":
                 assign_ast = build_ignore_context_manager(ctx, stmt)

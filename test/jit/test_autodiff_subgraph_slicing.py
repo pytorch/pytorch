@@ -2,6 +2,7 @@ import os
 import sys
 import unittest
 from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, enable_profiling_mode_for_profiling_tests
+from torch.testing._internal.common_jit import check_against_reference
 import torch
 
 # Make the helper files in test/ importable
@@ -9,7 +10,8 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import num_profiled_runs
+
+from typing import Optional
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -49,57 +51,62 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
-    def test_differentiable_graph_ops_requires_grad(self):
-        x = torch.randn(8, 2, dtype=torch.float).requires_grad_()
-        y = torch.randn(8, 2, dtype=torch.float)
-
-        def t(x : torch.Tensor, y : torch.Tensor):
-            o = x + 1.0
-            o1 = torch.relu(o)
-            o = y + 1.5
-            o2 = torch.relu(o)
-            o3 = o1 + o2
-            return o1, o2, o3
+    def test_bias_as_module_attr(self):
 
         with enable_profiling_mode_for_profiling_tests():
+            class M(torch.nn.Module):
+                def __init__(self, has_bias):
+                    super(M, self).__init__()
+                    self.ll = torch.nn.Linear(10, 10, has_bias)
 
-            t_jit = torch.jit.script(t)
-            jit_o = t_jit(x, y)
-            jit_o = t_jit(x, y)
-            o = t(x, y)
+                def forward(self, x, y):
+                    return self.ll(x + y) * x + y
 
-            FileCheck().check("prim::DifferentiableGraph").run(t_jit.graph_for(x, y))
-            # validate the differentiableGraphOps are marking proper requires_grad
-            for oo, jit_oo in zip(o, jit_o):
-                self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
-                self.assertEqual(oo, jit_oo)
-            # one more runs to trigger fusion
-            jit_o = t_jit(x, y)
-            for oo, jit_oo in zip(o, jit_o):
-                self.assertEqual(oo.dtype, jit_oo.dtype)
-                self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
-                self.assertEqual(oo, jit_oo)
+            x = torch.rand(10, 10, requires_grad=True)
+            no_bias = M(False)
+            scripted_no_bias = torch.jit.script(no_bias)
+            scripted_no_bias(x, x)
+            scripted_no_bias(x, x)
+            scripted_no_bias(x, x)
+            has_bias = M(True)
+            check_against_reference(self, scripted_no_bias, no_bias, lambda x: x, (x, x,), check_types=False)
+            scripted_has_bias = torch.jit.script(has_bias)
+            scripted_has_bias(x, x)
+            scripted_has_bias(x, x)
+            scripted_has_bias(x, x)
+            check_against_reference(self, scripted_has_bias, has_bias, lambda x: x, (x, x,), check_types=False)
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Simple Executor doesn't support gradients")
-    def test_prune_grad(self):
-        @torch.jit.script
-        def t(input, bias):
-            return torch.nn.functional.relu(input + bias)
-        input = torch.randn(2, 8, requires_grad=True)
-        bias = torch.randn(8, requires_grad=False)    # bias does NOT require grad
-        NUM_PROFILED_RUNS = 1
-        with num_profiled_runs(NUM_PROFILED_RUNS):
-            WARMUP = 3    # 2 runs to reach backward + 1 to optimize it
-            for x in range(WARMUP):
-                o = t(input, bias)
-                o.sum().backward()
+    def test_constructed_bias(self):
 
-            fwd_plan = list(t.get_debug_state().execution_plans.values())[0]
-            bwd_graph = list(fwd_plan.code.grad_executor_states()[0].execution_plans.values())[0].graph
-            tup = next(bwd_graph.outputs())
-            self.assertEqual(len(list(tup.node().inputs())), 1)
+        with enable_profiling_mode_for_profiling_tests():
+            def method1(x, weight, b1, b2):
+                bias = b1 * b2
+                return torch.nn.functional.linear(x, weight, bias)
+            N = 10
+            x = torch.rand(N, N, requires_grad=True)
+            weight = torch.rand(N, N, requires_grad=True)
+            b1 = torch.rand(N, N, requires_grad=True)
+            b2 = torch.rand(N, N, requires_grad=True)
+            scripted = self.checkScript(method1, (x, weight, b1, b2))
+            # check_types requires last_graph on scripted to be set, so we just skip it
+            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, b1, b2), check_types=False)
+
+    def test_bias_as_arg(self):
+
+        with enable_profiling_mode_for_profiling_tests():
+            def method1(x, weight, bias: Optional[torch.Tensor]):
+                return torch.nn.functional.linear(x, weight, bias).relu() + 2
+            N = 10
+            x = torch.rand(N, N, requires_grad=True)
+            weight = torch.rand(N, N, requires_grad=True)
+            bias = None
+            scripted = self.checkScript(method1, (x, weight, bias))
+            # check_types requires last_graph on scripted to be set, so we just skip it
+            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
+            bias = torch.rand(N, N, requires_grad=True)
+            scripted = self.checkScript(method1, (x, weight, bias))
+            # check_types requires last_graph on scripted to be set, so we just skip it
+            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
 
     def test_simple_merge(self):
         # o --> o

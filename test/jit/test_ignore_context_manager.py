@@ -1,5 +1,6 @@
 import os
 import sys
+import unittest
 
 import torch
 
@@ -14,10 +15,12 @@ if __name__ == "__main__":
                        "instead.")
 
 class TestIgnoreContextManager(JitTestCase):
+    @unittest.skipIf(sys.version_info < (3, 9), "only supported in python3.9")
     def test_with_ignore_context_manager_with_inp_out(self):
         class A(torch.nn.Module):
             def __init__(self):
                 super(A, self).__init__()
+
             def forward(self):
                 a: int = 4
                 b: int = 5
@@ -34,6 +37,7 @@ class TestIgnoreContextManager(JitTestCase):
         class B(torch.nn.Module):
             def __init__(self):
                 super(B, self).__init__()
+
             def forward(self):
                 a: int = 4
                 b: int = 5
@@ -48,6 +52,7 @@ class TestIgnoreContextManager(JitTestCase):
         class C(torch.nn.Module):
             def __init__(self):
                 super(C, self).__init__()
+
             def forward(self):
                 a: int = 4
                 b: int = 5
@@ -58,10 +63,12 @@ class TestIgnoreContextManager(JitTestCase):
         s = torch.jit.script(C())
         self.assertEqual(s(), 6)
 
+    @unittest.skipIf(sys.version_info < (3, 9), "only supported in python3.9")
     def test_with_ignore_context_manager_with_just_inp(self):
         class A(torch.nn.Module):
             def __init__(self):
                 super(A, self).__init__()
+
             def forward(self):
                 a: int = 4
                 b: int = 5
@@ -69,12 +76,14 @@ class TestIgnoreContextManager(JitTestCase):
                     l = [2 + b for i in range(a) if i > 2]
                 return a
         s = torch.jit.script(A())
-        self.assertEqual(s(), 9)
+        self.assertEqual(s(), 4)
 
+    @unittest.skipIf(sys.version_info < (3, 9), "only supported in python3.9")
     def test_with_ignore_context_manager_wrong_name(self):
         class A(torch.nn.Module):
             def __init__(self):
                 super(A, self).__init__()
+
             def forward(self):
                 a: int = 4
                 b: int = 5
@@ -87,5 +96,4 @@ class TestIgnoreContextManager(JitTestCase):
                 return c + d
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
                                     "Context manager with name objdfjehfeh is not supported"):
-
             s = torch.jit.script(A())
