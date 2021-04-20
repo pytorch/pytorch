@@ -72,7 +72,16 @@ if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
     # Save sccache logs to file
     sccache --stop-server || true
     rm ~/sccache_error.log || true
-    if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    if [[ -n "${SKIP_SCCACHE_INITIALIZATION:-}" ]]; then
+      # sccache --start-server seems to hang forever on self hosted runners for GHA
+      # so let's just go ahead and skip the --start-server altogether since it seems
+      # as though sccache still gets used even when the sscache server isn't started
+      # explicitly
+      echo "Skipping sccache server initialization, setting environment variables"
+      export SCCACHE_IDLE_TIMEOUT=1200
+      export SCCACHE_ERROR_LOG=~/sccache_error.log
+      export RUST_LOG=sccache::server=error
+    elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
       SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
     else
       # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:

@@ -64,6 +64,7 @@ TESTS = [
     'test_linalg',
     'test_logging',
     'test_mkldnn',
+    'test_module_init',
     'test_multiprocessing',
     'test_multiprocessing_spawn',
     'distributed/test_nccl',
