@@ -40,6 +40,10 @@ TORCH_LIBRARY_IMPL(_, AutogradCPU, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 
+TORCH_LIBRARY_IMPL(_, AutogradXPU, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
 TORCH_LIBRARY_IMPL(_, AutogradCUDA, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }

@@ -86,7 +86,7 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedCPU;
   } else if (t == DispatchKey::QuantizedCUDA) {
     return Backend::QuantizedCUDA;
-  } else if (t == DispatchKey::XPU) {
+  } else if (t == DispatchKey::XPU || t == DispatchKey::AutogradXPU) {
     return Backend::XPU;
   } else if (t == DispatchKey::SparseXPU) {
     return Backend::SparseXPU;
