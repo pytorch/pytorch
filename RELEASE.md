@@ -54,7 +54,7 @@ Create PR from `release/{MAJOR}.{MINOR}` to `orig/release/{MAJOR}.{MINOR}` in or
 Example:
 * https://github.com/pytorch/pytorch/pull/51995
 
- TODO: Create release branch in `builder` repo and pin release CI to use that branch rather than HEAD of builder repo. 
+ TODO: Create release branch in `builder` repo and pin release CI to use that branch rather than HEAD of builder repo.
 ## Drafting RCs (Release Candidates)
 
 To draft RCs a user with necessary permission can push a git tag to the main `pytorch/pytorch` git repository.
