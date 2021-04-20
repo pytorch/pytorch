@@ -3180,7 +3180,7 @@ class TestRandomTensorCreation(TestCase):
 
         # Test core functionality. On CUDA, different value of n has different
         # code path
-        for n in (50000, 100000):
+        for n in (100, 50000, 100000):
             # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
             # different from others on CUDA.
             for dtype in (torch.long, torch.half, torch.float):
