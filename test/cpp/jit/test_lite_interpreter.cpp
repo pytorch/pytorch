@@ -576,7 +576,7 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
 }
 
 TEST(LiteInterpreterTest, LoadAndRunByteCodeModel) {
-  // Load check in model: sequence.ptl
+  // Test current runtime can load and run bytecode version 4 and 5.
   std::string file_path(__FILE__);
   auto test_model_file_v5 =
       file_path.substr(0, file_path.find_last_of("/\\") + 1);
