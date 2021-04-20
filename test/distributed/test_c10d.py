@@ -4822,7 +4822,7 @@ class CommTest(MultiProcessTestCase):
         # WORLD_SIZE env var for dev purposes. Would like to use
         # torch.cuda.device_count() here, but runs into CUDA re-init in forked
         # subprocess error.
-        return os.environ.get("WORLD_SIZE", 2)
+        return int(os.environ.get("WORLD_SIZE", 2))
 
     def _test_broadcast_coalesced(self, process_group, device, root_rank):
         half = torch.float16
@@ -4929,11 +4929,13 @@ class CommTest(MultiProcessTestCase):
                 )
                 self.assertEqual(initial_num + i + 1, seq_num)
 
+        if self.rank == 0:
+            print(f"HAVE WORLD SIZE {dist.get_world_size(process_group)}")
         if dist.get_world_size(process_group) > 2:
             # Test when certain ranks don't call collectives
-            if dist.get_rank(process_group) not in [0, 1]:
+            if dist.get_rank(process_group) not in [0, 2]:
                 dist.all_reduce(t, group=process_group, async_op=True)
-            # Now ranks 0 and 1 should be lagging by 1.
+            # Now ranks 0 and 2 should be lagging by 1.
             if not c10d.distributed_c10d._rank_not_in_group(process_group):
                 seq_num = process_group._get_sequence_number_for_group()
                 rank = dist.get_rank(process_group)
@@ -4941,22 +4943,20 @@ class CommTest(MultiProcessTestCase):
                 dist.all_gather_object(obj_list, (rank, seq_num), group=verify_pg)
                 rank_to_seq_num = {rank: num for (rank, num) in obj_list}
                 self.assertEqual(len(set(rank_to_seq_num.values())), 2)
-                self.assertEqual(rank_to_seq_num[0], rank_to_seq_num[1])
+                self.assertEqual(rank_to_seq_num[0], rank_to_seq_num[2])
                 expected_same = {
                     rank_to_seq_num[i]
                     for i in rank_to_seq_num.keys()
-                    if i not in [0, 1]
+                    if i not in [0, 2]
                 }
                 self.assertEqual(len(expected_same), 1)
-                self.assertEqual(rank_to_seq_num[0] + 1, rank_to_seq_num[2])
+                self.assertEqual(rank_to_seq_num[0] + 1, rank_to_seq_num[1])
 
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_sequence_num_incremented_gloo_default(self):
+    def _test_sequence_num_incremented_default_group(self, backend_name):
         torch.cuda.set_device(self.rank)
         store = c10d.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            "gloo",
+            backend_name,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -4965,52 +4965,39 @@ class CommTest(MultiProcessTestCase):
             c10d.distributed_c10d._get_default_group(),
             ranks=list(i for i in range(dist.get_world_size())),
         )
-
-    @skip_if_lt_x_gpu(4)
-    @requires_gloo()
-    def test_sequence_num_incremented_gloo_subgroup(self):
-        torch.cuda.set_device(self.rank)
-        store = c10d.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            "gloo",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-        subgroup_ranks = [0, 1, 2]
-        subgroup = dist.new_group(subgroup_ranks)
-        self._test_sequence_num_incremented(subgroup, subgroup_ranks)
-
-    @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sequence_num_incremented_nccl_subgroup(self):
-        torch.cuda.set_device(self.rank)
-        store = c10d.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-        subgroup_ranks = [0, 1, 2]
-        subgroup = dist.new_group(subgroup_ranks)
-        self._test_sequence_num_incremented(subgroup, subgroup_ranks)
 
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_sequence_num_incremented_nccl_default(self):
+        self._test_sequence_num_incremented_default_group("nccl")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_sequence_num_incremented_gloo_default(self):
+        self._test_sequence_num_incremented_default_group("gloo")
+
+    def _test_sequence_num_incremented_subgroup(self, backend_name):
         torch.cuda.set_device(self.rank)
         store = c10d.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            "nccl",
+            backend_name,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
         )
-        self._test_sequence_num_incremented(
-            c10d.distributed_c10d._get_default_group(),
-            ranks=list(i for i in range(dist.get_world_size())),
-        )
+        subgroup_ranks = [0, 1, 2]
+        subgroup = dist.new_group(subgroup_ranks)
+        self._test_sequence_num_incremented(subgroup, subgroup_ranks)
+
+    @skip_if_lt_x_gpu(4)
+    @requires_gloo()
+    def test_sequence_num_incremented_gloo_subgroup(self):
+        self._test_sequence_num_incremented_subgroup("gloo")
+
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sequence_num_incremented_nccl_subgroup(self):
+        self._test_sequence_num_incremented_subgroup("nccl")
 
     def _test_sequence_num_set_default_pg(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -5048,10 +5035,12 @@ class CommTest(MultiProcessTestCase):
         )
 
         subgroup = dist.new_group([0, 1])
-        subgroup_seq = subgroup._get_sequence_number_for_group()
-        obj_list = [None for _ in range(dist.get_world_size())]
-        dist.all_gather_object(obj_list, subgroup_seq)
-        self.assertEqual(len(set(obj_list)), 1)
+
+        if not c10d.distributed_c10d._rank_not_in_group(subgroup):
+            subgroup_seq = subgroup._get_sequence_number_for_group()
+            obj_list = [None for _ in range(dist.get_world_size(subgroup))]
+            dist.all_gather_object(obj_list, subgroup_seq, group=subgroup)
+            self.assertEqual(len(set(obj_list)), 1)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(2)
