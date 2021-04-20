@@ -297,9 +297,9 @@ void softplus_backward_kernel(TensorIterator& iter, const Scalar& beta_, const S
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softplus_backward_cuda", [&]() {
     auto beta = beta_.to<scalar_t>();
     auto threshold = threshold_.to<scalar_t>();
-    gpu_kernel(iter, [beta, threshold]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    gpu_kernel(iter, [beta, threshold]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
       scalar_t z = std::exp(b * beta);
-      return (b * beta) > threshold ? a : a * (z - scalar_t(1.)) / z;
+      return (c * beta) > threshold ? a : a * (z - scalar_t(1.)) / z;
     });
   });
 }

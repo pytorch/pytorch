@@ -356,7 +356,17 @@ Tensor & softplus_backward_out(const Tensor& grad_output,
     const Scalar& threshold,
     const Tensor& output,
     Tensor& grad_input) {
-  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(grad_input)
+    .add_input(grad_output)
+    .add_input(output)
+    .add_input(self)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
+    .build();
   softplus_backward_stub(iter.device_type(), iter, beta, threshold);
   return grad_input;
 }
@@ -368,7 +378,17 @@ Tensor softplus_backward(
     const Scalar& threshold,
     const Tensor& output) {
   Tensor grad_input;
-  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(grad_input)
+    .add_input(grad_output)
+    .add_input(output)
+    .add_input(self)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
+    .build();
   softplus_backward_stub(iter.device_type(), iter, beta, threshold);
   return iter.output();
 }

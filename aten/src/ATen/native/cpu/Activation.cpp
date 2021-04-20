@@ -552,13 +552,13 @@ void softplus_backward_kernel(TensorIterator& iter, const Scalar& beta_, const S
     const Vec one_vec(static_cast<scalar_t>(1.0));
     cpu_kernel_vec(
         iter,
-        [beta, threshold](scalar_t a, scalar_t b) -> scalar_t {
+        [beta, threshold](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
           scalar_t z = std::exp(b * beta);
-          return (b * beta) > threshold ? a : a * (z - scalar_t(1.)) / z;
+          return (c * beta) > threshold ? a : a * (z - scalar_t(1.)) / z;
         },
-        [beta_vec, one_vec, threshold_vec](Vec a, Vec b) -> Vec {
+        [beta_vec, one_vec, threshold_vec](Vec a, Vec b, Vec c) -> Vec {
           const Vec z = (b * beta_vec).exp();
-          return Vec::blendv(a * (z - one_vec) / z, a, (b * beta_vec) > threshold_vec);
+          return Vec::blendv(a * (z - one_vec) / z, a, (c * beta_vec) > threshold_vec);
         }
     );
   });
