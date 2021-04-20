@@ -514,4 +514,20 @@ static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Scalar
       out_name, " with dtype ", out_type);
 }
 
+/*
+  Two types of 'other' tensors are supported when solving
+  a system of linear equations matmul(input, x) = other:
+  * 1-dimensional (1D) tensor or batch of 1D tensors (vector case)
+  * 2-dimensional (2D) tensor or batch of 2D tensors (matrix case).
+  The original torch.solve supported only the matrix case, while NumPy works for both cases.
+  For the batched input we need to be able to distinguish them.
+  Let input.shape = (batch_dimensions, m, n), then 'other' is of vector type if other.shape == (batch_dimensions, m).
+  This rule is compatible with NumPy, see https://github.com/numpy/numpy/blob/v1.20.0/numpy/linalg/linalg.py#L384-L389
+*/
+static inline bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor& other) {
+  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim() - 1); // input.shape[:-1]
+  bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
+  return vector_case;
+}
+
 }}  // namespace at::native

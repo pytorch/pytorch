@@ -60,7 +60,7 @@ from quantization.test_quantize_jit import TestQuantizeJit  # noqa: F401
 from quantization.test_quantize_jit import TestQuantizeJitPasses  # noqa: F401
 from quantization.test_quantize_jit import TestQuantizeJitOps  # noqa: F401
 from quantization.test_quantize_jit import TestQuantizeDynamicJitPasses  # noqa: F401
-from quantization.test_quantize_jit import TestQuantizeDynamicJitOps  # noqaa: F401
+from quantization.test_quantize_jit import TestQuantizeDynamicJitOps  # noqa: F401
 
 # 3. GraphModule based graph mode quantization
 try:
