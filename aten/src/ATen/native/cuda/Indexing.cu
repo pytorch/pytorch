@@ -181,6 +181,8 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
 }
 
 
+void index_put_accum_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_indices, Tensor &sorted_indices, int64_t num_indices);
+
 namespace {
 
 int64_t largestIndex(const Tensor &self) {
@@ -211,6 +213,14 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
 
       linearIndex.divide_(sliceSize, "trunc");
 
+      // cub on CUDA <= 11.2 have a bug that for small sizes
+      // cub's sort can be much slower than thrust's merge sort
+      // this bug is fixed in CUDA 11.3
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11030
+      if (num_indices < 50000) {
+        index_put_accum_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices)
+      } else
+#endif
       {
       // Sort the inputs into sorted with the corresponding indices
       auto range = at::arange(num_indices, linearIndex.options());
