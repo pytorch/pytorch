@@ -155,16 +155,6 @@ struct SymbolicShapeAnalyzer {
     }
   }
 
-  bool isDominatedBy(Node* node, Node* dominator) {
-    while (node) {
-      if (node->owningBlock() == dominator->owningBlock()) {
-        return dominator->isBefore(node);
-      }
-      node = node->owningBlock()->owningNode();
-    }
-    return false;
-  }
-
   void mergeSymbolicShapeSets(const std::vector<Value*>& symbolic_set) {
     // resolve all symbolic values to values which they are dominated by
     // there are ways to compute this more efficiently but typically number of
@@ -173,7 +163,7 @@ struct SymbolicShapeAnalyzer {
       Value* v = symbolic_set[i];
       Value* dominating_value = v;
       for (size_t j = 0; j < symbolic_set.size(); ++j) {
-        if (isDominatedBy(dominating_value->node(), symbolic_set[j]->node())) {
+        if (dominating_value->node()->isDominatedBy(symbolic_set[j]->node())) {
           dominating_value = symbolic_set[j];
         }
       }

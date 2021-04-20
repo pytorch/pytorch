@@ -117,16 +117,6 @@ struct GuardElimination {
     }
   }
 
-  bool isDominatedBy(Node* node, Node* dominator) {
-    while (node) {
-      if (node->owningBlock() == dominator->owningBlock()) {
-        return dominator->isBefore(node);
-      }
-      node = node->owningBlock()->owningNode();
-    }
-    return false;
-  }
-
   void removeDominatedGuards(Block* b) {
     // If a Node guards a value which isn't mutated, then that node
     // can replace all other guards of the value which it dominates
@@ -150,7 +140,7 @@ struct GuardElimination {
             continue;
           }
 
-          if (!isDominatedBy(use.user, n)) {
+          if (!use.user->isDominatedBy(n)) {
             continue;
           }
 

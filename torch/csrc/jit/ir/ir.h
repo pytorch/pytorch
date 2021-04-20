@@ -264,7 +264,23 @@ struct Value {
   //          %4 = g(%3)
   //          %5 = inplace_(%3)
   //          %6 = h(%5, %5)
+  // XXX: does not check scoping legality, consider using
+  // replaceAllUsesDominatedByNodeWith
   TORCH_API void replaceAllUsesAfterNodeWith(const Node* node, Value* newValue);
+
+  // Replaces all uses of this value with 'newValue' that are dominated by
+  // 'node'. replaceAllUsesAfterNodeWith does not check domination, so in the
+  // following example:
+  // x = op(...) if cond:
+  //    z = foo(..)
+  //    bar(x)
+  // else:
+  //    print(x)
+  // x.replaceAllUsesAfterNodeWith(foo, z) would replace print(x) with print(z)
+  // which would produce invalid IR
+  TORCH_API void replaceAllUsesDominatedByNodeWith(
+      const Node* node,
+      Value* newValue);
 
   TORCH_API Value* copyMetadata(Value* from);
 
@@ -441,6 +457,11 @@ struct TORCH_API Node {
   // replaces `this` with a new node with the same inputs and outputs
   // but a new node symbol. does not destroy `this`
   Node* replaceWithNewSymbol(Symbol new_symbol);
+
+  // Checks if this node is dominated by `dominator` which means that
+  // `dominator` will always be executed before `this` and `dominator`
+  // is in scope of `this.
+  bool isDominatedBy(const Node* dominator) const;
 
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
@@ -1037,6 +1058,7 @@ struct Block {
     n->insertAfter(input_);
     return n;
   }
+
   // clone all inputs, nodes, and outputs from src and append them
   // to the inputs, nodes, and outputs of this block
   // value_map is used whenever a node in src references a free variable
