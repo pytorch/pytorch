@@ -61,8 +61,18 @@ check_tensor_options_and_extract_memory_format(
   }
 }
 
-void undefined_device_check_failure(at::CheckedFrom methodName, at::CheckedFrom argName);
-void common_device_check_failure(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName);
+inline void common_device_check_failure(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
+  TORCH_CHECK(false,
+    "Expected all tensors to be on the same common device, but "
+    "found at least two devices, ", common_device.value(), " and ", tensor.device(), "! "
+    "(when checking arugment for argument ", argName, " in method ", methodName, ")");
+}
+
+inline void undefined_device_check_failure(at::CheckedFrom methodName, at::CheckedFrom argName) {
+  TORCH_CHECK(false,
+    "Tensor is undefined."
+    "(when checking arugment for argument ", argName, " in method ", methodName, ")");
+}
 
 inline void check_or_update_common_device(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
   // TODO: This check should be done separately
