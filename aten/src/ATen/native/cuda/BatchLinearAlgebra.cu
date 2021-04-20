@@ -2020,7 +2020,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
 
   // magmaGeqrf uses a hybrid CPU-GPU algorithm to compute the elementary reflectors.
   // The driver routine geqrf2_gpu accepts a tensor on the CPU for elementary reflectors.
-  Tensor tau_cpu = at::empty(tau.sizes(), tau.options().device(at::kCPU));
+  Tensor tau_cpu = at::empty(tau.sizes(), tau.options().device(at::kCPU).pinned_memory(true));
   scalar_t* tau_data = tau_cpu.data_ptr<scalar_t>();
   scalar_t* work_data = nullptr; // workspace is not needed for geqrf2_gpu
 
@@ -2034,7 +2034,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
     magmaGeqrf<scalar_t>(m, n, input_working_ptr, lda, tau_working_ptr, work_data, &info, /*is_v2=*/true);
     checkMagmaInternalError(info, "geqrf");
   }
-  tau.copy_(tau_cpu);
+  tau.copy_(tau_cpu, /*non_blocking=*/true);
 #endif
 }
 
@@ -2759,6 +2759,11 @@ TORCH_CHECK(false, "torch.linalg.lstsq: MAGMA library not found in "
     auto trans = MagmaNoTrans;
     auto m = magma_int_cast(a.size(-2), "m");
     auto n = magma_int_cast(a.size(-1), "n");
+
+    TORCH_CHECK(
+      m >= n,
+      "torch.linalg.lstsq: only overdetermined systems (input.size(-2) >= input.size(-1)) are allowed on CUDA");
+
     auto nrhs = magma_int_cast(b.size(-1), "nrhs");
     auto ldda = std::max<magma_int_t>(1, m);
     auto lddb = std::max<magma_int_t>(1, std::max(m, n));
