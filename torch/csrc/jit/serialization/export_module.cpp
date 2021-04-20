@@ -438,10 +438,13 @@ class ScriptModuleSerializer {
     size_t i = 0;
     std::string prefix = archive_name + "/";
 
-    // Store all tensors from archives in the tensors_archive_table_writers_
-    // list to tensors_archive_table_
-    if (tensors_archive_table_writers_.find(archive_name) !=
-        tensors_archive_table_writers_.end()) {
+    // TODO: currently there exists logic only for archive constant and bytecode,
+    // to avoid exporting duplicate tensors. The logic can be more generic such that it
+    // can be used by other tensors from other archive, to avoid deduplicating tensors
+    // among different archives.
+
+    // Store all tensors from archives `constants` to tensors_archive_table_
+    if (archive_name == kArchiveNameConstants) {
       const auto tensor_candidates = data_pickle.tensorData();
       for (size_t tensor_index = 0; tensor_index < tensor_candidates.size();
            tensor_index++) {
@@ -450,10 +453,10 @@ class ScriptModuleSerializer {
       }
     }
 
+    // Export deduplicate tensors only if use_tensors_archive_table is set to true and
+    // archive name is `bytecode`
     bool can_use_tensors_archive_table =
-        (use_tensors_archive_table &&
-         tensors_archive_table_readers_.find(archive_name) !=
-             tensors_archive_table_readers_.end());
+        (use_tensors_archive_table && archive_name == kArchiveNameBytecode);
 
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
@@ -616,28 +619,8 @@ class ScriptModuleSerializer {
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
 
-  // key: tensor, value: pair(arhive_name, index).
-  // This map is used for deduplication tensors from different archive.
+  // key: tensor, value: pair(arhive_name, index)
   TensorIndexMap tensors_archive_table_;
-
-  // Introduce tensors_archive_table writer and reader here to avoid
-  // duplicate tensors. The tensors from tensors_archive_table_writers_
-  // will be stored in tensors_archive_table_. Currently only tensors from
-  // `constant` archive is in the writer list.
-
-  // Only archive in tensors_archive_table_writers_ set can write tensors to
-  // tensors_archive_table_.
-  std::unordered_set<std::string> tensors_archive_table_writers_ = {
-      kArchiveNameConstants};
-  // Only archive in tensors_archive_table_readers_ set can use
-  // tensors_archive_table_ as the storage root key. If the tensor exist in
-  // tensors_archive_table_, the storage root key will be {achive_name}/{index},
-  // instead of {index}. The corresponding tensors won't be exported again.
-  // Currently, only archive `bytecode` uses tensors_archive_table_. If another
-  // archive registers in tensors_archive_table_readers_, please be careful with
-  // forward compatiblity breakage.
-  std::unordered_set<std::string> tensors_archive_table_readers_ = {
-      kArchiveNameBytecode};
 
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
