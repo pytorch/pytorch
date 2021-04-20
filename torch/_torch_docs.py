@@ -3199,9 +3199,9 @@ Example::
     >>> x = torch.arange(9.)
     >>> mantissa, exponent = torch.frexp(x)
     >>> mantissa
-    >>> tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
+    tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
     >>> exponent
-    >>> tensor([0, 1, 2, 2, 3, 3, 3, 3, 4], dtype=torch.int32)
+    tensor([0, 1, 2, 2, 3, 3, 3, 3, 4], dtype=torch.int32)
     >>> torch.ldexp(mantissa, exponent)
     tensor([0., 1., 2., 3., 4., 5., 6., 7., 8.])
 """)
@@ -5206,7 +5206,7 @@ Returns the indices of the maximum value of all elements in the :attr:`input` te
 This is the second value returned by :meth:`torch.max`. See its
 documentation for the exact semantics of this method.
 
-.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
+.. note:: If there are multiple maximal values then the indices of the first maximal value are returned.
 
 Args:
     {input}
@@ -7007,6 +7007,7 @@ Args:
         Can be a variable number of arguments or a collection like a list or tuple.
 
 Keyword args:
+    {generator}
     {out}
     {dtype}
     {layout}
@@ -7133,6 +7134,7 @@ Args:
         Can be a variable number of arguments or a collection like a list or tuple.
 
 Keyword args:
+    {generator}
     {out}
     {dtype}
     {layout}
