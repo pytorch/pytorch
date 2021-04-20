@@ -38,8 +38,9 @@ class PyTorchLinuxWorkflow:
                     build_environment=self.build_environment,
                     docker_image_base=self.docker_image_base,
                     test_runner_type=self.test_runner_type,
+                    # two leading spaces is necessary to match yaml indent
                     on_pull_request=(
-                        "pull_request:" if self.on_pull_request else ""
+                        "  pull_request:" if self.on_pull_request else ""
                     )
                 )
             )
