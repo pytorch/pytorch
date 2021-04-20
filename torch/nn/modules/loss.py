@@ -309,15 +309,14 @@ class GaussianNLLLoss(_Loss):
     D-dimensional tensor of positive variances ``var`` the loss is:
 
     .. math::
-        \text{loss} = \frac{1}{2}\sum_{i=1}^D \left(\log\left(\text{max}\left(\text{var}[i],
-        \ \text{eps}\right)\right) + \frac{\left(\text{input}[i] - \text{target}[i]\right)^2}
-        {\text{max}\left(\text{var}[i], \ \text{eps}\right)}\right) + \text{const.}
+        \text{loss} = \frac{1}{2}\left(\log\left(\text{max}\left(\text{var},
+        \ \text{eps}\right)\right) + \frac{\left(\text{input} - \text{target}\right)^2}
+        {\text{max}\left(\text{var}, \ \text{eps}\right)}\right) + \text{const.}
 
     where :attr:`eps` is used for stability. By default, the constant term of
     the loss function is omitted unless :attr:`full` is ``True``. If ``var`` is
     a scalar (implying ``target`` tensor has homoscedastic Gaussian
     distributions) it is broadcasted to be the same size as the input.
-
 
     Args:
         full (bool, optional): include the constant term in the loss
@@ -339,14 +338,12 @@ class GaussianNLLLoss(_Loss):
           ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N)`
 
     Examples::
-
         >>> loss = nn.GaussianNLLLoss()
         >>> input = torch.randn(5, 2, requires_grad=True)
         >>> target = torch.randn(5, 2)
         >>> var = torch.ones(5, 2, requires_grad=True) #heteroscedastic
         >>> output = loss(input, target, var)
         >>> output.backward()
-
 
         >>> loss = nn.GaussianNLLLoss()
         >>> input = torch.randn(5, 2, requires_grad=True)
