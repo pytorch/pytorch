@@ -14,7 +14,7 @@ import logging
 import traceback
 import types
 
-from typing import NamedTuple, Union
+from typing import NamedTuple, Optional, Union
 from functools import wraps
 
 import torch
@@ -260,7 +260,7 @@ def create_device(interface=None):
         return c10d.ProcessGroupGloo.create_device(interface=interface)
 
 
-def get_timeout(test_id):
+def get_timeout(test_id) -> int:
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
 
 
@@ -275,13 +275,13 @@ def captured_output():
         sys.stdout, sys.stderr = old_out, old_err
 
 
-def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
+def simple_sparse_reduce_tests(rank: int, world_size: int, num_inputs: int = 1):
     """
     Generate a number of basic test cases for sparse reduction.
     These cover tensors with a varying number of sparse dimensions and a varying
     number of dense dimensions. The only reduction operation we support is sum.
     """
-    def generate(rank, world_size, sparse_dims=1, dense_dims=0):
+    def generate(rank: int, world_size: int, sparse_dims: int = 1, dense_dims: int = 0):
         # First sparse dimension is [0..rank].
         # Subsequent dimensions are always 0, so we know there is
         # a non-empty intersection between any two sparse tensors.
@@ -293,7 +293,7 @@ def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
         values = torch.ones([rank + 1] + [2 for _ in range(dense_dims)])
         return torch.sparse_coo_tensor(indices, values, shape)
 
-    def compute_sum(fn, world_size):
+    def compute_sum(fn, world_size: int):
         return reduce(lambda a, b: a + b, [fn(rank, world_size) for rank in range(world_size)])
 
     return [
@@ -317,11 +317,9 @@ def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
         ]
     ]
 
+tmp_dir: Optional[tempfile.TemporaryDirectory] = None
 
-tmp_dir = None
-
-
-def initialize_temp_directories(init_method=None):
+def initialize_temp_directories(init_method: Optional[str] = None) -> None:
     global tmp_dir
     tmp_dir = tempfile.TemporaryDirectory()
     os.environ["TEMP_DIR"] = tmp_dir.name
@@ -337,8 +335,7 @@ def initialize_temp_directories(init_method=None):
             init_dir_path, "shared_init_file"
         )
 
-
-def cleanup_temp_dir():
+def cleanup_temp_dir() -> None:
     if tmp_dir is not None:
         tmp_dir.cleanup()
 
@@ -363,11 +360,11 @@ class MultiProcessTestCase(TestCase):
     TEST_ERROR_EXIT_CODE = 10
 
     # do not early terminate for distributed tests.
-    def _should_stop_test_suite(self):
+    def _should_stop_test_suite(self) -> bool:
         return False
 
     @property
-    def world_size(self):
+    def world_size(self) -> int:
         return 4
 
     def join_or_run(self, fn):
@@ -383,23 +380,23 @@ class MultiProcessTestCase(TestCase):
     # Constructor patches current instance test method to
     # assume the role of the main process and join its subprocesses,
     # or run the underlying test function.
-    def __init__(self, method_name='runTest'):
+    def __init__(self, method_name: str = 'runTest') -> None:
         super().__init__(method_name)
         fn = getattr(self, method_name)
         setattr(self, method_name, self.join_or_run(fn))
 
-    def setUp(self):
+    def setUp(self) -> None:
         super().setUp()
-        self.skip_return_code_checks = []
-        self.processes = []
+        self.skip_return_code_checks = []  # type: ignore
+        self.processes = []  # type: ignore
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         global TEST_SKIPS
         self.old_test_skips = TEST_SKIPS.copy()
         # pid to pipe consisting of error message from process.
-        self.pid_to_pipe = {}
+        self.pid_to_pipe = {}  # type: ignore
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         super().tearDown()
         for p in self.processes:
             p.terminate()
@@ -409,11 +406,11 @@ class MultiProcessTestCase(TestCase):
         # processes to prevent an effective file descriptor leak.
         self.processes = []
 
-    def _current_test_name(self):
+    def _current_test_name(self) -> str:
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
 
-    def _start_processes(self, proc):
+    def _start_processes(self, proc) -> None:
         test_skips_manager = Manager()
         test_skips = test_skips_manager.dict()
         global TEST_SKIPS
@@ -432,11 +429,11 @@ class MultiProcessTestCase(TestCase):
             self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
 
-    def _fork_processes(self):
+    def _fork_processes(self) -> None:
         proc = torch.multiprocessing.get_context("fork").Process
         self._start_processes(proc)
 
-    def _spawn_processes(self):
+    def _spawn_processes(self) -> None:
         proc = torch.multiprocessing.get_context("spawn").Process
         self._start_processes(proc)
 
@@ -444,7 +441,7 @@ class MultiProcessTestCase(TestCase):
         GET_TRACEBACK = 1
 
     @staticmethod
-    def _event_listener(pipe, rank):
+    def _event_listener(pipe, rank: int):
         logger.info(f'Starting event listener thread for {rank}')
         while True:
             if pipe.poll(None):
@@ -468,7 +465,7 @@ class MultiProcessTestCase(TestCase):
                         logger.info(f'Process {rank} sent traceback')
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe):
+    def _run(cls, rank: int, test_name: str, file_name: str, pipe) -> None:
         self = cls(test_name)
 
         # Start event listener thread.
@@ -483,7 +480,7 @@ class MultiProcessTestCase(TestCase):
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
 
-    def run_test(self, test_name, pipe):
+    def run_test(self, test_name: str, pipe) -> None:
         if sys.platform != 'win32' and sys.platform != 'darwin':
             # Register signal handler to dump stack traces on FATALs.
             # Windows and MacOS do not support the signal handlers.
@@ -505,7 +502,7 @@ class MultiProcessTestCase(TestCase):
             pipe.close()
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
 
-    def _get_timedout_process_traceback(self):
+    def _get_timedout_process_traceback(self) -> None:
         pipes = []
         for i, process in enumerate(self.processes):
             if process.exitcode is None:
@@ -529,7 +526,7 @@ class MultiProcessTestCase(TestCase):
             else:
                 logger.error(f'Could not retrieve traceback for timed out process: {rank}')
 
-    def _join_processes(self, fn):
+    def _join_processes(self, fn) -> None:
         timeout = get_timeout(self.id())
         start_time = time.time()
         subprocess_error = False
@@ -576,7 +573,7 @@ class MultiProcessTestCase(TestCase):
             global TEST_SKIPS
             TEST_SKIPS = self.old_test_skips
 
-    def _check_no_test_errors(self, elapsed_time):
+    def _check_no_test_errors(self, elapsed_time) -> None:
         """
         Checks that we didn't have any errors thrown in the child processes.
         """
@@ -585,7 +582,7 @@ class MultiProcessTestCase(TestCase):
                 raise RuntimeError('Process {} timed out after {} seconds'.format(i, elapsed_time))
             self.assertNotEqual(self.TEST_ERROR_EXIT_CODE, p.exitcode)
 
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, elapsed_time) -> None:
         """
         Checks that the return codes of all spawned processes match, and skips
         tests if they returned a return code indicating a skipping condition.
@@ -633,5 +630,5 @@ class MultiProcessTestCase(TestCase):
         )
 
     @property
-    def is_master(self):
+    def is_master(self) -> bool:
         return self.rank == 0
