@@ -316,7 +316,7 @@ def _sum_of_list(tensorlist):
 
 
 # has to be at top level or Pickle complains
-class FooToPickle(torch.nn.Module):  # noqa T484
+class FooToPickle(torch.nn.Module):
     def __init__(self):
         super(FooToPickle, self).__init__()
         self.bar = torch.jit.ScriptModule()
@@ -747,7 +747,7 @@ class TestJit(JitTestCase):
             # no opt plan
             jitted._debug_flush_compilation_cache()
             with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
-                states = jitted.get_debug_state() # noqa
+                states = jitted.get_debug_state()
 
             NUM_RUNS = 1
             with num_profiled_runs(NUM_RUNS):
@@ -760,7 +760,7 @@ class TestJit(JitTestCase):
                 # no opt plan
                 fwd._debug_flush_compilation_cache()
                 with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
-                    states = m.get_debug_state() # noqa
+                    states = m.get_debug_state()
 
     def test_numel(self):
         @torch.jit.script
@@ -3443,14 +3443,14 @@ def foo(x):
             with self.capture_stdout() as captured:
                 @torch.jit.script
                 def invalid_prefix_annotation1(a):
-                    #type: (Int) -> Int # noqa
+                    #type: (Int) -> Int # noqa: E265
                     return a + 2
 
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
             with self.capture_stdout() as captured:
                 @torch.jit.script
                 def invalid_prefix_annotation2(a):
-                    #type   : (Int) -> Int # noqa
+                    #type   : (Int) -> Int # noqa: E265
                     return a + 2
 
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
@@ -3478,7 +3478,7 @@ def foo(x):
 
         node = list(f.graph.nodes())[0]
         t = node.outputsAt(0).type()
-        self.assertFalse(t == None)  # noqa
+        self.assertIsNotNone(t)
 
     @unittest.skipIf(IS_WINDOWS and sys.version_info >= (3, 8), 'TODO: need to fix the test case')
     def test_unmatched_type_annotation(self):
@@ -4586,7 +4586,7 @@ a")
                 @torch.jit.script
                 def func(a, b):
                     # type: (float, Tensor) -> Tensor
-                    return a ** (b * 2 + 1)  # noqa T484
+                    return a ** (b * 2 + 1)
 
                 a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
                 func(2, a, profile_and_replay=True).backward()
@@ -4677,7 +4677,7 @@ a")
     def test_constant_pooling_none(self):
         @torch.jit.script
         def typed_nones(a=None, b=None, c=None):
-            # type: (Optional[int], Optional[bool], Optional[Tensor]) -> Tuple[Optional[int], Optional[bool], Optional[Tensor]] # noqa
+            # type: (Optional[int], Optional[bool], Optional[Tensor]) -> Tuple[Optional[int], Optional[bool], Optional[Tensor]]
             return a, b, c
 
         @torch.jit.script
@@ -4857,7 +4857,7 @@ a")
             @torch.jit.script
             def func(x, y):
                 # type: (Tensor, int) -> List[Tensor]
-                return torch.unbind(x, y)  # noqa T484
+                return torch.unbind(x, y)
 
             with disable_autodiff_subgraph_inlining():
                 x = torch.rand([2, 2]).requires_grad_()
@@ -4879,7 +4879,7 @@ a")
             @torch.jit.script
             def func(a):
                 # type: (List[Tensor]) -> List[Tensor]
-                return torch.meshgrid(a)  # noqa T484
+                return torch.meshgrid(a)
             with disable_autodiff_subgraph_inlining():
                 a = torch.tensor([1.0, 2, 3]).requires_grad_()
                 b = torch.tensor([1.0, 2, 3, 4]).requires_grad_()
@@ -5619,7 +5619,7 @@ a")
 
             @torch.jit.script
             def test_bad_conditional(x):
-                if (1, 2):  # noqa F634
+                if (1, 2):  # noqa: F634
                     return
                 else:
                     return 0
@@ -6267,7 +6267,7 @@ a")
         self.checkScript(one_return, [a], optimize=True)
         self.checkScript(multiple_returns, [a], optimize=True)
 
-        with self.assertRaisesRegex(RuntimeError, "does not return along all paths"):  # noqa
+        with self.assertRaisesRegex(RuntimeError, "does not return along all paths"):
             torch.jit.CompilationUnit('''
             def no_return_bad_annotation(a):
                 # type: (Tensor) -> Tensor
@@ -6770,7 +6770,7 @@ a")
         @torch.jit.script
         def test_dtype(inp_dtype: torch.dtype):
             a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
-            return a, torch.tensor(1.0, dtype=inp_dtype)  # noqa T484
+            return a, torch.tensor(1.0, dtype=inp_dtype)
 
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             g = test_dtype.graph_for(5, profile_and_replay=True)
@@ -6802,9 +6802,9 @@ a")
         def test(b):
             # type: (bool) -> Tuple[Tensor, Tensor, Tensor]
             a = torch.tensor(1., requires_grad=b)
-            b = torch.tensor(1., requires_grad=True)  # noqa T484
+            b = torch.tensor(1., requires_grad=True)
             c = torch.tensor(1., requires_grad=False)
-            return a, b, c  # noqa T484
+            return a, b, c
 
         g = test.graph_for(True)
         out = next(g.outputs())
@@ -8981,7 +8981,7 @@ dedent """
         with torch.jit.optimized_execution(False):
             self.assertEqual(torch.cat([v, v, v], dim=1), M()(v))
 
-    class StarTestSumStarred(torch.nn.Module):  # noqa T484
+    class StarTestSumStarred(torch.nn.Module):
         def __init__(self):
             super(TestScript.StarTestSumStarred, self).__init__()
 
@@ -8991,7 +8991,7 @@ dedent """
                 output += inputs[i]
             return output
 
-    class StarTestReturnThree(torch.nn.Module):  # noqa T484
+    class StarTestReturnThree(torch.nn.Module):
         def __init__(self):
             super(TestScript.StarTestReturnThree, self).__init__()
 
@@ -9032,7 +9032,7 @@ dedent """
         m = M2()
         self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
-    class StarTestSumAndReturnThree(torch.nn.Module):  # noqa T484
+    class StarTestSumAndReturnThree(torch.nn.Module):
         def __init__(self):
             super(TestScript.StarTestSumAndReturnThree, self).__init__()
 
@@ -10076,7 +10076,7 @@ dedent """
     def test_ellipsis_const_mid(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[2, Ellipsis, 0:4, 4:8].size()  # noqa T484
+            return x[2, Ellipsis, 0:4, 4:8].size()
 
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
@@ -10084,7 +10084,7 @@ dedent """
     def test_ellipsis_const_mid_select(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[2, Ellipsis, 4, 4, 4:8, 2].size()  # noqa T484
+            return x[2, Ellipsis, 4, 4, 4:8, 2].size()
 
         dummy = torch.zeros(8, 8, 8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
@@ -10092,21 +10092,21 @@ dedent """
     def test_ellipsis_const_start(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[Ellipsis, 0:4, 4:8].size()  # noqa T484
+            return x[Ellipsis, 0:4, 4:8].size()
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
 
     def test_ellipsis_const_end(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[0:4, 2, Ellipsis].size()  # noqa T484
+            return x[0:4, 2, Ellipsis].size()
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
 
     def test_ellipsis_mid(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[2, ..., 0:4, 4:8].size()  # noqa T484
+            return x[2, ..., 0:4, 4:8].size()
 
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
@@ -10114,7 +10114,7 @@ dedent """
     def test_ellipsis_mid_select(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[2, ..., 4, 4, 4:8, 2].size()  # noqa T484
+            return x[2, ..., 4, 4, 4:8, 2].size()
 
         dummy = torch.zeros(8, 8, 8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
@@ -10122,14 +10122,14 @@ dedent """
     def test_ellipsis_start(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[..., 0:4, 4:8].size()  # noqa T484
+            return x[..., 0:4, 4:8].size()
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
 
     def test_ellipsis_end(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[0:4, 2, ...].size()  # noqa T484
+            return x[0:4, 2, ...].size()
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
 
@@ -11223,7 +11223,7 @@ dedent """
             def test_sizes(x):
                 # type: (float) -> int
                 sumz = 0
-                for s in x: # noqa
+                for s in x:
                     sumz += 1
                 return sumz
 
@@ -13085,7 +13085,7 @@ dedent """
 
         def index_str_to_tensor(s):
             # type: (str) -> int
-            return torch.tensor(ord(s))  # noqa T484
+            return torch.tensor(ord(s))
 
         s = u'\u00a3'.encode('utf8')[:1]
         self.checkScript(index_str_to_tensor, (s,))
@@ -13561,14 +13561,14 @@ dedent """
 
         with self.assertRaisesRegex(RuntimeError, "does not return along all"):
             @torch.jit.script
-            def partial(x):  # noqa 484
+            def partial(x):
                 # type: (Tensor) -> int
                 if x:
                     return 1
 
         with self.assertRaisesRegex(RuntimeError, "does not return along all"):
             @torch.jit.script
-            def typed_none():  # noqa 484
+            def typed_none():
                 # type: () -> Optional[int]
                 pass
 
