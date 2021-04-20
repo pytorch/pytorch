@@ -72,7 +72,14 @@ def requires_backend_wrapper(f: ExternalBackendFunction) -> bool:
     in_denylist = any([re.match(frx, str(f.native_function.func.name)) for frx in _FN_DENYLIST_REGEX])
     return not in_denylist and (requires_lowering or has_xla_lowering)
 
-def xla_tensor_creation_api(ret_name: str, ret: Return, device_param_name: str, *, tuple_idx: Optional[int] = None) -> str:
+def xla_tensor_creation_api(
+        ret_name: str,
+        ret: Return,
+        device_param_name: str,
+        *,
+        cpu_result_name: str,
+        tuple_idx: Optional[int] = None
+) -> str:
     if ret.type == BaseType(BaseTy.Tensor) and not ret.is_write:
         # Only raw Tensor (non-reference) returns need to go through the XLA tensor creation API.
         # Tensor references can be returned directly, since they've already been converted to XLA tensors.
@@ -84,11 +91,7 @@ def xla_tensor_creation_api(ret_name: str, ret: Return, device_param_name: str, 
         # for non tensor-types, there's no need to wrap the output in an xla bridge api.
         return ret_name
 
-    out_name = 'x_result'
-    if tuple_idx is not None:
-        out_name = f"std::get<{tuple_idx}>(x_result)"
-
-    return f"bridge::{bridge_api}({out_name}, bridge::GetXlaDevice({device_param_name}))"
+    return f"bridge::{bridge_api}({cpu_result_name}, bridge::GetXlaDevice({device_param_name}))"
 
 
 
@@ -119,20 +122,21 @@ class GenExternalAtenFallback:
             dispatcher_sig = DispatcherSignature.from_schema(g.out.native_function.func)
             name = dispatcher_sig.name()
 
-            dispatcher_order_args = list(dispatcher.jit_arguments(g.out.native_function.func))
+            dispatcher_order_args = dispatcher.jit_arguments(g.out.native_function.func)
             tensors = [a for a in dispatcher_order_args if a.type == BaseType(BaseTy.Tensor)]
             print_args_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensors])
 
             func_name = f'AtenXlaTypeDefault::{name}'
-            return_names = cpp.return_names(g.out.native_function, override_name="x_result")
+            functional_result_name = f'{name}_tmp'
+            return_names = cpp.return_names(g.out.native_function)
             if len(return_names) > 1:
                 updates = '\n  '.join(
-                    f'bridge::XlaUpdateTensors({{{ret_name}}}, {{std::get<{i}>({name}_tmp)}}, {{0}});'
+                    f'bridge::XlaUpdateTensors({{{ret_name}}}, {{std::get<{i}>({functional_result_name})}}, {{0}});'
                     for i, ret_name in enumerate(return_names))
                 returns = f'{dispatcher_sig.returns_type().cpp_type()}({", ".join(return_names)})'
             else:
                 ret_name = return_names[0]
-                updates = f'bridge::XlaUpdateTensors({{{ret_name}}}, {{{name}_tmp}}, {{0}});'
+                updates = f'bridge::XlaUpdateTensors({{{ret_name}}}, {{{functional_result_name}}}, {{0}});'
                 returns = ret_name
 
             functional_sig = DispatcherSignature.from_schema(g.functional.native_function.func)
@@ -141,7 +145,7 @@ class GenExternalAtenFallback:
 {dispatcher_sig.defn(name=func_name)} {{
   XLA_FN_TRACK(3);
   TF_VLOG(3) << "XLA {name} :"{print_args_str};
-  auto {name}_tmp = AtenXlaType::{functional_sig.name()}({", ".join(a.name for a in functional_sig.arguments())});
+  auto {functional_result_name} = AtenXlaType::{functional_sig.name()}({", ".join(a.name for a in functional_sig.arguments())});
   {updates}
   return {returns};
 }}
@@ -184,10 +188,13 @@ class GenExternalAtenFallback:
                     # xla has their own kernel: register it
                     namespace = 'AtenXlaType'
                 else:
-                    # xla doesn't have a kernel: register a cpu fallback
+                    # xla doesn't have a kernel: register the cpu fallback (or codegen'd out kernel).
                     namespace = 'AtenXlaTypeDefault'
-                payload = f"static_cast<{dispatcher_sig.decl(func_ptr_cast=True)}>(&{namespace}::{name})"
+                payload = f"static_cast<{dispatcher_sig.ptr_type()}>(&{namespace}::{name})"
                 return f'  m.impl("{f.native_function.func.name}", {payload});\n'
+
+            if self.target is not Target.NAMESPACED_DEFINITION:
+                assert_never(self.target)
 
             # Instead of generating a CPU fallback, the xla codegen generates out wrappers for a few hardcoded operators.
             # TODO: we should generate out wrappers for ALL valid out kernels; not just ones in xla's hardcoded list
@@ -196,7 +203,7 @@ class GenExternalAtenFallback:
                 return gen_out_wrapper(g)
 
             # Everything below here is where we generate the CPU fallback.
-            dispatcher_order_args = list(dispatcher.jit_arguments(f.native_function.func))
+            dispatcher_order_args = dispatcher.jit_arguments(f.native_function.func)
 
             # Map each argument to it's intermediate variable name in the fallback
             # We have to do it separately for TensorList/Optional<Tensor>/Tensor
@@ -250,14 +257,15 @@ class GenExternalAtenFallback:
 
             # Notice that we don't need to perform a translate: we're technically going from the dispatcher API
             # to the faithful C++ API, which are carefuly written to be exactly the same.
+            cpu_result_name = 'x_result'
             if is_method:
                 at_call = f'{updated_bindings[0]}.{at_call_name}({", ".join(name for name in updated_bindings[1:])});'
             else:
                 at_call = f'at::{at_call_name}({", ".join(name for name in updated_bindings)});'
             avoid_warning = ''
             if f.native_function.func.returns:
-                at_call = 'auto&& x_result = ' + at_call
-                avoid_warning = '\n  static_cast<void>(x_result); // Avoid warnings in case not used'
+                at_call = f'auto&& {cpu_result_name} = {at_call}'
+                avoid_warning = f'\n  static_cast<void>({cpu_result_name}); // Avoid warnings in case not used'
 
             collect_mutated_tensors = ''
             update_tensors = ''
@@ -268,14 +276,17 @@ class GenExternalAtenFallback:
 
             returns = ''
             if f.native_function.func.returns:
-                ret_names = cpp.return_names(f.native_function, override_name="x_result")
+                ret_names = cpp.return_names(f.native_function, fallback_name=cpu_result_name)
                 if len(ret_names) == 1:
                     returns = xla_tensor_creation_api(
-                        ret_names[0], f.native_function.func.returns[0], get_device_param(dispatcher_order_args))
+                        ret_names[0], f.native_function.func.returns[0],
+                        get_device_param(dispatcher_order_args), cpu_result_name=cpu_result_name)
                 else:
-                    return_args = [xla_tensor_creation_api(
-                        ret_names[i], f.native_function.func.returns[i], get_device_param(dispatcher_order_args), tuple_idx=i)
-                        for i in range(len(f.native_function.func.returns))]
+                    return_args = [
+                        xla_tensor_creation_api(
+                            ret_names[i], f.native_function.func.returns[i],
+                            get_device_param(dispatcher_order_args), cpu_result_name=f'std::get<{i}>({cpu_result_name})'
+                        ) for i in range(len(f.native_function.func.returns))]
                     returns = f'{dispatcher_sig.returns_type().cpp_type()}({", ".join(return_args)})'
             return_str = ''
             if returns != '':

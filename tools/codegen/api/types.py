@@ -41,12 +41,12 @@ tensorListT = BaseCppType('at', 'TensorList')
 dimnameT = BaseCppType('at', 'Dimname')
 dimnameListT = BaseCppType('at', 'DimnameList')
 layoutT = BaseCppType('at', 'Layout')
-deviceT = BaseCppType('at', 'Device')
+deviceT = BaseCppType('c10', 'Device')
 scalarT = BaseCppType('at', 'Scalar')
 memoryFormatT = BaseCppType('at', 'MemoryFormat')
 qschemeT = BaseCppType('at', 'QScheme')
 storageT = BaseCppType('at', 'Storage')
-streamT = BaseCppType('at', 'Stream')
+streamT = BaseCppType('', 'Stream')
 intArrayRefT = BaseCppType('at', 'IntArrayRef')
 tensorOptionsT = BaseCppType('at', 'TensorOptions')
 typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
@@ -412,12 +412,10 @@ class DispatcherSignature:
     def name(self) -> str:
         return dispatcher.name(self.func)
 
-    def decl(self, name: Optional[str] = None, func_ptr_cast: bool = False) -> str:
-        args_str = ', '.join(a.decl(func_ptr_cast=func_ptr_cast) for a in self.arguments())
+    def decl(self, name: Optional[str] = None) -> str:
+        args_str = ', '.join(a.decl() for a in self.arguments())
         if name is None:
             name = self.name()
-        if func_ptr_cast:
-            name = "(*)"  # We don't include the name- just the function pointer syntax.
         return f"{self.returns_type().cpp_type()} {name}({args_str})"
 
     def defn(self, name: Optional[str] = None) -> str:
@@ -431,6 +429,10 @@ class DispatcherSignature:
 
     def returns_type(self) -> CType:
         return dispatcher.returns_type(self.func.returns)
+
+    def ptr_type(self) -> str:
+        dispatcher_args_types_str = ', '.join(a.type for a in self.arguments())
+        return f'{self.returns_type().cpp_type()} (*)({dispatcher_args_types_str})'
 
     # Return the C++ function type, e.g., something like int(bool)
     def type(self) -> str:

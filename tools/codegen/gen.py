@@ -535,8 +535,8 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
     return returns, name_to_field_name
 
 # arguments in yaml roughly corresponds to the public C++ API
-def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_set: Set[str], out_arg_set: Set[str],
-                              name_to_field_name: Dict[str, str]) -> object:
+def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_set: Set[str],
+                              out_arg_set: Set[str], name_to_field_name: Dict[str, str]) -> object:
     if isinstance(cpp_a.argument, TensorOptionsArguments):
         arg: Dict[str, object] = {
             'annotation': None,
@@ -553,11 +553,11 @@ def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_
         raise AssertionError()
     elif isinstance(cpp_a.argument, Argument):
         return compute_argument_yaml(
-            cpp_a.argument, schema_order=schema_order, kwarg_only_set=kwarg_only_set,
-            out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
+            cpp_a.argument, schema_order=schema_order,
+            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
 
-def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Set[str], out_arg_set: Set[str],
-                          name_to_field_name: Dict[str, str]) -> object:
+def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Set[str],
+                          out_arg_set: Set[str], name_to_field_name: Dict[str, str]) -> object:
     arg: Dict[str, object] = {
         'annotation': str(a.annotation) if a.annotation else None,
         'dynamic_type': dynamic_type(a.type),
@@ -595,8 +595,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     cpp_args = sig_group.signature.arguments()
     arguments = [
         compute_cpp_argument_yaml(
-            cpp_a, schema_order=False, kwarg_only_set=kwarg_only_set,
-            out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
+            cpp_a, schema_order=False,
+            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
         for cpp_a in cpp_args
     ]
 
@@ -604,8 +604,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     schema_order_arguments = [
         compute_argument_yaml(
-            a, schema_order=True, kwarg_only_set=kwarg_only_set,
-            out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
+            a, schema_order=True,
+            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
         for a in schema_order_jit_arguments
     ]
 
