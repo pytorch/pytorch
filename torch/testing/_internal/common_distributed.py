@@ -226,7 +226,8 @@ def skip_if_win32():
     )
 
 @retry_on_connect_failures
-def create_tcp_store(addr="localhost", world_size=1, is_master=True, timeout=timedelta(minutes=5), wait_for_workers=True, jit_class=False):
+def create_tcp_store(addr="localhost", world_size=1, is_master=True, timeout=timedelta(minutes=5),
+                    wait_for_workers=True, jit_class=False):
     """
     Creates a TCP store. Retries if the chosen port is already in use.
     """
