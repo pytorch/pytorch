@@ -310,7 +310,7 @@ def build_class_def(ctx, py_def, methods, properties, self_name, assigns):
 def build_def(ctx, py_def, type_line, def_name, self_name=None):
     global _args_and_types  # type: ignore[name-defined]
 
-    _args_and_types = False  # type: ignore[name-defined]
+    _args_and_types = None  # type: ignore[name-defined]
     body = py_def.body
     r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
                        py_def.col_offset,
@@ -319,7 +319,7 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None):
     # If MonkeyType is installed, get all the consolidated traces for the arguments
     # and the return types from type_trace_db
 
-    type_trace_db = torch.jit._script.type_trace_db
+    type_trace_db = torch.jit._script._get_type_trace_db()
     if type_trace_db.trace_records:
         _args_and_types = type_trace_db.get_args_types(def_name)  # type: ignore[name-defined]
 
@@ -375,7 +375,7 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
-    elif getattr(py_arg, 'annotation', None) is None and bool(_args_and_types):  # type: ignore[name-defined]
+    elif _args_and_types:  # type: ignore[name-defined]
         annotation_expr = Var(Ident(r, _args_and_types[name].pop()))  # type: ignore[name-defined]
     elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
