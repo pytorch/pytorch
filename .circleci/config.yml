@@ -1422,6 +1422,7 @@ jobs:
           no_output_timeout: "5m"
           command: |
             set -ex
+            source /Users/distiller/workspace/miniconda3/bin/activate
             pip install typing_extensions boto3
             python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           when: always
