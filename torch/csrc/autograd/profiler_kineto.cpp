@@ -41,10 +41,8 @@ inline int64_t getTimeUs() {
 // Caching linux pids and tids is not advisable in the general case,
 // but this is only for profiling purposes and we don't need to handle
 // special cases during fork, clone etc.
-pid_t cachedTid() {
-  static thread_local pid_t tid{(pid_t)syscall(SYS_gettid)};
-  return tid;
-}
+static thread_local pid_t cachedTid;
+
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
 std::string stacksToStr(const std::vector<std::string>& stacks);
@@ -79,11 +77,20 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.outputTypes = "[]";
     op.inputNames = "[]";
     op.outputNames = "[]";
+
+    op.pthreadId = pthread_self();
 #endif
 
+    if (!cachedTid) {
+      cachedTid = (pid_t)syscall(SYS_gettid);
+#ifdef USE_KINETO_UPDATED
+      libkineto::api().activityProfiler().recordThreadInfo(cachedTid, pthread_self());
+#endif
+    }
+
+    op.sysThreadId = cachedTid;
+
     // setting both pthread and linux tid for Kineto
-    op.sysThreadId = cachedTid();
-    op.pthreadId = pthread_self();
 
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
