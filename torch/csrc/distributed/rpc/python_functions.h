@@ -9,16 +9,16 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-// Converts an internal FutureMessage type into a user-facing FutureIValue type
-// by creating a new FutureIValue and call its markCompleted as a callback in
-// the given FutureMessage.
+// Converts an internal ivalue::Future of Message into a user-facing
+// ivalue::Future of py::object type by creating a new ivalue::Future and call
+// its  markCompleted as a callback in the given ivalue::Future.
 // If hasValue is true, the Message will be converted into a py::object and then
-// wrap it with an IValue. If hasValue is false, this FutureIValue is only used
-// for signaling and launching callbacks. In this case, the message will be
-// discarded and then set the FutureIValue using an empty IValue or the given
+// wrap it with an IValue. If hasValue is false, this ivalue::Future is only
+// used for signaling and launching callbacks. In this case, the message will be
+// discarded and then set the ivalue::Future using an empty IValue or the given
 // FutureError if there is an error.
-c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
-    const std::shared_ptr<FutureMessage>& futureResponseMessage,
+c10::intrusive_ptr<JitFuture> toPyJitFuture(
+    const std::shared_ptr<JitFuture>& messageJitFuture,
     bool hasValue = true);
 
 c10::intrusive_ptr<JitFuture> pyRpcBuiltin(

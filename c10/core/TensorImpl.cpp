@@ -4,12 +4,15 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
+#include <c10/core/InferenceMode.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
     true,
     "If set, keeps memory when a tensor is shrinking its size.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     caffe2_max_keep_on_shrink_memory,
     LLONG_MAX,
@@ -44,13 +47,13 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-const at::Tensor& TensorImpl::fw_grad(uint64_t level, const at::Tensor& self) const {
+const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self) const {
   // See TensorImpl::grad() above for explanation about the line below
   if (!autograd_meta_) return impl::GetAutogradMetaFactory()->undefined_tensor();
   return autograd_meta_->fw_grad(level, self);
 }
 
-void TensorImpl::set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) {
+void TensorImpl::_set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) {
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
@@ -59,15 +62,35 @@ TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
-    : TensorImpl(std::move(storage), key_set, data_type, storage.device()) {}
+    // Use std::forward to suppress static analyzer false positive.
+    : TensorImpl(std::forward<Storage>(storage), key_set, data_type, storage.device()) {}
+
+TensorImpl::TensorImpl(
+    ImplType type,
+    Storage&& storage,
+    DispatchKeySet key_set,
+    const caffe2::TypeMeta data_type)
+    : storage_(std::move(storage)),
+      storage_offset_(0),
+      numel_(0),
+      data_type_(data_type),
+      device_opt_(storage_.device()),
+      key_set_(key_set) {
+  init_bitfields();
+  // Inference tensor doesn't have version counter.
+  if (!is_inference_tensor()) {
+    version_counter_ = VariableVersion(/*version=*/0);
+  }
+}
 
 TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta data_type, c10::optional<c10::Device> device_opt)
+    // NOLINTNEXTLINE(performance-move-const-arg)
     : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::TypeMeta data_type,
                        c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
-      sizes_{0},
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
@@ -80,26 +103,62 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
     // UndefinedTensorImpl is a singleton, so we skip logging it
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }
-  // After we removed Autograd keys from globally enabled set, every Tensor must be created with
-  // a backend DispatchKey and an AutogradBackend key.
-  // We automatically add the corresponding autograd key to key_set_ so that backends can stay
-  // in the old way of only registering with backend key like DispatchKey::CPU.
-  // TODO: Ideally this logic fits best in Variable/Autograd layer so that we only
-  // add AutogradBackend key when the tensor requires grad.
-  DispatchKey k = key_set.highestPriorityBackendTypeId();
-  key_set_ = key_set.add(getAutogradKeyFromBackend(k));
+
+  bool inference_mode = c10::InferenceMode::is_enabled();
+
+  // Inference tensor doesn't have autograd related keys.
+  if (inference_mode) {
+    // See Note [Expected TLS state in InferenceMode] for why we exclude Autograd & InplaceOrView keys.
+    // Normally key_set only contains backend keys but we do the substraction
+    // here to make sure.
+    key_set_ = key_set - c10::autograd_dispatch_keyset_with_InplaceOrView;
+  } else {
+    // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
+    //       See Note [Dream: skip VariableType kernel when requires_grad=false]
+    DispatchKey k = key_set.highestPriorityBackendTypeId();
+    key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
+  }
+
+  // Inference tensor doesn't have version counter.
+  if (!is_inference_tensor()) {
+    version_counter_ = VariableVersion(/*version=*/0);
+  }
 
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
   // Storages with default devices.
-  strides_.push_back(1);
 }
 
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 IntArrayRef TensorImpl::sizes() const {
-  return sizes_;
+  return sizes_and_strides_.sizes_arrayref();
 }
+#endif
 
 IntArrayRef TensorImpl::strides() const {
-  return strides_;
+  return sizes_and_strides_.strides_arrayref();
+}
+
+void TensorImpl::HandleResize() {
+  // If needed, we will free the data. the next mutable_data() call
+  // will create the data storage.
+  bool reset_tensor = false;
+  if (reserved_) {
+    // If tensor is reserved then don't claim its memeory unless nbytes()
+    // is smaller than new size
+    reset_tensor = storage_.nbytes() <
+      (storage_offset_ + numel_) * data_type_.itemsize();
+  } else {
+    reset_tensor = storage_.nbytes() <
+      (storage_offset_ + numel_) * data_type_.itemsize() ||
+      !FLAGS_caffe2_keep_on_shrink ||
+      storage_.nbytes() -
+      (storage_offset_ + numel_) * data_type_.itemsize() >
+      static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
+  }
+
+  if (reset_tensor && storage_initialized()) {
+    FreeMemory();
+  }
 }
 
 bool TensorImpl::compute_contiguous() const {
@@ -108,9 +167,10 @@ bool TensorImpl::compute_contiguous() const {
     return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
-    if (sizes_[d] != 1) {
-      if (strides_[d] == z) {
-        z *= sizes_[d];
+    const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+    if (size_d != 1) {
+      if (sizes_and_strides_.stride_at_unchecked(d) == z) {
+        z *= size_d;
       } else {
         is_contiguous = false;
         break;
@@ -123,20 +183,22 @@ bool TensorImpl::compute_contiguous() const {
 bool TensorImpl::compute_channels_last_contiguous_2d() const {
   // Please don't combine these code, constant array is used here to let
   // compiler fully unroll the loop to get better performance
-  switch (sizes_.size()) {
+  switch (sizes_and_strides_.size()) {
     case 4:
       {
         int64_t expected = 1;
         for (auto& d : {1, 3, 2, 0}) {
-          if (sizes_[d] != 1) {
-            if (strides_[d] != expected) {
+          const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+          if (size_d != 1) {
+            if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
               return false;
             }
-            expected *= sizes_[d];
+            expected *= size_d;
           }
         }
         return true;
       }
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case 3:
       // TODO dim == 3 case will be enabled once it is fully tested
       return false;
@@ -148,20 +210,23 @@ bool TensorImpl::compute_channels_last_contiguous_2d() const {
 bool TensorImpl::compute_channels_last_contiguous_3d() const {
   // Please don't combine these code, constant array is used here to let
   // compiler fully unroll the loop to get better performance
-  switch (sizes_.size()) {
+  switch (sizes_and_strides_.size()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 5:
       {
         int64_t expected = 1;
         for (auto& d : {1, 4, 3, 2, 0}) {
-          if (sizes_[d] != 1) {
-            if (strides_[d] != expected) {
+          const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+          if (size_d != 1) {
+            if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
               return false;
             }
-            expected *= sizes_[d];
+            expected *= size_d;
           }
         }
         return true;
       }
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case 4:
       // TODO dim == 4 case will be enabled once it is fully tested
       return false;
@@ -171,17 +236,18 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
 }
 
 bool TensorImpl::compute_strides_like_channels_last_2d() const {
-  return is_channels_last_strides_2d(sizes_, strides_);
+  return is_channels_last_strides_2d(TensorImpl::sizes(), TensorImpl::strides());
 }
 
 bool TensorImpl::compute_strides_like_channels_last_3d() const {
-  return is_channels_last_strides_3d(sizes_, strides_);
+  return is_channels_last_strides_3d(TensorImpl::sizes(), TensorImpl::strides());
 }
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {
   if (dim() == 1) {
-    return sizes_[0] < 2 || strides_[0] == 1;
+    return sizes_and_strides_.size_at_unchecked(0) < 2 || sizes_and_strides_.stride_at_unchecked(0) == 1;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   SmallVector<int64_t,5> perm;
   perm.resize(dim());
   for (int64_t i = 0; i < dim(); i ++) {
@@ -189,22 +255,23 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   }
   // Sort by strides, leaving 0 and 1 sized dims at the end of the array
   std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
-      if (sizes_[a] < 2) {
+      if (sizes_and_strides_.size_at_unchecked(a) < 2) {
         return false;
-      } else if (sizes_[b] < 2) {
+      } else if (sizes_and_strides_.size_at_unchecked(b) < 2) {
         return true;
       }
-      return strides_[a] < strides_[b];
+      return sizes_and_strides_.stride_at_unchecked(a) < sizes_and_strides_.stride_at_unchecked(b);
   });
   auto require_stride = 1;
   for (int64_t i = 0; i < dim(); i ++) {
-    if (sizes_[perm[i]] < 2) {
+    const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
+    if (size_perm_i < 2) {
       return true;
     }
-    if (strides_[perm[i]] != require_stride) {
+    if (sizes_and_strides_.stride_at_unchecked(perm[i]) != require_stride) {
       return false;
     }
-    require_stride *= sizes_[perm[i]];
+    require_stride *= size_perm_i;
   }
   return true;
 }
@@ -216,39 +283,48 @@ void TensorImpl::release_resources() {
   }
 }
 
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 int64_t TensorImpl::dim() const {
-  return sizes_.size();
+  return sizes_and_strides_.size();
 }
+#endif
 
 int64_t TensorImpl::size(int64_t d) const {
   d = at::maybe_wrap_dim(d, dim(), false);
-  return sizes_[d];
+  return sizes_and_strides_.size_at_unchecked(d);
 }
 
 int64_t TensorImpl::stride(int64_t d) const {
   d = at::maybe_wrap_dim(d, dim(), false);
-  return strides_[d];
+  return sizes_and_strides_.stride_at_unchecked(d);
 }
 
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 bool TensorImpl::has_storage() const {
   return storage_;
 }
-
-bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
-#ifdef DEBUG
-  AT_ASSERT(compute_contiguous() == is_contiguous_);
 #endif
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-      return is_channels_last_contiguous_;
-  }
-  else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-      return is_channels_last_3d_contiguous_;
-  }
-  return is_contiguous_;
+
+void TensorImpl::throw_storage_access_error() const {
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
-const Storage& TensorImpl::storage() const {
-  return storage_;
+bool TensorImpl::is_contiguous_nondefault_policy_impl(at::MemoryFormat memory_format) const {
+  if (has_contiguity_ == static_cast<uint8_t>(HasContiguityPolicy::ContiguityNotSupported)) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "Tensors of type ", tensorimpl_type_name(),
+        " do not have is_contiguous");
+  } else {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(has_contiguity_ == static_cast<uint8_t>(HasContiguityPolicy::CustomBehavior));
+    return is_contiguous_custom(memory_format);
+  }
+}
+
+bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "TensorImpl::is_contiguous_custom should never be called; did you "
+      "set_has_contiguity_policy and forget to override is_contiguous_custom?");
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -267,9 +343,18 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
           device};
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
+// Setting requires_grad to true on inference tensor outside InferenceMode
+// is forbidden.  Ideally it would also be illegal inside InferenceMode.
+// But there's no way that we can directly allocate a tensor to have
+// requires_grad = true in C++ constructor so set_requires_grad is widely
+// used in C++ frontend. Forbidding it inside InferenceMode will force users
+// to delete these setter code in their code which is not ideal.
 void TensorImpl::set_requires_grad(bool requires_grad) {
+  TORCH_CHECK(!(requires_grad && is_inference_tensor() && !c10::InferenceMode::is_enabled()),
+    "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.");
   if (!requires_grad && !autograd_meta_) return;
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
   // NB: In principle, setting requires_grad to false could result in
@@ -337,13 +422,13 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
     TensorImpl* dest_impl,
     bool allow_tensor_metadata_change) {
   dest_impl->storage_ = src_impl->storage_;
-  dest_impl->sizes_ = src_impl->sizes_;
-  dest_impl->strides_ = src_impl->strides_;
+  dest_impl->sizes_and_strides_ = src_impl->sizes_and_strides_;
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
   dest_impl->key_set_ = src_impl->key_set_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
+  dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
   dest_impl->is_channels_last_3d_contiguous_ = src_impl->is_channels_last_3d_contiguous_;
   dest_impl->is_channels_last_ = src_impl->is_channels_last_;
@@ -352,6 +437,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  dest_impl->storage_access_should_throw_ = src_impl->storage_access_should_throw_;
   if (src_impl->named_tensor_meta_ != nullptr) {
     dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
   }
@@ -363,7 +449,11 @@ void TensorImpl::copy_tensor_metadata(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) {
   copy_tensor_metadata_except_version_counter(src_impl, dest_impl, allow_tensor_metadata_change);
-  dest_impl->set_version_counter(version_counter);
+  // TODO: In the ideal end state, it's okay to set disabled version_counter
+  // on inference tensor since it's a no-op. This requires refactor on call sites.
+  if (!dest_impl->is_inference_tensor()) {
+    dest_impl->set_version_counter(version_counter);
+  }
 }
 
 void TensorImpl::copy_tensor_metadata(
@@ -372,12 +462,15 @@ void TensorImpl::copy_tensor_metadata(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) {
   copy_tensor_metadata_except_version_counter(src_impl, dest_impl, allow_tensor_metadata_change);
-  dest_impl->set_version_counter(std::move(version_counter));
+  if (!dest_impl->is_inference_tensor()) {
+    dest_impl->set_version_counter(std::move(version_counter));
+  }
 }
 
 namespace impl {
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AutogradMetaFactory* meta_factory = nullptr;
 }
 

@@ -114,6 +114,17 @@ class AliasDb {
   TORCH_API void dump() const;
   TORCH_API std::string toString() const;
 
+  // Generates a DOT (www.graphviz.org) graph representation
+  //
+  // Returns `true` if the output file was successfully generated
+  //
+  // WARNING: The output dot file path can't include shell specific notations,
+  //  for example you can't use "~/temp/aliasdb.dot"
+  //  (instead, use "/home/user/temp/aliasdb.dot")
+  //
+  TORCH_API bool dumpToGraphvizFile(const char* filename) const;
+  TORCH_API std::string toGraphviz() const;
+
   static bool isMutableType(const Value* v);
   static bool isMutableType(const TypePtr& type);
 
@@ -258,7 +269,7 @@ class AliasDb {
   c10::optional<TWriteIndex> writeIndex_;
   // Collection of all memory locations that are written to.
   c10::optional<MemoryLocations> writtenToLocationsIndex_;
-  MemoryLocations buildWrittenToLocationsIndex() const;
+  void buildWrittenToLocationsIndex();
 
   std::unordered_set<const Value*> wildcards_;
 

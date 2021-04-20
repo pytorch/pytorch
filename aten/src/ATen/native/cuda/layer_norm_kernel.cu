@@ -424,10 +424,12 @@ void LayerNormBackwardKernelImpl(
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
     const Tensor& input,
-    IntArrayRef normalized_shape,
-    const Tensor& weight /* optional */,
-    const Tensor& bias /* optional */,
+    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     double eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
 
   auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto X = std::get<0>(inputs);
@@ -436,7 +438,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
   auto M = std::get<3>(inputs);
   auto N = std::get<4>(inputs);
 
-  Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor Y = at::native::empty_like(
+      X,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
   if (M > 0) {
@@ -464,10 +472,12 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const Tensor& mean,
-    const Tensor& rstd,
-    const Tensor& weight /* optional */,
-    const Tensor& bias /* optional */,
+    const Tensor& rstd, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     std::array<bool, 3> grad_input_mask) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
 
     auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
     auto X = std::get<0>(inputs);
@@ -480,13 +490,45 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
     Tensor dgamma;
     Tensor dbeta;
     if (grad_input_mask[0]) {
-      dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      dX = at::native::empty_like(
+          X,
+          c10::nullopt /* dtype */,
+          c10::nullopt /* layout */,
+          c10::nullopt /* device */,
+          c10::nullopt /* pin_memory */,
+          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     if (grad_input_mask[1]) {
-      dgamma = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      dgamma = M > 0 ? at::native::empty_like(
+                           gamma,
+                           c10::nullopt /* dtype */,
+                           c10::nullopt /* layout */,
+                           c10::nullopt /* device */,
+                           c10::nullopt /* pin_memory */,
+                           LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+                     : at::native::zeros_like(
+                           gamma,
+                           c10::nullopt /* dtype */,
+                           c10::nullopt /* layout */,
+                           c10::nullopt /* device */,
+                           c10::nullopt /* pin_memory */,
+                           LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     if (grad_input_mask[2]) {
-      dbeta = M > 0 ? at::native::empty_like(beta, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(beta, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      dbeta = M > 0 ? at::native::empty_like(
+                          beta,
+                          c10::nullopt /* dtype */,
+                          c10::nullopt /* layout */,
+                          c10::nullopt /* device */,
+                          c10::nullopt /* pin_memory */,
+                          LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+                    : at::native::zeros_like(
+                          beta,
+                          c10::nullopt /* dtype */,
+                          c10::nullopt /* layout */,
+                          c10::nullopt /* device */,
+                          c10::nullopt /* pin_memory */,
+                          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     if (M > 0) {
       LayerNormBackwardKernelImpl(

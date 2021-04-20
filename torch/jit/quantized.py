@@ -1,12 +1,11 @@
+from torch import Tensor, _VF  # noqa: F401
+from torch.nn.utils.rnn import PackedSequence
 import torch
 
-from typing import Tuple, Optional, List
-
-from torch import Tensor, _VF  # noqa: F401
-
-from torch.nn.utils.rnn import PackedSequence
-
 import warnings
+
+from typing import List, Optional, Tuple
+
 
 class QuantizedLinear(torch.jit.ScriptModule):
     __constants__ = ['scale', 'zero_point']
@@ -348,7 +347,6 @@ class QuantizedLSTM(QuantizedRNNBase):
     @torch.jit.script_method
     def forward_impl(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]], batch_sizes: Optional[Tensor],
                      max_batch_size: int, sorted_indices: Optional[Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
-        # noqa
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             zeros = torch.zeros(self.num_layers * num_directions,
@@ -423,7 +421,6 @@ class QuantizedGRU(QuantizedRNNBase):
     @torch.jit.script_method
     def forward_impl(self, input: Tensor, hx: Optional[Tensor], batch_sizes: Optional[Tensor], max_batch_size: int,
                      sorted_indices: Optional[Tensor]) -> Tuple[Tensor, Tensor]:
-        # noqa
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             hx = torch.zeros(self.num_layers * num_directions,

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
@@ -11,6 +12,7 @@
 using c10::AliasInfo;
 using c10::BoolType;
 using c10::CapsuleType;
+using c10::ComplexType;
 using c10::DeviceObjType;
 using c10::DictType;
 using c10::FloatType;
@@ -54,16 +56,18 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
       {"float", FloatType::get()},
+      {"complex", ComplexType::get()},
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
+      {"NoneType", NoneType::get()},
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
       {"AnyClassType", at::AnyClassType::get()},
       {"AnyEnumType", at::AnyEnumType::get()},
   };
   auto tok = L.cur();
-  if (!L.nextIf(TK_NONE)) {
+  if (!L.nextIf(TK_NONE) && !L.nextIf(TK_NONE_TYPE)) {
     L.expect(TK_IDENT);
   }
   std::string text = tok.text();

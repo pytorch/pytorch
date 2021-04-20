@@ -327,7 +327,6 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
 
   #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    TORCH_CHECK(prop->major >= 8, "BFloat16 bgemm in CUDA requires Ampere or later GPU");
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(handle,
                                     opa, opb, (int)m, (int)n, (int)k,
                                     (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
@@ -343,7 +342,7 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0, NULL, NULL));
   #else
-    TORCH_CHECK(false, "BFloat16 bgemm in CUDA requires Ampere or later GPU");
+    TORCH_CHECK(false, "CUDA BFloat16 bgemm requires CUDA 11 or later");
   #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 }
 #endif // __HIP_PLATFORM_HCC__
@@ -550,39 +549,148 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::BFloat16);
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  if (prop->major >= 8) {
-    // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
-    // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
-    TORCH_CUDABLAS_CHECK(cublasGemmEx(
-        handle,
-        opa,
-        opb,
-        m,
-        n,
-        k,
-        &falpha,
-        a,
-        CUDA_R_16BF,
-        lda,
-        b,
-        CUDA_R_16BF,
-        ldb,
-        &fbeta,
-        c,
-        CUDA_R_16BF,
-        ldc,
-        CUDA_R_32F,
-        CUBLAS_GEMM_DFALT_TENSOR_OP));
-    // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
-    // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-  } else {
-    TORCH_CHECK(false, "BFloat16 gemm in CUDA requires Ampere or later GPU");
-  }
+  TORCH_CUDABLAS_CHECK(cublasGemmEx(
+      handle,
+      opa,
+      opb,
+      m,
+      n,
+      k,
+      &falpha,
+      a,
+      CUDA_R_16BF,
+      lda,
+      b,
+      CUDA_R_16BF,
+      ldb,
+      &fbeta,
+      c,
+      CUDA_R_16BF,
+      ldc,
+      CUDA_R_32F,
+      CUBLAS_GEMM_DFALT_TENSOR_OP));
 }
 #endif
+
+template <>
+void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasStrsm(
+      handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb));
+}
+
+template <>
+void trsm<double>(CUDABLAS_TRSM_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDtrsm(
+      handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb));
+}
+
+template <>
+void trsm<c10::complex<float>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCtrsm(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuComplex*>(alpha),
+      reinterpret_cast<const cuComplex*>(A),
+      lda,
+      reinterpret_cast<cuComplex*>(B),
+      ldb));
+}
+
+template <>
+void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZtrsm(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuDoubleComplex*>(alpha),
+      reinterpret_cast<const cuDoubleComplex*>(A),
+      lda,
+      reinterpret_cast<cuDoubleComplex*>(B),
+      ldb));
+}
+
+template <>
+void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasStrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      alpha,
+      A,
+      lda,
+      B,
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      alpha,
+      A,
+      lda,
+      B,
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<c10::complex<float>>(
+    CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuComplex*>(alpha),
+      reinterpret_cast<cuComplex**>(A),
+      lda,
+      reinterpret_cast<cuComplex**>(B),
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<c10::complex<double>>(
+    CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuDoubleComplex*>(alpha),
+      reinterpret_cast<cuDoubleComplex**>(A),
+      lda,
+      reinterpret_cast<cuDoubleComplex**>(B),
+      ldb,
+      batchCount));
+}
 
 /* LEVEL 2 BLAS FUNCTIONS */
 
@@ -831,18 +939,18 @@ void getrfBatched<c10::complex<float>>(
 
 template <>
 void getriBatched<double>(
-    int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, double** dC_array) {
+    int n, double** dA_array, int ldda, int* ipiv_array, double** dC_array, int lddc, int* info_array, int batchsize) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasDgetriBatched(
-      handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
+      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
 }
 
 template <>
 void getriBatched<float>(
-    int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, float** dC_array) {
+    int n, float** dA_array, int ldda, int* ipiv_array, float** dC_array, int lddc, int* info_array, int batchsize) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasSgetriBatched(
-      handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
+      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
 }
 
 template <>
@@ -851,9 +959,10 @@ void getriBatched<c10::complex<double>>(
     c10::complex<double>** dA_array,
     int ldda,
     int* ipiv_array,
+    c10::complex<double>** dC_array,
+    int lddc,
     int* info_array,
-    int batchsize,
-    c10::complex<double>** dC_array) {
+    int batchsize) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasZgetriBatched(
       handle,
@@ -862,7 +971,7 @@ void getriBatched<c10::complex<double>>(
       ldda,
       ipiv_array,
       reinterpret_cast<cuDoubleComplex**>(dC_array),
-      n,
+      lddc,
       info_array,
       batchsize));
 }
@@ -873,9 +982,10 @@ void getriBatched<c10::complex<float>>(
     c10::complex<float>** dA_array,
     int ldda,
     int* ipiv_array,
+    c10::complex<float>** dC_array,
+    int lddc,
     int* info_array,
-    int batchsize,
-    c10::complex<float>** dC_array) {
+    int batchsize) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasCgetriBatched(
       handle,
@@ -884,7 +994,7 @@ void getriBatched<c10::complex<float>>(
       ldda,
       ipiv_array,
       reinterpret_cast<cuComplex**>(dC_array),
-      n,
+      lddc,
       info_array,
       batchsize));
 }

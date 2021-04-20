@@ -25,8 +25,6 @@ namespace {
 //    https://bugs.llvm.org/show_bug.cgi?id=45824
 // Most likely we will do aarch32 support with inline asm.
 #if defined(__aarch64__)
-// See https://github.com/pytorch/pytorch/issues/47098
-#if defined(__clang__) || (__GNUC__ > 8 || (__GNUC__ == 8 && __GNUC_MINOR__ > 3))
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
@@ -59,7 +57,8 @@ private:
   float32x4x2_t values;
 public:
   using value_type = float;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 8;
   }
   Vec256() {}
@@ -284,6 +283,19 @@ public:
     }
     return mask;
   }
+  Vec256<float> isnan() const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float res[size()];
+    store(tmp);
+    for (int i = 0; i < size(); i++) {
+      if (_isnan(tmp[i])) {
+        std::memset(static_cast<void*>(&res[i]), 0xFF, sizeof(float));
+      } else {
+        std::memset(static_cast<void*>(&res[i]), 0, sizeof(float));
+      }
+    }
+    return loadu(res);
+  };
   Vec256<float> map(float (*f)(float)) const {
     __at_align32__ float tmp[size()];
     store(tmp);
@@ -326,6 +338,16 @@ public:
     }
     return loadu(tmp);
   }
+  Vec256<float> copysign(const Vec256<float> &sign) const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float tmp_sign[size()];
+    store(tmp);
+    sign.store(tmp_sign);
+    for (size_type i = 0; i < size(); i++) {
+      tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
+    }
+    return loadu(tmp);
+  }
   Vec256<float> erf() const {
     return map(std::erf);
   }
@@ -363,6 +385,9 @@ public:
   }
   Vec256<float> i0() const {
     return map(calc_i0);
+  }
+  Vec256<float> i0e() const {
+    return map(calc_i0e);
   }
   Vec256<float> igamma(const Vec256<float> &x) const {
     __at_align32__ float tmp[size()];
@@ -696,7 +721,6 @@ Vec256<float> inline fmadd(const Vec256<float>& a, const Vec256<float>& b, const
   return Vec256<float>(r0, r1);
 }
 
-#endif /* defined(__clang__) || (__GNUC__ > 8 || (__GNUC__ == 8 && __GNUC_MINOR__ > 3)) */
 #endif /* defined(aarch64) */
 
 }}}

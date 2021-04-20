@@ -1,11 +1,15 @@
 #include <c10d/ProcessGroupGloo.hpp>
 
 #include <c10d/GlooDeviceFactory.hpp>
+#include <chrono>
+#include <exception>
+#include <ratio>
+#include <tuple>
 
 #ifdef _WIN32
+#include <gloo/common/win.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <gloo/common/win.h>
 #else
 #include <netdb.h>
 #include <sys/socket.h>
@@ -37,6 +41,7 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
 #include <gloo/config.h>
@@ -105,34 +110,62 @@ namespace c10d {
 
 namespace {
 
-// Wrap c10d store as Gloo store
-class GlooStore : public ::gloo::rendezvous::Store {
- public:
-  GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
+using steady_clock_time_point =
+    std::chrono::time_point<std::chrono::steady_clock>;
 
-  void set(const std::string& key, const std::vector<char>& value) override {
-    std::vector<uint8_t> tmp(value.begin(), value.end());
-    store_->set(key, tmp);
+std::chrono::milliseconds getRemainingTime(
+    steady_clock_time_point startTime,
+    const std::chrono::milliseconds& timeout,
+    bool waitAllRanks) {
+  if (waitAllRanks) {
+    // See Note in monitoredBarrier
+    return timeout;
+  }
+  auto elapsedTime = std::chrono::steady_clock::now() - startTime;
+  auto remainingMillis = timeout -
+      std::chrono::duration_cast<std::chrono::milliseconds>(elapsedTime);
+
+  // If no more remaining time, return -1 to indicate to caller.
+  if (remainingMillis.count() <= 0) {
+    return std::chrono::milliseconds(-1);
   }
 
-  std::vector<char> get(const std::string& key) override {
-    auto value = store_->get(key);
-    return std::vector<char>(value.begin(), value.end());
-  }
+  return remainingMillis;
+}
 
-  void wait(const std::vector<std::string>& keys) override {
-    store_->wait(keys, Store::kDefaultTimeout);
-  }
+// Emit a LOG(ERROR) and throws runtime_error with the given messages.
+void logAndThrow(
+    const std::string& logMessage,
+    const std::string& errorMessage) {
+  LOG(ERROR) << logMessage;
+  throw std::runtime_error(errorMessage);
+}
 
-  void wait(
-      const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout) override {
-    store_->wait(keys, timeout);
+// For monitoredBarrier, checks remaining time left to finish processing ranks
+// and throws error if timeout.
+void checkRemainingTime(
+    const std::chrono::milliseconds& monitoredBarrierTimeout,
+    const std::chrono::milliseconds& remainingTime,
+    const std::vector<int>& processedRanks,
+    int currentRank) {
+  const std::string kNoRemainingTimeError = c10::str(
+      "Rank ",
+      currentRank,
+      " timed out in monitoredBarrier after ",
+      monitoredBarrierTimeout.count(),
+      " ms.");
+  if (remainingTime.count() < 0) {
+    std::string rankInfo;
+    if (processedRanks.size() > 0) {
+      rankInfo = c10::str(
+          "Successfully processed ranks: ", c10::Join(", ", processedRanks));
+    } else {
+      rankInfo = "No ranks successfully processed in monitoredBarrier.";
+    }
+    auto error = c10::str(kNoRemainingTimeError, "\n", rankInfo);
+    logAndThrow(error, error);
   }
-
- protected:
-  c10::intrusive_ptr<::c10d::Store> store_;
-};
+}
 
 typedef void (*ReduceFunc)(void*, const void*, const void*, size_t);
 
@@ -341,10 +374,10 @@ void initializeStreamsEvents(
     std::vector<at::cuda::CUDAEvent>& events) {
   // Ensure that the tensors in the nested tensor vectors are on the same
   // device.
-  for (size_t i = 0; i < tensors.size(); i++) {
-    auto device_id = tensors[i][0].device().index();
-    for (size_t j = 1; j < tensors[i].size(); j++) {
-      if (tensors[i][j].device().index() != device_id) {
+  for (const auto & tensorgroup : tensors) {
+    const auto device_id = tensorgroup[0].device().index();
+    for (const auto & tensor: tensorgroup) {
+      if (tensor.device().index() != device_id) {
         throw std::runtime_error(
             "tensors in the nested tensor vectors need to "
             "be on the same device");
@@ -386,7 +419,13 @@ const auto kLoopbackAddress = "127.0.0.1";
 ProcessGroupGloo::SendWork::SendWork(
     at::Tensor& tensor,
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
-    : tensor_(tensor), buffer_(std::move(buffer)) {}
+    : ProcessGroupGloo::Work(
+          -1,
+          OpType::SEND,
+          "gloo:send",
+          c10::optional<std::vector<at::Tensor>>({tensor})),
+      tensor_(tensor),
+      buffer_(std::move(buffer)) {}
 
 bool ProcessGroupGloo::SendWork::wait(std::chrono::milliseconds timeout) {
   bool sendCompleted = false;
@@ -412,8 +451,16 @@ void ProcessGroupGloo::SendWork::abort() {
 
 ProcessGroupGloo::RecvWork::RecvWork(
     at::Tensor& tensor,
-    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
-    : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(-1) {}
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+    const char* profilingTitle)
+    : ProcessGroupGloo::Work(
+          -1,
+          OpType::UNKNOWN,
+          profilingTitle,
+          c10::optional<std::vector<at::Tensor>>({tensor})),
+      tensor_(tensor),
+      buffer_(std::move(buffer)),
+      srcRank_(-1) {}
 
 int ProcessGroupGloo::RecvWork::sourceRank() const {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -442,8 +489,8 @@ void ProcessGroupGloo::RecvWork::abort() {
   buffer_->abortWaitRecv();
 }
 
-ProcessGroupGloo::Options::Options()
-    : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
+ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
+    : ProcessGroup::Options(timeout, GLOO_BACKEND_NAME), threads(2) {}
 
 namespace {
 
@@ -565,12 +612,13 @@ ProcessGroupGloo::ProcessGroupGloo(
     const c10::intrusive_ptr<Store>& store,
     int rank,
     int size,
-    Options options)
+    c10::intrusive_ptr<Options> options)
     : ProcessGroup(rank, size),
       store_(new GlooStore(store)),
+      options_(options),
       stop_(false),
       collectiveCounter_(0) {
-  auto& devices = options.devices;
+  auto& devices = options->devices;
   if (devices.empty()) {
     throw std::runtime_error("No device(s) specified");
   }
@@ -587,12 +635,12 @@ ProcessGroupGloo::ProcessGroupGloo(
   // option is needed if you have a fast NIC that cannot be saturated
   // by a single I/O thread.
   //
-  contexts_.reserve(options.devices.size());
-  for (size_t i = 0; i < options.devices.size(); i++) {
+  contexts_.reserve(options->devices.size());
+  for (size_t i = 0; i < options->devices.size(); i++) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
     auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
-    context->setTimeout(options.timeout);
-    context->connectFullMesh(store, options.devices[i]);
+    context->setTimeout(options->timeout);
+    context->connectFullMesh(store, options->devices[i]);
     contexts_.push_back(std::move(context));
   }
 
@@ -600,9 +648,9 @@ ProcessGroupGloo::ProcessGroupGloo(
   // working on in the workInProgress_ vector. It must have size equal
   // to the number of workers such that they can simply index into it
   // using the worker index they are started with.
-  workInProgress_.resize(options.threads);
+  workInProgress_.resize(options->threads);
 
-  threads_.resize(options.threads);
+  threads_.resize(options->threads);
   for (size_t i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
@@ -678,7 +726,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
       int rootRank,
       int rootTensor,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:broadcast"),
+      : ProcessGroupGloo::AsyncWork("gloo:broadcast", inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -825,8 +873,11 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_reduce"),
-      context(context), inputs(inputs), reduceOp(reduceOp), tag(tag) {}
+      : ProcessGroupGloo::AsyncWork("gloo:all_reduce", inputs),
+        context(context),
+        inputs(inputs),
+        reduceOp(reduceOp),
+        tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
   std::vector<at::Tensor> inputs;
@@ -859,7 +910,6 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
     return fn;
   }
-
 
   std::vector<at::Tensor> result() override {
     TORCH_CHECK(
@@ -911,7 +961,10 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : context(context), inputs(inputs), tag(tag) {}
+      : ProcessGroupGloo::AsyncWork("gloo:sparse_all_reduce", inputs),
+        context(context),
+        inputs(inputs),
+        tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
   std::vector<at::Tensor> inputs;
@@ -1051,8 +1104,8 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Copy back to input tensors.
     outputs.reserve(inputs.size());
-    for (size_t i = 0; i < inputs.size(); i++) {
-      inputs[i].copy_(output);
+    for (auto & input : inputs) {
+      input.copy_(output);
       if (output.is_sparse()) {
         outputs.push_back(output.clone());
       } else {
@@ -1119,8 +1172,8 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<at::Tensor> indices;
     indices.reserve(metadata.size());
     size_t offset = 0;
-    for (size_t i = 0; i < metadata.size(); i++) {
-      const auto nnz = metadata[i].nnz();
+    for (const auto & i : metadata) {
+      const auto nnz = i.nnz();
       const auto numel = sparseDim * nnz;
       indices.push_back(
           output.narrow(0, offset, numel).reshape({sparseDim, nnz}));
@@ -1164,8 +1217,8 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<at::Tensor> values;
     values.reserve(metadata.size());
     size_t offset = 0;
-    for (size_t i = 0; i < metadata.size(); i++) {
-      const auto nnz = metadata[i].nnz();
+    for (const auto & i : metadata) {
+      const auto nnz = i.nnz();
       const auto numel = denseNumel * nnz;
       auto tensorShape = std::vector<int64_t>({(int64_t)nnz});
       std::copy(
@@ -1434,7 +1487,7 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
       int rootTensor,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:reduce"),
+      : ProcessGroupGloo::AsyncWork("gloo:reduce", inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -1599,8 +1652,11 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_gather"),
-        context(context), outputs(outputs), inputs(inputs), tag(tag) {}
+      : ProcessGroupGloo::AsyncWork("gloo:all_gather", inputs),
+        context(context),
+        outputs(outputs),
+        inputs(inputs),
+        tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
   std::vector<std::vector<at::Tensor>> outputs;
@@ -1626,9 +1682,9 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     gloo::allgather(opts);
 
     // Unflatten into output tensors.
-    for (size_t i = 0; i < outputs.size(); i++) {
-      for (size_t j = 0; j < outputs[i].size(); j++) {
-        outputs[i][j].copy_(flatOutputTensor[j]);
+    for (auto & outputgroup : outputs) {
+      for (const auto j : c10::irange(outputgroup.size())) {
+        outputgroup[j].copy_(flatOutputTensor[j]);
       }
     }
   }
@@ -1755,8 +1811,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   const auto& options = inputs[0].options();
   const auto& sizes = inputs[0].sizes();
   assertTypeAndSizesMatch(invalidArgument, inputs, options, sizes);
-  for (size_t i = 0; i < outputs.size(); i++) {
-    assertTypeAndSizesMatch(invalidArgument, outputs[i], options, sizes);
+  for (const auto & output : outputs) {
+    assertTypeAndSizesMatch(invalidArgument, output, options, sizes);
   }
 
   const auto& device = inputs[0].device();
@@ -1797,7 +1853,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& output_lists,
       std::vector<at::Tensor>& input_list,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_gather"),
+      : ProcessGroupGloo::AsyncWork("gloo:all_gather", input_list),
         context(context),
         output_lists(output_lists),
         input_list(input_list),
@@ -1927,7 +1983,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       int root,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:gather"),
+      : ProcessGroupGloo::AsyncWork("gloo:gather", inputs),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2132,7 +2188,11 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& inputs,
       int root,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:scatter"),
+      : ProcessGroupGloo::AsyncWork(
+            "gloo:scatter",
+            inputs.size() > 0
+                ? c10::optional<std::vector<at::Tensor>>(inputs[0])
+                : c10::nullopt),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2195,8 +2255,8 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
     }
 
     tmpOutputs.reserve(outputs.size());
-    for (size_t i = 0; i < outputs.size(); i++) {
-      tmpOutputs.push_back(pinnedLike(outputs[i]));
+    for (auto & output : outputs) {
+      tmpOutputs.push_back(pinnedLike(output));
     }
   }
 
@@ -2327,7 +2387,9 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       std::vector<int64_t>& outputCounts,
       std::vector<int64_t>& inputCounts,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_to_all"),
+      : ProcessGroupGloo::AsyncWork(
+            "gloo:all_to_all",
+            c10::optional<std::vector<at::Tensor>>({inputTensor})),
         context(context),
         outputTensor(outputTensor),
         inputTensor(inputTensor),
@@ -2505,9 +2567,7 @@ at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
 }
 
 uint32_t checkTag(int32_t tag) {
-  if (tag < 0) {
-    throw std::runtime_error("Tag must be >= 0");
-  }
+  TORCH_CHECK(tag >= 0, "Tag must be nonnegative");
   return (uint32_t)tag;
 }
 
@@ -2546,7 +2606,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
-  return c10::make_intrusive<RecvWork>(tensor, std::move(buf));
+  return c10::make_intrusive<RecvWork>(tensor, std::move(buf), "gloo:recv");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
@@ -2574,7 +2634,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
-  return c10::make_intrusive<RecvWork>(tensor, std::move(buf));
+  return c10::make_intrusive<RecvWork>(
+      tensor, std::move(buf), "gloo:recvAnySource");
 }
 
 namespace {
@@ -2585,8 +2646,10 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:barrier"),
-        context(context), priorWork(std::move(priorWork)), tag(tag) {}
+      : ProcessGroupGloo::AsyncWork("gloo:barrier", c10::nullopt),
+        context(context),
+        priorWork(std::move(priorWork)),
+        tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
   std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork;
@@ -2629,6 +2692,133 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
       std::move(context), std::move(priorWork), tag);
   enqueue(work);
   return work;
+}
+
+void ProcessGroupGloo::monitoredBarrier(
+    const BarrierOptions& opts,
+    bool waitAllRanks) {
+      C10_LOG_API_USAGE_ONCE("torch.distributed.monitored_barrier");
+  // Use default timeout if no timeout was specified.
+  auto monitoredBarrierTimeout =
+      (opts.timeout == kUnsetTimeout) ? this->options_->timeout : opts.timeout;
+  auto rank = this->getRank();
+  auto t1 = nextTag();
+  auto t2 = nextTag();
+  std::vector<at::Tensor> commTensor = {at::tensor({rank})};
+  // only enforce timeout on rank 0. This is so that other ranks aren't timed
+  // out first, bringing down the job without reporting which rank timed out.
+  if (rank != 0) {
+    auto sendWork = send(commTensor, 0, t1);
+    auto recvWork = recv(commTensor, 0, t2);
+    try {
+      sendWork->wait();
+      recvWork->wait();
+    } catch (const std::exception& e) {
+      const std::string error = c10::str(
+        "Rank ",
+        rank,
+        " successfully reached monitoredBarrier, but received errors while waiting",
+        " to be unblocked by rank 0. Please check rank 0 logs for faulty rank."
+      );
+      logAndThrow(
+        error,
+        c10::str(error, "\n Original exception: \n", e.what())
+      );
+    }
+    return;
+  }
+  auto startTime = std::chrono::steady_clock::now();
+  auto worldSize = this->getSize();
+  // Mappings of rank to recvWork/sendWork respectively.
+  std::map<int, c10::intrusive_ptr<ProcessGroup::Work>> recvWorkMap;
+  std::map<int, c10::intrusive_ptr<ProcessGroup::Work>> sendWorkMap;
+  // Kick off recvWork and wait to unblock sendWork->wait() from non-zero ranks.
+  // Failed/hanging ranks will not ack this call, letting rank 0 know about the
+  // failure.
+  for (int dstRank = 1; dstRank < worldSize; ++dstRank) {
+    recvWorkMap.insert({dstRank, recv(commTensor, dstRank, t1)});
+  }
+
+  auto waitLoop =
+      [&](const std::map<int, c10::intrusive_ptr<ProcessGroup::Work>>& works) {
+        std::vector<int> processedRanks;
+        for (auto& work : works) {
+          bool rankResponded = false;
+          try {
+            // Note: if waitAllRanks=false, we recompute the time remaining in
+            // barrier and use this recomputed time in wait(). However, if
+            // waitAllRanks=true, we use the original timeout, since if we use
+            // up the entire timeout waiting for response from rank n, then we
+            // won't have any timeout left to query ranks beginning with n + 1.
+            auto remainingTime = getRemainingTime(
+                startTime, monitoredBarrierTimeout, waitAllRanks);
+            if (!waitAllRanks) {
+              checkRemainingTime(
+                  monitoredBarrierTimeout,
+                  remainingTime,
+                  processedRanks,
+                  rank);
+            }
+            work.second->wait(remainingTime);
+            rankResponded = true;
+          } catch (const std::exception& e) {
+            const std::string error = c10::str(
+                "Rank ",
+                work.first,
+                " failed to pass monitoredBarrier in ",
+                monitoredBarrierTimeout.count(),
+                " ms");
+            if (waitAllRanks) {
+              LOG(ERROR) << error;
+            } else {
+              logAndThrow(
+                  error,
+                  c10::str(error, "\n Original exception: \n", e.what()));
+            }
+          }
+          if (rankResponded) {
+            processedRanks.push_back(work.first);
+          }
+        }
+        // If we are collecting all failed ranks, check if we need to throw if
+        // some ranks have not responded.
+        if (waitAllRanks && processedRanks.size() != size_) {
+          std::vector<int> failedRanks;
+          for (int i = 1; i < size_; ++i) {
+            if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
+                processedRanks.end()) {
+              failedRanks.push_back(i);
+            }
+          }
+
+          TORCH_INTERNAL_ASSERT(!failedRanks.empty());
+          const std::string ranksStr = c10::Join(", ", failedRanks);
+          const std::string error = c10::str(
+              "Ranks ",
+              ranksStr,
+              " failed to pass monitoredBarrier in ",
+              monitoredBarrierTimeout.count(),
+              " ms");
+          logAndThrow(error, error);
+        }
+      };
+
+  waitLoop(recvWorkMap);
+  // If we've reached here successfully, this means all ranks have acked in
+  // monitoredBarrier. Unblock all ranks now by responding to their recv(). This
+  // ensures that this is a true barrier in that all ranks  exit it successfully
+  // or none of them do.
+  for (int dstRank = 1; dstRank < worldSize; ++dstRank) {
+    sendWorkMap.insert({dstRank, send(commTensor, dstRank, t2)});
+  }
+
+  waitLoop(sendWorkMap);
+
+  auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - startTime);
+  LOG(INFO) << "All ranks passed monitoredBarrier in "
+            << elapsedTime.count()
+            << " ms.";
 }
 
 } // namespace c10d

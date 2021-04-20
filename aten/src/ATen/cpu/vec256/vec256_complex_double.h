@@ -22,7 +22,8 @@ private:
   __m256d values;
 public:
   using value_type = c10::complex<double>;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 2;
   }
   Vec256() {}
@@ -204,7 +205,8 @@ public:
   }
   Vec256<c10::complex<double>> acos() const {
     // acos(x) = pi/2 - asin(x)
-    const __m256d pi_2 = _mm256_setr_pd(M_PI/2, 0.0, M_PI/2, 0.0);
+    constexpr auto pi_2d = c10::pi<double> / 2;
+    const __m256d pi_2 = _mm256_setr_pd(pi_2d, 0.0, pi_2d, 0.0);
     return _mm256_sub_pd(pi_2, asin());
   }
   Vec256<c10::complex<double>> atan() const;

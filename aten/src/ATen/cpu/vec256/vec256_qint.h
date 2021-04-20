@@ -5,7 +5,7 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/quantized/affine_quantizer_base.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
@@ -220,7 +220,8 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
 
 template<>
 struct Vec256<c10::qint32> : public Vec256qi {
-    static constexpr int size() {
+    using size_type = int;
+    static constexpr size_type size() {
         return 8;
     }
 

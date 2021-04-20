@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -25,7 +26,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
     const func_t& f,
     scalar_t init_val) {
   if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
+    at::native::resize_output(result, self.sizes());
   }
   if (self.numel() == 0) {
     return;
@@ -36,6 +37,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
     return;
   }
 
+  // TODO This probably should be using at::native::make_reduction
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
@@ -114,7 +116,15 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
 
           // Reference : https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
           auto log_add_exp = [](scalar_t x, scalar_t y) -> scalar_t {
-            return std::log1p(std::exp(std::min(x, y) - std::max(x, y))) + std::max(x, y);
+            scalar_t min = std::isnan(y) ? y : std::min(x,y); //std::min returns first arg if one of the args is nan
+            scalar_t max = std::isnan(y) ? y : std::max(x,y); //std::max returns first arg if one of the args is nan
+            if (min != max || std::isfinite(min)) {
+              // nan will be propagated here
+              return std::log1p(std::exp(min - max)) + max;
+            } else {
+           // special case to correctly handle infinite cases
+              return x;
+            }
           };
           cum_number = log_add_exp(x, cum_number);
           result_data[i * result_dim_stride] = static_cast<scalar_t>(cum_number);
@@ -179,7 +189,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
 
 static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
-    Scalar p) {
+    const Scalar& p) {
   float val;
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();
@@ -256,11 +266,25 @@ static void norm_kernel_tensor_iterator_impl(
 }
 
 static void and_kernel_impl(TensorIterator& iter) {
-  if (c10::isIntegralType(iter.dtype(), /*includeBool=*/true)) {
+  if (iter.dtype() == ScalarType::Byte) {
+    // Refer [all, any : uint8 compatibility]
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
         [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
+          Vec256<uint8_t> c = Vec256<uint8_t>();
+
+          for (decltype(c.size()) i = 0; i != Vec256<uint8_t>::size(); i++) {
+            c[i] = (a[i] && b[i]) ? 1 : 0;
+          }
+          return c;
+        },
+        /*ident=*/true);
+  } else {
+    binary_kernel_reduce_vec(
+        iter,
+        [=](bool a, bool b) -> bool { return a && b; },
+        [=](Vec256<bool> a, Vec256<bool> b) {
           // Adding the implementation here instead of in vec256_base to avoid
           // return value inconsistency. Other comparison operators in
           // vec256_base return -1/0 (all bit 1 / all bit 0) as true/false to
@@ -271,39 +295,45 @@ static void and_kernel_impl(TensorIterator& iter) {
           //
           // In this method, users would expect, e.g., all(), to return 1/0 as
           // true/false.
-          Vec256<uint8_t> c = Vec256<uint8_t>();
-          for (int i = 0; i != Vec256<uint8_t>::size(); i++) {
-            c[i] = (a[i] && b[i]) ? 1 : 0;
+          Vec256<bool> c = Vec256<bool>();
+
+          for (decltype(c.size()) i = 0; i != Vec256<bool>::size(); i++) {
+            c[i] = a[i] && b[i];
           }
           return c;
         },
         /*ident=*/true);
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "and_kernel", [&]() {
-      binary_kernel_reduce(
-          iter, AndOps<scalar_t>(), static_cast<scalar_t>(true));
-    });
   }
 }
 
 static void or_kernel_impl(TensorIterator& iter) {
-  if (c10::isIntegralType(iter.dtype(), /*includeBool=*/true)) {
+  if (iter.dtype() == ScalarType::Byte) {
+    // Refer [all, any : uint8 compatibility]
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },
         [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
           Vec256<uint8_t> c = Vec256<uint8_t>();
-          for (int i = 0; i != Vec256<uint8_t>::size(); i++) {
+
+          for (decltype(c.size()) i = 0; i != Vec256<uint8_t>::size(); i++) {
             c[i] = (a[i] || b[i]) ? 1 : 0;
           }
           return c;
         },
         /*ident=*/false);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "or_kernel", [&]() {
-      binary_kernel_reduce(
-          iter, OrOps<scalar_t>(), static_cast<scalar_t>(false));
-    });
+    binary_kernel_reduce_vec(
+        iter,
+        [=](bool a, bool b) -> bool { return a || b; },
+        [=](Vec256<bool> a, Vec256<bool> b) {
+          Vec256<bool> c = Vec256<bool>();
+
+          for (decltype(c.size()) i = 0; i != Vec256<bool>::size(); i++) {
+            c[i] = a[i] || b[i];
+          }
+          return c;
+        },
+        /*ident=*/false);
   }
 }
 
@@ -327,7 +357,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
       std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), -1));
     return;
   }
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "min_values_cpu", [&iter] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "min_values_cpu", [&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
@@ -337,7 +367,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
 }
 
 static void max_values_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "max_values_cpu", [&iter] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "max_values_cpu", [&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
@@ -347,7 +377,7 @@ static void max_values_kernel_impl(TensorIterator& iter) {
 }
 
 static void argmax_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(1), "argmax_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmax_cpu", [&] {
     binary_kernel_reduce(
       iter,
       ArgMaxOps<scalar_t>{},
@@ -356,7 +386,7 @@ static void argmax_kernel_impl(TensorIterator &iter) {
 }
 
 static void argmin_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(1), "argmin_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmin_cpu", [&] {
     binary_kernel_reduce(
       iter,
       ArgMinOps<scalar_t>{},

@@ -5,6 +5,20 @@
 namespace torch {
 namespace jit {
 
+// This is a hack to remove instances deleted in C++ from the PyBind cache
+// C++->Python. We need this because otherwise we may get the old Python object
+// if C++ creates a new object at the memory location of the deleted object.
+void clear_registered_instances(void* ptr) {
+  auto& registered_instances =
+      pybind11::detail::get_internals().registered_instances;
+  auto range = registered_instances.equal_range(ptr);
+  for (auto it = range.first; it != range.second; ++it) {
+    auto vh = it->second->get_value_and_holder();
+    vh.set_instance_registered(false);
+  }
+  registered_instances.erase(ptr);
+}
+
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
@@ -21,6 +35,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::FloatType:
       return py::cast<double>(obj);
+    case TypeKind::ComplexType: {
+      auto c_obj = py::cast<std::complex<double>>(obj.ptr());
+      return static_cast<c10::complex<double>>(c_obj);
+    }
     case TypeKind::IntType:
     // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
     case TypeKind::LayoutType:
@@ -70,15 +88,18 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
     case TypeKind::DeviceObjType: {
-      auto device = reinterpret_cast<THPDevice*>(obj.ptr());
-      return device->device;
+      if (THPDevice_Check(obj.ptr())) {
+        auto device = reinterpret_cast<THPDevice*>(obj.ptr());
+        return device->device;
+      }
+      return c10::Device(py::cast<std::string>(obj.ptr()));
     }
     case TypeKind::StreamObjType: {
       auto stream = reinterpret_cast<THPStream*>(obj.ptr());
       return static_cast<int64_t>(stream->cdata);
     }
     case TypeKind::ListType: {
-      const auto& elem_type = type->expect<ListType>()->getElementType();
+      const auto& elem_type = type->expectRef<ListType>().getElementType();
       switch (elem_type->kind()) {
         // allows single int/float to be broadcasted to a fixed size list
         case TypeKind::IntType:
@@ -127,7 +148,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         // return an IValue() to denote a NoneType
         return {};
       }
-      return toIValue(obj, type->expect<OptionalType>()->getElementType());
+      return toIValue(obj, type->expectRef<OptionalType>().getElementType());
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
@@ -157,8 +178,18 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
               attrName));
         }
 
-        const auto& contained = py::getattr(obj, attrName.c_str());
-        userObj->setSlot(slot, toIValue(contained, attrType));
+        try {
+          const auto& contained = py::getattr(obj, attrName.c_str());
+          userObj->setSlot(slot, toIValue(contained, attrType));
+        } catch (std::exception& e) {
+          throw py::cast_error(c10::str(
+              "Could not cast attribute '",
+              attrName,
+              "' to type ",
+              attrType->repr_str(),
+              ": ",
+              e.what()));
+        }
       }
       return userObj;
     }
@@ -219,6 +250,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
+      } else if (PyComplex_CheckExact(obj.ptr())) {
+        auto c_obj = py::cast<std::complex<double>>(obj.ptr());
+        return static_cast<c10::complex<double>>(c_obj);
       } else {
         throw py::cast_error(
             c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));

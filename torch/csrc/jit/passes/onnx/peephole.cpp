@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
@@ -137,14 +138,14 @@ void fuseBroadcast(Block* b) {
       // Not all broadcasts are supported by ONNX broadcast.
       c10::optional<size_t> axis = fusibleExpandTo(
           unexpanded_input->type()
-              ->expect<TensorType>()
-              ->sizes()
+              ->expectRef<TensorType>()
+              .sizes()
               .concrete_sizes()
               .value(), // from
           n->output()
               ->type()
-              ->expect<TensorType>()
-              ->sizes()
+              ->expectRef<TensorType>()
+              .sizes()
               .concrete_sizes()
               .value()); // to
       if (axis == c10::nullopt)
@@ -415,10 +416,8 @@ void fixDefaultRNNState(
   batch_size->addInput(shape_of_input->outputs()[0]);
   batch_size->addInput(gather_indices->outputs()[0]);
 
-  Node* unsqueezed_batch_size = graph->create(onnx::Unsqueeze, 1);
-  unsqueezed_batch_size->insertBefore(n);
-  unsqueezed_batch_size->addInput(batch_size->outputs()[0]);
-  unsqueezed_batch_size->is_(attr::axes, {0});
+  Node* unsqueezed_batch_size =
+      createONNXUnsqueeze(graph, n, batch_size->outputs()[0], 0, opset_version);
 
   Node* hidden_size = graph->create(onnx::Constant, 1);
   hidden_size->insertBefore(n);
@@ -439,10 +438,8 @@ void fixDefaultRNNState(
               ? 2
               : 1)));
 
-  Node* unsqueezed_num_directions = graph->create(onnx::Unsqueeze, 1);
-  unsqueezed_num_directions->insertBefore(n);
-  unsqueezed_num_directions->addInput(num_directions->outputs()[0]);
-  unsqueezed_num_directions->is_(attr::axes, {0});
+  Node* unsqueezed_num_directions = createONNXUnsqueeze(
+      graph, n, num_directions->outputs()[0], 0, opset_version);
 
   Node* concated_dims = graph->create(onnx::Concat, 1);
   concated_dims->insertBefore(n);
@@ -554,6 +551,65 @@ static void replaceInputWithList(Node* node, size_t i, ArrayRef<Value*> to) {
   }
 }
 
+static void eraseListConstruct(Block* block, int opset_version);
+
+static void eraseListConstruct(Node* n, int opset_version) {
+  for (auto b : n->blocks()) {
+    eraseListConstruct(b, opset_version);
+  }
+  std::vector<std::tuple<size_t, std::vector<Value*>>> replacements;
+
+  auto block = n->owningBlock();
+  size_t i = 0;
+  for (auto* input : n->inputs()) {
+    if (input->node()->kind() == prim::ListConstruct) {
+      auto* lc_node = input->node();
+      TypePtr elem =
+          lc_node->output()->type()->castRaw<ListType>()->getElementType();
+      if (elem->cast<IntType>()) {
+        // ListConstruct Int[] output case, we need to transform to ONNX
+        // Concat to ensure the output is a single tensor(dynamic) type in
+        // order to be consumed as inputs
+        std::vector<Value*> unsqueezed;
+        Graph* g = block->owningGraph();
+        for (auto* input : lc_node->inputs()) {
+          Node* unsqueezed_node =
+              createONNXUnsqueeze(g, lc_node, input, 0, opset_version);
+          unsqueezed.emplace_back(unsqueezed_node->output());
+        }
+        Node* concat_node = g->create(onnx::Concat, 1);
+        concat_node->i_(attr::axis, 0);
+        for (auto v : unsqueezed) {
+          concat_node->addInput(v);
+        }
+        concat_node->insertBefore(lc_node);
+
+        // make concat node output as new input, then ListConstruct should
+        // become dead
+        replacements.emplace_back(
+            i, std::vector<Value*>({concat_node->output()}));
+
+      } else {
+        if (opset_version >= OPSET_VERSION_11) {
+          c10::Symbol seq_node_kind = lc_node->inputs().size() > 0
+              ? onnx::SequenceConstruct
+              : onnx::SequenceEmpty;
+          Node* seq_node = block->owningGraph()->create(
+              seq_node_kind, {lc_node->inputs()}, 1);
+          seq_node->insertBefore(lc_node);
+          seq_node->output()->copyMetadata(lc_node->output());
+          lc_node->replaceAllUsesWith(seq_node);
+        }
+      }
+    }
+    i++;
+  }
+
+  for (auto ritr = replacements.rbegin(); ritr != replacements.rend(); ++ritr) {
+    replaceInputWithList(n, std::get<0>(*ritr), std::get<1>(*ritr));
+  }
+}
+
 static void eraseListConstruct(Block* block, int opset_version) {
   // TODO: Fix this pass/maybe get rid of this part.
   // Tensor lists might be used for meshgrid and such ops as well.
@@ -562,71 +618,9 @@ static void eraseListConstruct(Block* block, int opset_version) {
     Node* n = *it;
     ++it;
 
-    for (auto b : n->blocks()) {
-      eraseListConstruct(b, opset_version);
-    }
-    std::vector<std::tuple<size_t, std::vector<Value*>>> replacements;
-
-    size_t i = 0;
-    for (auto* input : n->inputs()) {
-      if (input->node()->kind() == prim::ListConstruct) {
-        auto* lc_node = input->node();
-        TypePtr elem =
-            lc_node->output()->type()->cast<ListType>()->getElementType();
-        if (elem->cast<IntType>()) {
-          // ListConstruct Int[] output case, we need to transform to ONNX
-          // Concat to ensure the output is a single tensor(dynamic) type in
-          // order to be consumed as inputs
-          std::vector<Value*> unsqueezed;
-          Graph* g = block->owningGraph();
-          for (auto* input : lc_node->inputs()) {
-            Node* unsqueezed_node = g->create(onnx::Unsqueeze, 1);
-            unsqueezed_node->insertBefore(lc_node);
-            unsqueezed_node->addInput(input);
-            unsqueezed_node->is_(attr::axes, {0});
-            unsqueezed.emplace_back(unsqueezed_node->output());
-          }
-          Node* concat_node = g->create(onnx::Concat, 1);
-          concat_node->i_(attr::axis, 0);
-          for (auto v : unsqueezed) {
-            concat_node->addInput(v);
-          }
-          concat_node->insertBefore(lc_node);
-
-          // make concat node output as new input, then ListConstruct should
-          // become dead
-          replacements.emplace_back(
-              i, std::vector<Value*>({concat_node->output()}));
-
-        } else {
-          if (opset_version < OPSET_VERSION_11) {
-            // Tensor lists are used mostly for inputs to cat/stack. They are
-            // already handled in those symbolics, and should become dead
-            // afterwards.
-            replacements.emplace_back(
-                i,
-                std::vector<Value*>(
-                    lc_node->inputs().begin(), lc_node->inputs().end()));
-          } else {
-            c10::Symbol seq_node_kind = lc_node->inputs().size() > 0
-                ? onnx::SequenceConstruct
-                : onnx::SequenceEmpty;
-            Node* seq_node = block->owningGraph()->create(
-                seq_node_kind, {lc_node->inputs()}, 1);
-            seq_node->insertBefore(lc_node);
-            seq_node->output()->copyMetadata(lc_node->output());
-            lc_node->replaceAllUsesWith(seq_node);
-          }
-        }
-      }
-      i++;
-    }
-
-    for (auto ritr = replacements.rbegin(); ritr != replacements.rend();
-         ++ritr) {
-      replaceInputWithList(n, std::get<0>(*ritr), std::get<1>(*ritr));
-    }
+    eraseListConstruct(n, opset_version);
   }
+  eraseListConstruct(block->return_node(), opset_version);
 }
 
 // For ops such as meshgrid where output is a list of Tensors
@@ -674,6 +668,24 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       auto prev = it->input(0)->node();
       Node* origNllLossNode = *it;
       Node* origLogSoftmaxNode;
+
+      // Check for patterns especially in cases with autocasting enabled
+      // in which a cast node is inserted before the NegativeLogLikelihoodLoss
+      // node and this causes the patterns below not to be recognizable by the
+      // fuseLogSoftmaxNllLoss function
+      // For example if the input is 2D
+      // graph(%input : Half(3, 5),
+      // %target : Long(3)):
+      // %4 : Half(3, 5) = onnx::LogSoftmaxaxis=1
+      // %8 : Float = onnx::Cast[to=1](%4)
+      // %9 : Float(3) = onnx::NegativeLogLikelihoodLoss[reduction="none"]
+      // return (%8)
+      Node* castNode = nullptr;
+      if (prev->kind() == onnx::Cast) {
+        castNode = prev;
+        prev = prev->input(0)->node();
+      }
+
       if (prev->kind() == onnx::LogSoftmax) {
         // if the input is 2D
         // graph(%input : Float(3, 5),
@@ -681,7 +693,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // %4 : Float(3, 5) = onnx::LogSoftmaxaxis=1
         // %8 : Float(3) = onnx::NegativeLogLikelihoodLoss[reduction="none"]
         // return (%8)
-        origLogSoftmaxNode = it->input(0)->node();
+        origLogSoftmaxNode = prev;
       } else if (
           prev->kind() == onnx::Transpose &&
           prev->input(0)->node()->kind() == onnx::LogSoftmax) {
@@ -696,7 +708,8 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // (%10)
         origLogSoftmaxNode = prev->input(0)->node();
         auto transpose = origLogSoftmaxNode->input(0)->node();
-        origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
+        if (transpose->inputs().size() > 0)
+          origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
       } else if (
           prev->kind() == onnx::Reshape &&
           prev->input(0)->node()->kind() == onnx::Transpose &&
@@ -748,15 +761,25 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
           // onnx::Reshape(%35, %36) return (%37)
           auto nllloss_output = origNllLossNode->output(0)->uses()[0].user;
           TORCH_INTERNAL_ASSERT(nllloss_output->kind() == onnx::Reshape);
-          TORCH_INTERNAL_ASSERT(
-              nllloss_output->inputs()[1]->node()->kind() ==
-              prim::ListConstruct);
           // make output of reshape the output of nllloss
           nllloss_output->replaceAllUsesWith(origNllLossNode);
           origNllLossNode->output(0)->copyMetadata(nllloss_output->output(0));
         }
       } else {
         continue;
+      }
+
+      // If the pattern indeed consists of a cast node before the
+      // NegativeLogLikelihoodLoss node, place a cast node in the beginning
+      // of the pattern instead
+      if (castNode != nullptr) {
+        auto onnx_type = castNode->i(attr::to);
+        Node* cast_node = b->owningGraph()->create(onnx::Cast, 1);
+        cast_node->addInput(origLogSoftmaxNode->inputs().at(0));
+        cast_node->i_(attr::to, onnx_type);
+        cast_node->insertBefore(origLogSoftmaxNode);
+        origLogSoftmaxNode->replaceInputWith(
+            origLogSoftmaxNode->inputs().at(0), cast_node->output());
       }
 
       Node* softmaxCrossEntropyNode = b->owningGraph()->create(
@@ -828,6 +851,28 @@ static void removeSequenceSplitConcat(Block* b) {
   }
 }
 
+static void insertIdentityForInputUsedAsOutput(Block* b) {
+  // Resolving limitation from ONNX that the block input cannot be used directly
+  // as block output. Inserting an Identity node inside
+  // the block, linking with the value as workaround.
+  for (auto out : b->outputs()) {
+    auto n = out->node();
+    if (nullptr != n && n->kind() == prim::Param) {
+      Node* id_node = b->owningGraph()->create(onnx::Identity);
+      id_node->insertBefore(b->return_node());
+      id_node->addInput(out);
+      id_node->output()->setType(out->type());
+      b->return_node()->replaceInputWith(out, id_node->output());
+    }
+  }
+
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      insertIdentityForInputUsedAsOutput(child_block);
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -871,6 +916,7 @@ void PeepholeOptimizeONNX(
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
   removeSequenceSplitConcat(graph->block());
+  insertIdentityForInputUsedAsOutput(graph->block());
 }
 
 } // namespace jit

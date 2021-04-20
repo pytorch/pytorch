@@ -14,8 +14,8 @@ Sections start with a reference to the source file where the code related to the
 
 ## Table of Contents
 
-- [JIT Technical Overview](#jit-technical-overview)
-  - [Table of Contents](#table-of-contents)
+<!-- toc -->
+
 - [Core Program Representation](#core-program-representation)
   - [Modules](#modules)
   - [Parameters](#parameters)
@@ -26,6 +26,7 @@ Sections start with a reference to the source file where the code related to the
   - [Block](#block)
     - [If](#if)
     - [Loops](#loops)
+    - [With](#with)
   - [Value](#value)
   - [Type](#type)
 - [Generating Programs](#generating-programs)
@@ -37,11 +38,12 @@ Sections start with a reference to the source file where the code related to the
   - [Lexer](#lexer)
   - [Tokens](#tokens)
   - [Parser](#parser)
-  - [Compiler](#compiler)
+  - [IR Emitter](#ir-emitter)
   - [SugaredValue](#sugaredvalue)
   - [Resolver](#resolver)
   - [Environment](#environment)
-  - [SSA Conversion](#convert_to_ssa)
+  - [Conversion To SSA](#conversion-to-ssa)
+  - [Exit Transform](#exit-transform)
   - [Python-Compiler Interaction](#python-compiler-interaction)
 - [Executing Programs](#executing-programs)
   - [Evaluation Semantics](#evaluation-semantics)
@@ -51,6 +53,7 @@ Sections start with a reference to the source file where the code related to the
   - [Interpreter](#interpreter)
   - [Graph Executor](#graph-executor)
   - [JIT Logging](#jit-logging)
+  - [JIT Optimization Limitter](#jit-optimization-limitter)
   - [DifferentiableGraphOp](#differentiablegraphop)
   - [Interpreter](#interpreter-1)
   - [FusionGroup](#fusiongroup)
@@ -58,7 +61,7 @@ Sections start with a reference to the source file where the code related to the
     - [Aliasing and mutation in the PyTorch API](#aliasing-and-mutation-in-the-pytorch-api)
     - [Aliasing and mutation annotations in FunctionSchema](#aliasing-and-mutation-annotations-in-functionschema)
     - [Alias Analysis in the IR](#alias-analysis-in-the-ir)
-    - [Writing optimization passes with AliasDb](#writing-optimization-passes-with-aliasdb)
+    - [Writing optimization passes with `AliasDb`](#writing-optimization-passes-with-aliasdb)
 - [Profiling Programs](#profiling-programs)
 - [Saving Programs](#saving-programs)
 - [Testing Programs](#testing-programs)
@@ -66,6 +69,7 @@ Sections start with a reference to the source file where the code related to the
   - [Python Printer](#python-printer)
 - [Python Bindings](#python-bindings)
 
+<!-- tocstop -->
 
 # Core Program Representation
 
@@ -1184,6 +1188,32 @@ By default, types in the graph are printed with maximum verbosity.  The verbosit
 * `2`: Also print strides
 * `3`: Also print device type and whether gradient is required
 
+## JIT Optimization Limitter ##
+
+[jit_opt_limit.h](jit_opt_limit.h)
+
+Often times, we need to limit the number of optimizations for any lowering passes for debugging purposes.
+
+`TorchScript` offers a simple optimization limit checker that can be configured through environment variable `PYTORCH_JIT_OPT_LIMIT`. The purpose is to limit how many optimization you can make per pass. This is useful for debugging any passes.
+
+Opt limit checker is enabled on a per file basis (hence per pass). For example, in `constant_propagation.cpp`, `PYTORCH_JIT_OPT_LIMIT` should be set to `constant_propagation=<opt_limit>` where `<opt_limit>` is the number of optimizations you want to make for the pass. (i.e.
+`PYTORCH_JIT_OPT_LIMIT="constant_propagation=<opt_limit>"`).
+
+Multiple files can be configured by separating each file name with a colon
+`:` as in the following example,
+`PYTORCH_JIT_OPT_LIMIT="constant_propagation=<opt_limit>:dead_code_elimination=<opt_limit>"`
+
+You can call opt limiter by calling a macro `JIT_OPT_ALLOWED`. It will return true if
+we haven't reached the optimization limit yet. Otherwise, it will return
+false. Typical usage:
+
+```cpp
+if (!JIT_OPT_ALLOWED) {
+    GRAPH_DUMP(...); //supplied from jit_log
+    return;
+}
+```
+
 ## DifferentiableGraphOp ##
 
 [runtime/graph_executor.cpp](runtime/graph_executor.cpp)
@@ -1334,13 +1364,13 @@ If your PR adds/updates a gradient formula for `torch`/`nn` functions, you **MUS
 - `torch` functions: `method_tests` in [common_method_tests.py](../../../test/common_method_tests.py)
 - `nn` functions: `nn_functional_tests` in [test_jit.py](../../../test/test_jit.py)
 
-To turn on autodiff check, you can add an optional `check_ad(should_check_autodiff[bool], nonfusible_nodes[str|list[str]], fusible_nodes[str|list[str]])` tuple after the optional test variant name field.
-If `should_check_autodiff=True`, the differentiated traced/script forward graph must have a `prim::DifferentiableGraph`.
+To turn on autodiff check, you can add an optional `check_ad(should_autodiff_node[bool], nonfusible_nodes[str|list[str]], fusible_nodes[str|list[str]])` tuple after the optional test variant name field.
+If `should_autodiff_node=True`, the differentiated traced/script forward graph must have a `prim::DifferentiableGraph`.
 
 All nodes in `nonfusible_nodes` should show up in at least once in `prim::DifferentiableGraph` subgraphs.
 When fusion is enabled, all nodes in `fusible_nodes` should show up in one of `prim::FusionGroup` graphs attached to `prim::DifferentiableGraph`,
 otherwise they're checked as `nonfusible_nodes` as well.
-On the other hand, if `should_check_autodiff=False`, the graph can still have `prim::DifferentiableGraph` with other nodes, but not `nonfusible_nodes` and `fusible_nodes`.
+On the other hand, if `should_autodiff_node=False`, the graph can still have `prim::DifferentiableGraph` with other nodes, but not `nonfusible_nodes` and `fusible_nodes`.
 
 To make writing test easier, you only need to write out node names if it's different from the function name. Below are a few examples:
 ```python

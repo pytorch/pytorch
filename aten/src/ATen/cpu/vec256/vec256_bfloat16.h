@@ -50,12 +50,22 @@ static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   return _mm256_permute4x64_epi64(t_lo, 0xd8); // 11        01        10        00
 }
 
+static inline __m256i merge_compare_result(const __m256& a, const __m256& b) {
+  __m256i lo = _mm256_castps_si256(a);
+  __m256i hi = _mm256_castps_si256(b);
+  lo = _mm256_srli_epi32(lo, 16);
+  hi = _mm256_srli_epi32(hi, 16);
+  auto out = _mm256_packus_epi32(lo, hi);
+  return _mm256_permute4x64_epi64(out, 0xd8);
+}
+
 template <> class Vec256<BFloat16> {
 private:
   __m256i values;
 public:
   using value_type = uint16_t;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 16;
   }
   Vec256() {}
@@ -210,7 +220,7 @@ public:
       const auto nan_vec = _mm256_set1_ps(NAN);
       const auto not_nan_mask = _mm256_cmp_ps(values, values, _CMP_EQ_OQ);
       const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
-      const auto pi = _mm256_set1_ps(M_PI);
+      const auto pi = _mm256_set1_ps(c10::pi<float>);
 
       const auto neg_mask = _mm256_cmp_ps(values, zero_vec, _CMP_LT_OQ);
       auto angle = _mm256_blendv_ps(zero_vec, pi, neg_mask);
@@ -247,6 +257,15 @@ public:
     auto o1 = Sleef_atan2f8_u10(lo, b1);
     auto o2 = Sleef_atan2f8_u10(hi, b2);
     return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> copysign(const Vec256<BFloat16> &sign) const {
+    // copy sign bit (0x8000) from sign and remaining bits from values
+    __m256i mask_value = _mm256_set1_epi32(~0x80008000);
+    __m256i mask_signbit = _mm256_set1_epi32(0x80008000);
+    return Vec256<BFloat16>(
+      _mm256_or_si256(
+        _mm256_and_si256(values, mask_value),
+        _mm256_and_si256(sign, mask_signbit)));
   }
   Vec256<BFloat16> erf() const {
     return map(Sleef_erff8_u10);
@@ -301,6 +320,22 @@ public:
     for (int64_t i = 0; i < size() / 2; i++) {
       tmp1[i] = calc_i0(tmp1[i]);
       tmp2[i] = calc_i0(tmp2[i]);
+    }
+    auto o1 = _mm256_loadu_ps(tmp1);
+    auto o2 = _mm256_loadu_ps(tmp2);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> i0e() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto sz = size();
+    __at_align32__ float tmp1[sz / 2], tmp2[sz / 2];
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
+
+    for (decltype(sz) i = 0; i < sz / 2; i++) {
+      tmp1[i] = calc_i0e(tmp1[i]);
+      tmp2[i] = calc_i0e(tmp2[i]);
     }
     auto o1 = _mm256_loadu_ps(tmp1);
     auto o2 = _mm256_loadu_ps(tmp2);
@@ -474,33 +509,44 @@ Vec256<BFloat16> static inline bfloat16_binary_op_as_fp32(const Vec256<BFloat16>
   return cvtfp32_bf16(o1, o2);
 }
 
+template<typename Op>
+Vec256<BFloat16> static inline bfloat16_compare_as_fp32(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b, Op op) {
+  __m256 a_lo, a_hi;
+  __m256 b_lo, b_hi;
+  cvtbf16_fp32(__m256i(a), a_lo, a_hi);
+  cvtbf16_fp32(__m256i(b), b_lo, b_hi);
+  auto o1 = op(a_lo, b_lo);
+  auto o2 = op(a_hi, b_hi);
+  return merge_compare_result(o1, o2);
+}
+
 Vec256<BFloat16> inline Vec256<BFloat16>::operator>(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_GT_OQ);
   });
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator<(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_LT_OQ);
   });
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator>=(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_GE_OQ);
   });
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator<=(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_LE_OQ);
   });
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator==(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_EQ_OQ);
   });
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator!=(const Vec256<BFloat16>& other) const {
-  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+  return bfloat16_compare_as_fp32(*this, other, [](__m256 x, __m256 y) {
     return _mm256_cmp_ps(x, y, _CMP_NEQ_UQ);
   });
 }

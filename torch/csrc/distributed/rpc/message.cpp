@@ -104,6 +104,18 @@ Message createExceptionResponse(const std::string& exceptionStr, int64_t id) {
       id);
 }
 
+namespace {
+
+// NB: need to call torch::class_ to register Message in the map returned by
+// c10::getCustomClassTypeMap(). Otherwise, Message cannot be wrapped within
+// an IValue.
+// NB: add this line here instead of in rpc/init.cpp because 1) we have C++
+// only tests that won't run rpc/init.cpp; 2) Message is not meant to be
+// visible from Python.
+static const auto message = torch::class_<Message>("rpc", "_Message");
+
+} // namespace
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

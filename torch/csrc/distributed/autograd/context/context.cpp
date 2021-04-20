@@ -123,26 +123,27 @@ void DistAutogradContext::resetGraphTask() {
 }
 
 void DistAutogradContext::addOutstandingRpc(
-    const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
-  futureMessage->addCallback([this](const rpc::FutureMessage& futureMessage) {
-    if (futureMessage.hasError()) {
+    const std::shared_ptr<rpc::JitFuture>& jitFuture) {
+  std::weak_ptr<rpc::JitFuture> wp = jitFuture;
+  jitFuture->addCallback([this, wp]() {
+    auto future = wp.lock();
+    if (future->hasError()) {
       // If we have an error, let the local autograd engine know about it.
       std::unique_lock<std::mutex> lock(lock_);
       if (graphTask_) {
         graphTask_->set_exception_without_signal(nullptr);
         lock.unlock();
         if (!graphTask_->future_completed_.exchange(true)) {
-          graphTask_->future_result_->setErrorIfNeeded(
-              std::make_exception_ptr(*futureMessage.error()));
+          graphTask_->future_result_->setErrorIfNeeded(future->exception_ptr());
         }
       } else {
         LOG(WARNING) << "Ignoring error since GraphTask is no longer valid: "
-                     << (*futureMessage.error()).what();
+                     << future->tryRetrieveErrorMessage();
       }
     }
   });
   std::lock_guard<std::mutex> guard(lock_);
-  outStandingRpcs_.push_back(futureMessage);
+  outStandingRpcs_.push_back(jitFuture);
 }
 
 void DistAutogradContext::clearOutstandingRpcs() {
@@ -170,8 +171,10 @@ std::shared_ptr<c10::ivalue::Future> DistAutogradContext::
     state->future->markCompleted(c10::IValue());
   } else {
     for (auto& rpc : outStandingRpcs) {
-      rpc->addCallback([state](const rpc::FutureMessage& rpc) {
-        if (rpc.hasError()) {
+      std::weak_ptr<rpc::JitFuture> wp = rpc;
+      rpc->addCallback([state, wp]() {
+        auto future = wp.lock();
+        if (future->hasError()) {
           // If there's an error, we want to setError() on the future,
           // unless another error has already been sent - use a CAS to
           // guard.
@@ -183,7 +186,7 @@ std::shared_ptr<c10::ivalue::Future> DistAutogradContext::
           bool expectedAlreadySent = false;
           if (state->alreadySentError.compare_exchange_strong(
                   expectedAlreadySent, true)) {
-            state->future->setError(std::make_exception_ptr(*rpc.error()));
+            state->future->setError(future->exception_ptr());
           }
           return;
         }

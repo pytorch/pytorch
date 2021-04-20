@@ -10,6 +10,14 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
+enum Conv2dMethod {
+  Conv2dDepthwise,
+  Conv2dPointwise,
+  Conv2dOld,
+  Conv2dSlidingWindow,
+  Conv2dWinograd_2_3,
+};
+
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
  public:
   static Conv2dOpContext create(
@@ -22,8 +30,8 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
       bool transposed,
       IntArrayRef output_padding,
       int64_t groups,
-      c10::optional<Scalar> output_min = c10::nullopt,
-      c10::optional<Scalar> output_max = c10::nullopt);
+      const c10::optional<Scalar>& output_min = c10::nullopt,
+      const c10::optional<Scalar>& output_max = c10::nullopt);
 
   using State = std::tuple<
       Tensor,
@@ -49,8 +57,9 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
       bool transposed,
       IntArrayRef output_padding,
       int64_t groups,
-      c10::optional<Scalar> output_min = c10::nullopt,
-      c10::optional<Scalar> output_max = c10::nullopt);
+      const Conv2dMethod method,
+      const c10::optional<Scalar>& output_min = c10::nullopt,
+      const c10::optional<Scalar>& output_max = c10::nullopt);
 
  private:
   struct {
@@ -76,6 +85,8 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
     c10::optional<Scalar> output_min;
     c10::optional<Scalar> output_max;
   } unpacked_;
+
+  Conv2dMethod method_;
 };
 
 Tensor conv2d_clamp_run(
@@ -89,8 +100,8 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max);
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max);
 
 } // namespace ops
 } // namespace vulkan

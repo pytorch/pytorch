@@ -1,11 +1,14 @@
 import itertools
 from typing import Optional, List, Sequence, Union
 
-from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api.types import CppSignatureGroup, DispatcherSignature
+from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe
-from tools.codegen.model import *
+from tools.codegen.context import with_native_function
+from tools.codegen.utils import mapMaybe
+from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
+                                 TensorOptionsArguments)
 
 # Note [Manual Backend kernels]
 # For these ops, we want to manually register to dispatch key Backend and
@@ -41,7 +44,7 @@ MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_BACKEND | MANUAL_AUTOGRAD_AND_TRACER
 DONT_RECORD_TRACE = {
     'convolution', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d',
     'conv_transpose2d', 'conv_transpose3d', 'lstm_cell', 'gru_cell',
-    'rnn_tanh_cell', 'rnn_relu_cell', 'linear',
+    'rnn_tanh_cell', 'rnn_relu_cell',
     # FIXME: figure out a better way when we support sparse tensors in jit
     '_coalesced',
 }
@@ -291,7 +294,7 @@ def declare_returned_variables(f: NativeFunction) -> str:
         return ''
     types = map(cpp.return_type, f.func.returns)
     names = cpp.return_names(f)
-    return '\n'.join(f'{type} {name};' for type, name in zip(types, names))
+    return '\n'.join(f'{type.cpp_type()} {name};' for type, name in zip(types, names))
 
 def tie_return_values(f: NativeFunction) -> str:
     if len(f.func.returns) == 1:
@@ -310,12 +313,7 @@ def get_return_value(f: NativeFunction) -> str:
         return f'std::make_tuple({moved})'
 
 TRACE_DISPATCH = CodeTemplate("""\
-static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-    .typed<${arg_types}>();
-${assign_return_values}c10::Dispatcher::singleton()
-    .redispatch<${ret_and_arg_types}>(${redispatch_args});
-""")
+${assign_return_values}at::redispatch::${api_name}(${unpacked_args});""")
 
 def emit_trace_body(f: NativeFunction) -> List[str]:
     trace_body: List[str] = []
@@ -326,19 +324,26 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    ret_and_arg_types = ', '.join([dispatcher_sig.returns_type()] + [a.type.cpp_type() for a in dispatcher_exprs])
-    redispatch_args = ', '.join(['op', 'c10::DispatchKey::Tracer'] + [a.expr for a in dispatcher_exprs])
+    # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
+    # See Note [Plumbing Keys Through The Dispatcher] for details.
+    dispatch_key_set = 'ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Tracer)'
+    redispatch_args = ', '.join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     assign_return_values = f'{tie_return_values(f)} = ' \
                            if f.func.kind() == SchemaKind.functional and f.func.returns else ''
 
+    # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
+    # We could probably work harder to ensure that the fast variants are called instead, but the perf benefit would be minimal.
+    sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
+    if sig_group.faithful_signature is not None:
+        api_name = sig_group.faithful_signature.name()
+    else:
+        api_name = sig_group.signature.name()
+
     trace_body.append(TRACE_DISPATCH.substitute(
-        operator_name=f.func.name.name,
-        overload_name=f.func.name.overload_name,
-        arg_types=dispatcher_sig.type(),
         assign_return_values=assign_return_values,
-        ret_and_arg_types=ret_and_arg_types,
-        redispatch_args=redispatch_args,
+        api_name=api_name,
+        unpacked_args=redispatch_args,
     ))
 
     trace_body.append(format_postrecord_trace(f))
@@ -364,12 +369,15 @@ def method_definition(f: NativeFunction) -> Optional[str]:
         return None
 
     formals = ', '.join(
-        f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
-        for a in f.func.schema_order_arguments()
+        # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
+        # See Note [Plumbing Keys Through The Dispatcher] for details.
+        ['c10::DispatchKeySet ks'] +
+        [f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+            for a in f.func.schema_order_arguments()]
     )
 
     return METHOD_DEFINITION.substitute(
-        return_type=cpp.returns_type(f.func.returns),
+        return_type=cpp.returns_type(f.func.returns).cpp_type(),
         type_wrapper_name=type_wrapper_name(f),
         formals=formals,
         type_definition_body=emit_trace_body(f),
@@ -396,7 +404,7 @@ def gen_trace_type_shard(
     fm: FileManager, native_functions: Sequence[NativeFunction], suffix: str
 ) -> None:
     fm.write_with_template('TraceType%s.cpp' % suffix, 'TraceType.cpp', lambda: {
-        'generated_comment': '@' + f'generated from {fm.template_dir}/TraceType.cpp',
+        'generated_comment': f'@generated from {fm.template_dir}/TraceType.cpp',
         'trace_method_definitions': list(mapMaybe(method_definition, native_functions)),
         'trace_wrapper_registrations': list(mapMaybe(method_registration, native_functions)),
     })

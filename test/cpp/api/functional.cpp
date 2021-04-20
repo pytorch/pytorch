@@ -270,6 +270,42 @@ TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+TEST_F(FunctionalTest, HuberLossDefaultOptions) {
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output =
+      F::huber_loss(input, target);
+  auto expected = torch::tensor(0.0233335, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, HuberLossDelta) {
+  auto input = torch::tensor({0.1, 1.5, 10.0}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto options = F::HuberLossFuncOptions().reduction(torch::kMean).delta(0.5);
+  auto output = F::huber_loss(input, target, options);
+  auto expected = torch::tensor(1.67 * 0.5, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, HuberLossNoReduction) {
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto options = F::HuberLossFuncOptions().reduction(torch::kNone);
+  auto output = F::huber_loss(input, target, options);
+  auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, SoftMarginLossDefaultOptions) {
   auto input = torch::tensor({2., 4., 1., 3.}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
@@ -695,7 +731,7 @@ TEST_F(FunctionalTest, TripletMarginWithDistanceLossDefaultParity) {
   for (auto& reduction : reductions) {
     for (auto& margin : margins) {
       for (const auto& swap : swaps) {
-        auto anchor = 
+        auto anchor =
             torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
         auto positive =
             torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -1247,8 +1283,8 @@ TEST_F(FunctionalTest, EmbeddingBag) {
   auto offsets = torch::tensor({0,4}, torch::kLong);
   auto weight = torch::empty({10, 3});
   torch::nn::init::normal_(weight);
-  auto y = F::embedding_bag(input, weight, F::EmbeddingBagFuncOptions().mode(torch::kSum).offsets(offsets));
-  auto y_exp = std::get<0>(torch::embedding_bag(weight, input, offsets, false, 0, false, torch::Tensor()));
+  auto y = F::embedding_bag(input, weight, F::EmbeddingBagFuncOptions().mode(torch::kSum).offsets(offsets).padding_idx(4));
+  auto y_exp = std::get<0>(torch::embedding_bag(weight, input, offsets, false, 0, false, torch::Tensor(), false, 4));
   ASSERT_TRUE(torch::allclose(y, y_exp));
 
   // no options test

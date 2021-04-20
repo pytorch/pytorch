@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/passes/peephole.h>
+
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/peephole_alias_sensitive.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
@@ -22,9 +24,13 @@ struct PeepholeOptimizeImpl {
   PeepholeOptimizeImpl(
       const std::shared_ptr<Graph>& graph,
       bool disable_shape_peepholes)
-      : graph_(graph), shape_peepholes_(!disable_shape_peepholes) {
-    run(graph->block());
-    PeepholeOptimizeListIdioms(graph);
+      : graph_(graph), shape_peepholes_(!disable_shape_peepholes) {}
+
+  bool run() {
+    bool changed = optimizeBlock(graph_->block());
+    changed |= PeepholeOptimizeListIdioms(graph_);
+    changed |= PeepholeOptimizeAliasSensitive(graph_);
+    return changed;
   }
 
   // The intent for this optimization pass is to catch all of the small, easy to
@@ -36,12 +42,13 @@ struct PeepholeOptimizeImpl {
   //
   // TODO: Decide what kind of fixed point strategy we will have
   //
-  void run(Block* block) {
+  bool optimizeBlock(Block* block) {
+    bool changed = false;
     for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
       auto* node = *it;
 
       for (Block* sub_block : node->blocks()) {
-        run(sub_block);
+        changed |= optimizeBlock(sub_block);
       }
 
       if (node->kind() != prim::Constant) {
@@ -52,6 +59,7 @@ struct PeepholeOptimizeImpl {
         for (Value* output : node->outputs()) {
           if (output->type()->cast<NoneType>()) {
             output->replaceAllUsesWith(graph_->insertConstant(IValue()));
+            changed = true;
           }
         }
       }
@@ -68,6 +76,7 @@ struct PeepholeOptimizeImpl {
               " (x._grad_sum_to_size(x, None) == x) is replaced with ",
               node->input(0)->debugName());
           node->output()->replaceAllUsesWith(node->input(0));
+          changed = true;
         } else {
           auto uses = node->output()->uses();
           for (Use u : uses) {
@@ -79,6 +88,7 @@ struct PeepholeOptimizeImpl {
                   " (x._grad_sum_to_size(y)._grad_sum_to_size(z) == x._grad_sum_to_size(z)) is replaced with ",
                   node->inputs().at(0)->debugName());
               u.user->replaceInput(0, node->inputs().at(0));
+              changed = true;
             }
           }
         }
@@ -99,6 +109,7 @@ struct PeepholeOptimizeImpl {
                 " (x.expand(x.size()) == x) is replaced with ",
                 node->namedInput(attr::self)->debugName());
             node->output()->replaceAllUsesWith(node->namedInput(attr::self));
+            changed = true;
           }
         }
       } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
@@ -110,6 +121,7 @@ struct PeepholeOptimizeImpl {
               " (x.t().t() == x) is replaced with ",
               input_node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
+          changed = true;
         }
       } else if (
           node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor") &&
@@ -124,6 +136,7 @@ struct PeepholeOptimizeImpl {
               " (x.type_as(y) == x) is replaced with ",
               node->input(0)->debugName());
           node->output()->replaceAllUsesWith(node->input(0));
+          changed = true;
         }
       } else if (
           node->kind() == aten::Float || node->kind() == aten::Int ||
@@ -137,6 +150,7 @@ struct PeepholeOptimizeImpl {
               " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
               node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
+          changed = true;
         }
       } else if (
           node->matches("aten::size(Tensor self) -> int[]") &&
@@ -151,6 +165,7 @@ struct PeepholeOptimizeImpl {
             IValue ival(sizes);
             auto const_sizes_val = node->owningGraph()->insertConstant(ival);
             node->output()->replaceAllUsesWith(const_sizes_val);
+            changed = true;
           }
         }
       } else if (
@@ -171,6 +186,7 @@ struct PeepholeOptimizeImpl {
               IValue ival(*ptt->sizes()[norm_index]);
               auto const_sizes_val = node->owningGraph()->insertConstant(ival);
               node->output()->replaceAllUsesWith(const_sizes_val);
+              changed = true;
             }
           }
         }
@@ -182,6 +198,18 @@ struct PeepholeOptimizeImpl {
           c10::ScalarType dtype = *maybe_dtype;
           WithInsertPoint guard(node);
           IValue ival(at::isFloatingType(dtype));
+          auto new_constant = node->owningGraph()->insertConstant(ival);
+          node->output()->replaceAllUsesWith(new_constant);
+          changed = true;
+        }
+      } else if (
+          node->matches("aten::is_complex(Tensor self) -> bool") &&
+          shape_peepholes_) {
+        auto ptt = node->inputs().at(0)->type()->cast<TensorType>();
+        if (auto maybe_dtype = ptt->scalarType()) {
+          c10::ScalarType dtype = *maybe_dtype;
+          WithInsertPoint guard(node);
+          IValue ival(at::isComplexType(dtype));
           auto new_constant = node->owningGraph()->insertConstant(ival);
           node->output()->replaceAllUsesWith(new_constant);
         }
@@ -206,6 +234,7 @@ struct PeepholeOptimizeImpl {
                 " (True or False) with ",
                 n.cond()->debugName());
             n.outputs().at(i)->replaceAllUsesWith(n.cond());
+            changed = true;
           }
         }
       } else if (
@@ -226,6 +255,7 @@ struct PeepholeOptimizeImpl {
             GRAPH_UPDATE(
                 "Folding ", getHeader(node), " to ", output->debugName());
             node->output()->replaceAllUsesWith(output);
+            changed = true;
           }
         }
       } else if (
@@ -241,6 +271,7 @@ struct PeepholeOptimizeImpl {
               node->input(),
               " can't be optional");
           node->output()->replaceAllUsesWith(node->input());
+          changed = true;
         }
       } else if (node->kind() == prim::unchecked_cast) {
         // unchecked_cast is not generated for tensor properties, so we are not
@@ -253,6 +284,7 @@ struct PeepholeOptimizeImpl {
               getHeader(node),
               " as input type subtypes output type");
           node->output()->replaceAllUsesWith(node->input());
+          changed = true;
         }
       } else if (
           node->matches("prim::dtype(Tensor a) -> int") && shape_peepholes_) {
@@ -267,6 +299,7 @@ struct PeepholeOptimizeImpl {
               " with a type constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
+          changed = true;
         }
       } else if (
           node->matches("prim::device(Tensor a) -> Device") &&
@@ -281,6 +314,7 @@ struct PeepholeOptimizeImpl {
               " with a device constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
+          changed = true;
         }
       } else if (
           node->matches("aten::dim(Tensor self) -> int") && shape_peepholes_) {
@@ -295,6 +329,7 @@ struct PeepholeOptimizeImpl {
               " with a \"dim\" constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
+          changed = true;
         }
       } else if (
           node->matches("prim::is_cuda(Tensor a) -> bool") &&
@@ -310,6 +345,7 @@ struct PeepholeOptimizeImpl {
               " with a is_cuda constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
+          changed = true;
         }
       }
 
@@ -319,6 +355,7 @@ struct PeepholeOptimizeImpl {
       // the limited speedup of these optimizations
       // runAliasingSensitivePeepholeTransformations(node);
     }
+    return changed;
   }
 
   // if either the inputs or outputs of an op alias graph's inputs or
@@ -331,10 +368,11 @@ struct PeepholeOptimizeImpl {
   //     s += x
   //     return s
   //
-  void runAliasingSensitivePeepholeTransformations(Node* node) {
+  bool runAliasingSensitivePeepholeTransformations(Node* node) {
     // this code is not currently enabled, see [aliasing sensitive
     // optimizations]
     TORCH_INTERNAL_ASSERT(false);
+    bool changed = false;
     if (node->matches(
             "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
             /*const_inputs=*/{attr::alpha, attr::other}) ||
@@ -349,6 +387,7 @@ struct PeepholeOptimizeImpl {
             " (x + 0 == x - 0 == x) is replaced with ",
             node->input(0)->debugName());
         node->output()->replaceAllUsesWith(node->input(0));
+        changed = true;
       }
     } else if (
         node->matches(
@@ -364,8 +403,10 @@ struct PeepholeOptimizeImpl {
             " (x * 1 == x / 1 == x) is replaced with ",
             node->input(0)->debugName());
         node->output()->replaceAllUsesWith(node->input(0));
+        changed = true;
       }
     }
+    return changed;
   }
 
  private:
@@ -373,7 +414,8 @@ struct PeepholeOptimizeImpl {
   bool shape_peepholes_;
 };
 
-void FuseAddMM(Block* block) {
+bool FuseAddMM(Block* block) {
+  bool changed = false;
   for (Node* node : block->nodes()) {
     // XXX: remember that if you want to simplify an expression by combining
     // multiple nodes into a different one, then you need to check that they
@@ -422,11 +464,11 @@ void FuseAddMM(Block* block) {
 
             // Attempts to find a matrix with a defined scalar type to type as
             auto* type_as_mat = mat1;
-            if (!type_as_mat->type()->expect<TensorType>()->scalarType()) {
+            if (!type_as_mat->type()->expectRef<TensorType>().scalarType()) {
               type_as_mat = mat2;
             }
             auto mat_scalar_type =
-                type_as_mat->type()->expect<TensorType>()->scalarType();
+                type_as_mat->type()->expectRef<TensorType>().scalarType();
 
             // we can't use type_as if we don't know the target type (mm), the
             // bias needs to be coerced to
@@ -474,15 +516,17 @@ void FuseAddMM(Block* block) {
                 " into ",
                 addmm_value->debugName());
             node->output()->replaceAllUsesWith(addmm_value);
+            changed = true;
             continue;
           }
         }
       }
     }
     for (Block* b : node->blocks()) {
-      FuseAddMM(b);
+      changed |= FuseAddMM(b);
     }
   }
+  return changed;
 }
 
 // FuseAddMM is a separate pass from peephole optimize because it is currently
@@ -492,17 +536,21 @@ void FuseAddMM(Block* block) {
 // since after ONNX translation we would see redundant Gemm ops with sub-optimal
 // inputs. This flag is exposed so that ONNX export can pass `true` to get the
 // fused behavior, but normal JIT peephole optimization is left alone.
-void FuseAddMM(const std::shared_ptr<Graph>& graph) {
-  FuseAddMM(graph->block());
+bool FuseAddMM(const std::shared_ptr<Graph>& graph) {
+  return FuseAddMM(graph->block());
 }
 
-void PeepholeOptimize(
+bool PeepholeOptimize(
     const std::shared_ptr<Graph>& graph,
     bool addmm_fusion_enabled) {
   PeepholeOptimizeImpl peephole(graph, addmm_fusion_enabled);
+  bool changed = peephole.run();
   GRAPH_DUMP("After PeepholeOptimize: ", graph);
   // Eliminate dead code created by any peephole passes we've just done
-  EliminateDeadCode(graph->block());
+  if (changed) {
+    EliminateDeadCode(graph->block());
+  }
+  return changed;
 }
 
 } // namespace jit

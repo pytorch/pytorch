@@ -34,8 +34,8 @@ repositories {
 
 dependencies {
     ...
-    implementation 'org.pytorch:pytorch_android:1.8.0-SNAPSHOT'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.8.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android:1.9.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.9.0-SNAPSHOT'
     ...
 }
 ```
@@ -201,8 +201,7 @@ After that, you can use libtorch C++ API from your native code.
 namespace pytorch_testapp_jni {
 namespace {
     struct JITCallGuard {
-      torch::autograd::AutoGradMode no_autograd_guard{false};
-      torch::AutoNonVariableTypeMode non_var_guard{true};
+      c10::InferenceMode guard;
       torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard{false};
     };
 }
@@ -223,4 +222,4 @@ To load torchscript model for mobile we need some special setup which is placed 
 
 ## PyTorch Android API Javadoc
 
-You can find more details about the PyTorch Android API in the [Javadoc](https://pytorch.org/docs/stable/packages.html).
+You can find more details about the PyTorch Android API in the [Javadoc](https://pytorch.org/javadoc/).

@@ -1,6 +1,6 @@
 import torch
 from collections import OrderedDict
-from typing import Union, Callable, Any
+from typing import Union, Callable, Any, Dict
 import re
 
 from .utils import _parent_name
@@ -38,14 +38,14 @@ def get_flattened_qconfig_dict(qconfig_dict):
 
     def flatten_key(key):
         if key in qconfig_dict:
-            for obj, qconfig in qconfig_dict[key]:
+            for (obj, qconfig) in qconfig_dict[key].items():
                 flattened[obj] = qconfig
 
     flatten_key('object_type')
     flatten_key('module_name')
     return flattened
 
-def convert_dict_to_ordered_dict(qconfig_dict):
+def convert_dict_to_ordered_dict(qconfig_dict: Any) -> Dict[str, Dict[Any, Any]]:
     """ Convert dict in qconfig_dict to ordered dict
     """
     # convert a qconfig list for a type to OrderedDict
@@ -55,6 +55,7 @@ def convert_dict_to_ordered_dict(qconfig_dict):
     _convert_to_ordered_dict('object_type', qconfig_dict)
     _convert_to_ordered_dict('module_name_regex', qconfig_dict)
     _convert_to_ordered_dict('module_name', qconfig_dict)
+    return qconfig_dict
 
 def get_object_type_qconfig(
         qconfig_dict: Any,
@@ -88,10 +89,9 @@ def get_module_name_qconfig(qconfig_dict, module_name, fallback_qconfig):
 # get qconfig for module_name,
 # fallback to module_name_regex_qconfig, module_type_qconfig,
 # global_qconfig if necessary
-def get_qconfig(modules, qconfig_dict, module_name, global_qconfig):
-    assert modules is not None
+def get_qconfig(qconfig_dict, module_type, module_name, global_qconfig):
     module_type_qconfig = get_object_type_qconfig(
-        qconfig_dict, type(modules[module_name]), global_qconfig)
+        qconfig_dict, module_type, global_qconfig)
     module_name_regex_qconfig = get_module_name_regex_qconfig(
         qconfig_dict, module_name, module_type_qconfig)
     module_name_qconfig = get_module_name_qconfig(

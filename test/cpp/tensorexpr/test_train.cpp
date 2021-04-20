@@ -304,14 +304,15 @@ TEST(Train, TrainBasic) {
 
     for (auto i = 0; i < 100; ++i) {
       std::generate(X_.begin(), X_.end(), gen);
-      cg.call({X_.data(),
-               W_ref_.data(),
-               W_.data(),
-               one_.data(),
-               K_.data(),
-               LR_.data(),
-               W_.data(),
-               N});
+      cg.call(
+          {X_.data(),
+           W_ref_.data(),
+           W_.data(),
+           one_.data(),
+           K_.data(),
+           LR_.data(),
+           W_.data(),
+           N});
     }
     // Less than 1% difference after running regression
     for (auto i = 0; i < W_.size(); ++i) {

@@ -347,6 +347,7 @@ class MyScriptClass:
 @torch.jit.interface
 class MyModuleInterface(torch.nn.Module):
     def forward(self) -> Tensor:
+        # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
 
@@ -427,7 +428,7 @@ class LocalRRefTest:
 
         def use_rref_on_owner(rref: RRef[MyScriptClass]) -> int:
             args = (rref,)
-            kwargs: Dict[str, Any] = {}  # noqa
+            kwargs: Dict[str, Any] = {}
             fut = rpc.rpc_async(
                 rref.owner(), script_rref_get_value_my_script_class, args, kwargs
             )
@@ -1282,7 +1283,7 @@ class JitRpcTest(
         self.assertEqual(sleep_event.name, "foo")
         # Validate that callbacks were fired at the right time by checking the
         # profiling event cpu time
-        self.assertGreaterEqual(sleep_event.cpu_time * 1e-6, sleep_interval)
+        self.assertGreaterAlmostEqual(sleep_event.cpu_time * 1e-6, sleep_interval)
 
     def test_call_fork_in_jit_with_profiling(self):
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit

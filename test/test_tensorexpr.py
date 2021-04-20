@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch import nn
 import unittest
 
-from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
+from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
 
 from torch.testing._internal.te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
@@ -25,6 +25,11 @@ class BaseTestClass(JitTestCase):
         torch._C._jit_set_texpr_fuser_enabled(True)
         self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
+        # TODO: CPU fuser currently is disabled when multithreading.
+        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
+        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
@@ -36,6 +41,8 @@ class BaseTestClass(JitTestCase):
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -861,6 +868,10 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.relu(torch.add(x, y))
             return c
 
+        def test_hardtanh(x, y):
+            c = F.hardtanh(torch.add(x, y), -1.0, 1.0)
+            return c
+
         def test_threshold(x, y):
             c = F.threshold(torch.add(x, y), 0.5, 10)
             return c
@@ -896,6 +907,7 @@ class TestTensorExprFuser(BaseTestClass):
             test_threshold,
             test_relu,
             test_tanh,
+            test_hardtanh,
             test_sigmoid,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
@@ -968,13 +980,10 @@ class TestTensorExprFuser(BaseTestClass):
         self.assertLastGraphAllFused()
 
     def test_double_intrinsics(self):
-        # TODO: add "cpu" device once `pow` is supported there
-        devices = ["cuda"] if torch.cuda.is_available() else []
-
         def do_pow(x):
             return torch.pow(x, 7)
 
-        for device in devices:
+        for device in self.devices:
             x = torch.rand(10, dtype=torch.double, device=device)
             traced = torch.jit.trace(do_pow, (x))
             x = warmup_and_run_forward(traced, x)
@@ -1163,13 +1172,11 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_scalar(self):
         @torch.jit.script
-        def test_float(x, y, z, a, b):
-            # type: (Tensor, Tensor, Tensor, float, float) -> Tensor
+        def test_float(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, a: float, b: float) -> torch.Tensor:
             return torch.add(torch.add(x, y, alpha=a), z, alpha=b)
 
         @torch.jit.script
-        def test_int(x, y, z, a, b):
-            # type: (Tensor, Tensor, Tensor, int, int) -> Tensor
+        def test_int(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, a: int, b: int) -> torch.Tensor:
             return torch.add(torch.add(x, y, alpha=a), z, alpha=b)
 
         for test in (test_float, test_int):
@@ -1186,8 +1193,7 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_loop(self):
         @torch.jit.script
-        def test(x, y, z):
-            # type: (Tensor, Tensor, int) -> Tensor
+        def test(x: torch.Tensor, y: torch.Tensor, z: int) -> torch.Tensor:
             b = y
             for i in range(0, z):
                 a = x + y
@@ -1650,4 +1656,4 @@ class TestTensorExprFuser(BaseTestClass):
             self.assertEqual(ref, exp)
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

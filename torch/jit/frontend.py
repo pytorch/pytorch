@@ -157,6 +157,23 @@ def get_class_properties(cls, self_name):
     return properties
 
 
+def get_class_assigns(ctx, cls_ast):
+    assigns = []
+
+    def maybe_build_assign(builder, entry):
+        nonlocal assigns
+        try:
+            assigns.append(builder(ctx, entry))
+        except NotSupportedError:
+            pass
+    for entry in cls_ast.body:
+        if isinstance(entry, ast.Assign):
+            maybe_build_assign(StmtBuilder.build_Assign, entry)
+        elif isinstance(entry, ast.AnnAssign):
+            maybe_build_assign(StmtBuilder.build_AnnAssign, entry)
+    return assigns
+
+
 def get_jit_class_def(cls, self_name):
     # Get defs for each method within the current class independently
     # TODO: proper overriding analysis when implementing class inheritance
@@ -166,9 +183,14 @@ def get_jit_class_def(cls, self_name):
         and not is_static_fn(cls, m.__name__)
         and m.__name__ in cls.__dict__
     )
-    methods = [get_jit_def(method[1],
-                           method[0],
-                           self_name=self_name) for method in methods]
+
+    def is_classmethod(fn):
+        return inspect.ismethod(fn) and getattr(fn, "__self__", None) == cls
+
+    methods = [get_jit_def(obj,
+                           name,
+                           self_name=self_name,
+                           is_classmethod=is_classmethod(obj)) for (name, obj) in methods]
 
     properties = get_class_properties(cls, self_name)
 
@@ -178,7 +200,11 @@ def get_jit_class_def(cls, self_name):
     py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
-    return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
+    class_ast = py_ast.body[0]
+    assert isinstance(class_ast, ast.ClassDef)
+    assigns = get_class_assigns(ctx, class_ast)
+
+    return build_class_def(ctx, class_ast, methods, properties, self_name, assigns)
 
 
 def normalize_source_lines(sourcelines: List[str]) -> List[str]:
@@ -217,7 +243,7 @@ def normalize_source_lines(sourcelines: List[str]) -> List[str]:
     return aligned_prefix + aligned_suffix
 
 
-def get_jit_def(fn, def_name, self_name=None):
+def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     """
     Build a JIT AST (TreeView) from the given function.
 
@@ -244,6 +270,12 @@ def get_jit_def(fn, def_name, self_name=None):
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
     fn_def = py_ast.body[0]
 
+    if is_classmethod:
+        arg_name = fn_def.args.args[0].arg
+        # Insert a statement that assigns the first argument to the class
+        assign_stmt = ast.parse(f"{arg_name} = {self_name}").body[0]
+        fn_def.body.insert(0, assign_stmt)
+
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
         unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
@@ -268,10 +300,10 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_class_def(ctx, py_def, methods, properties, self_name):
+def build_class_def(ctx, py_def, methods, properties, self_name, assigns):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties)
+    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties, assigns)
 
 
 def build_def(ctx, py_def, type_line, def_name, self_name=None):
@@ -472,6 +504,9 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
+        if stmt.orelse:
+            raise NotSupportedError(r, "else branches of for loops aren't supported")
+
         return For(
             r, [build_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
@@ -603,6 +638,8 @@ class ExprBuilder(Builder):
             return FalseLiteral(r)
         elif expr.id == "None":
             return NoneLiteral(r)
+        elif expr.id == "Ellipsis":
+            return Dots(r)
         return Var(Ident(r, expr.id))
 
     @staticmethod
@@ -614,6 +651,8 @@ class ExprBuilder(Builder):
             return FalseLiteral(r)
         elif expr.value is None:
             return NoneLiteral(r)
+        elif expr.value == Ellipsis:
+            return Dots(r)
         else:
             raise ValueError("Name constant value unsupported: " + str(expr.value))
 
@@ -761,8 +800,11 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Dict(ctx, expr):
-        return DictLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
-                           [build_expr(ctx, e) for e in expr.keys], [build_expr(ctx, e) for e in expr.values])
+        range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        if expr.keys and not expr.keys[0]:
+            raise NotSupportedError(range, "Dict expansion (e.g. `{**dict}`) is not supported")
+        return DictLiteral(range, [build_expr(ctx, e) for e in expr.keys],
+                           [build_expr(ctx, e) for e in expr.values])
 
     @staticmethod
     def build_Num(ctx, expr):
@@ -777,7 +819,7 @@ class ExprBuilder(Builder):
             # NB: this check has to happen before the int check because bool is
             # a subclass of int
             return ExprBuilder.build_NameConstant(ctx, expr)
-        if isinstance(value, (int, float)):
+        if isinstance(value, (int, float, complex)):
             return ExprBuilder.build_Num(ctx, expr)
         elif isinstance(value, str):
             return ExprBuilder.build_Str(ctx, expr)

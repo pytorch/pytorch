@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/frontend/strtod.h>
 #include <torch/csrc/jit/frontend/tree.h>
 
+#include <c10/util/complex.h>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -291,6 +292,7 @@ struct Expr : public TreeView {
       case TK_TRUE:
       case TK_FALSE:
       case TK_NONE:
+      case TK_NONE_TYPE:
       case TK_CAST:
       case TK_APPLY:
       case '.':
@@ -450,6 +452,8 @@ struct Property : public TreeView {
   }
 };
 
+struct Assign;
+
 struct ClassDef : public TreeView {
   explicit ClassDef(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_CLASS_DEF);
@@ -470,19 +474,43 @@ struct ClassDef : public TreeView {
   Maybe<List<Property>> properties() const {
     return Maybe<List<Property>>(subtree(3));
   }
+  Maybe<List<Assign>> assigns() const {
+    return Maybe<List<Assign>>(subtree(4));
+  }
+  static ClassDef create(
+      const SourceRange& range,
+      const Ident& name,
+      const Maybe<Expr>& superclass,
+      const List<Stmt>& body) {
+    return ClassDef(Compound::create(
+        TK_CLASS_DEF,
+        range,
+        {name,
+         superclass,
+         body,
+         Maybe<List<Property>>::create(range),
+         Maybe<List<Assign>>::create(range)}));
+  }
   static ClassDef create(
       const SourceRange& range,
       const Ident& name,
       const Maybe<Expr>& superclass,
       const List<Stmt>& body,
-      c10::optional<const List<Property>> properties = {}) {
-    auto props = properties.has_value()
-        ? Maybe<List<Property>>::create(range, properties.value())
-        : Maybe<List<Property>>::create(range);
-    return ClassDef(
-        Compound::create(TK_CLASS_DEF, range, {name, superclass, body, props}));
+      const List<Property>& properties,
+      const List<Assign>& assigns) {
+    return ClassDef(Compound::create(
+        TK_CLASS_DEF,
+        range,
+        {name,
+         superclass,
+         body,
+         Maybe<List<Property>>::create(range, properties),
+         Maybe<List<Assign>>::create(range, assigns)}));
   }
 };
+
+TORCH_API std::vector<std::string> getUnresolvedClassAttributes(
+    const ClassDef& def);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Statements
@@ -867,12 +895,18 @@ struct Const : public Expr {
     tree_->matchNumSubtrees(TK_CONST, 1);
   }
   bool isFloatingPoint() const {
+    if (isComplex())
+      return false;
+
     bool is_inf = subtree(0)->stringValue() == "inf";
     return is_inf ||
         subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
   }
   bool isIntegral() const {
-    return !isFloatingPoint();
+    return !isFloatingPoint() && !isComplex();
+  }
+  bool isComplex() const {
+    return subtree(0)->stringValue().find_first_of('j') != std::string::npos;
   }
   int64_t asIntegral() const {
     try {
@@ -887,6 +921,17 @@ struct Const : public Expr {
     // Android version of strtod_c().
     char* dummy;
     return torch::jit::strtod_c(subtree(0)->stringValue().c_str(), &dummy);
+  }
+  c10::complex<double> asComplex() const {
+    char* dummy;
+    auto str = subtree(0)->stringValue();
+    // Complex numbers (a+bj, where a is non-zero) are parsed as an addition
+    // between float/int a and a complex number "bj". When a is 0, a complex
+    // number bj is created as above. So, while parsing the string, we don't
+    // have to worry about the real component of the complex number.
+    auto imag =
+        torch::jit::strtod_c(str.substr(0, str.size() - 1).c_str(), &dummy);
+    return c10::complex<double>(0, imag);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();
@@ -965,15 +1010,15 @@ struct SliceExpr : public Expr {
   Maybe<Expr> step() const {
     return Maybe<Expr>(subtree(2));
   }
-  Expr startOr(int alternative) const {
+  Expr startOr(int64_t alternative) const {
     const auto startOption = start();
     return startOption.present() ? startOption.get() : createInt(alternative);
   }
-  Expr endOr(int alternative) const {
+  Expr endOr(int64_t alternative) const {
     const auto endOption = end();
     return endOption.present() ? endOption.get() : createInt(alternative);
   }
-  Expr stepOr(int alternative) const {
+  Expr stepOr(int64_t alternative) const {
     const auto stepOption = step();
     return stepOption.present() ? stepOption.get() : createInt(alternative);
   }
@@ -987,7 +1032,7 @@ struct SliceExpr : public Expr {
   }
 
  private:
-  Expr createInt(int value) const {
+  Expr createInt(int64_t value) const {
     return Expr(Const::create(range(), c10::to_string(value)));
   }
 };
