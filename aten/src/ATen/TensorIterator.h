@@ -333,6 +333,8 @@ public:
 
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 
+  void build_ternary_float_op(const Tensor& out, const Tensor& a, const Tensor& b, const Tensor& c);
+  void build_ternary_op(const Tensor& out, const Tensor& a, const Tensor& b, const Tensor& c);
   void build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
@@ -455,6 +457,8 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   // Slicing is OK, TensorIterator guaranteed NOT to have any fields
   TensorIterator(const TensorIteratorBase& iter) : TensorIteratorBase(iter) {}
 
+  static TensorIterator ternary_float_op(Tensor& out, const Tensor& a, const Tensor& b, const Tensor& c);
+  static TensorIterator ternary_op(Tensor& out, const Tensor& a, const Tensor& b, const Tensor& c);
   static TensorIterator binary_float_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
