@@ -601,7 +601,7 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
-def sample_inputs_add(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
     scalar = 1 if dtype is torch.bool else scalar
     tests_list = [
@@ -3041,7 +3041,16 @@ op_db: List[OpInfo] = [
     OpInfo('add',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_add,
+           sample_inputs_func=sample_inputs_binary_pwise,
+           supports_inplace_autograd=False),
+    OpInfo('mul',
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_binary_pwise),
+    OpInfo('sub',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_binary_pwise,
            supports_inplace_autograd=False),
     OpInfo('addmm',
            dtypes=floating_types(),
@@ -5148,27 +5157,9 @@ def method_tests():
     set_rng_seed(SEED)
     return [
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
-        ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
-        ('sub', (S, S, S), ((S, S, S),), '', (True,)),
-        ('sub', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
-        ('sub', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
-        ('sub', (S, 1, S), ((M, S),), 'broadcast_all', (True,)),
-        ('sub', (S, S, S), ((),), 'scalar_broadcast_rhs', (True,)),
-        ('sub', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
-        ('sub', (S, S, S), (3.14,), 'constant', (True,)),
-        ('sub', (), (3.14,), 'scalar_constant', (True,)),
-        ('sub', (S, S, S), (3.14j,), 'complex_scalar_constant', (True,)),
+        ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),,
         ('__rsub__', (S, S, S), (3.14,), 'constant', (True, 'aten::rsub')),
         ('__rsub__', (), (3.14,), 'scalar_constant', (True, 'aten::rsub')),
-        ('mul', (S, S, S), ((S, S, S),), '', (True,)),
-        ('mul', (), ((),), 'scalar', (True,)),
-        ('mul', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
-        ('mul', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
-        ('mul', (S, 1, S), ((M, S),), 'broadcast_all', (True,)),
-        ('mul', (S, S, S), ((),), 'scalar_broadcast_rhs', (True,)),
-        ('mul', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
-        ('mul', (S, S, S), (3.14,), 'constant', (True,)),
-        ('mul', (), (3.14,), 'scalar_constant', (True,)),
         # TODO(@anjali411): enable these tests
         # ('mul', (S, S, S), (3.14j,), 'imaginary_constant', (True,)),
         # ('mul', (), (3.14j,), 'imaginary_scalar_constant', (True,)),
