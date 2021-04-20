@@ -881,6 +881,10 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Opt
         with monkeytype_trace(monkeytype_config):
             for example_input in example_inputs:  # type: ignore[union-attr]
                 obj(*example_input)
+    else:
+        warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
+                      "to enable Profile-Directed Typing in TorchScript. Refer  "
+                      "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
     return script(obj, optimize, _frames_up, _rcb)
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
