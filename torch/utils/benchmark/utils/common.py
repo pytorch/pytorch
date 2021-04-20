@@ -217,7 +217,7 @@ class Measurement:
   {'Median: ' if n > 1 else ''}{self._median / time_scale:.2f} {time_unit}
   {iqr_filter}IQR:    {self.iqr / time_scale:.2f} {time_unit} ({self._p25 / time_scale:.2f} to {self._p75 / time_scale:.2f})
   {n} measurement{'s' if n > 1 else ''}, {self.number_per_run} runs {'per measurement,' if n > 1 else ','} {self.num_threads} thread{'s' if self.num_threads > 1 else ''}
-{newline.join(self._warnings)}""".strip() # noqa
+{newline.join(self._warnings)}""".strip()  # noqa: B950
 
         return "\n".join(l for l in repr_str.splitlines(keepends=False) if skip_line not in l)
 
