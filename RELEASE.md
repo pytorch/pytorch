@@ -39,7 +39,7 @@ release/1.8
 Please make sure to create branch that pins divergent point of release branch from the main thunk, i.e. `orig/release/{MAJOR}.{MINOR}`
 ### Making release branch specific changes
 
-These are examples of changes that should be made to release branches so that CI can function normally on
+These are examples of changes that should be made to release branches so that CI / tooling can function normally on
 them:
 
 * Update target determinator to use release branch:
@@ -48,15 +48,17 @@ them:
   * Example: https://github.com/pytorch/pytorch/pull/40721
 * Update backwards compatibility tests to use RC binaries instead of nightlies
   * Example: https://github.com/pytorch/pytorch/pull/40706
+* Add `release/{MAJOR}.{MINOR}` to list of branches in [`browser-extension.json`](https://github.com/pytorch/pytorch/blob/fb-config/browser-extension.json) for FaceHub integrated setups
+  * Example: https://github.com/pytorch/pytorch/commit/f99fbd94d18627bae776ea2448e075ca4d5e37b2
 
-Create PR from `release/{MAJOR}.{MINOR}` to `orig/release/{MAJOR}.{MINOR}` in order to start CI testing for cherry-picks into release branch.
+> TODO: Create release branch in [`pytorch/builder`](https://github.com/pytorch/builder) repo and pin release CI to use that branch rather than HEAD of builder repo.
+
+### Getting CI signal on release branches:
+Create a PR from `release/{MAJOR}.{MINOR}` to `orig/release/{MAJOR}.{MINOR}` in order to start CI testing for cherry-picks into release branch.
 
 Example:
 * https://github.com/pytorch/pytorch/pull/51995
 
- TODO: Create release branch in `builder` repo and pin release CI to use that branch rather than HEAD of builder repo.
- 
- Add `release/{MAJOR}.{MINOR}` to list of branches in https://github.com/pytorch/pytorch/blob/fb-config/browser-extension.json for FaceHub integrated setups
 ## Drafting RCs (Release Candidates)
 
 To draft RCs, a user with the necessary permissions can push a git tag to the main `pytorch/pytorch` git repository.
