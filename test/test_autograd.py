@@ -994,8 +994,8 @@ class TestAutograd(TestCase):
         self.assertRaises(RuntimeError, call_backwards)
 
     def test_backward_with_inputs(self):
-        x = torch.randn(2, 2, requires_grad=True)
-        y = torch.randn(2, 2, requires_grad=True)
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
 
         def fn():
             return x ** 2 + y * x + y ** 2
@@ -1016,31 +1016,31 @@ class TestAutograd(TestCase):
         reset_grad()
         torch.autograd.backward(fn(), gradient, inputs=[x])
         self.assertEqual(x.grad, x_grad_expected)
-        self.assertEqual(y.grad, torch.zeros(2, 2))
+        self.assertEqual(y.grad, torch.zeros(2, 2, dtype=torch.double))
 
         reset_grad()
         torch.autograd.backward(fn(), gradient, inputs=[y])
         self.assertEqual(y.grad, y_grad_expected)
-        self.assertEqual(x.grad, torch.zeros(2, 2))
+        self.assertEqual(x.grad, torch.zeros(2, 2, dtype=torch.double))
 
         reset_grad()
         torch.autograd.backward(fn(), gradient, inputs=y)
         self.assertEqual(y.grad, y_grad_expected)
-        self.assertEqual(x.grad, torch.zeros(2, 2))
+        self.assertEqual(x.grad, torch.zeros(2, 2, dtype=torch.double))
 
         reset_grad()
         self.assertRaisesRegex(RuntimeError, 'cannot be empty',
                                lambda: torch.autograd.backward(fn(), gradient, inputs=[]))
 
     def test_backward_with_nonleaf_inputs(self):
-        x = torch.randn(2, 2, requires_grad=True)
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         x_nonleaf = x * 1
-        y = torch.randn(2, 2, requires_grad=True)
-        z = torch.randn(2, 2, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
 
         out = x_nonleaf ** 2 + y * x_nonleaf + y ** 2
 
-        out.backward(torch.ones(2, 2), create_graph=True, inputs=[x, y])
+        out.backward(torch.ones(2, 2, dtype=torch.double), create_graph=True, inputs=[x, y])
         x_grad_expected = 2 * x + y
         y_grad_expected = x + 2 * y
 
@@ -1048,12 +1048,13 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad, x_grad_expected)
 
         self.assertRaisesRegex(RuntimeError, 'not a leaf Tensor',
-                               lambda: out.backward(torch.ones(2, 2), create_graph=True, inputs=[x, y, x_nonleaf]))
+                               lambda: out.backward(torch.ones(2, 2, dtype=torch.double),
+                                                    create_graph=True, inputs=[x, y, x_nonleaf]))
 
         # backward doesn't have an allow_unused flag, so the behavior of backward
         # when variable is not part of the graph is as if allow_used were true
         # x.grad will simply be None.
-        out.backward(torch.ones(2, 2), create_graph=True, inputs=[z])
+        out.backward(torch.ones(2, 2, dtype=torch.double), create_graph=True, inputs=[z])
         self.assertIsNone(z.grad)
 
     def test_dependent_backward(self):
@@ -7198,8 +7199,8 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(t, bar * 2)
 
     def test_view_inplace_non_differentiable_views(self):
-        original_foo = torch.rand(2)
-        original_bar = torch.ones(2)
+        original_foo = torch.rand(2, dtype=torch.double)
+        original_bar = torch.ones(2, dtype=torch.double)
 
         # Do clones to be able to compare the values updated inplace
         # with the original content of these Tensors
@@ -7764,7 +7765,7 @@ class TestAutogradDeviceType(TestCase):
 
     @onlyCUDA
     def test_pin_memory(self, device):
-        x = torch.randn(2, 2, requires_grad=True)
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         self.assertEqual(x, x.pin_memory())
         self.assertIsNot(x, x.pin_memory())
         self.assertTrue(x.pin_memory().requires_grad)
