@@ -720,10 +720,10 @@ class AbstractDistributedDataParallelTest(object):
             step_model(
                 ddp_model,
                 input[
-                self.rank * local_batch_size: (self.rank + 1) * local_batch_size
+                    self.rank * local_batch_size: (self.rank + 1) * local_batch_size
                 ],
                 target[
-                self.rank * local_batch_size: (self.rank + 1) * local_batch_size
+                    self.rank * local_batch_size: (self.rank + 1) * local_batch_size
                 ],
             )
 
