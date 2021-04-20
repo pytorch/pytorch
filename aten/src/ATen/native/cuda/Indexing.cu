@@ -19,6 +19,7 @@
 #include <ATen/cuda/cub.cuh>
 #include <THC/THCAtomics.cuh>
 
+#include <limits>
 
 #include <c10/macros/Macros.h>
 
@@ -203,6 +204,10 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
   std::vector<int64_t> inversePerm;
   std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices, !unsafe);
   int64_t num_indices = linearIndex.numel();
+
+  TORCH_CHECK(num_indices <= std::numeric_limits<int>::max(),
+    "index_put of tensors larger than INT_MAX is not supported yet in pytorch");
+
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
       auto src_ = permuted ? src.contiguous() : src;
@@ -230,6 +235,7 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
         range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
       }
+
       TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
       const int UNROLL = 4;
       const int indices_per_block = 4;
