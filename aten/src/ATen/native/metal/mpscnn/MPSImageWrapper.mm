@@ -117,14 +117,6 @@ void MPSImageWrapper::setTexture(MPSImage* image) {
 void MPSImageWrapper::prepare() {
   // If the temporary image is still alive in the current command buffer,
   // make it a static image.
-#if DEBUG
-  NSLog(@"[MPSImageWrapper] prepare: [%lld, %lld, %lld, %lld] is static: %d \n",
-      (int64_t)_image.numberOfImages,
-      (int64_t)_image.featureChannels,
-      (int64_t)_image.height,
-      (int64_t)_image.width,
-      !_image.isTemporaryImage);
-#endif
   if (_image.isTemporaryImage && _image.readCount != 0) {
     _image =
         createStaticImage((MPSTemporaryImage*)_image, _commandBuffer, false);
