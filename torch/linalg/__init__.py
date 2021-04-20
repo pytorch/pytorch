@@ -24,7 +24,7 @@ For a complex Hermitian or real symmetric matrix :math:`A`, this is defined as
 where :math:`L` is a lower triangular matrix and
 :math:`L^{\text{H}}` is the conjugate transpose when :math:`L` is complex, and the transpose when :math:`L` is real-valued.
 
-If :attr:`input` is a batch of matrices, then the returned matrices are also batched with the
+If :attr:`input` is a batch of matrices, then `L` is also batched with the
 same batch dimensions.
 
 Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
@@ -217,7 +217,7 @@ For a complex :attr:`input`, it returns the angle and the logarithm of the modul
 determinant, that is, a logarithmic polar decomposition of the determinant.
 
 It returns a named tuple `(sign, logabsdet)`.
-If :attr:`input` is a batch of matrices, then `sign`, `logabsdet` are also batched with the same
+If :attr:`input` is a batch of matrices, then `sign` and `logabsdet` are also batched with the same
 batch dimensions.
 
 Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
@@ -272,7 +272,7 @@ This decomposition exists if and only if :math:`A` is `diagonalizable`_. This is
 
 The returned decomposition is a named tuple `(eigenvalues, eigenvectors)`,
 which corresponds to :math:`L`, :math:`V` above. If :attr:`input` is a batch of matrices,
-then `L`, `V` are also batched with the same batch dimensions.
+then `L` and `V` are also batched with the same batch dimensions.
 
 Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
 The output tensors `eigenvalues` and `eigenvectors` will always be complex-valued, even when :attr:`input` is real.
@@ -399,7 +399,7 @@ When :attr:`UPLO` is `'U'`, only the upper triangular part of each matrix is use
 
 The returned decomposition is represented as a namedtuple `(eigenvalues, eigenvectors)`,
 which corresponds to :math:`L`, :math:`V` above. If :attr:`input` is a batch of matrices,
-then `L`, `V` are also batched with the same batch dimensions.
+then `L` and `V` are also batched with the same batch dimensions.
 
 The eigenvalues are returned in ascending order.
 
@@ -684,7 +684,7 @@ Args:
 
 Keyword args:
     driver (str, optional): name of the LAPACK/MAGMA method to be used.
-        If `None`, `'gelsy'` is used for CPU inputs and `'gels'` for GPU inputs.
+        If `None`, `'gelsy'` is used for CPU inputs and `'gels'` for CUDA inputs.
         Default: `None`.
 
 Example::
@@ -1100,7 +1100,7 @@ and unitary in the complex case.
 
 The returned decomposition is a named tuple `(U, S, Vh)`
 which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.
-If :attr:`input` is a batch of matrices, then `U`, `S`, `Vh` are also batched with the same
+If :attr:`input` is a batch of matrices, then `U`, `S` and `Vh` are also batched with the same
 batch dimensions.
 
 The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
@@ -1695,7 +1695,7 @@ For a matrix :math:`A`, this is defined as
 where :math:`Q` is orthogonal in the real case and unitary in the complex case, and :math:`R` is upper triangular.
 
 The returned decomposition is a named tuple `(Q, R)`.
-If :attr:`input` is a batch of matrices, then `Q`, `R` are also batched with the same
+If :attr:`input` is a batch of matrices, then `Q` and `R` are also batched with the same
 batch dimensions.
 
 The parameter :attr:`mode` controls the shape of the output. If :attr:`input` has shape
