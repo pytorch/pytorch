@@ -209,7 +209,6 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   float weight_sum = 0.0;
   if (!label_prob_mode_) {
     const int* label_data = T.data<int>();
-    const float* Xdata = X.data<float>();
 
     for (int i = 0; i < N; ++i) {
       CAFFE_ENFORCE(
