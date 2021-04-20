@@ -477,9 +477,7 @@ std::vector<int64_t> ComputeShapeFromReshape(
   }
   final_shape.push_back(static_cast<int64_t>(std::round(shape_ratio)));
   for (auto i = minus_one_pos + 1; i < reshape_size; i++) {
-    int64_t cur_shape = reshape[i] == 0
-        ? input_shape[i]
-        : reshape[i];
+    int64_t cur_shape = reshape[i] == 0 ? input_shape[i] : reshape[i];
     final_shape.push_back(cur_shape);
   }
   return final_shape;
