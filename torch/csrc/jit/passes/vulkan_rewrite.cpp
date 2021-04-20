@@ -225,6 +225,8 @@ script::Module vulkanOptimizeForMobile(
   vulkanFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);
   vulkanRemoveMutation(cloned_module);
+  cloned_module.register_attribute(
+      "optimized_for_vulkan", BoolType::get(), true);
   return cloned_module;
 }
 
