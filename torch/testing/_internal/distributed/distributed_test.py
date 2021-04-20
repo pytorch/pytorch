@@ -12,6 +12,7 @@ from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple
+from torch.testing._internal.common_utils import IS_MACOS, IS_WINDOWS, FILE_SCHEMA
 
 import torch
 import torch.cuda
@@ -24,7 +25,6 @@ from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
-from torch.testing._internal.common_utils import FILE_SCHEMA
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -39,6 +39,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     captured_output,
     with_nccl_blocking_wait,
+    with_dist_debug_levels,
 )
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -134,6 +135,8 @@ ddp_find_unused_params_enabled_str = "Since `find_unused_parameters=True` is ena
 # Error message substring for possibility of not all model outputs being used
 # in loss computation
 ddp_outputs_not_used_in_loss_str = "`forward` function outputs participate in calculating loss"
+# Error message substring suggesting to use TORCH_DISTRIBUTED_DEBUG
+ddp_suggest_debug_mode_str = "set the environment variable TORCH_DISTRIBUTED_DEBUG to either INFO or DETAIL"
 
 
 class DDPUnevenTestInput(NamedTuple):
@@ -246,10 +249,14 @@ def get_timeout(test_id):
         return DEFAULT_TIMEOUT
 
 default_pg_timeout = 60
-# These tests can run slowly and need additional time to complete, otherwise
-# they would be taken down by NCCL_ASYNC_ERROR_HANDLING.
+
 CUSTOM_PG_TIMEOUT = {
+    # This test runs slowly and needs additional time to complete, otherwise can
+    # be taken down by NCCL_ASYNC_ERROR_HANDLING
     "test_ddp_uneven_inputs": 300,
+    # This test has a short timeout since it tests being taken down by
+    # NCCL_ASYNC_ERROR_HANDLING which we want to happen quickly.
+    "test_ddp_model_diff_across_ranks": 5,
 }
 
 
@@ -619,7 +626,7 @@ class DistributedTest:
                 expected_time = time.time() + timeout.total_seconds()
                 with self.assertRaisesRegex(Exception, " (Timed out|closed|timeout) "):
                     dist.barrier(group_id)
-                self.assertGreaterEqual(time.time(), expected_time)
+                self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.05)
             else:
                 time.sleep(timeout.total_seconds())
 
@@ -1518,6 +1525,10 @@ class DistributedTest:
 
             if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 events = get_event(profiling_title_postfix)
+                print(f'profiling title postfix: {profiling_title_postfix}')
+                print(f'all events: {prof.function_events}')
+                print(f'events: {events}')
+                print(f'op_calls: {op_calls}')
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertEqual(e.count, 1)
@@ -2652,7 +2663,7 @@ class DistributedTest:
                 else:
                     dist.broadcast(expected_time, dest, group_id)
                     dist.barrier(group_id)
-                    self.assertGreaterEqual(
+                    self.assertGreaterAlmostEqual(
                         float(time.time()),
                         float(expected_time[0]),
                         "destination rank: %d, my rank: %d" % (dest, rank) +
@@ -3241,6 +3252,7 @@ class DistributedTest:
                 powersgd_state = powerSGD.PowerSGDState(
                     process_group=None,
                     matrix_approximation_rank=1,
+                    start_powerSGD_iter=2,
                     warm_start=warm_start,
                 )
                 self._test_ddp_hook_parity(state=powersgd_state, hook=powerSGD.powerSGD_hook)
@@ -3622,7 +3634,8 @@ class DistributedTest:
                 ddp_logging_data = model_DDP.get_ddp_logging_data()
                 if (idx > 0 and (idx < 10 or idx % 2 != 0)):
                     self.assertGreaterEqual(ddp_logging_data.forward_compute_time, 1)
-                    self.assertGreaterEqual(ddp_logging_data.backward_compute_comm_overlap_time, 1)
+                    self.assertGreaterEqual(ddp_logging_data.backward_compute_time, 1)
+                    self.assertGreaterEqual(ddp_logging_data.backward_comm_time, 1)
                     self.assertGreaterEqual(
                         ddp_logging_data.backward_compute_time,
                         ddp_logging_data.backward_compute_comm_overlap_time)
@@ -3693,7 +3706,8 @@ class DistributedTest:
             # It is hard to test accurate latency, but it can test whether the latency is
             # a valid value and in the expected range.
             self.assertGreaterEqual(ddp_logging_data.avg_forward_compute_time, 1)
-            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_comm_overlap_time, 1)
+            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_time, 1)
+            self.assertGreaterEqual(ddp_logging_data.avg_backward_comm_time, 1)
             self.assertGreaterEqual(
                 ddp_logging_data.avg_backward_compute_time,
                 ddp_logging_data.avg_backward_compute_comm_overlap_time)
@@ -4624,6 +4638,7 @@ class DistributedTest:
                 # isolate failure hangs.
                 torch.cuda.synchronize(device=self.rank)
 
+        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
@@ -4655,6 +4670,15 @@ class DistributedTest:
                             ddp_recommend_find_unused_params_str,
                             ddp_outputs_not_used_in_loss_str
                         ]
+                        # In debug mode, should show parameters that weren't reduced.
+                        # Without debug mode, should show suggestion to use debug mode.
+                        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+                            expected_strs.append(ddp_suggest_debug_mode_str)
+                        else:
+                            unreduced_params = ", ".join(['net2.weight'])
+                            expected_strs.append(
+                                f"did not receive grad for rank {self.rank}: {unreduced_params}"
+                            )
                         for s in expected_strs:
                             self.assertTrue(
                                 s in msg,
@@ -4665,6 +4689,8 @@ class DistributedTest:
                         self.assertFalse(True, "DDP unused parameters error not raised.")
                 else:
                     ddp(inp).sum().backward()
+
+            dist.barrier()
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -4814,11 +4840,11 @@ class DistributedTest:
             b = torch.rand(batch, dim, device=self.rank)
 
             class NamedTupleModule(torch.nn.Module):
-                def __init__(_self):  # noqa
+                def __init__(_self):  # noqa: B902
                     super().__init__()
                     _self.lin = nn.Linear(10, 1)
 
-                def forward(_self, input, expected_type):  # noqa
+                def forward(_self, input, expected_type):  # noqa: B902
                     # Without NamedTuple support, this would be of type tuple.
                     self.assertTrue(
                         isinstance(input, expected_type),
@@ -4839,6 +4865,7 @@ class DistributedTest:
             inp = TestNamedTupleInput_1(a, b)
             model(inp, type(inp))
 
+        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
@@ -4909,11 +4936,23 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         msg = str(e)
+                        # 2nd linear layer is unused
+                        unused_param_index = 1
                         expected_strs = [
                             ddp_prev_reduction_unfinished_str,
                             ddp_recommend_find_unused_params_str,
-                            ddp_outputs_not_used_in_loss_str
+                            ddp_outputs_not_used_in_loss_str,
+                            f"Parameter indices which did not receive grad for rank {self.rank}: {unused_param_index}"
                         ]
+                        # In debug mode, should show parameters that weren't reduced.
+                        # Without debug mode, should show suggestion to use debug mode.
+                        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+                            expected_strs.append(ddp_suggest_debug_mode_str)
+                        else:
+                            unreduced_params = ", ".join(['lin2.weight'])
+                            expected_strs.append(
+                                f"did not receive grad for rank {self.rank}: {unreduced_params}"
+                            )
                         for s in expected_strs:
                             self.assertTrue(
                                 s in msg,
@@ -4923,6 +4962,9 @@ class DistributedTest:
                     else:
                         self.assertFalse(True, "DDP error not raised")
 
+            dist.barrier()
+
+        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
@@ -4999,11 +5041,22 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         msg = str(e)
+                        unused_param_index = 1
                         expected_strs = [
                             ddp_prev_reduction_unfinished_str,
                             ddp_recommend_find_unused_params_str,
-                            ddp_outputs_not_used_in_loss_str
+                            ddp_outputs_not_used_in_loss_str,
+                            f"Parameter indices which did not receive grad for rank {self.rank}: {unused_param_index}"
                         ]
+                        # In debug mode, should show parameters that weren't reduced.
+                        # Without debug mode, should show suggestion to use debug mode.
+                        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+                            expected_strs.append(ddp_suggest_debug_mode_str)
+                        else:
+                            unreduced_params = ", ".join(['lin2.weight'])
+                            expected_strs.append(
+                                f"did not receive grad for rank {self.rank}: {unreduced_params}"
+                            )
                         for s in expected_strs:
                             self.assertTrue(
                                 s in msg,
@@ -5012,6 +5065,8 @@ class DistributedTest:
                         self.assertFalse(ddp_find_unused_params_enabled_str in msg)
                     else:
                         self.assertFalse(True, "DDP error not raised")
+
+            dist.barrier()
 
         @require_backend({"gloo"})
         @unittest.skipIf(BACKEND == "nccl", "NCCL does not support scatter")
@@ -5057,7 +5112,9 @@ class DistributedTest:
             rank_0_ctx = (
                 suppress()
                 if dist.get_backend() == dist.Backend.NCCL
-                else self.assertRaisesRegex(RuntimeError, "Connection closed by peer")
+                # Gloo can raise various exception messages, so just assert
+                # Runtime error here.
+                else self.assertRaises(RuntimeError)
             )
             ctx = (
                 rank_0_ctx
@@ -5070,17 +5127,21 @@ class DistributedTest:
                 )
                 dist.barrier()
 
+        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
         def test_output_unused_in_loss(self):
             model = TwoLinLayerNet()
+            # Need copy of model to pass into 2nd DDP ctor otherwise autograd hooks
+            # on first DDP reducer will execute!
+            model_copy = copy.deepcopy(model)
             net = torch.nn.parallel.DistributedDataParallel(
-                model.cuda(self.rank),
+                copy.deepcopy(model).cuda(self.rank),
                 device_ids=[self.rank],
             )
             net_with_find_unused = torch.nn.parallel.DistributedDataParallel(
-                model.cuda(self.rank),
+                model_copy.cuda(self.rank),
                 device_ids=[self.rank],
                 find_unused_parameters=True,
             )
@@ -5100,11 +5161,16 @@ class DistributedTest:
                             loss.backward()
                         except RuntimeError as e:
                             msg = str(e)
+                            unused_index = 0
+                            unused_index_substr = (
+                                f"Parameter indices which did not receive grad for rank {self.rank}: {unused_index}"
+                            )
                             if ddp == net:
                                 expected_strs = [
                                     ddp_prev_reduction_unfinished_str,
                                     ddp_recommend_find_unused_params_str,
                                     ddp_outputs_not_used_in_loss_str,
+                                    unused_index_substr,
                                 ]
                                 unexpected_strs = [
                                     ddp_find_unused_params_enabled_str,
@@ -5114,10 +5180,20 @@ class DistributedTest:
                                     ddp_prev_reduction_unfinished_str,
                                     ddp_outputs_not_used_in_loss_str,
                                     ddp_find_unused_params_enabled_str,
+                                    unused_index_substr,
                                 ]
                                 unexpected_strs = [
                                     ddp_recommend_find_unused_params_str,
                                 ]
+                            # In debug mode, should show parameters that weren't reduced.
+                            # Without debug mode, should show suggestion to use debug mode.
+                            if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+                                expected_strs.append(ddp_suggest_debug_mode_str)
+                            else:
+                                unreduced_params = ", ".join(['a.weight'])
+                                expected_strs.append(
+                                    f"did not receive grad for rank {self.rank}: {unreduced_params}"
+                                )
                             for s in expected_strs:
                                 self.assertTrue(
                                     s in msg,
@@ -5131,8 +5207,14 @@ class DistributedTest:
                         else:
                             self.assertFalse(True, "DDP error not raised")
 
+            dist.barrier()
+
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
+        @unittest.skipIf(
+            IS_MACOS or IS_WINDOWS,
+            "MacOS uses uv transport which does not have as robust error handling as tcp transport"
+        )
         def test_monitored_barrier_gloo(self):
             tensors = [torch.ones(10) * self.rank]
             # Kick off some allreduce work on all ranks
@@ -5144,23 +5226,26 @@ class DistributedTest:
             # All ranks besides 1 call into barrier, rank 0 should report failure
             # while others report gloo error.
             failed_rank = 1
-            if self.rank == failed_rank:
-                return
-            if self.rank == 0:
+            src_rank = 0
+            if self.rank == src_rank:
                 with self.assertRaisesRegex(
                     RuntimeError,
                     f"Rank {failed_rank} failed to pass monitoredBarrier"
                 ):
                     dist.monitored_barrier(timeout=timeout)
-            else:
-                # It is permissible for other ranks that did not fail to
-                # successfully exit or crash in the monitored barrier, the main
-                # purpose of monitored barrier is to report the rank that hung
-                # on rank 0.
-                try:
+            elif self.rank != failed_rank:
+                # Other ranks should not pass barrier since rank 0 failed.
+                err_regex = (
+                    f"Rank {self.rank} successfully reached monitoredBarrier,"
+                    f" but received errors while waiting to be unblocked by rank"
+                    f" {src_rank}"
+                )
+                with self.assertRaisesRegex(RuntimeError, err_regex):
                     dist.monitored_barrier(timeout=timeout)
-                except RuntimeError:
-                    pass
+
+            # We need a barrier since otherwise failed_rank exits too early
+            # and cause a timeout.
+            self._barrier(timeout=30)
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
@@ -5212,22 +5297,21 @@ class DistributedTest:
             if self.rank != 0:
                 with self.assertRaisesRegex(RuntimeError, "Caught collective operation timeout"):
                     nccl_pg.allreduce(tensors).wait(timedelta(seconds=0.1))
-                return
-
-            # Rank 0 should report first (in order) timed out rank or all ranks
-            # depending on wait_all_ranks flag passed into monitored_barrier.
-            if wait_all_ranks:
-                rank_str = ", ".join([str(i) for i in range(1, int(self.world_size))])
-                err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
             else:
-                expected_first_fail_rank = 1
-                err_regex = f"Rank {expected_first_fail_rank} failed to pass monitoredBarrier"
-            monitored_barrier_timeout_seconds = timedelta(seconds=0.1)
-            with self.assertRaisesRegex(
-                RuntimeError,
-                err_regex
-            ):
-                gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks)
+                # Rank 0 should report first (in order) timed out rank or all ranks
+                # depending on wait_all_ranks flag passed into monitored_barrier.
+                if wait_all_ranks:
+                    rank_str = ", ".join([str(i) for i in range(1, int(self.world_size))])
+                    err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
+                else:
+                    expected_first_fail_rank = 1
+                    err_regex = f"Rank {expected_first_fail_rank} failed to pass monitoredBarrier"
+                monitored_barrier_timeout_seconds = timedelta(seconds=0.1)
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    err_regex
+                ):
+                    gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks)
 
         @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})
@@ -5266,18 +5350,28 @@ class DistributedTest:
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
         @skip_if_small_worldsize
+        @unittest.skipIf(
+            IS_MACOS or IS_WINDOWS,
+            "MacOS uses uv transport which does not have as robust error handling as tcp transport"
+        )
         def test_monitored_barrier_failure_order(self):
             # Ensure that the first (in sorted order) rank is reported when
             # multiple ranks fail to pass the monitored_barrier.
             # TODO(#54879): Provide ability to wait and report all failed ranks
             expected_first_failed_rank = 2
             timeout = timedelta(seconds=2)
-            if self.rank == 0:
+            src_rank = 0
+            if self.rank == src_rank:
                 with self.assertRaisesRegex(RuntimeError, f"Rank {expected_first_failed_rank}"):
                     dist.monitored_barrier(timeout=timeout)
             elif self.rank == 1:
-                # Successfully pass barrier
-                dist.monitored_barrier(timeout=timeout)
+                err_regex = (
+                    f"Rank {self.rank} successfully reached monitoredBarrier,"
+                    f" but received errors while waiting to be unblocked by rank"
+                    f" {src_rank}"
+                )
+                with self.assertRaisesRegex(RuntimeError, err_regex):
+                    dist.monitored_barrier(timeout=timeout)
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
@@ -5292,6 +5386,161 @@ class DistributedTest:
                 with self.assertRaisesRegex(RuntimeError, err_regex):
                     dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
 
-            # We need a barrier since otherwise non-zero ranks exit too early
-            # and cause a timeout.
-            self._barrier(timeout=30)
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_build_param_to_name_mapping(self):
+            model = TwoLinLayerNet()
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            expected_mapping = {0: "a.weight", 1: "b.weight"}
+            net_params, _ = net._build_params_for_reducer()
+            param_to_name_mapping = net._build_param_to_name_mapping(net_params)
+            self.assertDictEqual(expected_mapping, param_to_name_mapping)
+
+            # Test when DDP is used with ignored parameters.
+            model = TwoLinLayerNet()
+            # Parameters to ignore are in the format {module_name}.{param_name}
+            params_to_ignore = ["a.weight"]
+            torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                model, params_to_ignore
+            )
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            expected_mapping = {0: "b.weight"}
+            net_params, _ = net._build_params_for_reducer()
+            param_to_name_mapping = net._build_param_to_name_mapping(net_params)
+            self.assertDictEqual(expected_mapping, param_to_name_mapping)
+
+        def _test_ddp_multiple_nested_unused_params_error(self, ignore_sparse):
+            debug_mode_off = dist._get_debug_mode() == dist._DistributedDebugLevel.OFF
+
+            class SubModule(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.embedding_net = EmbeddingNet(0)
+                    self.lin = TwoLinLayerNet()
+                    self.bn = BatchNormNet()
+                    self.lin_layer = nn.Linear(4, 10, bias=False)
+
+                def forward(self, x):
+                    x = self.bn(x)
+                    x = self.lin_layer(x)
+                    x = self.lin.a(x)  # self.lin.b param unused
+                    # EmbeddingNet entirely unused: self.embedding_net.embedding and
+                    # self.embedding_net.lin unused.
+                    return x
+
+            class MyModel(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.sub_module = SubModule()
+
+                def forward(self, x):
+                    return self.sub_module(x)
+
+            model = MyModel()
+            sparse_embedding_fqns = []
+            if ignore_sparse:
+                for module_name, module in model.named_modules():
+                    if module == model.sub_module.embedding_net.embedding:
+                        for parameter_name, param in module.named_parameters(
+                            recurse=False
+                        ):
+                            fqn = f"{module_name}.{parameter_name}"
+                            sparse_embedding_fqns.append(fqn)
+
+                torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                    model, sparse_embedding_fqns
+                )
+                unused_modules = [
+                    model.sub_module.embedding_net.lin,
+                    model.sub_module.lin.b,
+                ]
+            else:
+                unused_modules = list(model.sub_module.embedding_net.modules()) + [
+                    model.sub_module.lin.b,
+                ]
+
+
+            expected_unused_param_fqns = []
+            used_param_fqns = []  # Validate that these don't mistakenly show up.
+            fqn_to_param_index = {}
+            index = 0
+            for module_name, module in model.named_modules():
+                for parameter_name, param in module.named_parameters(recurse=False):
+                    fqn = f"{module_name}.{parameter_name}"
+                    fqn_to_param_index[fqn] = index
+                    if fqn not in sparse_embedding_fqns:
+                        index += 1
+                    if module in unused_modules:
+                        expected_unused_param_fqns.append(fqn)
+                    else:
+                        if (
+                            not ignore_sparse
+                            or module != model.sub_module.embedding_net.embedding
+                        ):
+                            used_param_fqns.append(fqn)
+
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            batch, dim = 10, 2
+            inp = torch.ones(batch, dim)
+            for i in range(2):
+                if i == 0:
+                    out = net(inp)
+                    loss = out.sum()
+                    loss.backward()
+                else:
+                    try:
+                        out = net(inp)
+                        loss = out.sum()
+                        loss.backward()
+                    except RuntimeError as e:
+                        e = str(e)
+
+                        unused_param_substr = e[e.find("did not receive grad") :]
+                        # Validate that each unused param fully qualified name
+                        # shows up in error logs. We do this instead of
+                        # constructing a joined string since order of parameters
+                        # can be different in Reducer. In addition, validate
+                        # param indices show up as well.
+                        for unused_param_fqn in expected_unused_param_fqns:
+                            self.assertTrue(unused_param_fqn in unused_param_substr or debug_mode_off)
+                            self.assertTrue(
+                                str(fqn_to_param_index[unused_param_fqn]) in unused_param_substr,
+                                f"Did not find index {fqn_to_param_index[unused_param_fqn]} for {unused_param_fqn}"
+                            )
+
+                        # Validate that used param fqns don't show up in error
+                        # logs.
+                        for used_param_fqn in used_param_fqns:
+                            self.assertFalse(used_param_fqn in unused_param_substr)
+                        # Validate that ignored param fqns don't show up as unused
+                        # (since DDP does not track them)
+                        for sparse_param_fqn in sparse_embedding_fqns:
+                            self.assertFalse(sparse_param_fqn in unused_param_substr)
+                    else:
+                        self.assertTrue(False, "Expected error was not raised!")
+
+        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_multiple_nested_unused_params_error(self):
+            self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=False)
+
+        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_multiple_nested_unused_params_err_ignore_params(self):
+            # Tests unused parameter reporting when DDP is configured to ignore
+            # certain parameters.
+            self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=True)

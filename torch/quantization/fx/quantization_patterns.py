@@ -137,9 +137,10 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         # determine how many of the first two args are Tensors (versus scalars)
         # this distinguishes things like "x + y" from "x + 2" or "2 + x"
         self.num_tensor_args = 0
+        cache_for_no_tensor_check: Dict[Node, bool] = dict()
         for arg_idx in range(len(self.binary_op_node.args)):
             arg = self.binary_op_node.args[arg_idx]
-            if isinstance(arg, Node) and (not all_node_args_have_no_tensors(arg, quantizer.modules)):
+            if isinstance(arg, Node) and (not all_node_args_have_no_tensors(arg, quantizer.modules, cache_for_no_tensor_check)):
                 self.num_tensor_args += 1
         self.all_node_args_are_tensors = \
             (self.num_tensor_args == len(self.binary_op_node.args))
@@ -190,7 +191,10 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
             if self.num_tensor_args == 1:
                 # add/mul scalar
                 first_arg = self.binary_op_node.args[0]
-                if isinstance(first_arg, Node) and (not all_node_args_have_no_tensors(first_arg, quantizer.modules)):
+                cache_for_no_tensor_check: Dict[Node, bool] = dict()
+                if isinstance(first_arg, Node) and (
+                        not all_node_args_have_no_tensors(
+                            first_arg, quantizer.modules, cache_for_no_tensor_check)):
                     quantized_index = 0
                 else:
                     quantized_index = 1
@@ -390,7 +394,15 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # pack weight
                 weight = load_arg(quantized=True)(self.conv_node.args[1])
                 other_args = load_arg(quantized=False)(self.conv_node.args[2:])
-                prepack_args = tuple([weight] + list(other_args))
+                bias, stride, padding, dilation, groups = other_args
+                if self.conv == torch.nn.functional.conv1d:
+                    # F.conv1d can take `int` as well as `list[int]` for stride,
+                    # padding, dilation, but the prepack op cannot. Convert
+                    # these to lists if needed.
+                    stride = [stride] if isinstance(stride, int) else stride
+                    padding = [padding] if isinstance(padding, int) else padding
+                    dilation = [dilation] if isinstance(dilation, int) else dilation
+                prepack_args = (weight, bias, stride, padding, dilation, groups)
                 prepack_op = get_qconv_prepack_op(self.conv)
                 packed_weight = quantizer.quantized_graph.create_node(
                     "call_function", prepack_op, prepack_args, {})
@@ -628,7 +640,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         return quantizer.quantized_graph.create_node(
                             "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
                     else:
-                        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+                        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
 @register_quant_pattern(torch.nn.BatchNorm2d)
 @register_quant_pattern(torch.nn.BatchNorm3d)

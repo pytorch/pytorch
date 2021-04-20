@@ -350,9 +350,9 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
     dst.copy_(src);
     return;
   }
-  Tensor b_src;
-  std::tie(b_src) = expand_inplace(dst, src.view(slicePrefix1sSize(src.sizes())), "setitem");
-  dst.copy_(b_src);
+  auto src_view = src.view(slicePrefix1sSize(src.sizes()));
+  c10::MaybeOwned<Tensor> b_src = expand_inplace(dst, src_view, "setitem");
+  dst.copy_(*b_src);
 }
 
 // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
@@ -535,7 +535,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
 // This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
 // for "the assigned value is a Tensor" case
 // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
-static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, const Tensor& value, bool disable_slice_optimization = false) {
+static inline void set_item(const Tensor& self, const ArrayRef<TensorIndex>& indices, const Tensor& value, bool disable_slice_optimization = false) {
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
 
