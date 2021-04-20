@@ -115,7 +115,7 @@ Attribute.__doc__ = """
 """
 
 def _get_type_trace_db():
-    # This is a private API. Use of this for external puposes is discouraged.
+    # This is a private API. Use of this for external puporses is discouraged.
     return type_trace_db
 
 # Gets a function from the name of a method on a type
@@ -852,8 +852,8 @@ def call_prepare_scriptable_func(obj):
     return call_prepare_scriptable_func_impl(obj, memo)
 
 def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional[List[Tuple]] = None):
-    # This is a private API, intended for internal use only . Usage of this API is only for experimental
-    # purposes only and is highly discouraged to be used.
+    # This is a private API, intended for internal use only. Usage of this API is only for experimental
+    # purposes only and is highly discouraged.
     global type_trace_db
     if not _enabled:
         return obj
@@ -883,7 +883,7 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Opt
                 obj(*example_input)
     else:
         warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
-                      "to enable Profile-Directed Typing in TorchScript. Refer  "
+                      "to enable Profile-Directed Typing in TorchScript. Refer to "
                       "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
     return script(obj, optimize, _frames_up, _rcb)
 
