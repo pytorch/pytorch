@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from datetime import timedelta
 from enum import Enum
 import faulthandler
 from multiprocessing import Manager
@@ -225,12 +226,16 @@ def skip_if_win32():
     )
 
 @retry_on_connect_failures
-def create_tcp_store(addr="localhost", world_size=1, wait_for_workers=True):
+def create_tcp_store(addr="localhost", world_size=1, is_master=True, timeout=timedelta(minutes=5), wait_for_workers=True, jit_class=False):
     """
     Creates a TCP store. Retries if the chosen port is already in use.
     """
     port = find_free_port()
-    return c10d.TCPStore(addr, port, world_size, True, wait_for_workers=wait_for_workers)
+    if jit_class:
+        timeout_millisecond = int(timeout / timedelta(milliseconds=1))
+        return torch.classes.dist_c10d.TCPStore(addr, port, world_size, is_master, timeout_millisecond)
+    else:
+        return c10d.TCPStore(addr, port, world_size, is_master, wait_for_workers=wait_for_workers)
 
 TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
