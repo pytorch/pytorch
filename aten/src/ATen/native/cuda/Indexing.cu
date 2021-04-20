@@ -223,7 +223,7 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
       // this bug is fixed in CUDA 11.3
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11030
       if (num_indices < 50000) {
-        index_put_accum_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices)
+        index_put_accum_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
       } else
 #endif
       {
