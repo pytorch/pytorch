@@ -270,7 +270,10 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         for worker_name in rpc_backend_options.device_maps:
             local_devices.update(rpc_backend_options.device_maps[worker_name].keys())
 
-        if max(local_devices) >= torch.cuda.device_count() or min(local_devices) < 0:
+        if len(local_devices) > 0 and (
+            max(local_devices) >= torch.cuda.device_count() or
+            min(local_devices) < 0,
+        ):
             raise ValueError(
                 f"Invalid device in TensorPipe options on {name}:\n"
                 f"device_maps = {rpc_backend_options.device_maps},\n"
