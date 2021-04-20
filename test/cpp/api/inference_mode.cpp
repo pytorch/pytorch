@@ -568,10 +568,14 @@ TEST(InferenceModeTest, TestCustomFunction) {
 }
 
 TEST(InferenceModeTest, TestLegacyAutoNonVariableTypeModeWarning) {
+  bool prev = c10::Warning::get_warnAlways();
+  c10::Warning::set_warnAlways(true);
+
   {
     WarningCapture warnings;
     at::AutoNonVariableTypeMode guard;
     ASSERT_TRUE(
       warnings.str().find("AutoNonVariableTypeMode is deprecated") != std::string::npos);
   }
+  c10::Warning::set_warnAlways(prev);
 }

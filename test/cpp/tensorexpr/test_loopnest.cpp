@@ -4324,7 +4324,8 @@ TEST(LoopNest, fuseLoopsSimple) {
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(k, 0, 100, Store::make(b_buf, {k}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
-  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4364,7 +4365,8 @@ TEST(LoopNest, fuseLoopsMultiple) {
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(k, 0, 100, Store::make(b_buf, {k}, Mul::make(20, k)));
   auto par = Block::make({forI, forJ, forK});
-  auto fused_loop = LoopNest::fuseLoops({forI, forJ, forK});
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forI, forJ, forK}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4421,7 +4423,8 @@ TEST(LoopNest, fuseLoopsNested) {
   auto forM = For::make(m, 0, 20, Block::make({initA, forJ}));
   auto forN = For::make(n, 0, 20, Block::make({initB, forK}));
   auto par = Block::make({forM, forN});
-  auto fused_loop = LoopNest::fuseLoops({forM, forN});
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forM, forN}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4481,7 +4484,8 @@ TEST(LoopNest, fuseLoopsNested2D) {
           50,
           Store::make(b_buf, {m, n}, Add::make(m, Mul::make(n, 100)))));
   auto par = Block::make({forI, forM});
-  auto fused_loop = LoopNest::fuseLoops({forI, forM});
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4522,7 +4526,8 @@ TEST(LoopNest, fuseLoopsNested2DInner) {
   auto forN = For::make(
       n, 0, 100, Store::make(b_buf, {i, n}, Add::make(i, Mul::make(n, 100))));
   auto forI = For::make(i, 0, 20, Block::make({forJ, forN}));
-  auto fused_loop = LoopNest::fuseLoops({forJ, forN});
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forN}, &fused_loop));
 
   std::ostringstream oss;
   oss << *forI;
@@ -4557,8 +4562,8 @@ TEST(LoopNest, fuseLoopsDifferentStopBounds) {
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(k, 0, 50, Store::make(b_buf, {j}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}), "Loops with different stop bounds");
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
 TEST(LoopNest, fuseLoopsDifferentStartBounds) {
@@ -4578,8 +4583,8 @@ TEST(LoopNest, fuseLoopsDifferentStartBounds) {
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(k, 50, 100, Store::make(b_buf, {j}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}), "Loops with different start bounds");
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
 TEST(LoopNest, fuseLoopsNotContiguous) {
@@ -4601,8 +4606,8 @@ TEST(LoopNest, fuseLoopsNotContiguous) {
   auto initB = Store::make(b_buf, {0}, 0);
   auto forK = For::make(k, 50, 100, Store::make(b_buf, {j}, Mul::make(20, k)));
   auto par = Block::make({forJ, initB, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}), "Only contiguous loops can be fused");
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
 TEST(LoopNest, fuseLoopsWithDifferentParents) {
@@ -4628,8 +4633,8 @@ TEST(LoopNest, fuseLoopsWithDifferentParents) {
   auto initB = Store::make(b_buf, {0}, 0);
   auto forK = For::make(k, 50, 100, Store::make(b_buf, {j}, Mul::make(20, k)));
   auto par = Block::make({forI, initB, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}), "loops with different parents");
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
 TEST(LoopNest, fuseLoopsWithVariableBounds) {
@@ -4650,7 +4655,8 @@ TEST(LoopNest, fuseLoopsWithVariableBounds) {
   auto forJ = For::make(j, 0, N, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(k, 0, N, Store::make(b_buf, {j}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
-  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4686,7 +4692,8 @@ TEST(LoopNest, fuseLoopsWithExprBounds) {
   auto forJ = For::make(j, 0, M + N, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(k, 0, M + N, Store::make(b_buf, {j}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
-  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4722,7 +4729,8 @@ TEST(LoopNest, fuseLoopsWithDifferentExprBounds) {
   auto forJ = For::make(j, M, N * 2, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(k, M, N + N, Store::make(b_buf, {j}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
-  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4757,7 +4765,8 @@ TEST(LoopNest, fuseLoopsWithNonOverlappingBufferAccesses) {
       For::make(k, 10, 100, Store::make(a_buf, {k + 100}, Mul::make(30, k)));
   auto par = Block::make({forJ, forK});
 
-  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4803,7 +4812,8 @@ TEST(LoopNest, fuseLoopsWithNonOverlapping2DBufferAccesses) {
   auto forM = For::make(m, 0, 20, forN);
   auto par = Block::make({forI, forM});
 
-  auto fused_loop = LoopNest::fuseLoops({forI, forM});
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4839,9 +4849,8 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies1) {
   auto forK =
       For::make(k, 10, 100, Store::make(a_buf, {k - 1}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}),
-      "not valid since it results in a loop carried dependence");
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies2) {
@@ -4861,9 +4870,8 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies2) {
   auto forK =
       For::make(k, 10, 100, Store::make(a_buf, {k + 50}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}),
-      "not valid since it results in a loop carried dependence");
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies3) {
@@ -4905,9 +4913,8 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies3) {
   auto forM = For::make(m, 0, 20, Block::make({initA, forJ}));
   auto forN = For::make(n, 0, 20, Block::make({initB, forK}));
   auto par = Block::make({forM, forN});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forM, forN}),
-      "not valid since it results in a loop carried dependence");
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forM, forN}, &fused_loop));
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies4) {
@@ -4948,9 +4955,8 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies4) {
           50,
           Store::make(a_buf, {m + 1, n}, Add::make(m, Mul::make(n, 100)))));
   auto par = Block::make({forI, forM});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forI, forM}),
-      "not valid since it results in a loop carried dependence");
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies5) {
@@ -4977,9 +4983,8 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies5) {
       100,
       Store::make(a_buf, {i, n + 1}, Add::make(i, Mul::make(n, 100))));
   auto forI = For::make(i, 0, 20, Block::make({forJ, forN}));
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forN}),
-      "not valid since it results in a loop carried dependence");
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forN}, &fused_loop));
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
@@ -5004,9 +5009,8 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
       Store::make(
           b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto par = Block::make({forJ, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}),
-      "not valid since it results in a loop carried dependence");
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
 TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
@@ -5031,9 +5035,8 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
           b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto par = Block::make({forK, forJ});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forK, forJ}),
-      "not valid since it results in a loop carried dependence");
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forK, forJ}, &fused_loop));
 }
 
 TEST(LoopNest, areLoopsPerfectlyNested) {
