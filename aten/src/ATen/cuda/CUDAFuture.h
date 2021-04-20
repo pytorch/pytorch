@@ -15,7 +15,10 @@ namespace cuda {
 
 struct TORCH_CUDA_CPP_API CUDAFuture final : at::ivalue::Future {
  public:
-  explicit CUDAFuture(at::TypePtr type);
+  // FIXME Remove the c10::optional once the TensorPipe agent can provide this.
+  explicit CUDAFuture(
+      at::TypePtr type,
+      c10::optional<std::vector<c10::DeviceIndex>> devices = nullopt);
 
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) override;
 
@@ -44,6 +47,15 @@ struct TORCH_CUDA_CPP_API CUDAFuture final : at::ivalue::Future {
   // A cached version of the data ptrs extracted from the value when the future
   // is first marked completed.
   std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs_;
+
+  // The bounding set of devices that this future, and any of its children, is
+  // allowed to use. This is a superset of the set of devices used by the events
+  // above. We need this to know what streams (for which devices) to set as
+  // current when invoking a callback, thus allowing the callback to use devices
+  // that the parent future didn't use. This field is set to the value provided
+  // in the constructor and will be "inherited" by all child futures.
+  // FIXME Remove the c10::optional once the TensorPipe agent can provide this.
+  c10::optional<std::vector<c10::DeviceIndex>> devices_;
 };
 
 } // namespace cuda

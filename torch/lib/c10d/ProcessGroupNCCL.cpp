@@ -1086,8 +1086,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   {
     at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    std::vector<c10::DeviceIndex> deviceIndices;
+    for (const at::Device& device : devices) {
+      TORCH_INTERNAL_ASSERT(device.is_cuda());
+      deviceIndices.push_back(device.index());
+    }
     work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
-        c10::ListType::create(c10::TensorType::get()));
+        c10::ListType::create(c10::TensorType::get()),
+        std::move(deviceIndices));
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 

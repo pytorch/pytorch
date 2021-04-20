@@ -40,19 +40,61 @@ std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
   return data_ptrs;
 }
 
+std::vector<c10::DeviceIndex> getDevicesOfDataPtrs(
+    const std::vector<std::reference_wrapper<const at::DataPtr>>& data_ptrs) {
+  std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
+  for (const at::DataPtr& data_ptr : data_ptrs) {
+    if (data_ptr.device().is_cuda()) {
+      isCudaDeviceUsed[data_ptr.device().index()] = true;
+    }
+  }
+  std::vector<c10::DeviceIndex> device_indices;
+  for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
+    if (isCudaDeviceUsed[idx]) {
+      device_indices.push_back(idx);
+    }
+  }
+  return device_indices;
+}
+
+std::string formatSetOfDevices(const std::vector<c10::DeviceIndex>& devices) {
+  if (devices.empty()) {
+    return "(none)";
+  }
+  std::ostringstream oss;
+  oss << "cuda:" << devices[0];
+  for (size_t idx = 1; idx < devices.size(); idx++) {
+    if (idx == devices.size() - 1) {
+      oss << " and ";
+    } else {
+      oss << ", ";
+    }
+    oss << "cuda:" << devices[idx];
+  }
+  return oss.str();
+}
+
 } // namespace
 
-CUDAFuture::CUDAFuture(at::TypePtr type) : at::ivalue::Future(std::move(type)) {
+CUDAFuture::CUDAFuture(
+    at::TypePtr type,
+    c10::optional<std::vector<c10::DeviceIndex>> devices)
+    : at::ivalue::Future(std::move(type)), devices_(std::move(devices)) {
   // Use current device to initialize currentDevice_. This is necessary
   // because preMarkCompletedHook won't be called when the Future contains
   // an error. Uninitialized currentDevice_ could lead to crash when used
   // in CUDAGuard.
   currentDevice_ = c10::cuda::current_device();
+
+  // Needs to be sorted in order to use set_difference on it.
+  if (devices_.has_value()) {
+    std::sort(devices_->begin(), devices_->end());
+  }
 }
 
 c10::intrusive_ptr<ivalue::Future> CUDAFuture::createInstance(
     at::TypePtr type) {
-  return c10::make_intrusive<CUDAFuture>(std::move(type));
+  return c10::make_intrusive<CUDAFuture>(std::move(type), devices_);
 }
 
 /**
@@ -70,25 +112,33 @@ void CUDAFuture::preMarkCompletedHook(
   // Start by performing all steps that can throw, before setting any field.
   std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs =
       dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
+  std::vector<c10::DeviceIndex> usedDevices =
+      getDevicesOfDataPtrs(actualDataPtrs);
+  if (devices_.has_value()) {
+    std::vector<c10::DeviceIndex> excessDevices;
+    std::set_difference(
+        usedDevices.begin(),
+        usedDevices.end(),
+        devices_->begin(),
+        devices_->end(),
+        std::back_inserter(excessDevices));
+    TORCH_CHECK_VALUE(
+        excessDevices.empty(),
+        "The result contained tensors residing on devices ",
+        formatSetOfDevices(excessDevices),
+        " which are not among the expected devices ",
+        formatSetOfDevices(*devices_));
+  }
 
   currentDevice_ = c10::cuda::current_device();
 
   // Extract them once and cache them for later uses.
   dataPtrs_ = std::move(actualDataPtrs);
 
-  std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
-  for (const at::DataPtr& data_ptr : dataPtrs_) {
-    if (data_ptr.device().is_cuda()) {
-      isCudaDeviceUsed[data_ptr.device().index()] = true;
-    }
-  }
-
-  for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
-    if (isCudaDeviceUsed[idx]) {
-      at::cuda::CUDAEvent cudaEvent;
-      cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
-      cudaEvents_.push_back(std::move(cudaEvent));
-    }
+  for (const c10::DeviceIndex& idx : usedDevices) {
+    at::cuda::CUDAEvent cudaEvent;
+    cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
+    cudaEvents_.push_back(std::move(cudaEvent));
   }
 }
 
@@ -104,18 +154,29 @@ std::function<void(void)> CUDAFuture::wrapCallback(
     // misbehaving this also ends up using memory on those devices, which the
     // user might not want.
     std::vector<at::cuda::CUDAStream> streams;
-    for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
-      c10::DeviceIndex idx = cudaEvent.device_index();
-      // FIXME Should we find a way to allow to change the priority of
-      // streams?
-      at::cuda::CUDAStream stream =
-          at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx);
-      cudaEvent.block(stream);
-      streams.push_back(stream);
+    if (devices_.has_value()) {
+      for (const c10::DeviceIndex& idx : *devices_) {
+        // FIXME Should we find a way to allow to change the priority of
+        // streams?
+        streams.push_back(
+            at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
+      }
+    } else {
+      // FIXME Remove this branch when we make devices non-optional.
+      for (const at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
+        // FIXME Should we find a way to allow to change the priority of
+        // streams?
+        streams.push_back(at::cuda::getStreamFromPool(
+            /*isHighPriority=*/false, cudaEvent.device_index()));
+      }
     }
 
     // Use the dedicated callback stream to run callback.
     at::cuda::CUDAMultiStreamGuard streamGuard(streams);
+
+    for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
+      cudaEvent.block(at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+    }
 
     // Do not free the underlying data storage of value_ before its
     // usage on the stream finishes.
