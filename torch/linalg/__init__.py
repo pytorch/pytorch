@@ -587,7 +587,7 @@ Returns:
         - **solution** (*Tensor*): the least squares solution
         - **residuals** (*Tensor*):  if :math:`m > n` then for full rank matrices in :attr:`input` the tensor encodes
             the squared residuals of the solutions, that is :math:`||\text{input} @ x - b||_F^2`.
-            If :math:`m \le n` or matrix is not full rank, an empty tensor is returned instead.
+            If :attr:`input` is a matrix and :math:`m \le n` or it is not full rank, an empty tensor is returned instead.
             If :attr:`input` is a batch of matrices and any matrix in the batch is not full rank,
             then an empty tensor is returned. This behavior may change in a future PyTorch release.
         - **rank** (*Tensor*): the tensor of ranks of the matrix :attr:`input` with shape ``input.shape[:-2]``.
