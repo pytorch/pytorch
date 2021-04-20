@@ -115,7 +115,7 @@ Attribute.__doc__ = """
 """
 
 def _get_type_trace_db():
-    # This is a private API. Use of this for external puporses is discouraged.
+    # This is a private API. Use of this for external purposes is discouraged.
     return type_trace_db
 
 # Gets a function from the name of a method on a type
