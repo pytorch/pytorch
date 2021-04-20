@@ -419,7 +419,7 @@ if _enabled:
             Pickler's ``persistent_load`` function.
             """
             script_module_id, next_storage_id = exporter.script_module_serializer.serialize(
-                self._c, exporter.get_storage_id()
+                self._c, int(exporter.get_unique_id())
             )
             exporter._next_storage_id = next_storage_id
             return (unpackage_script_module, (str(script_module_id),))

@@ -427,35 +427,10 @@ class PackageScriptModuleTest(PackageTestCase):
 
         buffer.seek(0)
         importer = PackageImporter(buffer)
-        print(importer.file_structure())
+        file_structure = importer.file_structure()
+        self.assertTrue(file_structure.has_file(".data/ts_code/0"))
+        self.assertFalse(file_structure.has_file(".data/ts_code/1"))
 
-        """outputs: Idk if this is the desired behavior '-'
-        ─── <binary>
-            ├── .data
-            │   ├── ts_code
-            │   │   ├── 0
-            │   │   │   ├── constants.pkl
-            │   │   │   └── data.pkl
-            │   │   ├── 1
-            │   │   │   ├── constants.pkl
-            │   │   │   └── data.pkl
-            │   │   ├── 2
-            │   │   │   ├── constants.pkl
-            │   │   │   └── data.pkl
-            │   │   └── code
-            │   │       └── __torch__
-            │   │           └── package_a
-            │   │               ├── test_module.py
-            │   │               └── test_module.py.debug_pkl
-            │   ├── extern_modules
-            │   └── version
-            ├── package_a
-            │   └── test_module.py
-            └── res
-                ├── mod1.pkl
-                ├── mod2.pkl
-                └── mod3.pkl
-    """
 
     def test_saving_scripting_packaged_mod(self):
         """
