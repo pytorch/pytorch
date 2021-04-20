@@ -41,13 +41,13 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
           std::fill_n(_reversed_padding_repeated_twice.begin(), 2 * D, 0);
         },
         [&](enumtype::kSame) {
-          for (int64_t i = 0; i < D; ++i) {
+          for (size_t i = 0; i < D; ++i) {
             const auto stride = (*options.stride())[i];
             TORCH_CHECK(stride == 1, "padding='same' is not supported for strided convolutions");
           }
 
           _reversed_padding_repeated_twice.resize(2 * D);
-          for (int64_t i = 0; i < D; ++i) {
+          for (size_t i = 0; i < D; ++i) {
             const auto dilation = (*options.dilation())[i];
             const auto kernel_size = (*options.kernel_size())[i];
             const auto total_padding = dilation * (kernel_size - 1);
