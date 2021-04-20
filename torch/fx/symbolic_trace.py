@@ -434,7 +434,7 @@ _wrapped_methods_to_patch : List[Tuple[type, str]] = []
 
 if os.environ.get("FX_PATCH_GETITEM") == "1":
     # This change is needed to trace models like PositionalEmbedding from BERT:
-    # https://github.com/pytorch/benchmark/blob/master/torchbenchmark/models/BERT_pytorch/bert_pytorch/model/embedding/position.py  # noqa
+    # https://github.com/pytorch/benchmark/blob/master/torchbenchmark/models/BERT_pytorch/bert_pytorch/model/embedding/position.py
     # but causes issues in quantization documented here:
     # https://github.com/pytorch/pytorch/issues/50710
     # once that is fixed we can make this the default behavior.
