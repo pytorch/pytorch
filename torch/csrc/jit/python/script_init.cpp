@@ -119,14 +119,14 @@ struct PythonResolver : public Resolver {
         py::cast<std::string>(py::module::import("torch._jit_internal")
                                   .attr("_qualified_name")(obj)));
 
-    auto pyClass =
-        py::module::import("torch.jit._state")
-            .attr("_get_script_class")(qualifiedName.qualifiedName());
-    if (!pyClass.is_none()) {
-      return get_python_cu()->get_type(qualifiedName);
-    }
+    // auto pyClass =
+    //     py::module::import("torch.jit._state")
+    //         .attr("_get_script_class")(qualifiedName.qualifiedName());
+    // if (!pyClass.is_none()) {
+    return get_python_cu()->get_type(qualifiedName);
+    // }
 
-    return nullptr;
+    // return nullptr;
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
