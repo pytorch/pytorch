@@ -45,7 +45,7 @@ them:
   * Example: https://github.com/pytorch/pytorch/pull/40712
 * Cutting a release branch on [`pytorch/xla`](https://github.com/pytorch/xla)
   * Example: https://github.com/pytorch/pytorch/pull/40721
-* Update backwoards compatability tests to use RC binaries instead of nightlies
+* Update backwards compatibility tests to use RC binaries instead of nightlies
   * Example: https://github.com/pytorch/pytorch/pull/40706
 
 ## Drafting RCs (Release Candidates)
