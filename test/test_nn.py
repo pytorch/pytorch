@@ -10608,12 +10608,12 @@ class TestNNInit(TestCase):
                 init.kaiming_normal_(tensor)
 
     def test_kaiming_uniform_warning_on_0element_tensor(self):
-        tensor = self.empty(0, 1):
+        tensor = self.empty(0, 1)
         with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op"):
             _ = init.kaiming_uniform_(tensor)
 
     def test_kaiming_normal_warning_on_0element_tensor(self):
-        tensor = self.empty(0, 1):
+        tensor = self.empty(0, 1)
         with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op"):
             _ = init.kaiming_normal_(tensor)
 
