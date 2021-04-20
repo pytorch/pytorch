@@ -1475,7 +1475,6 @@ class TestLinalg(TestCase):
                 actual = torch.linalg.cond(input, p)
                 self.assertEqual(actual, expected)
 
-    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/55552
     @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -1801,7 +1800,6 @@ class TestLinalg(TestCase):
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
 
-    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/55552
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(*floating_and_complex_types())
@@ -3037,7 +3035,6 @@ class TestLinalg(TestCase):
             test_inverse_many_batches_helper(torch_inverse, 3, 512)
             test_inverse_many_batches_helper(torch_inverse, 64, 64)
 
-    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/55552
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
@@ -3171,7 +3168,6 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "rcond tensor of complex type is not supported"):
             torch.linalg.pinv(a, rcond=rcond)
 
-    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/55552
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -3302,7 +3298,6 @@ class TestLinalg(TestCase):
         expected = np.linalg.solve(A.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected)
 
-    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/55552
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
