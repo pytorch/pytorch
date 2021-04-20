@@ -217,8 +217,8 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       subValues.insert(*this);
       c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
       auto match = py_obj->tryToInferType();
-      TORCH_INTERNAL_ASSERT(match.success(),
-            "Cannot infer type of ", py_obj->toStr(), "\n:", match.reason());
+      TORCH_CHECK_TYPE(match.success(),
+            "Cannot infer type of ", py_obj->toStr(), ": ", match.reason());
       auto contained_value = py_obj->toIValue(match.type());
       contained_value.getSubValues(subValues);
       break;
@@ -227,8 +227,8 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Device:
     case Tag::Uninitialized:
     case Tag::Capsule:
-      TORCH_INTERNAL_ASSERT(
-          false, "sub ivalue is nat enabled for: ", this->tagKind());
+      TORCH_CHECK_TYPE(
+          false, "Cannot inspect value of type ", this->tagKind());
       // Fall through
     default:
       // don't record scalars.
