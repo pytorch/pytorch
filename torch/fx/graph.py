@@ -13,7 +13,7 @@ import warnings
 
 
 if TYPE_CHECKING:
-    from .graph_module import GraphModule  # noqa
+    from .graph_module import GraphModule
 
 
 # Mapping of builtins to their `typing` equivalent.
