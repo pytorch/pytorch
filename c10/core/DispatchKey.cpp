@@ -146,6 +146,8 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
   switch (t) {
     case DispatchKey::CPU:
       return DispatchKey::AutogradCPU;
+    case DispatchKey::XPU:
+      return DispatchKey::AutogradXPU;
     case DispatchKey::CUDA:
       return DispatchKey::AutogradCUDA;
     case DispatchKey::XLA:
