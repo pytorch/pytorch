@@ -1140,6 +1140,44 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @skipIfNoFBGEMM
+    def test_user_module_scriptable(self):
+        # Logging of the output of this class is not supported, because it is
+        # neither a tensor or an RNN return type.
+        class M1(nn.Module):
+            def forward(self, x):
+                x1 = x * 2
+                x2 = x * 4
+                return (x1, x2)
+
+        class M2(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x):
+                x1, x2 = self.m1(x)
+                return x1, x2
+
+        m = M2().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        prepare_custom_config_dict = {
+            'non_traceable_module_class': [M1],
+        }
+        mp1 = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
+        mp2 = copy.deepcopy(mp1)
+        matching_config = {
+            'non_matchable_module_class': [M1],
+        }
+        mp1_ns, mp2_ns = _add_loggers_impl(
+            'a', mp1, 'b', mp2, OutputLogger, should_log_inputs=False,
+            matching_config=matching_config)
+
+        # Scripting a model with loggers should succeed. If it fails because of
+        # incorrect dtypes, we can blocklist the associated types from being instrumented.
+        mp1_ns_scripted = torch.jit.script(mp1_ns)
+        mp2_ns_scripted = torch.jit.script(mp2_ns)
+
+    @skipIfNoFBGEMM
     def test_user_module(self):
         """
         For user defined modules,

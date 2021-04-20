@@ -56,3 +56,14 @@ NSResultsType = Dict[str, Dict[str, Dict[str, List[NSSingleResultType]]]]
 # `nn.Conv1d` for a `call_module` node calling the forward of a `nn.Conv1d` module
 # `'sigmoid'` for a `call_method` node calling `x.sigmoid()`
 NSNodeTargetType = Union[Callable, str]
+
+# Defines the matching config for all the APIs, for example:
+# {
+#   'non_matchable_module_class': [
+#     NonMatchableModuleClassType,
+#   ],
+#   'non_matchable_function': [
+#     non_matchable_function,
+#   ],
+# }
+NSMatchingConfig = Dict[str, Any]

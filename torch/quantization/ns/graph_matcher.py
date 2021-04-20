@@ -7,7 +7,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
 from .utils import getattr_from_fqn
-from .ns_types import NSSubgraph, NSNodeTargetType
+from .ns_types import NSSubgraph, NSNodeTargetType, NSMatchingConfig
 from .mappings import (
     FUNS_UNMATCHABLE,
     MODS_UNMATCHABLE,
@@ -303,10 +303,33 @@ def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[NSNodeTargetT
         return type(mod)
     return None
 
+def _should_skip_match(
+    subgraph: NSSubgraph,
+    gm: GraphModule,
+    matching_config: Optional[NSMatchingConfig],
+) -> bool:
+    if matching_config is None:
+        matching_config = {}
+    non_matchable_module_class = \
+        matching_config.get('non_matchable_module_class', [])
+    non_matchable_function = \
+        matching_config.get('non_matchable_function', [])
+    base_op_node = subgraph.base_op_node
+    if base_op_node.op == 'call_module':
+        assert isinstance(base_op_node.target, str)
+        mod = getattr_from_fqn(gm, base_op_node.target)
+        for cls in non_matchable_module_class:
+            if isinstance(mod, cls):
+                return True
+    elif base_op_node.op == 'call_function':
+        return base_op_node.target in non_matchable_function
+    return False
+
 def get_matching_subgraph_pairs(
     gm_a: GraphModule,
     gm_b: GraphModule,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    matching_config: Optional[NSMatchingConfig] = None,
 ) -> Dict[str, Tuple[NSSubgraph, NSSubgraph]]:
     """
     Matches matchable subgraphs of graph_a to graph_b.
@@ -422,6 +445,10 @@ def get_matching_subgraph_pairs(
 ({cur_subgraph_a}, {type_start_a}) and
 ({cur_subgraph_b}, {type_start_b}) are not related"""
                 raise GraphMatchingException(msg)
+            if _should_skip_match(cur_subgraph_a, gm_a, matching_config):
+                continue
+            elif _should_skip_match(cur_subgraph_b, gm_b, matching_config):
+                continue
             key_name_a = _get_name_for_subgraph(
                 cur_subgraph_a, gm_a, base_name_to_sets_of_related_ops,
                 existing_names_a)
