@@ -1,7 +1,4 @@
 import torch
-import functools
-import random
-import operator
 import warnings
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 from torch.testing._internal.common_device_type import \
