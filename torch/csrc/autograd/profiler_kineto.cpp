@@ -12,7 +12,6 @@
 
 #include <unistd.h>
 #include <sys/syscall.h>
-#include <fmt/format.h>
 
 // TODO: TO be removed, once this properly works from libkineto
 // Literal copy-n-paste from third_party/kineto/libkineto/src/WeakSymbols.cpp
@@ -284,25 +283,39 @@ void pushProfilingCallbacks() {
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
-  std::vector<std::string> output;
-  std::transform(
-      shapes.begin(),
-      shapes.end(),
-      std::back_inserter(output),
-      [](std::vector<int64_t> s) -> std::string {
-        return fmt::format("[{}]", fmt::join(s, ", "));
-      });
-  return fmt::format("[{}]", fmt::join(output, ", "));
+  std::ostringstream oss;
+  oss << "[";
+  for (size_t t_idx = 0; t_idx < shapes.size(); ++t_idx) {
+    if (t_idx > 0) {
+      oss << ", ";
+    }
+    oss << "[";
+    for (size_t s_idx = 0; s_idx < shapes[t_idx].size(); ++s_idx) {
+      if (s_idx > 0) {
+        oss << ", ";
+      }
+      oss << shapes[t_idx][s_idx];
+    }
+    oss << "]";
+  }
+  oss << "]";
+  return oss.str();
 }
 
 std::string dtypesToStr(const std::vector<std::string>& types) {
-  std::vector<std::string> output;
-  std::transform(
-      types.begin(),
-      types.end(),
-      std::back_inserter(output),
-      [](std::string s) -> std::string { return fmt::format("\"{}\"", s); });
-  return fmt::format("[{}]", fmt::join(output, ", "));
+  if (types.empty()) {
+    return "[]";
+  } else {
+    std::ostringstream oss;
+    std::transform(
+        types.begin(),
+        types.end(),
+        std::ostream_iterator<std::string>(oss, ", "),
+        [](std::string s) -> std::string { return "\"" + s + "\""; });
+    auto rc = oss.str();
+    rc.erase(rc.length() - 2); // remove last ", "
+    return "[" + rc + "]";
+  }
 }
 
 std::string stacksToStr(const std::vector<std::string>& stacks) {
