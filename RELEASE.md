@@ -57,7 +57,7 @@ Example:
  TODO: Create release branch in `builder` repo and pin release CI to use that branch rather than HEAD of builder repo.
 ## Drafting RCs (Release Candidates)
 
-To draft RCs a user with necessary permission can push a git tag to the main `pytorch/pytorch` git repository.
+To draft RCs, a user with the necessary permissions can push a git tag to the main `pytorch/pytorch` git repository.
 
 The git tag for a release candidate must follow the following format:
 ```
@@ -99,7 +99,7 @@ An example of this would look like:
 Promotion of RCs to stable is done with this script:
 [`pytorch/builder:release/promote.sh`](https://github.com/pytorch/builder/blob/master/release/promote.sh)
 
-Users of that script should take care to update the versions necessary to the versions you are attempting to promote for the specific packages you are attempting to promote.
+Users of that script should take care to update the versions necessary for the specific packages you are attempting to promote.
 
 Promotion should occur in two steps:
 * Promote S3 artifacts (wheels, libtorch) and Conda packages
@@ -113,7 +113,7 @@ Promotion should occur in two steps:
 
 In the event a submodule cannot be fast forwarded and a patch must be applied we can take two different approaches:
 
-* (preferred) Fork the said repository  under the pytorch Github organization, apply the patches we need there, and then switch our submodule to accept our fork.
+* (preferred) Fork the said repository under the pytorch Github organization, apply the patches we need there, and then switch our submodule to accept our fork.
 * Get the dependencies maintainers to support a release branch for us
 
 Editing submodule remotes can be easily done with: (running from the root of the git repository)
