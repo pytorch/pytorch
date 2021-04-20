@@ -136,7 +136,8 @@ bool canRunNatively(Node* n) {
       "prim::ListConstruct",
       "prim::ListUnpack",
       "prim::TupleConstruct",
-      "prim::DictConstruct"};
+      "prim::DictConstruct",
+      "aten::__getitem__"};
   auto str = std::string(n->kind().toQualString());
   if (!native_nodes.count(str)) {
     return false;
@@ -909,6 +910,14 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
           node->inputs().size());
       // put output back
       p_node->Output(0) = std::move(stack[0]);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::__getitem__")) {
+    return [](ProcessedNode* p_node) {
+      auto dict = p_node->Input(0).toGenericDict();
+      auto key = p_node->Input(1);
+      auto value = dict.find(key);
+      TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
+      p_node->Output(0) = value->value();
     };
   } else if (n->kind() == prim::ListConstruct) {
     return [](ProcessedNode* p_node) {
