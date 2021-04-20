@@ -202,7 +202,7 @@ class TestSparseCSR(TestCase):
                 csr.matmul(bad_vec)
 
     @onlyCPU
-    @dtypes(*torch.testing.floating_and_complex_types())
+    @dtypes(*torch.testing.floating_types())
     def test_coo_csr_conversion(self, device, dtype):
         size = (5, 5)
         dense = torch.randn(size, dtype=dtype, device=device)
