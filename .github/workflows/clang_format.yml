@@ -17,6 +17,8 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow us to use git merge-base
       - name: Run clang-format
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -eu
           # This is necessary to get the same results regardless of whether the
@@ -40,5 +42,3 @@ jobs:
           fi
           echo "$GIT_DIFF"
           exit 1
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
