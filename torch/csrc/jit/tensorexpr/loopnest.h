@@ -228,7 +228,7 @@ class TORCH_API LoopNest {
   static bool areLoopsPerfectlyNested(const std::vector<For*>& loops);
 
   static void unroll(For* f, Stmt** unrolled);
-  static void normalize(For* f, For** normalized);
+  static bool normalize(For* f);
   static bool flatten(const std::vector<For*>& f, For** flattened);
 
   // Get 'num' loops from the loopnest starting at 'f'.

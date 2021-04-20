@@ -55,7 +55,7 @@ TORCH_API std::string serialize_model_proto_to_string(
 
 TORCH_API void check_onnx_proto(const std::string& proto_string);
 
-// Serializer for both oldsyle and unified format TS serialization
+// Serializer for both oldsyle and unified format TorchScript serialization
 class TORCH_API ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(
@@ -97,6 +97,7 @@ class TORCH_API ScriptModuleSerializer {
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
   // created
   OrderedDict<std::string, PythonPrint> file_streams_;
+  // next torchscript identifier to be used in package archive
   uint64_t next_ts_id;
 };
 
