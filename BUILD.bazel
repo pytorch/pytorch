@@ -341,6 +341,7 @@ filegroup(
         "aten/src/ATen/cuda/CUDABlas.cpp",
         "aten/src/ATen/cuda/CUDASolver.cpp",
         "aten/src/ATen/cuda/CUDAContext.cpp",
+        "aten/src/ATen/cuda/CUDAFuture.cpp",
         "aten/src/ATen/cuda/CUDAGeneratorImpl.cpp",
         "aten/src/ATen/cuda/CUDAGraph.cpp",
         "aten/src/ATen/cuda/CuSparseHandlePool.cpp",
