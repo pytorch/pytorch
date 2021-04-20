@@ -31,6 +31,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/integer_value_refinement.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
@@ -172,6 +173,7 @@ void initJITBindings(PyObject* module) {
           RegisterOperatorShapeFunction)
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
+      .def("_jit_pass_integer_value_refinement", RefineIntegerValues)
       .def(
           "_jit_pass_onnx_fold_if",
           [](std::shared_ptr<Graph>& graph) {
@@ -405,6 +407,9 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("graph"),
           py::arg("refine_list_len") = false)
+      .def(
+          "_jit_pass_refine_integer_values",
+          [](std::shared_ptr<Graph>& g) { return RefineIntegerValues(g); })
       .def(
           "_jit_pass_fuse_addmm",
           [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })

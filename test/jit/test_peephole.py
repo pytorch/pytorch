@@ -308,6 +308,87 @@ class TestPeephole(JitTestCase):
         self.run_pass("constant_propagation", foo.graph)
         FileCheck().check_count("aten::len", 4).run(foo.graph)
 
+    def test_integer_refinement(self):
+        def run_peephole_and_check_const_value(graph, const_string):
+            self.run_pass("refine_integer_values", graph)
+            self.run_pass("constant_propagation", graph)
+            self.run_pass("dce", graph)
+            FileCheck().check(const_string).check_next("return").run(graph)
+
+        @torch.jit.script
+        def foo(x: int, y: int):
+            if x != 4 or y != 5:
+                raise Exception("")
+
+            return x + y
+
+        graph = foo.graph
+        self.run_pass("refine_integer_values", graph)
+        self.run_pass("constant_propagation", graph)
+        self.run_pass("dce", graph)
+        # print(graph)
+
+        run_peephole_and_check_const_value(foo.graph, "value=9")
+        self.assertEqual(foo(gen_li(4), gen_li(5)), 9)
+        with self.assertRaises(Exception):
+            foo(2, 4)
+
+        @torch.jit.script
+        def foo(x: int, y: int):
+            if x == 4 and y == 5:
+                pass
+            else:
+                raise Exception("hi")
+
+            return x + y
+
+        run_peephole_and_check_const_value(foo.graph, "value=9")
+        self.assertEqual(foo(gen_li(4), gen_li(5)), 9)
+        with self.assertRaises(Exception):
+            foo(2, 4)
+
+        @torch.jit.script
+        def foo(x: int, y: int, z: int):
+            if x != 4:
+                raise Exception("..")
+            else:
+                if y != 8:
+                    raise Exception("...")
+                else:
+                    if z == 3:
+                        pass
+                    else:
+                        raise Exception("...")
+
+            return x + y * z
+
+        run_peephole_and_check_const_value(foo.graph, "value=28")
+        self.assertEqual(foo(gen_li(4), gen_li(8), gen_li(3)), 28)
+        with self.assertRaises(Exception):
+            foo(1, 2, 3)
+
+        # refinement should persist in second len(x) call
+
+        @torch.jit.script
+        def foo(x: int, cond: bool):
+            if x == 4:
+                if cond:
+                    return x
+                return 4
+
+            return 4
+
+        run_peephole_and_check_const_value(foo.graph, "value=4")
+
+        @torch.jit.script
+        def foo(x: int, y: int):
+            assert x == 4 or y == 5
+            return x + y
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        self.run_pass("constant_propagation", foo.graph)
+        FileCheck().check_count("aten::len", 4).run(foo.graph)
+
     def test_optimize_out_comparison_same_value(self):
         @torch.jit.script
         def foo(x: int):
@@ -316,3 +397,19 @@ class TestPeephole(JitTestCase):
         self.run_pass("peephole", foo.graph)
         FileCheck().check_not("aten::eq").check_not("aten::neq").run(foo.graph)
         self.assertEqual(foo(1), (True, False))
+
+    def test_refine_integer_values(self):
+        @torch.jit.script
+        def foo(x: int):
+            y = 1
+            if x == 1:
+                return y
+            else:
+                return x
+
+        self.run_pass("refine_integer_values", foo.graph)
+        self.run_pass("constant_propagation", foo.graph)
+        self.run_pass("dce", foo.graph)
+        FileCheck().check("graph").check_next("return").run(foo.graph)
+        self.assertEqual(foo(2), 2)
+        self.assertEqual(foo(1), 1)
