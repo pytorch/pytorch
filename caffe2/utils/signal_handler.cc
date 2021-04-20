@@ -305,7 +305,7 @@ void uninstallFatalSignalHandlers() {
 #if defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
 C10_DEFINE_bool(
     caffe2_print_stacktraces,
-    true,
+    false,
     "If set, prints stacktraces when a fatal signal is raised.");
 #endif
 
