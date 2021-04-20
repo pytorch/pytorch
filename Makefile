@@ -74,4 +74,11 @@ clang_tidy:
 	echo "clang-tidy local lint is not yet implemented"
 	exit 1
 
+toc:
+	@python tools/actions_local_runner.py \
+		--file .github/workflows/lint.yml \
+		--job 'toc' \
+		--step 'Regenerate ToCs' \
+		--step "Assert that regenerating the ToCs didn't change them"
+
 lint: flake8 mypy quick_checks cmakelint generate-gha-workflows

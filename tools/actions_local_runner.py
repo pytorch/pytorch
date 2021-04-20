@@ -38,6 +38,7 @@ async def run_step(step, job_name):
     # TODO: Either lint that GHA scripts only use 'set -eux' or make this more
     # resilient
     script = script.replace("set -eux", "set -eu")
+    name = f'{job_name}: {step["name"]}'
 
     try:
         proc = await asyncio.create_subprocess_shell(
@@ -50,9 +51,10 @@ async def run_step(step, job_name):
         )
 
         stdout, stderr = await proc.communicate()
-        cprint(col.BLUE, f'{job_name}: {step["name"]}')
+
+        cprint(col.BLUE, name)
     except Exception as e:
-        cprint(col.BLUE, f'{job_name}: {step["name"]}')
+        cprint(col.BLUE, name)
         print(e)
 
     stdout = stdout.decode().strip()
@@ -62,6 +64,8 @@ async def run_step(step, job_name):
         print(stderr)
     if stdout != "":
         print(stdout)
+
+    return proc.returncode == 0
 
 
 async def run_steps(steps, job_name):
