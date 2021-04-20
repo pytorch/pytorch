@@ -1080,7 +1080,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // TODO: This is a massive hack!  There is some confusion about
     // Variable/Tensor inside the body of this function.  Turning off
     // grad smooths over the confusion for now.  This fixes
-    // test/test_c10d.py ProcessGroupGlooTest.test_sparse_allreduce_basics
+    // test/test_c10d_gloo.py ProcessGroupGlooTest.test_sparse_allreduce_basics
     //
     // The correct fix is to stop allocating tensors that are not variables,
     // but to conveniently do this c10d must depend on torch not ATen
