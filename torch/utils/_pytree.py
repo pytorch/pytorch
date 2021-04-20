@@ -59,7 +59,7 @@ FlattenFuncSpec = Callable[[PyTree, TreeSpec], List]
 class NodeDef(NamedTuple):
     flatten_fn: FlattenFunc
     unflatten_fn: UnflattenFunc
-    flatten_fn_spec: FlattenFuncSpec
+    flatten_fn_spec: Optional[FlattenFuncSpec]
 
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 
@@ -69,7 +69,7 @@ def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: Unfla
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
-def _dict_flatten_spec(d: Dict[Any, Any], context: Context) -> Tuple[List[Any], Context]:
+def _dict_flatten_spec(d: Dict[Any, Any], context: Context) -> List[Any]:
     return list([d[k] for k in context])
 
 def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
@@ -118,6 +118,8 @@ def tree_flatten_spec(pytree: PyTree, spec: TreeSpec):
     if isinstance(spec, LeafSpec):
         return [pytree]
     flatten_fn_spec = SUPPORTED_NODES[spec.type].flatten_fn_spec
+    if flatten_fn_spec is None:
+        raise RuntimeError(f"Cannot flatten pytree {type(pytree)} from spec")
     child_pytrees = flatten_fn_spec(pytree, spec.context)
     result = []
     for child, child_spec in zip(child_pytrees, spec.children_specs):
