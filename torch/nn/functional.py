@@ -413,7 +413,6 @@ def fractional_max_pool2d_with_indices(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
-    # noqa
     r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -473,7 +472,6 @@ def _fractional_max_pool2d(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tensor:
-    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             fractional_max_pool2d,
@@ -508,7 +506,6 @@ def fractional_max_pool3d_with_indices(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
-    # noqa
     r"""Applies 3D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -573,7 +570,6 @@ def _fractional_max_pool3d(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tensor:
-    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             fractional_max_pool3d,
@@ -609,7 +605,6 @@ def max_pool1d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    # noqa
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
@@ -640,7 +635,6 @@ def _max_pool1d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d,
@@ -677,7 +671,6 @@ def max_pool2d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    # noqa
     r"""Applies a 2D max pooling over an input signal composed of several input
     planes.
 
@@ -708,7 +701,6 @@ def _max_pool2d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d,
@@ -745,7 +737,6 @@ def max_pool3d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    # noqa
     r"""Applies a 3D max pooling over an input signal composed of several input
     planes.
 
@@ -776,7 +767,6 @@ def _max_pool3d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d,
@@ -845,7 +835,6 @@ def max_unpool1d(
     padding: BroadcastingList1[int] = 0,
     output_size: Optional[BroadcastingList1[int]] = None
 ) -> Tensor:
-    # noqa
     r"""Computes a partial inverse of :class:`MaxPool1d`.
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
@@ -882,7 +871,6 @@ def max_unpool2d(
     padding: BroadcastingList2[int] = 0,
     output_size: Optional[BroadcastingList2[int]] = None
 ) -> Tensor:
-    # noqa
     r"""Computes a partial inverse of :class:`MaxPool2d`.
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
@@ -915,7 +903,6 @@ def max_unpool3d(
     padding: BroadcastingList3[int] = 0,
     output_size: Optional[BroadcastingList3[int]] = None
 ) -> Tensor:
-    # noqa
     r"""Computes a partial inverse of :class:`MaxPool3d`.
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
@@ -2048,6 +2035,7 @@ def embedding_bag(
     sparse: bool = False,
     per_sample_weights: Optional[Tensor] = None,
     include_last_offset: bool = False,
+    padding_idx: Optional[int] = None,
 ) -> Tensor:
     r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
@@ -2084,6 +2072,9 @@ def embedding_bag(
         include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
             The last element is the size of the input, or the ending index position of the last bag (sequence).
 
+        padding_idx (int, optional): If given, indicates which indices in :attr:`input` represent padding. When
+                                     a :attr:`padding_idx` is encountered in :attr:`input` during a reduction,
+                                     it is skipped. This allows each bag to be a different logical size.
 
     Shape:
         - :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
@@ -2111,9 +2102,17 @@ def embedding_bag(
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.tensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.tensor([0,4])
-        >>> F.embedding_bag(embedding_matrix, input, offsets)
+        >>> F.embedding_bag(input, embedding_matrix, offsets)
         tensor([[ 0.3397,  0.3552,  0.5545],
                 [ 0.5893,  0.4386,  0.5882]])
+
+        >>> # example with padding_idx
+        >>> embedding_matrix = torch.rand(10, 3)
+        >>> input = torch.tensor([2, 2, 2, 2, 4, 3, 2, 9])
+        >>> offsets = torch.tensor([0,4])
+        >>> F.embedding_bag(input, embedding_matrix, offsets, padding_idx=2, mode='sum')
+        tensor([[ 0.0000,  0.0000,  0.0000],
+                [-0.7082,  3.2145, -2.6251]])
     """
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
@@ -2129,6 +2128,7 @@ def embedding_bag(
             sparse=sparse,
             per_sample_weights=per_sample_weights,
             include_last_offset=include_last_offset,
+            padding_idx=padding_idx,
         )
     # Check for backward compatibility.
     # Used to be embedding_bag(weight, input, ...)
@@ -2202,7 +2202,7 @@ def embedding_bag(
         )
 
     ret, _, _, _ = torch.embedding_bag(
-        weight, input, offsets, scale_grad_by_freq, mode_enum, sparse, per_sample_weights, include_last_offset
+        weight, input, offsets, scale_grad_by_freq, mode_enum, sparse, per_sample_weights, include_last_offset, padding_idx
     )
     return ret
 
@@ -2237,7 +2237,6 @@ def batch_norm(
     momentum: float = 0.1,
     eps: float = 1e-5,
 ) -> Tensor:
-    # noqa
     r"""Applies Batch Normalization for each channel across a batch of data.
 
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
@@ -2274,7 +2273,6 @@ def instance_norm(
     momentum: float = 0.1,
     eps: float = 1e-5,
 ) -> Tensor:
-    # noqa
     r"""Applies Instance Normalization for each channel in each data sample in a
     batch.
 
@@ -3055,7 +3053,7 @@ def margin_ranking_loss(
     r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
-    """  # noqa
+    """
     if has_torch_function_variadic(input1, input2, target):
         return handle_torch_function(
             margin_ranking_loss,
@@ -3093,7 +3091,7 @@ def hinge_embedding_loss(
     r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
-    """  # noqa
+    """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             hinge_embedding_loss,
@@ -3219,7 +3217,7 @@ def cosine_embedding_loss(
     r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
-    """  # noqa
+    """
     if has_torch_function_variadic(input1, input2, target):
         return handle_torch_function(
             cosine_embedding_loss,
@@ -4395,7 +4393,6 @@ def unfold(
     padding: BroadcastingList2[int] = 0,
     stride: BroadcastingList2[int] = 1
 ) -> Tensor:
-    # noqa
     r"""Extracts sliding local blocks from a batched input tensor.
 
     .. warning::
@@ -4435,7 +4432,6 @@ def fold(
     padding: BroadcastingList2[int] = 0,
     stride: BroadcastingList2[int] = 1
 ) -> Tensor:
-    # noqa
     r"""Combines an array of sliding local blocks into a large containing
     tensor.
 
