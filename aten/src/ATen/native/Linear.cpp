@@ -144,6 +144,19 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   return result;
 }
 
+namespace {
+
+bool einsum_check_label(char label) {
+  return std::isalpha(label, std::locale{"C"});
+}
+
+int64_t einsum_label_to_index(char label) {
+  constexpr int NUM_OF_LETTERS = 'z' - 'a' + 1;
+  return std::islower(label, std::locale{"C"}) ? label - 'a'
+                                               : NUM_OF_LETTERS + label - 'A';
+}
+}
+
 // There are roughly three parts to compute einsum:
 // 1. Parse equation to extract the labels for each input operand and output
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
@@ -202,13 +215,12 @@ Tensor einsum(std::string equation, TensorList operands) {
       default:
         // Parse label
         TORCH_CHECK(
-            lhs[i] >= 'a' && lhs[i] <= 'z',
-            "einsum() operand subscript must be in range [a, z] but found ",
+            einsum_check_label(lhs[i]),
+            "einsum() operand subscript must be in [a-zA-Z] but found ",
             lhs[i],
             " for operand ",
             curr_op);
-        // Convert label to index in [0, 25] and store
-        op_labels[curr_op].push_back(lhs[i] - 'a');
+        op_labels[curr_op].push_back(einsum_label_to_index(lhs[i]));
     }
   }
 
@@ -216,8 +228,8 @@ Tensor einsum(std::string equation, TensorList operands) {
       curr_op == num_ops - 1,
       "einsum() more operands were provided than specified in the equation");
 
-  // Labels must be within [a, z].
-  constexpr int TOTAL_LABELS = 'z' - 'a' + 1;
+  // Labels must be within [a-zA-Z].
+  constexpr int TOTAL_LABELS = 52;
   std::vector<int> label_count(TOTAL_LABELS, 0);
 
   // The maximum number of dimensions covered by any ellipsis, needed when
@@ -302,12 +314,11 @@ Tensor einsum(std::string equation, TensorList operands) {
 
         default:
           TORCH_CHECK(
-              // Labels must be in [a, z]
-              rhs[i] >= 'a' && rhs[i] <= 'z',
-              "einsum() subscripts must be in range [a, z] but found ",
+              einsum_check_label(rhs[i]),
+              "einsum() subscripts must be in [a-zA-Z] but found ",
               rhs[i],
               " for the output");
-          const auto label = rhs[i] - 'a';
+          const auto label = einsum_label_to_index(rhs[i]);
           TORCH_CHECK(
               // Ensure label appeared at least once for some input operand and at
               // most once for the output

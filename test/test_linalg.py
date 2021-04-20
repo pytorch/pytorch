@@ -4268,10 +4268,10 @@ class TestLinalg(TestCase):
         check("ij,ab->ijab", A, E)          # matrix outer product
 
         # Tensor operations
-        check("aij,ajk->aik", C, D)         # batch matmul
+        check("Aij,Ajk->Aik", C, D)         # batch matmul
         check("ijk,jk->i", C, A)            # tensor matrix contraction
         check("aij,jk->aik", D, E)          # tensor matrix contraction
-        check("abcd,dfg->abcfg", F, G)      # tensor tensor contraction
+        check("abCd,dFg->abCFg", F, G)      # tensor tensor contraction
         check("ijk,jk->ik", C, A)           # tensor matrix contraction with double indices
         check("ijk,jk->ij", C, A)           # tensor matrix contraction with double indices
         check("ijk,ik->j", C, B)            # non contiguous
@@ -4288,7 +4288,7 @@ class TestLinalg(TestCase):
         check("ki,...k->i...", A.t(), B)
         check("k...,jk->...", A.t(), B)
         check('...ik, ...j -> ...ij', C, x)
-        check('bik,k...j->i...j', C, torch.rand(5, 3, device=device, dtype=dtype))
+        check('Bik,k...j->i...j', C, torch.rand(5, 3, device=device, dtype=dtype))
         check('i...j, ij... -> ...ij', C, torch.rand(2, 5, 2, 3, device=device, dtype=dtype))
 
         # torch.bilinear with noncontiguous tensors
@@ -4298,7 +4298,7 @@ class TestLinalg(TestCase):
         check("bn,anm,bm->ba", l, w, r)
 
         # with strided tensors
-        check("bn,anm,bm->ba", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
+        check("bn,Anm,bm->bA", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum_random(self, device, dtype):
@@ -4385,8 +4385,8 @@ class TestLinalg(TestCase):
         check('...->...', 1, expected_output=1)
         check('...', [1], expected_output=[1])
         check('...->', [1], expected_output=1)
-        check('i...->i', [1], expected_output=[1])
-        check('i...->...i', [1], expected_output=[1])
+        check('z...->z', [1], expected_output=[1])
+        check('Z...->...Z', [1], expected_output=[1])
         check('...a->', [[2], [4]], expected_output=6)
         check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
 
@@ -4401,7 +4401,7 @@ class TestLinalg(TestCase):
         check('', [], r'must provide at least one operand')
         check('. ..', [x], r'found \'.\' for operand 0 that is not part of any ellipsis')
         check('... ...', [x], r'found \'.\' for operand 0 for which an ellipsis was already found')
-        check('A', [x], r'operand subscript must be in range \[a, z\] but found A for operand 0')
+        check('1', [x], r'operand subscript must be in \[a-zA-Z\] but found 1 for operand 0')
         check(',', [x], r'fewer operands were provided than specified in the equation')
         check('', [x, x], r'more operands were provided than specified in the equation')
         check('', [x], r'the number of subscripts in the equation \(0\) does not match the number '
@@ -4412,7 +4412,7 @@ class TestLinalg(TestCase):
                             r'of dimensions \(1\) for operand 0')
         check('a->... .', [x], r'found \'.\' for output but an ellipsis \(...\) was already found')
         check('a->..', [x], r'found \'.\' for output that is not part of any ellipsis \(...\)')
-        check('a->A', [x], r'subscripts must be in range \[a, z\] but found A for the output')
+        check('a->1', [x], r'subscripts must be in \[a-zA-Z\] but found 1 for the output')
         check('a->aa', [x], r'output subscript a appears more than once in the output')
         check('a->i', [x], r'output subscript i does not appear in the equation for any input operand')
         check('aa', [y], r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
