@@ -5157,12 +5157,9 @@ def method_tests():
     set_rng_seed(SEED)
     return [
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
-        ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),,
+        ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
         ('__rsub__', (S, S, S), (3.14,), 'constant', (True, 'aten::rsub')),
         ('__rsub__', (), (3.14,), 'scalar_constant', (True, 'aten::rsub')),
-        # TODO(@anjali411): enable these tests
-        # ('mul', (S, S, S), (3.14j,), 'imaginary_constant', (True,)),
-        # ('mul', (), (3.14j,), 'imaginary_scalar_constant', (True,)),
         ('__rmul__', (S, S, S), (3.14,), 'constant', (True, 'aten::mul')),
         ('__rmul__', (), (3.14,), 'scalar_constant', (True, 'aten::mul')),
         ('div', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
