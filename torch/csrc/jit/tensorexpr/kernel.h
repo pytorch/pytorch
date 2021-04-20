@@ -11,6 +11,10 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// Returns true if the TE fuser supports this conv2d.
+bool conv2dIsSupported(const Node* node);
+// Returns true if the TE fuser supports this matmul.
+bool matmulIsSupported(const Node* node);
 template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
@@ -23,6 +27,11 @@ using ArgNone = c10::monostate;
 using ArgValue = c10::variant<tensorexpr::BufHandle, tensorexpr::VarHandle, double, int64_t, bool, ArgNone>;
 
 class TORCH_API TensorExprKernel {
+  struct ConstantDescr {
+    const Buf* buf;
+    void* ptr;
+  };
+
  public:
   explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
 
@@ -80,12 +89,12 @@ class TORCH_API TensorExprKernel {
 
   ExprHandle constant(const ArgValue& v);
   ExprHandle constant(const torch::jit::Value* v);
+  ExprHandle broadcast(const Buf* b, const std::vector<ExprHandle>& axes);
   ExprHandle broadcastBufTemp(  // TODO(chilli): switch over to this when finished refactoring
       BufHandle b,
       const std::vector<ExprHandle>& axes);
-  ExprHandle broadcast(Tensor* t, const std::vector<ExprHandle>& axes);
   ExprHandle chunk(
-      Tensor* t,
+      const Buf* b,
       size_t chunkIdx,
       int64_t dim,
       int64_t chunks,
@@ -171,7 +180,11 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeConv2d(const torch::jit::Value* v);
 
+  Tensor* computeMatmul(const torch::jit::Value* v);
+
   Tensor* computeValue(const torch::jit::Value* v);
+
+  void bindConstant(const torch::jit::Value* v);
 
   Stmt* transformLoops(BackendType backendType, Stmt* st);
 
@@ -182,7 +195,7 @@ class TORCH_API TensorExprKernel {
       std::vector<at::Tensor>& outputs);
   BackendType inferBackendTypeFromDevice(at::Device device);
 
-  void bindInput(const torch::jit::Value* input);
+  Tensor* bindInput(const torch::jit::Value* input);
 
   Tensor* convertOutputToCorrectStrides(torch::jit::Value* v);
 
@@ -221,7 +234,7 @@ class TORCH_API TensorExprKernel {
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
   std::unordered_set<const Buf*> bufOutputs_;
-  std::unordered_map<const torch::jit::Value*, Tensor*> tensors_;
+  std::unordered_map<const torch::jit::Value*, const Buf*> bufs_;
   std::unordered_map<const torch::jit::Value*, VarHandle> scalars_;
   std::unordered_map<const torch::jit::Value*, std::string> input_name_map_;
   std::unique_ptr<CodeGen> codegen_;
@@ -236,6 +249,9 @@ class TORCH_API TensorExprKernel {
   bool hasBroadcast_{false};
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
       known_sizes_;
+
+  std::vector<at::Tensor> unpacked_constant_tensors_;
+  std::vector<ConstantDescr> constants_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();

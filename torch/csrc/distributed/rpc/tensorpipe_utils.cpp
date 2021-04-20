@@ -1,3 +1,4 @@
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 
 #ifdef USE_TENSORPIPE
@@ -5,6 +6,7 @@
 #ifdef USE_CUDA_NOT_ROCM
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #endif
 
 #include <tensorpipe/tensorpipe.h>
@@ -123,7 +125,8 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         tpMessage.tensors.push_back(std::move(tensor));
 #ifdef USE_CUDA_NOT_ROCM
       } else if (tensorDataVec[i].device().is_cuda()) {
-        auto stream = ctx->getStream(tensorDataVec[i].device().index());
+        auto stream = at::cuda::CUDAStream(
+            ctx->getStream(tensorDataVec[i].device().index()));
         tensorpipe::CudaBuffer buffer;
         buffer.ptr = tensorPtr;
         buffer.stream = stream.stream();
@@ -151,73 +154,82 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   return std::make_tuple(std::move(tpMessage), std::move(buffers));
 }
 
-TensorpipeReadBuffers tensorpipeAllocate(
-    tensorpipe::Message& tpMessage,
+std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
+    const tensorpipe::Descriptor& tpDescriptor,
     const std::shared_ptr<LazyStreamContext>& ctx) {
+  tensorpipe::Allocation tpAllocation;
   TensorpipeReadBuffers buffers;
 
   TORCH_INTERNAL_ASSERT(
-      tpMessage.payloads.size() == 4,
+      tpDescriptor.payloads.size() == 4,
       "message expected to contain 4 payloads, whereas it contained ",
-      tpMessage.payloads.size(),
+      tpDescriptor.payloads.size(),
       " payloads");
+  tpAllocation.payloads.resize(tpDescriptor.payloads.size());
 
   TORCH_INTERNAL_ASSERT(
-      tpMessage.payloads[kTpMessageTypeIdx].length == sizeof(MessageType),
+      tpDescriptor.payloads[kTpMessageTypeIdx].length == sizeof(MessageType),
       "first payload expected to contain ",
       sizeof(MessageType),
       " bytes, whereas it contained ",
-      tpMessage.payloads[kTpMessageTypeIdx].length,
+      tpDescriptor.payloads[kTpMessageTypeIdx].length,
       " bytes");
   buffers.type = std::make_unique<MessageType>();
-  tpMessage.payloads[kTpMessageTypeIdx].data = buffers.type.get();
+  tpAllocation.payloads[kTpMessageTypeIdx].data = buffers.type.get();
 
   TORCH_INTERNAL_ASSERT(
-      tpMessage.payloads[kTpMessageIdIdx].length == sizeof(int64_t),
+      tpDescriptor.payloads[kTpMessageIdIdx].length == sizeof(int64_t),
       "second payload expected to contain ",
       sizeof(int64_t),
       " bytes, whereas it contained ",
-      tpMessage.payloads[kTpMessageIdIdx].length,
+      tpDescriptor.payloads[kTpMessageIdIdx].length,
       " bytes");
   buffers.id = std::make_unique<int64_t>();
-  tpMessage.payloads[kTpMessageIdIdx].data = buffers.id.get();
+  tpAllocation.payloads[kTpMessageIdIdx].data = buffers.id.get();
 
   // FIXME The two resizes below zero out the vectors, which is not needed.
-  buffers.payload.resize(tpMessage.payloads[kTpMessagePayloadIdx].length);
-  tpMessage.payloads[kTpMessagePayloadIdx].data = buffers.payload.data();
+  buffers.payload.resize(tpDescriptor.payloads[kTpMessagePayloadIdx].length);
+  tpAllocation.payloads[kTpMessagePayloadIdx].data = buffers.payload.data();
 
-  buffers.pickle.resize(tpMessage.payloads[kTpMessagePickleIdx].length);
-  tpMessage.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
+  buffers.pickle.resize(tpDescriptor.payloads[kTpMessagePickleIdx].length);
+  tpAllocation.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
 
-  for (auto& tensor : tpMessage.tensors) {
-    if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCpu) {
+  size_t numTensors = tpDescriptor.tensors.size();
+  tpAllocation.tensors.resize(numTensors);
+  for (size_t tensorIdx = 0; tensorIdx < numTensors; ++tensorIdx) {
+    const tensorpipe::Descriptor::Tensor& tensor =
+        tpDescriptor.tensors[tensorIdx];
+    if (tensor.sourceDevice.type == tensorpipe::kCpuDeviceType) {
       buffers.tensors.emplace_back(
           at::getCPUAllocator()->allocate(tensor.length));
-      tensor.buffer.unwrap<tensorpipe::CpuBuffer>().ptr =
-          buffers.tensors.back().get();
+      tensorpipe::CpuBuffer buffer;
+      buffer.ptr = buffers.tensors.back().get();
+      tpAllocation.tensors[tensorIdx].buffer = buffer;
 #ifdef USE_CUDA_NOT_ROCM
-    } else if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCuda) {
+    } else if (tensor.sourceDevice.type == tensorpipe::kCudaDeviceType) {
+      // TODO: This could be simply `tensor.targetDevice.value().index`.
       auto deviceIndex = std::stoi(tensor.metadata);
-      auto stream = ctx->getStream(deviceIndex);
+      auto stream = at::cuda::CUDAStream(ctx->getStream(deviceIndex));
       // CUDACachingAllocator will call recordStream accordingly on the current
       // stream.
       at::cuda::CUDAStreamGuard guard(stream);
       buffers.tensors.emplace_back(
           c10::cuda::CUDACachingAllocator::get()->allocate(tensor.length));
-      tensor.buffer.unwrap<tensorpipe::CudaBuffer>().ptr =
-          buffers.tensors.back().get();
-      tensor.buffer.unwrap<tensorpipe::CudaBuffer>().stream = stream.stream();
+      tensorpipe::CudaBuffer buffer;
+      buffer.ptr = buffers.tensors.back().get();
+      buffer.stream = stream.stream();
+      tpAllocation.tensors[tensorIdx].buffer = buffer;
 #endif
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unrecognized TensorPipe buffer type.");
     }
   }
 
-  return buffers;
+  return {std::move(tpAllocation), std::move(buffers)};
 }
 
 Message tensorpipeDeserialize(
-    tensorpipe::Message&& message,
+    tensorpipe::Descriptor&& tpDescriptor,
     TensorpipeReadBuffers&& buffers) {
   // Tensors
   std::vector<at::Tensor> tensors;
@@ -253,8 +265,8 @@ Message tensorpipeDeserialize(
     tensors.emplace_back(std::move(t));
   }
 
-  for (size_t i = 0; i < message.tensors.size(); ++i) {
-    auto& tensor = message.tensors[i];
+  for (size_t i = 0; i < tpDescriptor.tensors.size(); ++i) {
+    auto& tensor = tpDescriptor.tensors[i];
     if (!tensor.metadata.empty()) {
       TORCH_INTERNAL_ASSERT(
           tensors[i].device() == indexToDevice(std::stoi(tensor.metadata)),

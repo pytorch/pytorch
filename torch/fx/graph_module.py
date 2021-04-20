@@ -488,7 +488,7 @@ class {module_name}(torch.nn.Module):
             # constiuent substrings of the error message
             tb_repr = traceback.format_exc()
             custom_msg = ("Call using an FX-traced Module, "
-                          f"line {err_lineno} of the traced Module’s "
+                          f"line {err_lineno} of the traced Module's "
                           "generated forward function:")
             before_err = "".join(all_src_lines[err_lineno - 2 : err_lineno])
             marker = "~" * err_line_len + "~~~ <--- HERE"
