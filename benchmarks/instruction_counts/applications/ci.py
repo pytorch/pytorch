@@ -11,7 +11,7 @@ from execution.runner import Runner
 from execution.work import WorkOrder
 
 
-REPEATS = 5
+REPEATS = 1  # 5
 TIMEOUT = 300  # Seconds
 RETRIES = 20
 
@@ -38,7 +38,7 @@ def main(argv: List[str]) -> None:
     work_orders = tuple(
         WorkOrder(label, autolabels, timer_args, timeout=TIMEOUT, retries=RETRIES)
         for label, autolabels, timer_args in benchmarks * REPEATS
-    )
+    )[:10]
 
     keys = tuple({str(work_order): None for work_order in work_orders}.keys())
     md5 = hashlib.md5()
