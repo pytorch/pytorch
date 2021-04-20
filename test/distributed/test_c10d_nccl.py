@@ -1065,11 +1065,11 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             step_model(model, input, target)
 
             ddp_input = input[
-                        self.rank * local_batch_size: (self.rank + 1) * local_batch_size
-                        ]
+                self.rank * local_batch_size: (self.rank + 1) * local_batch_size
+            ]
             ddp_target = target[
-                         self.rank * local_batch_size: (self.rank + 1) * local_batch_size
-                         ]
+                self.rank * local_batch_size: (self.rank + 1) * local_batch_size
+            ]
 
             if iteration % num_iters == 0:
                 # accumulate grads locally
@@ -1407,7 +1407,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
                                         )
                                 ):
                                     named_msg = (
-                                            layer_name + "." + param_name + " " + iter_msg
+                                        layer_name + "." + param_name + " " + iter_msg
                                     )
                                     self.assertEqual(
                                         p.grad, p_ddp.grad, rtol=tol, atol=tol
