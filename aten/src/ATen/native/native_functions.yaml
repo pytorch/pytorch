@@ -5066,32 +5066,40 @@
   variants: function, method
 
 - func: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: method
   dispatch:
     CPU: index_fill_
     CUDA: index_fill_
 
 - func: index_fill.int_Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: index_fill_.int_Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: method
   dispatch:
     CPU, CUDA: index_fill_
 
 - func: index_fill.int_Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: index_fill_.Dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: method
 
 - func: index_fill_.Dimname_Tensor(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: method
 
 - func: index_fill.Dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: index_fill.Dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
@@ -7916,6 +7924,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool2d_out_cpu
     CUDA: adaptive_max_pool2d_out_cuda
@@ -7923,9 +7932,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d(Tensor self, int[2] output_size) -> (Tensor, Tensor)
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool2d_cpu
-    CUDA: adaptive_max_pool2d_cuda
+  structured_delegate: adaptive_max_pool2d.out
 
 - func: adaptive_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -7942,6 +7949,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool3d_out_cpu
     CUDA: adaptive_max_pool3d_out_cuda
@@ -7949,9 +7957,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d(Tensor self, int[3] output_size) -> (Tensor, Tensor)
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool3d_cpu
-    CUDA: adaptive_max_pool3d_cuda
+  structured_delegate: adaptive_max_pool3d.out
 
 - func: adaptive_max_pool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn

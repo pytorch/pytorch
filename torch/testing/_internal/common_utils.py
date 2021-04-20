@@ -200,7 +200,7 @@ def wait_for_process(p):
         else:
             p.kill()
             raise
-    except:  # noqa E722, copied from python core library
+    except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
     finally:
