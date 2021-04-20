@@ -2157,11 +2157,11 @@ def gradcheck(fn, inputs, **kwargs):
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradcheck.
     default_values = {
         "check_batched_grad": True,
-        "fast_mode": True,
+        "fast_mode": False,
     }
 
     if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
-        default_values["fast_mode"] = False
+        default_values["fast_mode"] = True
 
     for key, value in default_values.items():
         kwargs[key] = kwargs.get(key, value)
@@ -2175,11 +2175,11 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
     default_values = {
         "check_batched_grad": True,
-        "fast_mode": True,
+        "fast_mode": False,
     }
 
     if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
-        default_values["fast_mode"] = False
+        default_values["fast_mode"] = True
 
     for key, value in default_values.items():
         kwargs[key] = kwargs.get(key, value)
