@@ -1,6 +1,6 @@
 import torch
 import torch.fx
-from torch.fx.node import Node
+from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional
 
 class TensorMetadata(NamedTuple):
@@ -103,8 +103,19 @@ class ShapeProp(torch.fx.Interpreter):
     def run_node(self, n : Node) -> Any:
         result = super().run_node(n)
 
-        if isinstance(result, torch.Tensor):
-            n.meta['tensor_meta'] = extract_tensor_metadata(result)
+        found_tensor = False
+
+        def extract_tensor_meta(obj):
+            if isinstance(obj, torch.Tensor):
+                nonlocal found_tensor
+                found_tensor = True
+                return extract_tensor_metadata(obj)
+            else:
+                return obj
+
+        meta = map_aggregate(result, extract_tensor_meta)
+        if found_tensor:
+            n.meta['tensor_meta'] = meta
 
         return result
 

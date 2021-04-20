@@ -13,12 +13,12 @@ from torch.distributed.rpc import RRef
 
 
 {jit_script_decorator}
-def _remote_forward(module_rref: RRef[module_interface_cls], {arg_types}){arrow_and_return_type}:  # noqa
+def _remote_forward(module_rref: RRef[module_interface_cls], {arg_types}){arrow_and_return_type}:
     module = module_rref.local_value()
     return module.forward({args}, {kwargs})
 
 
-def forward_async(self, {arg_types}){arrow_and_future_return_type}:  # noqa
+def forward_async(self, {arg_types}){arrow_and_future_return_type}:
     args = (self.module_rref, {args})
     kwargs = {{{kwargs}}}
     return rpc.rpc_async(
@@ -29,7 +29,7 @@ def forward_async(self, {arg_types}){arrow_and_future_return_type}:  # noqa
     )
 
 
-def forward(self, {arg_types}){arrow_and_return_type}:  # noqa
+def forward(self, {arg_types}){arrow_and_return_type}:
     args = (self.module_rref, {args})
     kwargs = {{{kwargs}}}
     ret_fut = rpc.rpc_async(
