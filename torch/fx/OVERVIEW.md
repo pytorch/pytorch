@@ -4,6 +4,8 @@ FX is a toolkit for pass writers to facilitate Python-to-Python transformation o
 
 ## Table of Contents
 
+<!-- toc -->
+
 - [FX Technical Overview](#fx-technical-overview)
   - [Table of Contents](#table-of-contents)
 - [Introduction](#introduction)
@@ -19,6 +21,8 @@ FX is a toolkit for pass writers to facilitate Python-to-Python transformation o
   - [Proxy](#proxy)
 - [The FX IR](#ir)
 - [Transformation and Codegen](#codegen)
+
+<!-- tocstop -->
 
 # Introduction
 

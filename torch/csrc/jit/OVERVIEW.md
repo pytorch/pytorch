@@ -14,6 +14,8 @@ Sections start with a reference to the source file where the code related to the
 
 ## Table of Contents
 
+<!-- toc -->
+
 - [JIT Technical Overview](#jit-technical-overview)
   - [Table of Contents](#table-of-contents)
 - [Core Program Representation](#core-program-representation)
@@ -67,6 +69,7 @@ Sections start with a reference to the source file where the code related to the
   - [Python Printer](#python-printer)
 - [Python Bindings](#python-bindings)
 
+<!-- tocstop -->
 
 # Core Program Representation
 

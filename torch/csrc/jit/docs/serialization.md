@@ -3,6 +3,8 @@
 This document explains the TorchScript serialization format, and the anatomy
 of a call to `torch::jit::save()` or `torch::jit::load()`.
 
+<!-- toc -->
+
   - [Overview](#overview)
     - [Design Notes](#design-notes)
   - [`code/`: How code is serialized](#code-how-code-is-serialized)
@@ -17,6 +19,8 @@ of a call to `torch::jit::save()` or `torch::jit::load()`.
   - [Appendix: `CompilationUnit` and code object ownership](#appendix-compilationunit-and-code-object-ownership)
     - [`CompilationUnit` ownership semantics](#compilationunit-ownership-semantics)
     - [Code object naming](#code-object-naming)
+
+<!-- tocstop -->
 
 ## Overview
 
