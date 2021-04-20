@@ -172,14 +172,15 @@ class TestLinalg(TestCase):
 
                     # SciPy and NumPy operate only on non-batched input and
                     # return an empty array with shape (0,) if rank(a) != n
-                    # but in PyTorch we can't replicate this behavior for batched inputs
-                    # instead if the corresponding rank for batched input is not equal to n
-                    # we fill residuals with inf
+                    # in PyTorch the batched inputs are supported and
+                    # matrices in the batched input can have different ranks
+                    # we compute residuals only if all matrices have rank == n
+                    # see https://github.com/pytorch/pytorch/issues/56483
                     if m > n:
-                        if rank == n:
+                        if torch.all(rank_1d == n):
                             self.assertEqual(residuals, select_if_not_empty(residuals_2d, i), atol=1e-5, rtol=1e-5)
                         else:
-                            self.assertTrue(torch.all(torch.isinf(select_if_not_empty(residuals_2d, i))))
+                            self.assertTrue(residuals_2d.numel() == 0)
 
             else:
                 self.assertEqual(res.solution.shape, (*a.shape[:-2], n, nrhs))
@@ -4759,6 +4760,22 @@ class TestLinalg(TestCase):
         torch.cross(x, y, out=res2)
         self.assertEqual(res1, res2)
 
+    # TODO: This test should be removed and OpInfo should enable complex
+    #       types after this PR is merged:
+    #       https://github.com/pytorch/pytorch/pull/55483
+    @dtypes(torch.cdouble)
+    def test_cross_autograd(self, device, dtype):
+        x = torch.rand(100, 3, dtype=dtype, device=device, requires_grad=True)
+        y = torch.rand(100, 3, dtype=dtype, device=device, requires_grad=True)
+
+        if torch.device(device).type == 'cuda' and dtype.is_complex:
+            # TODO: Remove this error when cross CUDA supports complex
+            with self.assertRaisesRegex(RuntimeError, r'_th_cross_kernel_out not supported on CUDAType for Complex'):
+                gradcheck(torch.cross, [x, y])
+        else:
+            gradcheck(torch.cross, [x, y])
+            gradgradcheck(torch.cross, [x, y], atol=1e-3, check_batched_grad=False)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_cross_with_and_without_dim(self, device, dtype):
@@ -7616,7 +7633,7 @@ else:
                                            axes=([1, 0], [0, 1])))
         self.assertEqual(c, cn)
 
-        cout = torch.zeros((5, 2))
+        cout = torch.zeros((5, 2), device=device)
         torch.tensordot(a, b, dims=([1, 0], [0, 1]), out=cout).cpu()
         self.assertEqual(c, cout)
 

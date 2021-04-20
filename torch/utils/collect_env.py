@@ -1,11 +1,15 @@
+from __future__ import print_function
+
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py`.
+import datetime
 import locale
 import re
 import subprocess
 import sys
 import os
 from collections import namedtuple
+
 
 try:
     import torch
@@ -34,7 +38,6 @@ SystemEnv = namedtuple('SystemEnv', [
     'hip_compiled_version',
     'hip_runtime_version',
     'miopen_runtime_version',
-    'caching_allocator_config',
 ])
 
 
@@ -174,7 +177,7 @@ def get_nvidia_smi():
         smis = [new_path, legacy_path]
         for candidate_smi in smis:
             if os.path.exists(candidate_smi):
-                smi = f'"{candidate_smi}"'
+                smi = '"{}"'.format(candidate_smi)
                 break
     return smi
 
@@ -273,11 +276,6 @@ def get_pip_packages(run_lambda):
     return 'pip3', out3
 
 
-def get_cachingallocator_config():
-    ca_config = os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')
-    return ca_config
-
-
 def get_env_info():
     run_lambda = run
     pip_version, pip_list_output = get_pip_packages(run_lambda)
@@ -319,7 +317,6 @@ def get_env_info():
         gcc_version=get_gcc_version(run_lambda),
         clang_version=get_clang_version(run_lambda),
         cmake_version=get_cmake_version(run_lambda),
-        caching_allocator_config=get_cachingallocator_config(),
     )
 
 env_info_fmt = """
@@ -430,6 +427,18 @@ def main():
     print("Collecting environment information...")
     output = get_pretty_env_info()
     print(output)
+
+    if TORCH_AVAILABLE and hasattr(torch, 'utils') and hasattr(torch.utils, '_crash_handler'):
+        minidump_dir = torch.utils._crash_handler.DEFAULT_MINIDUMP_DIR
+        if sys.platform == "linux" and os.path.exists(minidump_dir):
+            dumps = [os.path.join(minidump_dir, dump) for dump in os.listdir(minidump_dir)]
+            latest = max(dumps, key=os.path.getctime)
+            ctime = os.path.getctime(latest)
+            creation_time = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M:%S')
+            msg = "\n*** Detected a minidump at {} created on {}, ".format(latest, creation_time) + \
+                  "if this is related to your bug please include it when you file a report ***"
+            print(msg, file=sys.stderr)
+
 
 
 if __name__ == '__main__':
