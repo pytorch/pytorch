@@ -327,11 +327,6 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None):
     return_type = None
     if getattr(py_def, 'returns', None) is not None:
         return_type = build_expr(ctx, py_def.returns)
-    else:
-        if type_trace_db.trace_records:
-            # Get the return type annotation from the _args_and_types
-            # dictionary
-            return_type = Var(Ident(r, _args_and_types["return_type"].pop()))  # type: ignore[name-defined, index]
 
     decl = Decl(r, param_list, return_type)
     is_method = self_name is not None
