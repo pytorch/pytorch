@@ -10,6 +10,7 @@
 - [Unit testing](#unit-testing)
   - [Python Unit Testing](#python-unit-testing)
   - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
+  - [Local linting](#local-linting)
   - [Running `mypy`](#running-mypy)
   - [C++ Unit Testing](#c-unit-testing)
 - [Writing documentation](#writing-documentation)
@@ -357,13 +358,44 @@ The above is an example of testing a change to all Loss functions: this
 command runs tests such as `TestNN.test_BCELoss` and
 `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
+
+### Local linting
+
+You can run the same linting steps that are used in CI locally via `make`:
+
+```bash
+make lint -j 6  # run lint (using 6 parallel jobs)
+```
+
+These jobs may require extra dependencies that aren't dependencies of PyTorch
+itself, so you can install them via this command, which you should only have to
+run once:
+
+```bash
+make setup_lint
+```
+
+To run a specific linting step, use one of these targets or see the
+[`Makefile`](Makefile) for a complete list of options.
+
+```bash
+# Check for tabs, trailing newlines, etc.
+make quick_checks
+
+make flake8
+
+make mypy
+
+make cmakelint
+```
+
 ### Running `mypy`
 
 `mypy` is an optional static type checker for Python. We have multiple `mypy`
 configs for the PyTorch codebase, so you can run them all using this command:
 
 ```bash
-for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+make mypy
 ```
 
 See [Guide for adding type annotations to
@@ -411,8 +443,12 @@ pip install -r requirements.txt
 # npm install -g katex
 # Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
 # npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
-# If you're a Facebook employee using a devserver, yarn may be more convenient:
-# yarn global add katex
+```
+
+> Note that if you are a Facebook employee using a devserver, yarn may be more convenient to install katex:
+
+```
+yarn global add katex
 ```
 
 3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
@@ -477,6 +513,13 @@ et my_machine -t="8000:8000"
 ```
 
 Then navigate to `localhost:8000` in your web browser.
+
+**Tip:**
+You can start a lightweight HTTP server on the remote machine with:
+
+```
+python -m http.server 8000 <path_to_html_output>
+```
 
 Alternatively, you can run `rsync` on your local machine to copy the files from
 your remote machine:
@@ -885,7 +928,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
    nbytes_read_write = 4 # this is number of bytes read + written by a kernel. Change this to fit your kernel.
 
    for i in range(10):
-       a=torch.Tensor(size).cuda().uniform_()
+       a=torch.empty(size).cuda().uniform_()
        torch.cuda.synchronize()
        start = time.time()
        # dry run to alloc
