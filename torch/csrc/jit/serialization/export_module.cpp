@@ -448,10 +448,13 @@ class ScriptModuleSerializer {
     size_t i = 0;
     std::string prefix = archive_name + "/";
 
-    // Store all tensors from archives in the tensors_archive_table_writers_
-    // list to tensors_archive_table_
-    if (tensors_archive_table_writers_.find(archive_name) !=
-        tensors_archive_table_writers_.end()) {
+    // TODO: currently there exists logic only for archive constant and bytecode,
+    // to avoid exporting duplicate tensors. The logic can be more generic such that it
+    // can be used by other tensors from other archive, to avoid deduplicating tensors
+    // among different archives.
+
+    // Store all tensors from archives `constants` to tensors_archive_table_
+    if (archive_name == kArchiveNameConstants) {
       const auto tensor_candidates = data_pickle.tensorData();
       for (size_t tensor_index = 0; tensor_index < tensor_candidates.size();
            tensor_index++) {
@@ -459,10 +462,11 @@ class ScriptModuleSerializer {
             std::make_pair(kArchiveNameConstants, tensor_index);
       }
     }
+
+    // Export deduplicate tensors only if use_tensors_archive_table is set to true and
+    // archive name is `bytecode`
     bool can_use_tensors_archive_table =
-        (use_tensors_archive_table &&
-         tensors_archive_table_readers_.find(archive_name) !=
-             tensors_archive_table_readers_.end());
+        (use_tensors_archive_table && archive_name == kArchiveNameBytecode);
 
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
@@ -626,8 +630,7 @@ class ScriptModuleSerializer {
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
 
-  // key: tensor, value: pair(arhive_name, index).
-  // This map is used for deduplication tensors from different archive.
+  // key: tensor, value: pair(arhive_name, index)
   TensorIndexMap tensors_archive_table_;
 
   // Introduce tensors_archive_table writer and reader here to avoid
