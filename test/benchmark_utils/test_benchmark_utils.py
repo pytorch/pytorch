@@ -697,7 +697,7 @@ class TestBenchmarkUtils(TestCase):
                 2000  /usr/include/c++/8/bits/atomic_base.h:at::Tensor at::detail::make_tensor ... t_null_type<c10::StorageImpl> >&&, c10::DispatchKey&&, caffe2::TypeMeta&)
                 2000  /usr/include/c++/8/array:at::Tensor& c10::Dispatcher::callWithDispatchKe ... , c10::Scalar)> const&, c10::DispatchKey, at::Tensor&, c10::Scalar) const
 
-            Total: 8869966"""  # noqa
+            Total: 8869966"""  # noqa: B950
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -935,7 +935,7 @@ class TestBenchmarkUtils(TestCase):
                   compute_optimized      |  \x1b[2m\x1b[91m   3    \x1b[0m\x1b[0m  |     4.0     |      11      |  \x1b[92m\x1b[1m    2100    \x1b[0m\x1b[0m  |      2100
                   special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[92m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[92m\x1b[1m    1700    \x1b[0m\x1b[0m
 
-            Times are in microseconds (us)."""  # noqa
+            Times are in microseconds (us)."""  # noqa: B950
         )
 
         compare.colorize(rowwise=True)
@@ -949,7 +949,7 @@ class TestBenchmarkUtils(TestCase):
                   compute_optimized      |  \x1b[92m\x1b[1m   3    \x1b[0m\x1b[0m  |     4.0     |  \x1b[2m\x1b[91m    11    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    2100    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    2100    \x1b[0m\x1b[0m
                   special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[31m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[31m\x1b[1m    1700    \x1b[0m\x1b[0m
 
-            Times are in microseconds (us)."""  # noqa
+            Times are in microseconds (us)."""  # noqa: B950
         )
 
         def print_new_expected(s: str) -> None:

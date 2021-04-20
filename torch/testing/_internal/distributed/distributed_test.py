@@ -953,8 +953,8 @@ class DistributedTest:
             rank = dist.get_rank()
             send_size = rank + 1
             tensor = _build_tensor(send_size)
-            profile_ctx = _create_autograd_profiler(enable_profiling)
-            with profile_ctx as prof:
+            profiler_ctx = _create_autograd_profiler(enable_profiling)
+            with profiler_ctx as prof:
                 for src in range(0, dist.get_world_size()):
                     if src == rank:
                         # Send mode
@@ -1004,7 +1004,7 @@ class DistributedTest:
             irecv_ranks = list()
 
             profiler_ctx = _create_autograd_profiler(enable_profiling)
-            with profile_ctx as prof:
+            with profiler_ctx as prof:
                 for dst in range(0, dist.get_world_size()):
                     if dst == rank:
                         # Recv mode
@@ -1568,6 +1568,10 @@ class DistributedTest:
 
             if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 events = get_event(profiling_title_postfix)
+                print(f'profiling title postfix: {profiling_title_postfix}')
+                print(f'all events: {prof.function_events}')
+                print(f'events: {events}')
+                print(f'op_calls: {op_calls}')
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertEqual(e.count, 1)
@@ -4879,11 +4883,11 @@ class DistributedTest:
             b = torch.rand(batch, dim, device=self.rank)
 
             class NamedTupleModule(torch.nn.Module):
-                def __init__(_self):  # noqa
+                def __init__(_self):  # noqa: B902
                     super().__init__()
                     _self.lin = nn.Linear(10, 1)
 
-                def forward(_self, input, expected_type):  # noqa
+                def forward(_self, input, expected_type):  # noqa: B902
                     # Without NamedTuple support, this would be of type tuple.
                     self.assertTrue(
                         isinstance(input, expected_type),
