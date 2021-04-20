@@ -29,6 +29,7 @@ from torch.distributed.rpc.internal import (
     _internal_rpc_pickler,
     _build_rpc_profiling_key,
 )
+from torch.futures import Future
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     captured_output,
@@ -499,6 +500,30 @@ def MyConvNetForMNIST(device):
         nn.ReLU(),
         nn.Linear(128, 10),
     ).to(device)
+
+
+# A custom Python class that contains a tensor, needed to see if we correctly
+# use the Python pickler to extract tensors from non-IValue-convertible types.
+class TensorWrapper:
+    def __init__(self, t):
+        self.tensor = t
+
+
+# Copied from test/test_cuda.py.
+_cycles_per_ms = None
+
+def get_cycles_per_ms():
+    """Approximate number of cycles per millisecond for torch.cuda._sleep"""
+    global _cycles_per_ms
+    if _cycles_per_ms is None:
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        torch.cuda._sleep(1000000)
+        end.record()
+        end.synchronize()
+        _cycles_per_ms = 1000000 / start.elapsed_time(end)
+    return _cycles_per_ms
 
 
 class AsyncExecutionClass:
@@ -5635,3 +5660,81 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
                 self.assertEqual(actual, expected)
 
         rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_device_as_int(self):
+        fut = Future([0])
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_device_as_str(self):
+        fut = Future(["cuda:0"])
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_device_as_device(self):
+        fut = Future([torch.device("cuda", 0)])
+
+    def _test_cuda_future_extraction(self, wrapper, unwrapper):
+        # We check proper CUDA stream synchronization by filling the tensor with
+        # the expected value in one stream, and reading it from another stream.
+        # We copy between two (pre-allocated) CUDA tensor for it to be async.
+        source = torch.ones((100,), device="cuda:0")
+        tensor = torch.zeros((100,), device="cuda:0")
+        future = Future(["cuda:0"])
+        with torch.cuda.device("cuda:0"):
+            stream = torch.cuda.Stream()
+            another_stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                tensor.copy_(source, non_blocking=True)
+                future.set_result(wrapper(tensor))
+            with torch.cuda.stream(another_stream):
+                self.assertTrue(torch.equal(
+                    unwrapper(future.wait()).cpu(), torch.ones((100,))
+                ))
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_cuda_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: t, unwrapper=lambda v: v
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_list_with_cuda_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: [t], unwrapper=lambda v: v[0]
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_custom_class_with_cuda_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_cuda_future_callback_changes_devices(self):
+        # We check proper CUDA stream synchronization by filling the tensor with
+        # the expected value in one stream, and reading it from another stream.
+        # We copy between two (pre-allocated) CUDA tensor for it to be async.
+        source = torch.ones((100,), device="cuda:0")
+        tensor0 = torch.zeros((100,), device="cuda:0")
+        tensor1 = torch.zeros((100,), device="cuda:1")
+        parent_future = Future(["cuda:0", "cuda:1"])
+
+        def cb(fut):
+            t0 = fut.value()
+            tensor1.copy_(t0, non_blocking=True)
+            return tensor1
+
+        child_future = parent_future.then(cb)
+        with torch.cuda.device("cuda:0"):
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                tensor0.copy_(source, non_blocking=True)
+                parent_future.set_result(tensor0)
+        with torch.cuda.device("cuda:1"):
+            another_stream = torch.cuda.Stream()
+            with torch.cuda.stream(another_stream):
+                self.assertTrue(torch.equal(
+                    child_future.wait().cpu(), torch.ones((100,))
+                ))
