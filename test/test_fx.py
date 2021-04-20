@@ -1904,8 +1904,8 @@ class TestFX(JitTestCase):
         mod = Foo()
         mod_true = symbolic_trace(mod, concrete_args={'y': True})
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
-        self.assertEqual(mod_true(3), 6)
-        self.assertEqual(mod_false(3), 3)
+        self.assertEqual(mod_true(3, True), 6)
+        self.assertEqual(mod_false(3, False), 3)
 
     def test_custom_traceback_raised_when_exception_source_is_graphmodule(self):
         class M(torch.nn.Module):
@@ -2368,6 +2368,23 @@ class TestFX(JitTestCase):
             assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args)
         for f, inp in tests:
             verify_pytree(f, inp)
+
+    def test_pytree_concrete(self):
+        def f(b, a):
+            if b:
+                return a['a']
+            else:
+                return a['z']
+
+        inp = {'a': {'a': PH, 'z': PH}, 'b': True}
+        nf = symbolic_trace(f, concrete_args=inp)
+        val = pytree.tree_map(inp, lambda x: torch.randn(3) if x == PH else x)
+        self.assertEqual(nf(**val), f(**val))
+
+        nf = symbolic_trace(nf)
+        self.assertEqual(nf(**val), f(**val))
+
+
 
 
 def run_getitem_target():

@@ -324,7 +324,17 @@ class Tracer(TracerBase):
 
         def proxy_placeholder(name: str):
             if concrete_args is not None and name in concrete_args:
-                return concrete_args[name]
+                cnt = 0
+
+                def replace_ph(x):
+                    nonlocal cnt
+                    cnt += 1
+                    out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', (), {})
+                    if x == PH:
+                        return out
+                    return x
+
+                return pytree.tree_map(concrete_args[name], replace_ph)
             if name[0] == '*':
                 default = ()
             else:
@@ -349,15 +359,12 @@ class Tracer(TracerBase):
                 args.append(proxy_placeholder('**' + next(names_iter)))
             root_fn = _patch_function(root_fn, len(args))
 
-        if concrete_args is None:
+        flat_args, in_spec = pytree.tree_flatten(tuple(args))
+        if in_spec.num_leaves == len(args) and all(isinstance(i, pytree.LeafSpec) for i in in_spec.children_specs):
             return root_fn, args
 
-        flat_args, in_spec = pytree.tree_flatten(tuple(args))
         self.graph._in_spec = in_spec
         self.graph._orig_args = orig_args[:total_args]
-        for idx, arg in enumerate(flat_args[skip_arg_idx:], skip_arg_idx):
-            if not isinstance(arg, Proxy):
-                flat_args[idx] = self.create_proxy('placeholder', f'tree_{str(idx)}', (), {})
 
         def flatten_fn(*args):
             tree_args = pytree.tree_unflatten(list(args), in_spec)
@@ -697,10 +704,38 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
     Given an ``nn.Module`` or function instance ``root``, this function will return a ``GraphModule``
     constructed by recording operations seen while tracing through ``root``.
 
+    ``concrete_args`` allows you to partially specialize your function, whether it's to remove control flow or data structures.
+
+    For example::
+
+        def f(a, b):
+            if b == True:
+                return a
+            else:
+                return a*2
+
+    FX can typically not trace through this due to the presence of control flow. However, we can use `concrete_args` to specialize on the value of `b` to trace through this.
+
+        f = fx.symbolic_trace(f, concrete_args={'b': False})
+        assert f(3, False)  == 6
+
+    Note that although you can still pass in different values of `b`, they will be ignored.
+
+    We can also use `concrete_args` to eliminate data-structure handling from our function. This will use pytrees to flatten your input. To avoid overspecializing, pass in `fx.PH` for values that shouldn't be specialized. For example::
+
+        def f(x):
+            out = 0
+            for v in x.values():
+                out += v
+            return out
+        f = fx.symbolic_trace(f, concrete_args={'x': {'a': fx.PH, 'b': fx.PH, 'c': fx.PH}})
+        assert f({'a': 1, 'b': 2, 'c': 4}) == 7
+
+
     Args:
         root (Union[torch.nn.Module, Callable]): Module or function to be traced and converted
             into a Graph representation.
-        concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
+        concrete_args (Optional[Dict[str, any]]): Inputs to be partially specialized
         enable_cpatching: Enables C-level patching of functions (captures things like `torch.randn`)
 
     Returns:
