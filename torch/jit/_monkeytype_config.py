@@ -1,3 +1,5 @@
+import inspect
+import typing
 from typing import Optional, Iterable, List, Dict
 from collections import defaultdict
 
@@ -12,10 +14,7 @@ except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
 
 def get_qualified_name(func):
-    # For class methods, the method name also includes class name. To
-    # To extract the method name, we split the function name using "."
-    # The last value in the list provides the method name.
-    return func.__qualname__.split(".")[-1]
+    return func.__qualname__
 
 if _IS_MONKEYTYPE_INSTALLED:
 
@@ -70,9 +69,9 @@ if _IS_MONKEYTYPE_INSTALLED:
                     # If the type is a type imported from typing
                     # like Tuple, List, Dict then replace "typing."
                     # with a null string.
-                    _type_to_string = str(_type)
-                    if "typing" in _type_to_string:
-                        _all_type += _type_to_string.replace("typing.", '') + ","
+                    if inspect.getmodule(_type) == typing:
+                        _type_to_string = str(_type)
+                        _all_type += _type_to_string.replace('typing.', '') + ','
                     else:
                         _all_type += _type.__name__ + ','
                 _all_type = _all_type.lstrip(" ")  # Remove any trailing spaces
