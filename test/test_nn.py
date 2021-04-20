@@ -12213,6 +12213,28 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
+    @onlyCUDA   # Test if CPU and GPU results match
+    def test_ReflectionPad2d_large(self, device):
+        shapes = ([2, 65736, 6, 6], [65736, 2, 6, 6])
+        # shapes = ([2, 4, 6, 6], [4, 2, 6, 6])
+        pad = (1, 2, 3, 4)
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+
+            out = F.pad(x, pad, mode='reflect')
+            ref_out = F.pad(ref_x, pad, mode='reflect')
+
+            self.assertEqual(out, ref_out)
+
+            g = torch.randn_like(out)
+            ref_g = g.cpu()
+
+            out.backward(g)
+            ref_out.backward(ref_g)
+
+            self.assertEqual(x.grad, ref_x.grad)
+
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
