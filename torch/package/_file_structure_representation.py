@@ -24,6 +24,17 @@ class Folder:
         folder = self.get_folder(folders)
         folder.children[file] = Folder(file, False)
 
+    def has_file(self, filename: str):
+        lineage = filename.split("/", maxsplit=1)
+        child = lineage[0]
+        grandchildren = lineage[1] if len(lineage) > 1 else None
+        if child in self.children.keys():
+            if grandchildren is None:
+                return True
+            else:
+                return self.children[child].has_file(grandchildren)
+        return False
+
     def __str__(self):
         str_list: List[str] = []
         self.stringify_tree(str_list)
