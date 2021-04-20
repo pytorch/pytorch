@@ -980,13 +980,10 @@ class TestTensorExprFuser(BaseTestClass):
         self.assertLastGraphAllFused()
 
     def test_double_intrinsics(self):
-        # TODO: add "cpu" device once `pow` is supported there
-        devices = ["cuda"] if torch.cuda.is_available() else []
-
         def do_pow(x):
             return torch.pow(x, 7)
 
-        for device in devices:
+        for device in self.devices:
             x = torch.rand(10, dtype=torch.double, device=device)
             traced = torch.jit.trace(do_pow, (x))
             x = warmup_and_run_forward(traced, x)
