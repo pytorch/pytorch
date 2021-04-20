@@ -182,8 +182,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     auto k = node->kind();
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
         k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
-        k == prim::MKLDNNRelu6 || k == prim::MKLDNNHardTanh ||
-        k == aten::hardtanh) {
+        k == prim::MKLDNNHardTanh || k == aten::hardtanh) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -384,14 +383,6 @@ const RegisterOperators MKLDNNHardSwishOpReg({
         },
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
-        "prim::MKLDNNRelu6_(Tensor(a!) self) -> Tensor(a!)",
-        createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
-              at::cpu::hardtanh_out(output, input, 0.f, 6.f);
-            },
-            true),
-        AliasAnalysisKind::FROM_SCHEMA),
-    torch::jit::Operator(
         "prim::MKLDNNHardSwish(Tensor a) -> Tensor",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
@@ -404,14 +395,6 @@ const RegisterOperators MKLDNNHardSwishOpReg({
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
               at::cpu::hardsigmoid_out(output, input);
-            },
-            false),
-        AliasAnalysisKind::FROM_SCHEMA),
-    torch::jit::Operator(
-        "prim::MKLDNNRelu6(Tensor(a!) self) -> Tensor(a!)",
-        createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
-              at::cpu::hardtanh_out(output, input, 0.f, 6.f);
             },
             false),
         AliasAnalysisKind::FROM_SCHEMA),
@@ -660,7 +643,15 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     }
 
     if (body_node->kind() == aten::relu6) {
-      body_node->replaceWithNewSymbol(prim::MKLDNNRelu6);
+      WithInsertPoint insert_guard{body_node};
+      auto out_node = body_node->owningGraph()->create(
+          {prim::MKLDNNHardTanh}, {body_node->input(0)}, 1);
+      out_node->f_(attr::min_val, 0.);
+      out_node->f_(attr::max_val, 6.);
+      body_node->owningGraph()->insertNode(out_node);
+      auto out_val = out_node->output();
+      out_val->copyMetadata(body_node->output());
+      body_node->output()->replaceAllUsesWith(out_val);
       body_node->destroy();
       continue;
     }

@@ -33,7 +33,6 @@ namespace c10 {
   _(prim, MKLDNNGroup)               \
   _(prim, MKLDNNHardSwish)           \
   _(prim, MKLDNNHardSigmoid)         \
-  _(prim, MKLDNNRelu6)               \
   _(prim, MKLDNNHardTanh)            \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
