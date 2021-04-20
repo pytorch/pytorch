@@ -16,7 +16,6 @@ from torch._C._jit_tree_views import (
     SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
     DictComp,
 )
-
 from torch._utils_internal import get_source_lines_and_file
 
 from torch._jit_internal import SourceContext, should_drop, is_static_fn
