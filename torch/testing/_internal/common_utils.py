@@ -1049,6 +1049,46 @@ class TestCase(expecttest.TestCase):
 
         set_rng_seed(SEED)
 
+    def genSparseCSRTensor(self, size, nnz, device, dtype, index_dtype):
+        sparse_dim = 2
+        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
+
+        def random_sparse(m, n, nnz_per_row):
+            rows = torch.arange(m, dtype=index_dtype).repeat(nnz_per_row)
+            cols = torch.randint(0, n, size=[nnz_per_row * m], dtype=index_dtype)
+            return rows, cols
+
+        def coo_to_csr(indices, dim):
+            r = torch.zeros(dim + 1, dtype=index_dtype)
+            last_i = 0
+            for i in indices:
+                if i == last_i:
+                    r[last_i + 1] += 1
+                else:
+                    for _i in range(last_i, i + 1):
+                        r[_i + 1] = r[last_i + 1]
+                    last_i = i
+                    r[last_i + 1] += 1
+            for _i in range(last_i, dim):
+                r[_i + 1] = r[last_i + 1]
+            return r
+
+        values = make_tensor([nnz], device=device, dtype=dtype, low=-1, high=1)
+        rows, cols = None, None
+        if nnz >= size[0]:
+            rows, cols = random_sparse(size[0], size[1], nnz // size[0])
+        else:
+            rows, cols = random_sparse(size[0], size[1], 1)
+            permutation = list(range(nnz))
+            random.shuffle(permutation)
+            rows = rows[permutation]
+            cols = cols[permutation]
+        crow_indices = coo_to_csr(rows, size[0])
+        col_indices = cols
+        return torch.sparse_csr_tensor(crow_indices,
+                                       col_indices,
+                                       values, size=size, dtype=dtype, device=device)
+
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
         # empty numel, but nnz > 0 makes the indices containing values.

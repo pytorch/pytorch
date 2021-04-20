@@ -13,16 +13,7 @@ load_tests = load_tests
 
 class TestSparseCSR(TestCase):
     def gen_sparse_csr(self, shape, nnz, dtype, device, index_dtype=torch.int64):
-        total_values = functools.reduce(operator.mul, shape, 1)
-        dense = torch.randn(total_values, dtype=dtype, device=device)
-        fills = random.sample(list(range(total_values)), total_values - nnz)
-
-        dense[fills] = 0
-        dense = dense.reshape(shape)
-        s = dense.to_sparse_csr()
-        return torch.sparse_csr_tensor(torch.tensor(s.crow_indices(), dtype=index_dtype),
-                                       torch.tensor(s.col_indices(), dtype=index_dtype),
-                                       torch.tensor(s.values()), size=shape, dtype=dtype, device=device)
+        return self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
 
     def setUp(self):
         self.index_tensor = lambda *args: torch.tensor(*args, dtype=torch.int32)
