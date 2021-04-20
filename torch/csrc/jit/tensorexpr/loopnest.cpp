@@ -1313,12 +1313,26 @@ std::vector<For*> LoopNest::distributeLoopOverInnerLoops(For* loop) {
   return distributeLoop(loop, loopsSet);
 }
 
-For* LoopNest::fuseLoops(const std::vector<For*>& loops) {
+bool LoopNest::hasLoopCarriedDependence(For* loop) {
+  analysis::MemDependencyChecker analyzer;
+  loop->accept(&analyzer);
+  for (auto it1 = loop->body()->begin(); it1 != loop->body()->end(); ++it1) {
+    for (auto it2 = std::next(it1); it2 != loop->body()->end(); ++it2) {
+      if (hasPartialOverlap(analyzer, *it2, *it1)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
   if (loops.empty()) {
-    return nullptr;
+    return false;
   }
   if (loops.size() == 1) {
-    return loops.front();
+    *fused = loops.front();
+    return true;
   }
 
   // Check if all the loops have the same parent.
@@ -1326,16 +1340,15 @@ For* LoopNest::fuseLoops(const std::vector<For*>& loops) {
   for (auto l : loops) {
     auto par = l->get_parent();
     if (par == nullptr) {
-      throw malformed_input("Loop without parent: ", l);
+      return false;
     }
     if (par != root) {
-      throw malformed_input("Can't fuse loops with different parents: ", l);
+      return false;
     }
   }
   auto root_block = dynamic_cast<Block*>(root);
   if (root_block == nullptr) {
-    throw malformed_input(
-        "Loops' parent must be a Block, instead found ", root);
+    return false;
   }
 
   // Currently, we only handle cases where there are no statements between
@@ -1351,19 +1364,17 @@ For* LoopNest::fuseLoops(const std::vector<For*>& loops) {
   TORCH_INTERNAL_ASSERT(it != root_block->end());
   for (auto l : loops) {
     if (*it != l) {
-      throw malformed_input(
-          "Only contiguous loops can be fused, found another stmt before", l);
+      return false;
     }
     ++it;
   }
-
-  auto first_loop = loops.front();
 
   // Check if bounds are the same for all the loops.
   auto are_bounds_equal = [](const Expr* bound1, const Expr* bound2) {
     auto diff = IRSimplifier::simplify(new Sub(bound1, bound2));
     return diff->isConstant() && (immediateAs<int>(diff) == 0);
   };
+  auto first_loop = loops.front();
   auto first_loop_start = IRSimplifier::simplify(first_loop->start());
   auto first_loop_stop = IRSimplifier::simplify(first_loop->stop());
   for (size_t i = 1; i < loops.size(); ++i) {
@@ -1371,42 +1382,48 @@ For* LoopNest::fuseLoops(const std::vector<For*>& loops) {
     auto curr_loop_start = IRSimplifier::simplify(curr_loop->start());
     auto curr_loop_stop = IRSimplifier::simplify(curr_loop->stop());
     if (!are_bounds_equal(curr_loop_start, first_loop_start)) {
-      throw malformed_input(
-          "Loops with different start bounds cannot be fused");
+      return false;
     }
     if (!are_bounds_equal(curr_loop_stop, first_loop_stop)) {
-      throw malformed_input("Loops with different stop bounds cannot be fused");
+      return false;
     }
   }
 
-  // Now, we fuse the incoming loops. This is done by taking all the statements
-  // from the second loops onwards and moving them into the first loop's body.
-  // This way the final fused loop will be the same as the first loop.
+  // A lambda to fuse all the given loops.
+  auto fuse_all_loops = [](const std::vector<For*>& loops) {
+    auto first_loop = loops.front();
+    // Fuse the loops by taking all the statements from the second loops
+    // onwards and moving them into the first loop's body.
+    // This way the final fused loop will be the same as the first loop.
+    for (size_t i = 1; i < loops.size(); ++i) {
+      auto body = dynamic_cast<Block*>(Substitute(
+          Stmt::clone(loops[i]->body()),
+          {{loops[i]->var(), first_loop->var()}}));
+      first_loop->body()->splice(first_loop->body()->end(), body);
+    }
+  };
+
+  // We need to check if fusing the loops results in a loop-carried dependence.
+  // This check can be done only after the loops are fused into one. But if the
+  // check is violated, we need to return the given loops in the original form.
+  // So, we create a clone of all the loops, fuse them and check for this.
+  std::vector<For*> loops_copy;
+  loops_copy.reserve(loops.size());
+  for (const auto& l : loops) {
+    loops_copy.push_back(dynamic_cast<For*>(Stmt::clone(l)));
+  }
+  fuse_all_loops(loops_copy);
+  if (hasLoopCarriedDependence(loops_copy.front())) {
+    return false;
+  }
+
+  // Now that all conditions are satisfied, we fuse the given loops.
+  fuse_all_loops(loops);
+  *fused = loops.front();
   for (size_t i = 1; i < loops.size(); ++i) {
-    auto body = dynamic_cast<Block*>(Substitute(
-        Stmt::clone(loops[i]->body()), {{loops[i]->var(), first_loop->var()}}));
-    first_loop->body()->splice(first_loop->body()->end(), body);
     root_block->remove_stmt(loops[i]);
   }
-
-  analysis::MemDependencyChecker analyzer;
-  first_loop->accept(&analyzer);
-  for (auto it1 = first_loop->body()->begin(); it1 != first_loop->body()->end();
-       ++it1) {
-    for (auto it2 = std::next(it1); it2 != first_loop->body()->end(); ++it2) {
-      if (hasPartialOverlap(analyzer, *it2, *it1)) {
-        // Whenever there is a partial overlap between accesses in 2 statements
-        // in a loop, it results in a loop-carried dependence. NOTE: In
-        // general, this may not be true. But the semantics of TE IR is that all
-        // iterations of the loop can run in parallel, so there should be no
-        // loop-carried dependence in either direction (forward or backward).
-        throw malformed_input(
-            "Fusing given loops is not valid since it results in a loop carried dependence");
-      }
-    }
-  }
-
-  return first_loop;
+  return true;
 }
 
 For* findOuterFor(For* a, For* b) {
