@@ -2,6 +2,7 @@ import torch
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA, _inline_everything
 from torch import nn
 from torch.testing import FileCheck
+from typing import List
 
 import unittest
 

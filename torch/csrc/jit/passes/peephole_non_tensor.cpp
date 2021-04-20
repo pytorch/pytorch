@@ -129,8 +129,8 @@ struct PeepholeOptimizeNonTensorImpl {
           case TypeKind::ListType:
           case TypeKind::DictType: {
             WithInsertPoint guard(node);
-            // node->output()->replaceAllUsesWith(
-            //     graph_->insertConstant(node->kind() == aten::eq));
+            node->output()->replaceAllUsesWith(
+                graph_->insertConstant(node->kind() == aten::eq));
             changed = true;
           }
           default:
