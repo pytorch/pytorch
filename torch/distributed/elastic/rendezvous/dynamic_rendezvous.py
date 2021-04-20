@@ -188,7 +188,7 @@ class _NodeDescGenerator:
         return _NodeDesc(socket.getfqdn(), os.getpid(), local_id)
 
 
-class _Rendezvous:
+class _RendezvousState:
     """Holds the state of a rendezvous.
 
     A rendezvous is synced across the nodes via a ``RendezvousBackend``.
