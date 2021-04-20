@@ -38,14 +38,6 @@ TORCH_META_FUNC(addmm)(const Tensor &self, const Tensor &mat1, const Tensor &mat
   auto m1_sizes = mat1.sizes();
   auto m2_sizes = mat2.sizes();
 
-  if (self.numel() != 0) {
-    // if number of elements are zero, only then can the input tensor can be resized.
-    TORCH_CHECK((self.dim() == 2), "input matrix must be a matrix, got ",
-                self.dim(), "-D tensor");
-    TORCH_CHECK(((self_sizes[0] == m1_sizes[0]) && (self_sizes[1] == m2_sizes[1])),
-                "The input matrix must have the same size as the product of mat1 & mat2");
-  }
-
   TORCH_CHECK(
       m1_sizes[1] == m2_sizes[0], "mat1 and mat2 shapes cannot be multiplied (",
       m1_sizes[0], "x", m1_sizes[1], " and ", m2_sizes[0], "x", m2_sizes[1], ")");
@@ -54,8 +46,8 @@ TORCH_META_FUNC(addmm)(const Tensor &self, const Tensor &mat1, const Tensor &mat
   const int64_t size_[2] = {mat1.sizes().data()[0], mat2.sizes().data()[1]};
   set_output(0, IntArrayRef(size_, 2), {}, self.options(), names);
   auto result = maybe_get_output(0);
-  // This check can fire for inplace op only, for all other versions result is
-  // guaranteed to be correct size
+  // This check can fail only for the inplace variant. For all other variants,
+  // the result is guaranteed to be of the correct size
   TORCH_CHECK(result.dim() == 2 && result.sizes()[0] == mat1.sizes()[0] &&
               result.sizes()[1] == mat2.sizes()[1],
               "output of addmm operation should be 2D with size equal to "
@@ -905,7 +897,7 @@ TORCH_IMPL_FUNC(addmm_cpu_out)(const Tensor& self, const Tensor& m1,
     self_ = c10::MaybeOwned<Tensor>::borrowed(self);
   }
 
-  if ((&result != &self) && (beta.toComplexDouble() != 0.0)) {
+  if ((&result != &self) && (betaval != 0.0)) {
       at::native::copy_(const_cast<Tensor&>(result), *self_);
   }
 
