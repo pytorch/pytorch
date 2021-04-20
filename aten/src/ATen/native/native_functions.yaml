@@ -2644,14 +2644,15 @@
   variants: method
 
 - func: mv(Tensor self, Tensor vec) -> Tensor
+  structured_delegate: mv.out
   variants: function, method
   dispatch:
-    CPU, CUDA: mv
     SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CompositeExplicitAutograd: mv_out
+    CPU, CUDA: mv_out
 
 - func: mvlgamma(Tensor self, int p) -> Tensor
   variants: function, method
