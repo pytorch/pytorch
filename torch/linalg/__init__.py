@@ -533,8 +533,7 @@ Examples::
 """)
 
 lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
-torch.linalg.lstsq(input, b, rcond=None, *, driver=None)
-    -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+torch.linalg.lstsq(input, b, rcond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
 
 Computes the least squares solution to the system with a batch of matrices :math:`a` (represented by :attr:`input`)
 and a batch of vectors or matrices :math:`b` such that
@@ -589,8 +588,9 @@ Returns:
         - **solution** (*Tensor*): the least squares solution
         - **residuals** (*Tensor*):  if :math:`m > n` then for full rank matrices in :attr:`input` the tensor encodes
             the squared residuals of the solutions, that is :math:`||\text{input} @ x - b||_F^2`.
-            If :math:`m \le n` and rank is not equal to :math:`n`, an empty tensor is returned instead.
-            For the batched :attr:`input` if rank is less than :math:`n`, then a tensor filled with ``inf`` values is returned.
+            If :math:`m \le n` or matrix is not full rank, an empty tensor is returned instead.
+            If :attr:`input` is a batch of matrices and any matrix in the batch is not full rank,
+            then an empty tensor is returned. This behavior may change in a future PyTorch release.
         - **rank** (*Tensor*): the tensor of ranks of the matrix :attr:`input` with shape ``input.shape[:-2]``.
             Only computed if :attr:`driver` is one of (``'gelsy'``, ``'gelsd'``, ``'gelss'``),
             an empty tensor is returned otherwise.
