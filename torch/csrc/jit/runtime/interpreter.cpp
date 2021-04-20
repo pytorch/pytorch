@@ -483,11 +483,10 @@ struct CodeImpl {
   // aten::foo.str(arg0: str="default", arg1: int=0,
   //               arg2: bool=False, arg3: float=0.0)
   // If the usages in a graph is:
-  //    aten::foo("somestr", arg1=0, arg2=False, arg3=0.0)
+  //    aten::foo("somestr", arg1=0, arg2=True, arg3=0.0)
   //    aten::foo("somestr", arg1=1, arg2=False, arg3=0.0)
-  // op_to_num_specified_args_["aten::foo.str"] = 2
-  // This is because for all usages, last two args are not used. (e.g. same
-  // value as default schema value)
+  // op_to_num_specified_args_["aten::foo.str"] = 3
+  // This is because for all usages, at most 3 args are used.
   std::unordered_map<std::string, int> op_to_num_specified_args_;
 
   // running count of uses as we emit. When we reach use_count_[v] =
@@ -523,6 +522,10 @@ struct CodeImpl {
     n_inputs = graph_->inputs().size();
   }
 
+  // since subclass of CodeImpl needs to populate
+  // op_to_num_specified_args, we seperate the calls
+  // that changes internals of CodeImpl into a separate
+  // function. User must manually call run() before using it
   void run() {
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);

@@ -148,6 +148,7 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   auto graph = build_mobile_export_analysis_graph();
   MobileCode function(graph, "");
   auto op_to_specified_args = function.op_to_num_specified_args();
+  ASSERT_TRUE(op_to_specified_args.size() == 2);
   ASSERT_TRUE(op_to_specified_args["aten::slice.Tensor"] == 4);
   ASSERT_TRUE(op_to_specified_args["aten::slice.str"] == 1);
 
