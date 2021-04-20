@@ -8430,13 +8430,13 @@
   python_module: special
   variants: function
   dispatch:
-    CPU, CUDA: special_xlog1py
+    CompositeExplicitAutograd: special_xlog1py
 
 - func: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
   python_module: special
   variants: function
   dispatch:
-    CPU, CUDA: special_xlog1py
+    CompositeExplicitAutograd: special_xlog1py
 
 - func: special_xlog1py.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -8450,13 +8450,13 @@
   python_module: special
   variants: function
   dispatch:
-    CPU, CUDA: special_xlog1py_out
+    CompositeExplicitAutograd: special_xlog1py_out
 
 - func: special_xlog1py.other_scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
   variants: function
   dispatch:
-    CPU, CUDA: special_xlog1py_out
+    CompositeExplicitAutograd: special_xlog1py_out
 
 - func: special_i0e(Tensor self) -> Tensor
   python_module: special
