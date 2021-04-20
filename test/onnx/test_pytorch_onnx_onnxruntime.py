@@ -8411,6 +8411,32 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=['input_x', 'input_y'],
                       dynamic_axes={'input_x': [0, 1, 2, 3], 'input_y': [0, 1, 2, 3]})
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_index_add_normal(self):
+        class M(torch.nn.Module):
+            def __init__(self, dim, index, updates):
+                super(M, self).__init__()
+                self.dim = dim
+                self.index = index
+                self.updates = updates
+
+            def forward(self, x):
+                x.index_add_(self.dim, self.index, self.updates)
+                return x
+
+        x = torch.ones(5, 4, 3)
+        updates = torch.tensor([[1], [4], [7], [3], [2]], dtype=torch.float)
+        index = torch.tensor([0, 2, 3, 1, 4])
+        self.run_test(M(0, index, updates), (x,))
+
+        updates = torch.tensor([[[1, 5, 7], [2, 4, 5], [5, 5, 6], [2, 3, 4]]], dtype=torch.float)
+        index = torch.tensor([0, 2, 3, 1])
+        self.run_test(M(1, index, updates), (x,))
+
+        updates = torch.tensor([[[1, 2, 3], [4, 5, 6], [7, 8, 9], [2, 3, 4]]], dtype=torch.float)
+        index = torch.tensor([0, 2, 1])
+        self.run_test(M(2, index, updates), (x,))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
               **extra_kwargs):

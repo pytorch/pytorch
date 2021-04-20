@@ -3066,3 +3066,31 @@ def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device
 
 def mv(g, self, vec):
     return matmul(g, self, vec)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def index_add(g, self, dim, index, other):
+    from torch.onnx.symbolic_opset9 import scatter_add
+
+    dim = sym_help._maybe_get_const(dim, 'i')
+    self_dim_count = sym_help._get_tensor_rank(self)
+    other_dim_count = sym_help._get_tensor_rank(other)
+
+    if other_dim_count != self_dim_count:
+        delta = self_dim_count - other_dim_count
+        for i in range(delta):
+            other = sym_help._unsqueeze_helper(g, other, [sym_help._get_tensor_rank(other)])
+
+    # other.size(dim) == self.size(dim)
+
+    other = expand_as(g, other, self)
+
+    for i in range(dim):
+        index = sym_help._unsqueeze_helper(g, index, [0])
+
+    for i in range(self_dim_count - dim - 1):
+        index = sym_help._unsqueeze_helper(g, index, [sym_help._get_tensor_rank(index)])
+
+    index = expand_as(g, index, other)
+
+    return scatter_add(g, self, dim, index, other)
