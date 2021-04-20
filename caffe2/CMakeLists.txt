@@ -61,7 +61,22 @@ if(INTERN_BUILD_ATEN_OPS)
   add_subdirectory(../aten aten)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
+  set(VERBOSE_BUILD ON)
+
+  if(DEFINED CMAKE_MESSAGE_LOG_LEVEL)
+    if(${CMAKE_MESSAGE_LOG_LEVEL} STREQUAL "ERROR")
+      set(VERBOSE_BUILD OFF)
+    endif()
+    if(${CMAKE_MESSAGE_LOG_LEVEL} STREQUAL "WARNING")
+      set(VERBOSE_BUILD OFF)
+    endif()
+  endif()
+
   # Generate the headers wrapped by our operator
+  if(NOT VERBOSE_BUILD)
+    set(GEN_QUIET "--quiet")
+  endif()
+
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
   COMMAND
   "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
@@ -69,6 +84,7 @@ if(INTERN_BUILD_ATEN_OPS)
     --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
     --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
     --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
+    ${GEN_QUIET}
   DEPENDS
   ATEN_CPU_FILES_GEN_TARGET
   ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml

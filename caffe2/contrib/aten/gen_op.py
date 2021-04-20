@@ -24,6 +24,7 @@ from typing import Dict, List, Set
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--template_dir", default=".", help="where template.h is")
+parser.add_argument("--quiet", action='store_true', default=False, help="silence output")
 parser.add_argument("--yaml_dir", default="aten/src/ATen/ATen",
                     help="where ATen yaml files are")
 parser.add_argument("--output_prefix", default="", help="")
@@ -50,6 +51,13 @@ try:
     from yaml import CSafeLoader as Loader
 except ImportError:
     from yaml import SafeLoader as Loader  # type: ignore[misc]
+
+
+if args.quiet:
+    def report(*args, **kwargs):
+        pass
+else:
+    report = print
 
 
 def write(filename, s):
@@ -117,7 +125,7 @@ def supports(o, factory_methods):
     # Ignore all families (!) of functions that have TensorOptions (i.e. tensor factory methods).
     if o['name'] in factory_methods:
         if factory_methods[o['name']] == 0:
-            print("Skipping {} because it is a factory method".format(o['name']))
+            report("Skipping {} because it is a factory method".format(o['name']))
         factory_methods[o['name']] += 1
         return False
 
@@ -138,14 +146,14 @@ def supports(o, factory_methods):
     # skip return types we cannot handle
     for ret in o['returns']:
         if not value_has_tensors(ret) and ret['type'] not in RETURN_MAP:
-            print("Skipping {} Because of Ret: {} ({})".format(
+            report("Skipping {} Because of Ret: {} ({})".format(
                   o['name'], ret['type'], ret['dynamic_type']))
             return False
 
     # skip arguments we cannot handle
     for arg in o['arguments']:
         if not value_has_tensors(arg) and arg['type'] not in ARGUMENT_MAP:
-            print("Skipping {} Because of Arg: {} ({}) ".format(
+            report("Skipping {} Because of Arg: {} ({}) ".format(
                   o['name'], arg['type'], arg['dynamic_type']))
             return False
     return True

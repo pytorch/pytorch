@@ -295,7 +295,7 @@ package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
 version = get_torch_version()
 report("Building wheel {}-{}".format(package_name, version))
 
-cmake = CMake()
+cmake = CMake(quiet=not VERBOSE_SCRIPT)
 
 
 def get_submodule_folders():
@@ -331,7 +331,7 @@ def check_submodules():
             start = time.time()
             subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=cwd)
             end = time.time()
-            print(' --- Submodule initialization took {:.2f} sec'.format(end - start))
+            report(' --- Submodule initialization took {:.2f} sec'.format(end - start))
         except Exception:
             print(' --- Submodule initalization failed')
             print('Please run:\n\tgit submodule update --init --recursive')
@@ -871,6 +871,10 @@ if __name__ == '__main__':
         raise SystemExit(core.gen_usage(dist.script_name) + "\nerror: %s" % msg)
     if not ok:
         sys.exit()
+
+    # Make distutils respect --quiet too
+    setuptools.distutils.log.info = report
+    setuptools.distutils.log.warn = report
 
     if RUN_BUILD_DEPS:
         build_deps()

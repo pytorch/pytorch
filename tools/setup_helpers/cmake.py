@@ -93,9 +93,10 @@ def get_cmake_cache_variables_from_file(cmake_cache_file):
 class CMake:
     "Manages cmake."
 
-    def __init__(self, build_dir=BUILD_DIR):
+    def __init__(self, build_dir=BUILD_DIR, quiet=False):
         self._cmake_command = CMake._get_cmake_command()
         self.build_dir = build_dir
+        self.quiet = quiet
 
     @property
     def _cmake_cache_file(self):
@@ -132,10 +133,17 @@ class CMake:
                 return LooseVersion(line.strip().split(' ')[2])
         raise RuntimeError('no version found')
 
-    def run(self, args, env):
+    def run(self, args, generator_args, env):
         "Executes cmake with arguments and an environment."
 
         command = [self._cmake_command] + args
+
+        if self.quiet:
+            command += ["--log-level=ERROR", "-Wno-deprecated", "-Wno-dev", "-DCMAKE_INSTALL_MESSAGE=NEVER", "-DCMAKE_MESSAGE_LOG_LEVEL=ERROR"]
+            # command += ["-DCMAKE_MESSAGE_LOG_LEVEL=STATUS"]
+
+        if len(generator_args) > 0:
+            command += ["--"] + generator_args
         print(' '.join(command))
         try:
             check_call(command, cwd=self.build_dir, env=env)
@@ -332,7 +340,7 @@ class CMake:
         # 1. https://cmake.org/cmake/help/latest/manual/cmake.1.html#synopsis
         # 2. https://stackoverflow.com/a/27169347
         args.append(base_dir)
-        self.run(args, env=my_env)
+        self.run(args, generator_args=[], env=my_env)
 
     def build(self, my_env):
         "Runs cmake to build binaries."
@@ -345,7 +353,8 @@ class CMake:
         # minimum, which provides a '-j' option: build_args += ['-j', max_jobs]
         # would be sufficient by then.
         if IS_WINDOWS and not USE_NINJA:  # We are likely using msbuild here
-            build_args += ['--', '/p:CL_MPCount={}'.format(max_jobs)]
+            generator_args = ['/p:CL_MPCount={}'.format(max_jobs)]
         else:
-            build_args += ['--', '-j', max_jobs]
-        self.run(build_args, my_env)
+            generator_args = ['-j', max_jobs]
+        self.run(build_args, generator_args=generator_args, env=my_env)
+
