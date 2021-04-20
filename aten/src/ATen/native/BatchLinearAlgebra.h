@@ -175,6 +175,16 @@ using linalg_eigh_fn = void (*)(
     bool /*compute_eigenvectors*/);
 DECLARE_DISPATCH(linalg_eigh_fn, linalg_eigh_stub);
 
+using lstsq_fn = void (*)(
+    const Tensor& /*a*/,
+    Tensor& /*b*/,
+    Tensor& /*rank*/,
+    Tensor& /*singular_values*/,
+    Tensor& /*infos*/,
+    double /*rcond*/,
+    std::string /*driver_name*/);
+DECLARE_DISPATCH(lstsq_fn, lstsq_stub);
+
 using triangular_solve_fn = void (*)(
     Tensor& /*A*/,
     Tensor& /*b*/,
