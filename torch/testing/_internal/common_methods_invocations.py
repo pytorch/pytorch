@@ -2745,31 +2745,50 @@ def sample_inputs_inner(self, device, dtype, requires_grad, **kwargs):
         ),
     )
 
-def sample_inputs_scatter_ops(op_info, device, dtype, requires_grad):
-    def _make(shape, dtype=dtype, low=None, high=None):
+# Tests for scatter when passing the reduce argument are missing
+# Reference: https://github.com/pytorch/pytorch/issues/56464
+def sample_inputs_scatter(op_info, device, dtype, requires_grad):
+    def _tensor(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
+    def _gather(shape, index_dim, max_indices):
+        return gather_variable(shape, index_dim, max_indices, device=device)
+
+    zero = torch.tensor(0, dtype=torch.long, device=device)
     test_cases = (
-        ((M, S), (S, S)),
-        ((M, S), (M, S // 2)),
+        (_tensor((M, S)), ( 0, _gather((S, S), 1, M), _tensor((S, S)))),
+        (_tensor((M, S)), ( 1, _gather((S, S), 0, S), _tensor((S, S)))),
+        (_tensor((M, S)), (-1, _gather((S, S), 0, S), _tensor((S, S)))),
+        (_tensor((M, S)), ( 0, _gather((M, S // 2), 1, M), _tensor((M, S // 2)))),
+        (_tensor((M, S)), ( 1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
+        (_tensor((M, S)), (-1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
+        (_tensor(()), (0, zero.clone().detach(), _tensor(()))),
+        (_tensor(()), (0, zero.clone().detach(), 2.5)),
     )
 
-    samples = []
-    for self_shape, shape in test_cases:
-        for dim in [0, 1, -1]:
-            other_dim = 1 - (dim if dim >= 0 else -dim)
-            index = gather_variable(shape, other_dim, self_shape[dim], device=device)
-            samples.append(SampleInput(_make(self_shape), args=(dim, index, _make(shape))))
+    samples = [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
-    samples.append(
-        SampleInput(_make(()), args=(0, torch.tensor(0, dtype=torch.long, device=device), _make(()))),
+    return samples
+
+def sample_inputs_scatter_add(op_info, device, dtype, requires_grad):
+    def _tensor(shape, dtype=dtype, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    def _gather(shape, index_dim, max_indices):
+        return gather_variable(shape, index_dim, max_indices, device=device)
+
+    zero = torch.tensor(0, dtype=torch.long, device=device)
+    test_cases = (
+        (_tensor((M, S)), ( 0, _gather((S, S), 1, M), _tensor((S, S)))),
+        (_tensor((M, S)), ( 1, _gather((S, S), 0, S), _tensor((S, S)))),
+        (_tensor((M, S)), (-1, _gather((S, S), 0, S), _tensor((S, S)))),
+        (_tensor((M, S)), ( 0, _gather((M, S // 2), 1, M), _tensor((M, S // 2)))),
+        (_tensor((M, S)), ( 1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
+        (_tensor((M, S)), (-1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
+        (_tensor(()), (0, zero.clone().detach(), _tensor(()))),
     )
 
-    if op_info.name == 'scatter':
-        samples.append(SampleInput(
-            _make(()),
-            args=(0, torch.tensor(0, dtype=torch.long, device=device), 2.5)
-        ))
+    samples = [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
     return samples
 
@@ -4712,12 +4731,12 @@ op_db: List[OpInfo] = [
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_scatter_ops,
+           sample_inputs_func=sample_inputs_scatter,
            supports_out=False),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_scatter_ops,
+           sample_inputs_func=sample_inputs_scatter_add,
            supports_out=False),
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
