@@ -442,6 +442,10 @@ class intrusive_ptr final {
     return result;
   }
 
+  static intrusive_ptr steal_from_new(TTarget* raw_ptr) {
+    return intrusive_ptr(raw_ptr);
+  }
+
   /**
    * Turn a **non-owning raw pointer** to an intrusive_ptr.
    *
