@@ -678,7 +678,7 @@ def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
         ),
     )
 
-def sample_inputs_dot_vdot_complex_polar(self, device, dtype, requires_grad, **kwargs):
+def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
     return (
         SampleInput(
             make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -4603,7 +4603,7 @@ op_db: List[OpInfo] = [
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('polar',
            dtypes=floating_types(),
-           sample_inputs_func=sample_inputsr_complex_pola),
+           sample_inputs_func=sample_inputs_complex_polar),
     # To test reference numerics against multiple values of argument `n`,
     # we make multiple OpInfo entries with each entry corresponding to different value of n (currently 0 to 4).
     # We run the op tests from test_ops.py only for `n=0` to avoid redundancy in testing.
