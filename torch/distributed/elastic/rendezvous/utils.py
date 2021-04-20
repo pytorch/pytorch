@@ -7,6 +7,7 @@
 import ipaddress
 import re
 import socket
+import weakref
 from datetime import timedelta
 from threading import Event, Thread
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -162,6 +163,7 @@ class _PeriodicTimer:
         stop_event: Event
 
     _thread: Optional[Thread]
+    _finalizer: Optional[weakref.finalize]
 
     # The context that is shared between the timer and the background thread.
     _ctx: _Context
@@ -181,9 +183,7 @@ class _PeriodicTimer:
         self._ctx.stop_event = Event()
 
         self._thread = None
-
-    def __del__(self) -> None:
-        self.cancel()
+        self._finalizer = None
 
     def start(self) -> None:
         """Start the timer."""
@@ -194,18 +194,32 @@ class _PeriodicTimer:
             target=self._run, name="PeriodicTimer", args=(self._ctx,), daemon=True
         )
 
+        # We avoid using a regular finalizer (a.k.a. __del__) for stopping the
+        # timer as joining a daemon thread during the interpreter shutdown can
+        # cause deadlocks. The weakref.finalize is a superior alternative that
+        # provides a consistent behavior regardless of the GC implementation.
+        self._finalizer = weakref.finalize(
+            self, self._stop_thread, self._thread, self._ctx.stop_event
+        )
+
+        # We do not attempt to stop our background thread during the interpreter
+        # shutdown. At that point we do not even know whether it still exists.
+        self._finalizer.atexit = False
+
         self._thread.start()
 
     def cancel(self) -> None:
         """Stop the timer at the next opportunity."""
-        if not self._thread:
-            return
-
-        self._ctx.stop_event.set()
-
-        self._thread.join()
+        if self._finalizer:
+            self._finalizer()
 
     @staticmethod
     def _run(ctx) -> None:
         while not ctx.stop_event.wait(ctx.interval):
             ctx.function(*ctx.args, **ctx.kwargs)
+
+    @staticmethod
+    def _stop_thread(thread, stop_event):
+        stop_event.set()
+
+        thread.join()

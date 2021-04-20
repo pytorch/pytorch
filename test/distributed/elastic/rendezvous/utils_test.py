@@ -285,7 +285,7 @@ class PeriodicTimerTest(TestCase):
         self.assertTrue(all(t.name != "PeriodicTimer" for t in threading.enumerate()))
 
     def test_timer_calls_background_thread_at_regular_intervals(self):
-        begin_time = time.monotonic()
+        timer_begin_time: float
 
         # Call our function every 200ms.
         call_interval = 0.2
@@ -304,17 +304,19 @@ class PeriodicTimerTest(TestCase):
         timer_stop_event = threading.Event()
 
         def log_call(self):
-            nonlocal begin_time, call_count
+            nonlocal timer_begin_time, call_count
 
-            actual_call_intervals.append(time.monotonic() - begin_time)
+            actual_call_intervals.append(time.monotonic() - timer_begin_time)
 
             call_count += 1
             if call_count == min_required_call_count:
                 timer_stop_event.set()
 
-            begin_time = time.monotonic()
+            timer_begin_time = time.monotonic()
 
         timer = _PeriodicTimer(timedelta(seconds=call_interval), log_call, self)
+
+        timer_begin_time = time.monotonic()
 
         timer.start()
 
