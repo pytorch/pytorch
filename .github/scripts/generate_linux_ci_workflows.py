@@ -17,7 +17,7 @@ class PyTorchLinuxWorkflow:
             self,
             build_environment: str,
             docker_image_base: str,
-            on_pull_request: bool=False
+            on_pull_request: bool = False
     ):
         self.build_environment = build_environment
         self.docker_image_base = docker_image_base
