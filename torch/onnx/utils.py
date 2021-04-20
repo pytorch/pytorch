@@ -131,7 +131,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
-    #torch._C._jit_pass_lower_all_tuples(graph)
+    torch._C._jit_pass_lower_all_tuples(graph)
 
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
