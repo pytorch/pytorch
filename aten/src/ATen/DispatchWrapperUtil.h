@@ -63,7 +63,7 @@ check_tensor_options_and_extract_memory_format(
 
 inline void common_device_check_failure(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
   TORCH_CHECK(false,
-    "Expected all tensors to be on the same common device, but "
+    "Expected all tensors to be on the same device, but "
     "found at least two devices, ", common_device.value(), " and ", tensor.device(), "! "
     "(when checking arugment for argument ", argName, " in method ", methodName, ")");
 }

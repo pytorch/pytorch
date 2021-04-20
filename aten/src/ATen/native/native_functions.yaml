@@ -288,15 +288,19 @@
     CPU, CUDA: sgn_out
 
 - func: real(Tensor(a) self) -> Tensor(a)
+  common_device_guard: False   # TensorIterator
   variants: function
 
 - func: imag(Tensor(a) self) -> Tensor(a)
+  common_device_guard: False   # TensorIterator
   variants: function
 
 - func: conj(Tensor(a) self) -> Tensor(a)
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: conj_out
 
@@ -434,36 +438,44 @@
   variants: function
 
 - func: all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: all
 
 - func: all.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: all_out
 
 - func: all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: all.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: allclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> bool
   variants: function, method
 
 - func: any.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: any
 
 - func: any.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: any_out
 
 - func: any.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: any.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: arange(Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -485,6 +497,7 @@
 - func: _dim_arange(Tensor like, int dim) -> Tensor
 
 - func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: argmax
@@ -494,6 +507,7 @@
     CPU, CUDA: argmax_out
 
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: argmin
@@ -695,21 +709,25 @@
 
 # Sample bernoulli with values in `self` as probability.
 - func: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: bernoulli
 
 - func: bernoulli.out(Tensor self, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: function
   dispatch:
     CPU, CUDA: bernoulli_out
 
 - func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: method
   dispatch:
     CPU, CUDA: bernoulli_
 
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: method
   dispatch:
     CPU, CUDA: bernoulli_
@@ -718,6 +736,7 @@
 # There is no default valid on `p` here because it would introduce ambiguity
 # with `bernoulli(Tensor self, *, Generator? generator=None)` declaration.
 - func: bernoulli.p(Tensor self, float p, *, Generator? generator=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
@@ -809,6 +828,7 @@
     CompositeExplicitAutograd: copysign_out
 
 - func: logical_not(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: logical_not_(Tensor(a!) self) -> Tensor(a!)
@@ -816,10 +836,12 @@
   variants: method
 
 - func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: logical_not_out
 
 - func: logical_xor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: logical_xor_(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -827,10 +849,12 @@
   variants: method
 
 - func: logical_xor.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: logical_xor_out
 
 - func: logical_and(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: logical_and_(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -838,10 +862,12 @@
   variants: method
 
 - func: logical_and.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: logical_and_out
 
 - func: logical_or(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: logical_or_(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -849,6 +875,7 @@
   variants: method
 
 - func: logical_or.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: logical_or_out
 
@@ -904,6 +931,7 @@
   variants: function
 
 - func: ceil(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: ceil
@@ -915,6 +943,7 @@
     CompositeExplicitAutograd: ceil_
 
 - func: ceil.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: ceil_out
 
@@ -943,6 +972,7 @@
   variants: function, method
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: clamp
@@ -955,34 +985,41 @@
     CompositeExplicitAutograd: clamp_
 
 - func: clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: clamp_out
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: clamp_max
 
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: clamp_max_
 
 - func: clamp_max.out(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: clamp_max_out
 
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: clamp_min
 
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: clamp_min_
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: clamp_min_out
 
@@ -1084,6 +1121,7 @@
   dispatch: {}
 
 - func: cos(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   structured_delegate: cos.out
 
@@ -1093,12 +1131,14 @@
   structured_delegate: cos.out
 
 - func: cos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: cos_out
 
 - func: cosh(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   structured_delegate: cosh.out
 
@@ -1108,6 +1148,7 @@
   structured_delegate: cosh.out
 
 - func: cosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -1211,19 +1252,23 @@
     CUDA: cudnn_grid_sampler_backward
 
 - func: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: cummax
 
 - func: cummax.out(Tensor self, int dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CompositeExplicitAutograd: cummax_out
 
 - func: cummax.dimname(Tensor self, Dimname dim) -> (Tensor values, Tensor indices)
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: cummax.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
+  common_device_guard: False   # TensorIterator
 - func: _cummax_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
   variants: function
   dispatch:
@@ -1231,19 +1276,23 @@
     CUDA: cummax_helper_cuda
 
 - func: cummin(Tensor self, int dim) -> (Tensor values, Tensor indices)
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: cummin
 
 - func: cummin.out(Tensor self, int dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CompositeExplicitAutograd: cummin_out
 
 - func: cummin.dimname(Tensor self, Dimname dim) -> (Tensor values, Tensor indices)
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: cummin.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
+  common_device_guard: False   # TensorIterator
 - func: _cummin_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
   variants: function
   dispatch:
@@ -1255,6 +1304,7 @@
   common_device_guard: False
 
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: cumprod
@@ -1265,10 +1315,12 @@
     CompositeExplicitAutograd: cumprod_
 
 - func: cumprod.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CompositeExplicitAutograd: cumprod_out
 
 - func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: cumprod_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None) -> Tensor(a!)
@@ -1276,11 +1328,13 @@
 
 - func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: cumprod_backward(Tensor grad, Tensor input, int dim, Tensor output) -> Tensor
   variants: function
   common_device_guard: False
 
 - func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: cumsum
@@ -1291,10 +1345,12 @@
     CompositeExplicitAutograd: cumsum_
 
 - func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CompositeExplicitAutograd: cumsum_out
 
 - func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: cumsum_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None) -> Tensor(a!)
@@ -1302,6 +1358,7 @@
 
 - func: cumsum.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
 
 # convenience function that converts to intlists for you
@@ -1345,6 +1402,7 @@
   variants: function
 
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   structured_delegate: div.out
   dispatch:
@@ -1358,6 +1416,7 @@
     SparseCPU, SparseCUDA: div_sparse_
 
 - func: div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -1380,6 +1439,7 @@
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: div
@@ -1431,6 +1491,7 @@
 
   # true_divide, an alias for div
 - func: true_divide.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: true_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -1439,7 +1500,9 @@
 
 - func: true_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: true_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -1598,6 +1661,7 @@
     Meta: empty_strided_meta
 
 - func: erf(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: erf.out
   variants: function, method
 
@@ -1607,12 +1671,14 @@
   variants: function, method
 
 - func: erf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: erf_out
 
 - func: erfc(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: erfc.out
   variants: function, method
 
@@ -1622,12 +1688,14 @@
   variants: function, method
 
 - func: erfc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: erfc_out
 
 - func: exp(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: exp.out
   variants: function, method
 
@@ -1637,6 +1705,7 @@
   variants: function, method
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -1657,6 +1726,7 @@
     CPU, CUDA: exp2_out
 
 - func: expm1(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: expm1.out
   variants: function, method
 
@@ -1666,6 +1736,7 @@
   variants: function, method
 
 - func: expm1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -1728,6 +1799,7 @@
     Meta: fill_meta_
 
 - func: floor(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: floor
@@ -1739,10 +1811,12 @@
     CompositeExplicitAutograd: floor_
 
 - func: floor.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: floor_out
 
 - func: floor_divide(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: floor_divide
@@ -1756,11 +1830,13 @@
     SparseCPU, SparseCUDA: floor_divide_sparse_
 
 - func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: floor_divide_out
     SparseCPU, SparseCUDA: floor_divide_out_sparse_zerodim
 
 - func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: floor_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -1768,6 +1844,7 @@
   variants: method
 
 - func: frac(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: frac
@@ -1779,6 +1856,7 @@
     CompositeExplicitAutograd: frac_
 
 - func: frac.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: frac_out
 
@@ -2146,6 +2224,7 @@
     CUDA: linspace_cuda_out
 
 - func: log(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: log.out
   variants: function, method
 
@@ -2155,12 +2234,14 @@
   variants: function, method
 
 - func: log.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: log_out
 
 - func: log10(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: log10.out
   variants: function, method
 
@@ -2170,12 +2251,14 @@
   variants: function, method
 
 - func: log10.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: log10_out
 
 - func: log1p(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: log1p.out
   variants: function, method
   dispatch:
@@ -2189,6 +2272,7 @@
     SparseCPU, SparseCUDA: log1p_sparse_
 
 - func: log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -2196,6 +2280,7 @@
     SparseCPU, SparseCUDA: log1p_out_sparse
 
 - func: log2(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: log2.out
   variants: function, method
 
@@ -2205,6 +2290,7 @@
   variants: function, method
 
 - func: log2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -2324,19 +2410,23 @@
 - func: logcumsumexp.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: logsumexp
 
 - func: logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CompositeExplicitAutograd: logsumexp_out
 
 - func: logsumexp.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: logsumexp.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
@@ -2381,19 +2471,23 @@
     CPU, CUDA: _compute_linear_combination_out
 
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA, QuantizedCPU, QuantizedCUDA: max
 
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: max_out
 
 - func: max.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: max.names_dim_max(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
 
+  common_device_guard: False   # TensorIterator
 - func: value_selecting_reduction_backward(Tensor grad, int dim, Tensor indices, int[] sizes, bool keepdim) -> Tensor
   variants: function
   common_device_guard: False
@@ -2443,27 +2537,32 @@
 # The CPU and GPU dispatch variants are named weirdly here because otherwise there
 # are namespacing issues in C++
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: mean_cpu_gpu
     QuantizedCPU: mean_quantized_cpu
 
 - func: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: mean_cpu_gpu
     QuantizedCPU: mean_quantized_cpu
 
 - func: mean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: mean_out_cpu_gpu
     QuantizedCPU: mean_out_quantized_cpu
 
 - func: mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: median(Tensor self) -> Tensor
   variants: function, method
   dispatch:
@@ -2507,19 +2606,23 @@
 - func: nanmedian.names_dim_values(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA, QuantizedCPU, QuantizedCUDA: min
 
 - func: min.dim_min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: min_out
 
 - func: min.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: min.names_dim_min(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
+  common_device_guard: False   # TensorIterator
 - func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
   dispatch:
@@ -2652,6 +2755,7 @@
 - func: mode.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: mul.out
   variants: function, method
   dispatch:
@@ -2667,6 +2771,7 @@
     MkldnnCPU: mkldnn_mul_
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -2677,6 +2782,7 @@
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: mul
@@ -2713,6 +2819,7 @@
     CompositeExplicitAutograd: mv_out
 
 - func: mvlgamma(Tensor self, int p) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: mvlgamma
@@ -3003,6 +3110,7 @@
   variants: function, method
 
 - func: reciprocal(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: reciprocal.out
   variants: function, method
 
@@ -3012,12 +3120,14 @@
   variants: function, method
 
 - func: reciprocal.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: reciprocal_out
 
 - func: neg(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA, SparseCPU, SparseCUDA: neg
@@ -3030,6 +3140,7 @@
     SparseCPU, SparseCUDA: neg_sparse_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: neg_out
     SparseCPU, SparseCUDA: neg_out_sparse
@@ -3074,6 +3185,7 @@
   common_device_guard: False
 
 - func: round(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: round
@@ -3085,6 +3197,7 @@
     CompositeExplicitAutograd: round_
 
 - func: round.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU: round_out
     CUDA: round_out
@@ -3159,6 +3272,7 @@
     CPU, CUDA: hardshrink_backward
 
 - func: rsqrt(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: rsqrt
@@ -3170,6 +3284,7 @@
     CompositeExplicitAutograd: rsqrt_
 
 - func: rsqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: rsqrt_out
 
@@ -3225,6 +3340,7 @@
     CompositeImplicitAutograd: math_silu_backward
 
 - func: sigmoid(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: sigmoid.out
   variants: function, method
   dispatch:
@@ -3239,6 +3355,7 @@
     MkldnnCPU: mkldnn_sigmoid_
 
 - func: sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -3259,6 +3376,7 @@
     CPU, CUDA: logit_out
 
 - func: sin(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: sin.out
   variants: function, method
 
@@ -3268,6 +3386,7 @@
   variants: function, method
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -3288,6 +3407,7 @@
     CPU, CUDA: sinc_out
 
 - func: sinh(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: sinh.out
   variants: function, method
 
@@ -3297,6 +3417,7 @@
   variants: function, method
 
 - func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -3487,24 +3608,29 @@
   common_device_guard: False
 
 - func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: sum
 
 - func: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: sum
 
 - func: sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: sum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: sum_out
 
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   dispatch:
@@ -3524,6 +3650,7 @@
   common_device_guard: False
 
 - func: sqrt(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: sqrt.out
   variants: function, method
   dispatch:
@@ -3535,6 +3662,7 @@
   variants: function, method
 
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -3542,6 +3670,7 @@
     SparseCPU, SparseCUDA: sqrt_out_sparse
 
 - func: square(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: square_(Tensor(a!) self) -> Tensor(a!)
@@ -3553,56 +3682,69 @@
     CPU, CUDA: square_out
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: std
 
 - func: std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: std
 
 - func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+  common_device_guard: False   # TensorIterator
   variants: function
   dispatch:
     CPU, CUDA: std_mean
 
 - func: std_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  common_device_guard: False   # TensorIterator
   variants: function
   dispatch:
     CPU, CUDA: std_mean
 
 - func: std_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  common_device_guard: False   # TensorIterator
   variants: function
 
 - func: std.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: std_out
 
 - func: std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: std.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: prod
 
 - func: prod.dim_int(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: prod
 
 - func: prod.int_out(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: prod_out
 
 - func: prod.dim_Dimname(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: prod.Dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: t(Tensor(a) self) -> Tensor(a)
   common_device_guard: False
   variants: function, method
@@ -3616,6 +3758,7 @@
     CompositeExplicitAutograd: t_
 
 - func: tan(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: tan.out
   variants: function, method
 
@@ -3625,12 +3768,14 @@
   variants: function, method
 
 - func: tan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: tan_out
 
 - func: tanh(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: tanh.out
   variants: function, method
   dispatch:
@@ -3644,6 +3789,7 @@
   dispatch:
     MkldnnCPU: mkldnn_tanh_
 - func: tanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -3755,6 +3901,7 @@
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor
 
 - func: trunc(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: trunc
@@ -3766,6 +3913,7 @@
     CompositeExplicitAutograd: trunc_
 
 - func: trunc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: trunc_out
 
@@ -3837,35 +3985,43 @@
 - func: vander(Tensor x, int? N=None, bool increasing=False) -> Tensor
 
 - func: var(Tensor self, bool unbiased=True) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: var
 
 - func: var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: var
 
 - func: var.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: var_out
 
 - func: var.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+  common_device_guard: False   # TensorIterator
   variants: function
   dispatch:
     CPU, CUDA: var_mean
 
 - func: var_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  common_device_guard: False   # TensorIterator
   variants: function
   dispatch:
     CPU, CUDA: var_mean
 
 - func: var_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  common_device_guard: False   # TensorIterator
   variants: function
 
 - func: view_as(Tensor(a) self, Tensor other) -> Tensor(a)
@@ -3876,6 +4032,7 @@
 # this allows us to implicitly calculate the broadcast derivative, while only dealing with the
 # _s_where derivative.
 - func: where.self(Tensor condition, Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
@@ -3888,6 +4045,7 @@
   variants: function
 
 - func: where(Tensor condition) -> Tensor[]
+  common_device_guard: False   # TensorIterator
   variants: function
 
 - func: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
@@ -3949,11 +4107,13 @@
     CUDA: _s_dirichlet_cuda
 
 - func: poisson(Tensor self, Generator? generator=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
 
 - func: binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU: _s_binomial_cpu
     CUDA: _s_binomial_cuda
@@ -4018,44 +4178,54 @@
     SparseCUDA: log_softmax_backward_sparse_cuda
 
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA, SparseCPU, SparseCUDA: norm
 
 - func: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA, SparseCPU, SparseCUDA: norm
 
 - func: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA, SparseCPU, SparseCUDA: norm
 
 - func: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA, SparseCPU, SparseCUDA: norm
 
 - func: norm.dtype_out(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: norm_out
 
 - func: norm.out(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: norm_out
 
 # These four redispatch in their implementation, so OK to be CompositeImplicitAutograd
 - func: norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: norm.names_ScalarOpt_dim(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
 
 - func: norm.names_dtype_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: norm.names_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: frexp.Tensor(Tensor self) -> (Tensor mantissa, Tensor exponent)
   variants: method, function
   dispatch:
@@ -5068,19 +5238,23 @@
   variants: method
 
 - func: bitwise_xor.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: function
   dispatch:
     CPU, CUDA: bitwise_xor_out
 
 - func: bitwise_xor.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: function
   dispatch:
     CPU, CUDA: bitwise_xor_out
 
 - func: bitwise_xor.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
 
 - func: bitwise_xor.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
 
 - func: bitwise_xor_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -5177,6 +5351,7 @@
   variants: method
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_renorm_
@@ -5358,22 +5533,26 @@
   common_device_guard: False
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: ne_out
     QuantizedCPU: ne_out_quantized_cpu
 
 - func: ne.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: ne
     QuantizedCPU: ne_quantized_cpu
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: ne_out
     QuantizedCPU: ne_out_quantized_cpu
 
 - func: ne.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: ne
@@ -5409,44 +5588,52 @@
   variants: method
 
 - func: eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: eq_out
     QuantizedCPU: eq_out_quantized_cpu
 
 - func: eq.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: eq
     QuantizedCPU: eq_quantized_cpu
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: eq_out
     QuantizedCPU: eq_out_quantized_cpu
 
 - func: eq.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: eq
     QuantizedCPU: eq_quantized_cpu
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: ge_out
     QuantizedCPU: ge_out_quantized_cpu
 
 - func: ge.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: ge
     QuantizedCPU: ge_quantized_cpu
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: ge_out
     QuantizedCPU: ge_out_quantized_cpu
 
 - func: ge.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: ge
@@ -5482,22 +5669,26 @@
   variants: method
 
 - func: le.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: le_out
     QuantizedCPU: le_out_quantized_cpu
 
 - func: le.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: le
     QuantizedCPU: le_quantized_cpu
 
 - func: le.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: le_out
     QuantizedCPU: le_out_quantized_cpu
 
 - func: le.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: le
@@ -5533,22 +5724,26 @@
   variants: method
 
 - func: gt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: gt_out
     QuantizedCPU: gt_out_quantized_cpu
 
 - func: gt.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: gt
     QuantizedCPU: gt_quantized_cpu
 
 - func: gt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: gt_out
     QuantizedCPU: gt_out_quantized_cpu
 
 - func: gt.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: gt
@@ -5584,22 +5779,26 @@
   variants: method
 
 - func: lt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: lt
     QuantizedCPU: lt_quantized_cpu
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: lt
@@ -5941,6 +6140,7 @@
     CPU, CUDA: multinomial
 
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -5952,29 +6152,35 @@
   variants: method
 
 - func: lgamma(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: lgamma.out
   variants: method, function
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: digamma_out
 
 - func: digamma(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: digamma.out
   variants: method, function
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: polygamma
 
 - func: erfinv(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: erfinv.out
   variants: method, function
 
@@ -5984,6 +6190,7 @@
   variants: method
 
 - func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -6004,6 +6211,7 @@
     CPU, CUDA: i0_out
 
 - func: sign(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sign
@@ -6015,6 +6223,7 @@
     CompositeExplicitAutograd: sign_
 
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: sign_out
 
@@ -6027,6 +6236,7 @@
     CUDA: signbit_out
 
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: dist
@@ -6049,22 +6259,26 @@
   variants: method, function
 
 - func: lerp.Scalar_out(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU: lerp_cpu_scalar_out
     CUDA: lerp_cuda_scalar_out
 
 - func: lerp.Tensor_out(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU: lerp_cpu_tensor_out
     CUDA: lerp_cuda_tensor_out
 
 - func: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU: lerp_cpu_scalar
     CUDA: lerp_cuda_scalar
 
 - func: lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU: lerp_cpu_tensor
@@ -6082,19 +6296,23 @@
     CUDA: _histc_cuda
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: fmod_out
 
 - func: fmod.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: fmod
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: fmod_out
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: fmod
@@ -6156,24 +6374,29 @@
     CompositeExplicitAutograd: nextafter_
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: remainder_out
 
 - func: remainder.Scalar(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: remainder
 
 - func: remainder.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU, CUDA: remainder_out
 
 - func: remainder.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: remainder
 
 - func: min(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: min
@@ -6189,6 +6412,7 @@
     CPU, CUDA: fmin_out
 
 - func: max(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: max
@@ -6215,10 +6439,12 @@
 # binary max, alias of maximum
 # NOTE: max is not an alias for maximum, since there is also unary max
 - func: max.other(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
 
 - func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: minimum(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
@@ -6232,7 +6458,9 @@
 # NOTE: min is not an alias for minimum, since there is also unary min
 - func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
+  common_device_guard: False   # TensorIterator
 - func: min.other(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
 
 # The following quantile signatures are DEPRECATED in favor of the new ones with the interpolation kwarg.
@@ -6279,6 +6507,7 @@
   variants: method, function
 
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU: sort_out_cpu
     CUDA: sort_out_cuda
@@ -6289,6 +6518,7 @@
     CUDA: sort_out_stable_cuda
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU: sort_cpu
@@ -6318,6 +6548,7 @@
   variants: method, function
 
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
 
 - func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
@@ -6335,22 +6566,26 @@
     QuantizedCPU: topk_quantized_cpu
 
 - func: all(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: all
 
 - func: any(Tensor self) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: any
     SparseCPU, SparseCUDA: any_sparse
 
 - func: renorm.out(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   dispatch:
     CPU: legacy::cpu::_th_renorm_out
     CUDA: legacy::cuda::_th_renorm_out
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_renorm
@@ -6376,24 +6611,29 @@
     QuantizedCPU: equal_quantized_cpu
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: pow_Tensor_Tensor_out
 
 - func: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: pow.Tensor_Tensor_out
   variants: method, function
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   dispatch:
     CPU, CUDA: pow_Scalar_out
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: pow.Scalar_out
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -6401,6 +6641,7 @@
     SparseCPU, SparseCUDA: pow_out_sparse_scalar
 
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
+  common_device_guard: False   # TensorIterator
   structured_delegate: pow.Tensor_Scalar_out
   variants: function, method
   dispatch:
@@ -6437,6 +6678,7 @@
   variants: method
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: method
   dispatch:
     CPU, CUDA: normal_

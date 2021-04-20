@@ -165,19 +165,9 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
   const DeviceGuard device_guard(device_or_default(device));"""
                 else:
                     # kernel is operating on existing tensors
-
-                    # There is precedence for which argument we use to do
-                    # device guard.  This describes the precedence order.
-                    self_arg = [f.func.arguments.self_arg.argument] if f.func.arguments.self_arg is not None else []
-                    candidate_args = itertools.chain(
-                        self_arg,
-                        f.func.arguments.out,
-                        f.func.arguments.flat_positional
-                    )
-
-                    # Only tensor like arguments are eligible
                     device_guard = 'c10::optional<Device> common_device = nullopt;'
-                    for arg in candidate_args:
+                    for arg in f.func.arguments.flat_positional:
+                        # Only tensor like arguments are eligible
                         if arg.type.is_tensor_like():
                             device_guard += f"""
   c10::detail::check_or_update_common_device(common_device, {arg.name}, "{name}", "{arg.name}");"""
