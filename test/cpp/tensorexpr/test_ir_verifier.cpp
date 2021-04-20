@@ -74,23 +74,18 @@ TEST(IRVerifier, Load) {
   const Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
   {
     // Indices with different int dtypes (kInt, kLong) are ok
-    auto a = new Load(B, {I, J}, new IntImm(1));
+    auto a = new Load(B, {I, J});
     EXPECT_NO_THROW(verify(a));
   }
   {
     // Float index
-    auto a = new Load(B, {K, K}, new IntImm(1));
+    auto a = new Load(B, {K, K});
     EXPECT_ANY_THROW(verify(a));
   }
   {
     // Multilanes are only allowed in flattened indices
     auto multilane_index = new Ramp(I, new IntImm(1), 4);
-    auto a = new Load(B, {I, multilane_index}, new IntImm(1));
-    EXPECT_ANY_THROW(verify(a));
-  }
-  {
-    // Lane number mismatch in indices and mask
-    auto a = new Load(B, {I}, new Broadcast(new IntImm(1), 4));
+    auto a = new Load(B, {I, multilane_index});
     EXPECT_ANY_THROW(verify(a));
   }
 }
@@ -134,7 +129,7 @@ TEST(IRVerifier, Block) {
   const Var* I = new Var("i", kInt);
   const Buf* B = new Buf("B", {new IntImm(10)}, kInt);
   {
-    Stmt* store = new Store(B, {I}, I, new IntImm(1));
+    Stmt* store = new Store(B, {I}, I);
     Stmt* block1 = new Block({store});
     Stmt* block2 = new Block({store});
     // Stmt can't have multiple parrents, thus inserting it into several blocks
@@ -151,28 +146,23 @@ TEST(IRVerifier, Store) {
   const Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
   {
     // Indices with different int dtypes (kInt, kLong) are ok
-    auto a = new Store(B, {I, J}, K, new IntImm(1));
+    auto a = new Store(B, {I, J}, K);
     EXPECT_NO_THROW(verify(a));
   }
   {
     // Float index
-    auto a = new Store(B, {K, K}, K, new IntImm(1));
+    auto a = new Store(B, {K, K}, K);
     EXPECT_ANY_THROW(verify(a));
   }
   {
     // Multilanes are only allowed in flattened indices
     auto multilane_index = new Ramp(I, new IntImm(1), 4);
-    auto a = new Store(B, {I, multilane_index}, K, new IntImm(1));
-    EXPECT_ANY_THROW(verify(a));
-  }
-  {
-    // Lane number mismatch in indices and mask
-    auto a = new Store(B, {I}, K, new Broadcast(new IntImm(1), 4));
+    auto a = new Store(B, {I, multilane_index}, K);
     EXPECT_ANY_THROW(verify(a));
   }
   {
     // Value and buf dtypes mismatch
-    auto a = new Store(B, {I}, I, new Broadcast(new IntImm(1), 4));
+    auto a = new Store(B, {I}, I);
     EXPECT_ANY_THROW(verify(a));
   }
 }

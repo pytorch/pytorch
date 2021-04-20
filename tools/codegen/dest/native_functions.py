@@ -1,9 +1,9 @@
 from typing import List, Union, Set, Any
 
-from tools.codegen.context import *
-from tools.codegen.utils import *
-from tools.codegen.model import *
-from tools.codegen.api.types import *
+from tools.codegen.context import with_native_function
+from tools.codegen.utils import concatMap
+from tools.codegen.model import (NativeFunction, NativeFunctionsGroup,
+                                 is_structured_dispatch_key)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.native as native
 import tools.codegen.api.structured as structured
@@ -22,7 +22,7 @@ def gen_unstructured(f: NativeFunction) -> List[str]:
         if "legacy::" in n:
             continue
         seen.add(n)
-        returns_type = native.returns_type(f.func.returns)
+        returns_type = native.returns_type(f.func.returns).cpp_type()
         args = native.arguments(f.func)
         rs.append(f"TORCH_API {returns_type} {n}({', '.join(a.decl() for a in args)});")
 
@@ -49,7 +49,7 @@ void impl({', '.join(a.decl() for a in out_args)});
 
     seen = set()
     for f in g.functions():
-        returns_type = native.returns_type(f.func.returns)
+        returns_type = native.returns_type(f.func.returns).cpp_type()
         args = native.arguments(f.func)
         for k, n in f.dispatch.items():
             if n in seen:
