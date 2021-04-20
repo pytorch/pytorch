@@ -21,7 +21,8 @@ private:
   __m256d values;
 public:
   using value_type = double;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 4;
   }
   Vec256() {}
@@ -113,7 +114,7 @@ public:
     const auto not_nan_mask = _mm256_cmp_pd(values, values, _CMP_EQ_OQ);
     const auto nan_mask = _mm256_cmp_pd(not_nan_mask, zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm256_set1_pd(c10::pi<double>);
-    
+
     const auto neg_mask = _mm256_cmp_pd(values, zero_vec, _CMP_LT_OQ);
     auto angle = _mm256_blendv_pd(zero_vec, pi, neg_mask);
     angle = _mm256_blendv_pd(angle, nan_vec, nan_mask);
@@ -140,6 +141,9 @@ public:
   Vec256<double> atan2(const Vec256<double> &b) const {
     return Vec256<double>(Sleef_atan2d4_u10(values, b));
   }
+  Vec256<double> copysign(const Vec256<double> &sign) const {
+    return Vec256<double>(Sleef_copysignd4(values, sign));
+  }
   Vec256<double> erf() const {
     return Vec256<double>(Sleef_erfd4_u10(values));
   }
@@ -163,6 +167,9 @@ public:
   }
   Vec256<double> i0() const {
     return map(calc_i0);
+  }
+  Vec256<double> i0e() const {
+    return map(calc_i0e);
   }
   Vec256<double> igamma(const Vec256<double> &x) const {
     __at_align32__ double tmp[size()];

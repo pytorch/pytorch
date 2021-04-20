@@ -44,6 +44,8 @@ class TestBundledInputs(TestCase):
             (torch.ones(4, 8, 32, 32).contiguous(memory_format=torch.channels_last),),
             # Special encoding of random tensor.
             (torch.utils.bundled_inputs.bundle_randn(1 << 16),),
+            # Quantized uniform tensor.
+            (torch.quantize_per_tensor(torch.zeros(4, 8, 32, 32), 1, 0, torch.qint8),),
         ]
         torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
             sm, samples, get_expr)
@@ -214,7 +216,7 @@ class TestBundledInputs(TestCase):
         samples = [(torch.tensor([1]),)]
 
         # Test Failure Case both defined
-        try:
+        with self.assertRaises(Exception):
             nn = torch.jit.script(MultipleMethodModel())
             definition = textwrap.dedent("""
                 def _generate_bundled_inputs_for_forward(self):
@@ -228,16 +230,9 @@ class TestBundledInputs(TestCase):
                     nn.foo : samples,
                 },
             )
-        except Exception:
-            pass
-        else:
-            self.fail(
-                "Expected augment_many_model_functions_with_bundled_inputs to throw due to _generate_bundled_inputs_for_forward"
-                + " and inputs being defined, got no exception instead."
-            )
 
         # Test Failure Case neither defined
-        try:
+        with self.assertRaises(Exception):
             mm = torch.jit.script(MultipleMethodModel())
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
                 mm,
@@ -246,15 +241,27 @@ class TestBundledInputs(TestCase):
                     mm.foo : samples,
                 },
             )
-        except Exception:
-            pass
-        else:
-            self.fail(
-                "Expected augment_many_model_functions_with_bundled_inputs to throw due to not having bundled inputs for forward,"
-                + " got no exception instead."
+
+    def test_bad_inputs(self):
+        class SingleTensorModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+        # Non list for input list
+        with self.assertRaises(TypeError):
+            m = torch.jit.script(SingleTensorModel())
+            torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+                m,
+                inputs="foo"  # type: ignore
             )
 
-
+        # List of non tuples. Most common error using the api.
+        with self.assertRaises(TypeError):
+            m = torch.jit.script(SingleTensorModel())
+            torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+                m,
+                inputs=[torch.ones(1, 2), ]  # type: ignore
+            )
 
 if __name__ == '__main__':
     run_tests()

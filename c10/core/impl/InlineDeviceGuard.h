@@ -105,7 +105,7 @@ public:
   /// Sets the device to the given one.
   template <typename U=T, typename std::enable_if<!std::is_same<U, VirtualGuardImpl>::value, int>::type = 0>
   void set_device(at::Device device) {
-    AT_ASSERT((U::static_type == DeviceType::HIP && device.type() == DeviceType::CUDA) ||
+    AT_ASSERT((U::static_type == DeviceType::HIP && device.is_cuda()) ||
               device.type() == U::static_type);
     auto index = device.index();
     if (index == -1) return;

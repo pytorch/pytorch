@@ -80,9 +80,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   else
     conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
   fi
-  if [[ "$CUDA_VERSION" == 9.2* ]]; then
-    conda_install magma-cuda92 -c pytorch
-  elif [[ "$CUDA_VERSION" == 10.0* ]]; then
+
+  if [[ "$CUDA_VERSION" == 10.0* ]]; then
     conda_install magma-cuda100 -c pytorch
   elif [[ "$CUDA_VERSION" == 10.1* ]]; then
     conda_install magma-cuda101 -c pytorch
@@ -114,7 +113,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     boto3==1.16.34 \
     coverage \
     hypothesis==4.53.2 \
-    mypy==0.770 \
+    mypy==0.812 \
     tb-nightly
 
   # Update scikit-learn to a python-3.8 compatible version

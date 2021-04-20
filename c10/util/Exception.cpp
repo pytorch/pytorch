@@ -86,6 +86,16 @@ void torchCheckFail(const char *func, const char *file, uint32_t line, const cha
   throw ::c10::Error({func, file, line}, msg);
 }
 
+void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, const char* userMsg) {
+  torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
+}
+
+// This should never be called. It is provided in case of compilers
+// that don't do any dead code stripping in debug builds.
+void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, const std::string& userMsg) {
+  torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
+}
+
 } // namespace detail
 
 namespace Warning {
@@ -112,9 +122,11 @@ namespace {
       }
 
     private:
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
       static thread_local WarningHandler* warning_handler_;
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   thread_local WarningHandler* ThreadWarningHandler::warning_handler_ = nullptr;
 
 }
@@ -131,6 +143,7 @@ WarningHandler* get_warning_handler() noexcept(true) {
   return ThreadWarningHandler::get_handler();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool warn_always = false;
 
 void set_warnAlways(bool setting) noexcept(true) {

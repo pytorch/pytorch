@@ -173,8 +173,7 @@ struct TORCH_API Module : public Object {
   std::string dump_to_str(
       bool print_method_bodies,
       bool print_attr_values,
-      bool print_param_values,
-      int level) const;
+      bool print_param_values) const;
 
   /// Enables "training" mode.
   void train(bool on = true);
@@ -275,6 +274,13 @@ struct TORCH_API Module : public Object {
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 };
+
+// C++ equivalent api of `torch.jit.freeze`. See documentation there for
+// details.
+TORCH_API Module freeze(
+    const Module& module,
+    c10::optional<std::vector<std::string>> preserved_attrs = c10::nullopt,
+    bool optimize_numerics = true);
 
 namespace detail {
 

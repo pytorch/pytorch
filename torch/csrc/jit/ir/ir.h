@@ -323,6 +323,7 @@ struct TORCH_API Node {
   // null pointers next_in_graph[0] is next pointer next_in_graph[1] is prev
   // pointer using an array to allow the same iterator class for forward and
   // reverse node lists This list represents a topological sort
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-non-private-member-variables-in-classes,modernize-avoid-c-arrays)
   Node* next_in_graph[2] = {nullptr, nullptr};
 
   std::shared_ptr<Wrap<Node>> wrap() {
@@ -436,6 +437,10 @@ struct TORCH_API Node {
   }
 
   void replaceAllUsesWith(Node* n);
+
+  // replaces `this` with a new node with the same inputs and outputs
+  // but a new node symbol. does not destroy `this`
+  Node* replaceWithNewSymbol(Symbol new_symbol);
 
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
@@ -798,7 +803,9 @@ struct TORCH_API Node {
   }
 
   CREATE_ACCESSOR(Float, f)
+  CREATE_ACCESSOR(Complex, c)
   CREATE_ACCESSOR(Floats, fs)
+  CREATE_ACCESSOR(ComplexVals, cs)
   CREATE_ACCESSOR(String, s)
   CREATE_ACCESSOR(Strings, ss)
   CREATE_ACCESSOR(Int, i)
@@ -1088,6 +1095,10 @@ struct Graph {
   size_t next_unique_;
 
   std::unordered_map<std::string, Value*> unique_names_;
+  // name_base_suffix tracks largest suffix currently used by all names sharing
+  // same name_base. Key of this map is name_base, value is largest suffix
+  // numeric value.
+  std::unordered_map<std::string, size_t> name_base_suffix_;
 
   ScopePtr current_scope_;
 
@@ -1419,7 +1430,8 @@ struct TORCH_API ProfileIValueOp : public Node {
   ProfileIValueOp(
       Graph* graph,
       std::function<void(std::vector<IValue>&)> callback)
-      : Node(graph, ::c10::prim::profile_ivalue), callback_(callback) {}
+      : Node(graph, ::c10::prim::profile_ivalue),
+        callback_(std::move(callback)) {}
 
   void cloneFrom(Node* other_) override;
   Node* allocNewInstance(Graph* g) override;

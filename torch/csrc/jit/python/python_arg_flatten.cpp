@@ -20,6 +20,9 @@ static constexpr char ListClose = ']';
 static constexpr char TupleOpen = '(';
 static constexpr char TupleClose = ')';
 static constexpr char Variable = 'v';
+static constexpr char Bool = 'b';
+static constexpr char Long = 'l';
+static constexpr char Double = 'd';
 static constexpr char String = 's';
 static constexpr char NoneType = 'n';
 } // namespace D
@@ -59,12 +62,28 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.strings.emplace_back(str);
     args.desc.structure.push_back(D::String);
   } else if (THPVariable_Check(obj)) {
-    auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
+    auto& var = THPVariable_Unpack(obj);
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Variable);
   } else if (strcmp(THPUtils_typename(obj), "NoneType") == 0) {
     args.desc.structure.push_back(D::NoneType);
+  } else if (PyBool_Check(obj)) { // Wrap integers in bool tensors
+    at::Tensor var = scalar_to_tensor(at::Scalar(THPUtils_unpackBool(obj)));
+    args.vars.push_back(var);
+    args.desc.metadata.emplace_back(var);
+    args.desc.structure.push_back(D::Bool);
+  } else if (PyLong_Check(obj)) { // Wrap integers in long tensors
+    at::Tensor var = scalar_to_tensor(
+        at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(obj))));
+    args.vars.push_back(var);
+    args.desc.metadata.emplace_back(var);
+    args.desc.structure.push_back(D::Long);
+  } else if (PyFloat_Check(obj)) { // Wrap floating points in double tensors
+    at::Tensor var = scalar_to_tensor(THPUtils_unpackDouble(obj));
+    args.vars.push_back(var);
+    args.desc.metadata.emplace_back(var);
+    args.desc.structure.push_back(D::Double);
   } else {
     std::string msg =
         "Only tuples, lists and Variables are supported as JIT inputs/outputs. "
@@ -142,6 +161,9 @@ py::object unflatten_rec(
   } else if (type == D::NoneType) {
     return py::reinterpret_borrow<py::object>(py::none());
   } else {
+    // if (type == D::Long || type == D::Double || type == D::Bool ||
+    // D::Variable) unwrap variables (D::Variable), or unwrap primitive types
+    // (Long, Double, Bool) as variables for tracer.
     if (var_it == var_it_end)
       throw std::runtime_error("Not enough Variables given to unflatten");
     auto var = *var_it++;

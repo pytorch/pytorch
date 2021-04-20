@@ -423,6 +423,21 @@ bool is_float_or_complex_list(PyObject* obj) {
   return true;
 }
 
+static bool is_int_list(PyObject* obj, int broadcast_size) {
+  if (PyTuple_Check(obj) || PyList_Check(obj)) {
+    if (PySequence_Size(obj) == 0) {
+      return true;
+    }
+    auto item = py::reinterpret_steal<py::object>(
+        PySequence_GetItem(obj, 0));
+    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+    // in an intlist argument. Even float or complex scalar tensors.
+    return (THPVariable_Check(item.ptr()) || THPUtils_checkIndex(item.ptr()));
+  }
+  // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
+  return broadcast_size > 0 && THPUtils_checkLong(obj);
+}
+
 // argnum is needed for raising the TypeError, it's used in the error message.
 auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
 {
@@ -444,7 +459,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
         return true;
       }
       if (THPVariable_Check(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
+        const auto& var = THPVariable_Unpack(obj);
         return !var.requires_grad() && var.dim() == 0;
       }
       return false;
@@ -454,7 +469,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
         return true;
       }
       if (THPVariable_Check(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
+        const auto& var = THPVariable_Unpack(obj);
         return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
       }
       return false;
@@ -470,13 +485,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::TENSOR_LIST: {
       return is_tensor_list_and_append_overloaded(obj, &overloaded_args, argnum, true /* throw_error */);
     }
-    case ParameterType::INT_LIST: {
-      if (PyTuple_Check(obj) || PyList_Check(obj)) {
-        return true;
-      }
-      // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
-      return size > 0 && THPUtils_checkLong(obj);
-    }
+    case ParameterType::INT_LIST: return is_int_list(obj, size);
     case ParameterType::FLOAT_LIST: return is_float_or_complex_list(obj);
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
@@ -1062,7 +1071,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     return at::Tensor();
   }
   if (THPVariable_Check(obj)) {
-    return reinterpret_cast<THPVariable*>(obj)->cdata;
+    return THPVariable_Unpack(obj);
   }
 
   at::Scalar scalar;
@@ -1105,7 +1114,7 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
   if (THPVariable_Check(arg)) {
-    return ((THPVariable*)arg)->cdata.item();
+    return THPVariable_Unpack(arg).item();
   }
 
   if (THPUtils_checkLong(arg)) {

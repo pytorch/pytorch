@@ -3,6 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -112,7 +113,9 @@ void print_unsupported_ops_and_throw(
 // The deserializer class which loads the bytecode package from bc files.
 class BytecodeDeserializer final {
  public:
-  explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
+  explicit BytecodeDeserializer(
+      std::unique_ptr<PyTorchStreamReader> reader,
+      uint64_t module_load_options = 0);
   mobile::Module deserialize(c10::optional<at::Device> device);
   mobile::Module deserialize(
       c10::optional<at::Device> device,
@@ -134,25 +137,64 @@ class BytecodeDeserializer final {
       std::shared_ptr<mobile::CompilationUnit> mcu);
   std::unordered_map<std::string, std::string> readMobileMetadata(
       std::shared_ptr<mobile::CompilationUnit> mcu);
+  /**
+   * Loads operators by looking them up in the Dispatcher and returns
+   * the set of operator names (with overload) that are not supported
+   * by the current runtime.
+   */
+  std::unordered_set<std::string> load_and_find_unsupported_operator_names(
+      const std::vector<IValue>& ops_list,
+      mobile::Function* function,
+      int64_t model_version) const;
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_{};
   c10::optional<at::Device> device_;
+  uint64_t module_load_options_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
-    std::unique_ptr<PyTorchStreamReader> reader)
+    std::unique_ptr<PyTorchStreamReader> reader,
+    uint64_t module_load_options)
     : compilation_unit_(std::make_shared<CompilationUnit>()),
-      reader_(std::move(reader)) {}
+      reader_(std::move(reader)),
+      module_load_options_(module_load_options) {}
+
+std::unordered_set<std::string> BytecodeDeserializer::
+    load_and_find_unsupported_operator_names(
+        const std::vector<IValue>& ops_list,
+        mobile::Function* function,
+        int64_t model_version) const {
+  std::unordered_set<std::string> unsupported_op_names;
+  // ops_list is the list of operator names that were read in from
+  // bytecode.plk for the method that is currently being processed.
+  for (const auto& op : ops_list) {
+    auto op_item = op.toTuple()->elements();
+    TORCH_CHECK(
+        op_item.size() == 2, "There should be two parts in an operator name.");
+    auto op_found = function->append_operator(
+        op_item[0].toString()->string(),
+        op_item[1].toString()->string(),
+        model_version);
+    if (!op_found) {
+      unsupported_op_names.emplace(operator_str(
+          op_item[0].toString()->string(), op_item[1].toString()->string()));
+    }
+  }
+  return unsupported_op_names;
+}
 
 TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
-  static const c10::QualifiedName torchPrefix = "__torch__";
-  // HACK: first we check whether the name starts with `__torch__` to
-  // tell if it's "supposed" to be a class type. This is a reliable
+  // HACK: first we check whether the name starts with special prefix to
+  // tell if it's a supported pytorch class type. There are two special
+  // prefixes. "__torch__" for nn module, and "torch.jit" from to_backend.
+  // This is a reliable
   // check today, but there is no guarantee that this is the case. The
   // real solution is to merge type parsers so we can share class
   // resolution logic.
-  if (torchPrefix.isPrefixOf(qn)) {
+  static const c10::QualifiedName torchPrefix = "__torch__";
+  static const c10::QualifiedName jitPrefix = "torch.jit";
+  if (torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) {
     if (compilation_unit_->get_class(qn) == nullptr) {
       auto typeptr = ClassType::create(qn, compilation_unit_, true);
       compilation_unit_->register_type(typeptr);
@@ -269,26 +311,13 @@ void BytecodeDeserializer::parseMethods(
       }
     }
 
-    std::unordered_set<std::string> unsupported_op_names;
-    // ops_list is the list of operator names that were read in from
-    // bytecode.plk for the method that is currently being processed.
-    for (const auto& op : ops_list) {
-      auto op_item = op.toTuple()->elements();
-      TORCH_CHECK(
-          op_item.size() == 2,
-          "There should be two parts in an operator name.");
-      auto op_found = function->append_operator(
-          op_item[0].toString()->string(),
-          op_item[1].toString()->string(),
-          model_version);
-      if (!op_found) {
-        unsupported_op_names.emplace(operator_str(
-            op_item[0].toString()->string(), op_item[1].toString()->string()));
-      }
-    }
-    if (!unsupported_op_names.empty()) {
+    std::unordered_set<std::string> unsupported_op_names =
+        load_and_find_unsupported_operator_names(
+            ops_list, function.get(), model_version);
+    if ((module_load_options_ & MobileModuleLoadOptions::OPERATOR_CHECK) &&
+        !unsupported_op_names.empty()) {
       print_unsupported_ops_and_throw(unsupported_op_names);
-    };
+    }
 
     for (const auto& constant : consts_list) {
       function->append_constant(constant);
@@ -419,9 +448,9 @@ std::unordered_map<std::string, std::string> BytecodeDeserializer::
     return res;
   }
   auto ivalue_dict = readArchive("metadata", mcu).toGenericDict();
-  for (auto it = ivalue_dict.begin(); it != ivalue_dict.end(); ++it) {
-    auto key = it->key().toString()->string();
-    auto value = it->value().toString()->string();
+  for (const auto& it : ivalue_dict) {
+    const auto key = it.key().toString()->string();
+    const auto value = it.value().toString()->string();
     res[key] = value;
   }
   return res;
@@ -510,6 +539,14 @@ c10::IValue BytecodeDeserializer::readArchive(
 
 } // namespace
 
+// Forward declare so that _load_for_mobile() overloads can
+// call this method directly.
+mobile::Module _load_for_mobile_impl(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options);
+
 mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device) {
@@ -550,16 +587,38 @@ mobile::Module _load_for_mobile(
 }
 
 mobile::Module _load_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  auto module = _load_for_mobile_impl(
+      std::move(rai), device, extra_files, module_load_options);
+  return module;
+}
+
+mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files) {
+  auto module = _load_for_mobile_impl(
+      std::move(rai), device, extra_files, _default_mobile_module_load_options);
+  return module;
+}
+
+mobile::Module _load_for_mobile_impl(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
   auto observer = torch::observerConfig().getModuleObserver();
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
   }
+  const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  BytecodeDeserializer deserializer(std::move(reader));
+  BytecodeDeserializer deserializer(std::move(reader), module_load_options);
   try {
     mobile::Module result = deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
@@ -567,6 +626,7 @@ mobile::Module _load_for_mobile(
     if (result.metadata().find("model_name") == result.metadata().end()) {
       copied_metadata["model_name"] = result.name();
     }
+    copied_metadata["model_size"] = c10::guts::to_string(model_size);
     if (observer) {
       observer->onExitLoadModel(instance_key, copied_metadata);
     }
@@ -618,5 +678,26 @@ void _load_extra_only_for_mobile(
   deserializer.deserialize_only_extra(device, extra_files);
 }
 
+namespace mobile {
+
+std::set<std::string> _export_operator_list(
+    torch::jit::mobile::Module& module) {
+  std::set<std::string> operator_list;
+  for (Method func : module.get_methods()) {
+    const Function& function = func.function();
+    const std::shared_ptr<Code> cptr = function.get_code();
+    // op_names below isn't a list of unique operator names. In fact
+    // it can contain the same operator name many many times, so we need
+    // to de-dup the list by adding all the operator names into
+    // an std::set<std::string>.
+    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    for (auto& op_name : op_names) {
+      operator_list.insert(toString(op_name));
+    }
+  }
+  return operator_list;
+}
+
+} // namespace mobile
 } // namespace jit
 } // namespace torch

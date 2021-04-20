@@ -1,6 +1,5 @@
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests, set_cwd
-from torch.testing._internal.mypy_wrapper import config_files
+from torch.testing._internal.common_utils import TestCase, run_tests
 import tempfile
 import torch
 import doctest
@@ -127,48 +126,6 @@ class TestTypeHints(TestCase):
             if result != 0:
                 self.fail(f"mypy failed:\n{stdout}")
 
-    @unittest.skipIf(not HAVE_MYPY, "need mypy")
-    def test_run_mypy(self):
-        """
-        Runs mypy over all files specified in our mypy configs
-        Note that our mypy configs are not shipped in an installed
-        version of PyTorch, so this test will only run mypy in a
-        development setup or in CI.
-        """
-        def is_torch_mypyini(path_to_file):
-            with open(path_to_file, 'r') as f:
-                first_line = f.readline()
-
-            name = os.path.basename(path_to_file)
-            if first_line.startswith(f'# This is the PyTorch {name} file'):
-                return True
-
-            return False
-
-        # to add more configs, edit the implementation of the
-        # config_files function rather than editing this test or adding
-        # more tests to this suite
-        for ini in config_files():
-            with self.subTest(msg=ini):
-                test_dir = os.path.dirname(os.path.realpath(__file__))
-                repo_rootdir = os.path.join(test_dir, '..')
-                mypy_inifile = os.path.join(repo_rootdir, ini)
-                if not (os.path.exists(mypy_inifile) and is_torch_mypyini(mypy_inifile)):
-                    self.skipTest("Can't find PyTorch MyPy config file")
-
-                import numpy
-                if numpy.__version__.startswith('1.20.0.dev0'):
-                    self.skipTest("Typeannotations in numpy-1.20.0-dev are broken")
-
-                # TODO: Would be better not to chdir here, this affects
-                # the entire process!
-                with set_cwd(repo_rootdir):
-                    (stdout, stderr, result) = mypy.api.run([
-                        '--config', mypy_inifile,
-                    ])
-
-                if result != 0:
-                    self.fail(f"mypy failed: {stdout} {stderr}")
 
 if __name__ == '__main__':
     run_tests()

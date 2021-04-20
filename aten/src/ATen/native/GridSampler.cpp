@@ -485,7 +485,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
               }
             }
           } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-            // grid_sampler_compute_source_index will "clip the value" of idx depends on the padding, 
+            // grid_sampler_compute_source_index will "clip the value" of idx depends on the padding,
             // which would cause calculation to be wrong,
             // for example x = -0.1 -> ix = 0 for zero padding, but in bicubic ix = floor(x) = -1
             // There would be more problem in reflection padding, since the -1 and +1 direction is not fixed in boundary condition

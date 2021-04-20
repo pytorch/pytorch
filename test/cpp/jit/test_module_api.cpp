@@ -3,9 +3,11 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/testing/file_check.h>
 #include <torch/torch.h>
 
 namespace torch {
@@ -339,6 +341,20 @@ TEST(ModuleAPITest, Define) {
   )");
   auto result = m.run_method("add_it", torch::ones({}));
   AT_ASSERT(result.toTensor().item<float>() == 6);
+}
+
+TEST(ModuleAPITest, Freezing) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def forward(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  m.eval();
+  auto frozen_mod = torch::jit::freeze(m);
+  auto forward_g = frozen_mod.get_method("forward").graph();
+  testing::FileCheck().check_not("GetAttr")->run(*forward_g);
+  ;
 }
 
 TEST(ModuleAPITest, To_CUDA) {

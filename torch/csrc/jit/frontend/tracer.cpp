@@ -10,6 +10,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -429,7 +430,14 @@ static void gatherParametersAndBuffers(
     if (isCustomClass(s.value)) {
       tracer::setValueTrace(s.value, trace_get_attr);
     }
-    if (self_ty->getAttribute(s.name)->is_module()) {
+
+    auto attr_type = self_ty->getAttribute(s.name);
+    // Skipping Parameters and Buffers that are behind an `InterfaceType`
+    // because it is illegal for InterfaceType to expose any attribute.
+    // And these attributes should never be used/exposed outside of
+    // InterfaceType'd module anyway.
+    if (attr_type->is_module() &&
+        attr_type->kind() != TypeKind::InterfaceType) {
       gatherParametersAndBuffers(
           state, trace_get_attr, Module(s.value.toObject()), qualname);
     }

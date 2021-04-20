@@ -2,13 +2,12 @@
 from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Sequence, Dict, Callable
 import textwrap
 import torch
-from torch._C import TupleType, OptionalType, ListType
+from torch._C import TupleType, ListType
 
 
 T = TypeVar("T")
 
 MAX_RAW_TENSOR_SIZE = 16
-
 
 class InflatableArg(NamedTuple):
     value: Any
@@ -85,11 +84,11 @@ def augment_many_model_functions_with_bundled_inputs(
         and cache the value. If the user chooses this method inputs[<function>]
         should map to None
       - The `inputs` argument to this function can be a dictionary mapping functions to a
-        list of tuples, of the same form that will be returned by get_all_bundled_inputs_for_<function_name>.
-
-      It is highly recommended (though not enforced) that if multiple functions have the same input style, that
-      you create separate bundled inputs for each function. Reusing the same input and bundling it to multiple
-      functions can cause issues with other torch.jit functionality like freeze
+        list of inputs, of the same form that will be returned by get_all_bundled_inputs_for_<function_name>.
+        The type of the inputs is List[Tuple[Any, ...]]. The outer list corresponds with a
+        list of inputs, the inner tuple is the list of args that together make up one input.
+        For inputs of functions that take one arg, this will be a tuple of length one. The Any, ...
+        is the actual data that makes up the args, e.g. a tensor.
 
     Info is an optional parameter that maps functions to a list of strings providing extra information about that
     function's bundled inputs. This could be descriptions, expected outputs, etc.
@@ -103,16 +102,20 @@ def augment_many_model_functions_with_bundled_inputs(
     if not isinstance(model, torch.jit.ScriptModule):
         raise Exception("Only ScriptModule is supported.")
 
+    if not inputs:
+        raise Exception("Please provide inputs for at least 1 function")
+
     get_bundled_inputs_functions_and_info_template = ""
 
     for function, input_list in inputs.items():
         function_name = function.__name__
 
+        if input_list is not None and not isinstance(input_list, Sequence):
+            raise TypeError("Error inputs for function {0} is not a Sequence".format(function_name))
+
         function_arg_types = [arg.type for arg in function.schema.arguments[1:]]  # type: ignore
         deflated_inputs_type: ListType = ListType(TupleType(function_arg_types))
-        inflated_inputs_type: OptionalType[ListType] = OptionalType(deflated_inputs_type)
         model._c._register_attribute("_bundled_inputs_deflated_{name}".format(name=function_name), deflated_inputs_type, [])
-        model._c._register_attribute("_bundled_inputs_inflated_{name}".format(name=function_name), inflated_inputs_type, None)
 
         if hasattr(model, "_generate_bundled_inputs_for_" + function_name):
             if input_list is not None:
@@ -135,6 +138,10 @@ def augment_many_model_functions_with_bundled_inputs(
             deflated_inputs = []
             parts = []
             for inp_idx, args in enumerate(input_list):
+                if not isinstance(args, Tuple) and not isinstance(args, List):  # type: ignore
+                    raise TypeError(
+                        "Error bundled input for function {0} idx: {1} is not a Tuple or a List".format(function_name, inp_idx)
+                    )
                 deflated_args = []
                 parts.append("(")
                 for arg_idx, arg in enumerate(args):
@@ -148,7 +155,6 @@ def augment_many_model_functions_with_bundled_inputs(
             # Back-channel return this expr for debugging.
             if _receive_inflate_expr is not None:
                 _receive_inflate_expr.append(expr)
-            model._bundled_inputs_deflated = deflated_inputs
             setattr(model, "_bundled_inputs_deflated_{name}".format(name=function_name), deflated_inputs)
             definition = textwrap.dedent("""
                 def _generate_bundled_inputs_for_{name}(self):
@@ -162,9 +168,7 @@ def augment_many_model_functions_with_bundled_inputs(
         # Define get_all_bundled_inputs_for_<function_name> that caches the generated inputs.
         model.define(textwrap.dedent("""
             def get_all_bundled_inputs_for_{name}(self):
-                if self._bundled_inputs_inflated_{name} is None:
-                    self._bundled_inputs_inflated_{name} = self._generate_bundled_inputs_for_{name}()
-                all_inputs = self._bundled_inputs_inflated_{name}
+                all_inputs = self._generate_bundled_inputs_for_{name}()
                 assert all_inputs is not None
                 return all_inputs
             """).format(name=function_name))
@@ -226,7 +230,7 @@ def _inflate_expr(arg: T, ref: str) -> Tuple[Union[T, torch.Tensor], str]:
         # These can be represented compactly.
         for fmt in [torch.contiguous_format, torch.channels_last]:
             if arg.is_contiguous(memory_format=fmt) and (arg == arg.flatten()[0]).all().item():
-                return (torch.tensor([arg.flatten()[0]]).expand(*arg.size()),
+                return (arg.flatten()[0].clone().expand(*arg.size()),
                         f"{ref}.contiguous(memory_format={fmt})")
         # Prevent big tensors from being bundled by default.
         # TODO: Provide more useful diagnostics.
