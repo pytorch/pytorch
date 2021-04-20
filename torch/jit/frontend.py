@@ -307,9 +307,6 @@ def build_class_def(ctx, py_def, methods, properties, self_name, assigns):
 
 
 def build_def(ctx, py_def, type_line, def_name, self_name=None):
-    global _args_and_types  # type: ignore[name-defined]
-
-    _args_and_types = None  # type: ignore[name-defined]
     body = py_def.body
     r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
                        py_def.col_offset,
@@ -317,12 +314,12 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None):
 
     # If MonkeyType is installed, get all the consolidated traces for the arguments
     # and the return types from type_trace_db
-
     type_trace_db = torch.jit._script._get_type_trace_db()
+    args_and_types = None  # type: ignore[name-defined]
     if type_trace_db.trace_records:
-        _args_and_types = type_trace_db.get_args_types(def_name)  # type: ignore[name-defined]
+        args_and_types = type_trace_db.get_args_types(def_name)  # type: ignore[name-defined]
 
-    param_list = build_param_list(ctx, py_def.args, self_name)
+    param_list = build_param_list(ctx, py_def.args, self_name, args_and_types)
     return_type = None
     if getattr(py_def, 'returns', None) is not None:
         return_type = build_expr(ctx, py_def.returns)
@@ -342,7 +339,7 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
                      "or use keyword-only arguments with defaults")
 
 
-def build_param_list(ctx, py_args, self_name):
+def build_param_list(ctx, py_args, self_name, args_and_types=None):
     if py_args.kwarg is not None:
         expr = py_args.kwarg
         ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
@@ -358,19 +355,19 @@ def build_param_list(ctx, py_args, self_name):
             if arg is not None:
                 ctx_range = build_expr(ctx, arg).range()
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
-    result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
-    result += [build_param(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
+    result = [build_param(ctx, arg, self_name, False, args_and_types) for arg in py_args.args]
+    result += [build_param(ctx, arg, self_name, True, args_and_types) for arg in py_args.kwonlyargs]
     return result
 
 
-def build_param(ctx, py_arg, self_name, kwarg_only):
+def build_param(ctx, py_arg, self_name, kwarg_only, args_and_types=None):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     name = py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
-    elif _args_and_types:  # type: ignore[name-defined]
-        annotation_expr = Var(Ident(r, _args_and_types[name].pop()))  # type: ignore[name-defined]
+    elif args_and_types:  # type: ignore[name-defined]
+        annotation_expr = Var(Ident(r, args_and_types[name].pop()))  # type: ignore[name-defined]
     elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
     else:
