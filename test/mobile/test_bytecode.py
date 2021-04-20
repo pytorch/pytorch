@@ -28,7 +28,7 @@ pytorch_test_dri = Path(__file__).resolve().parents[1]
 # exported_optimized_scripted_module = optimized_scripted_module._save_for_lite_interpreter(
 #   str(output_model_path))
 
-class testByteCode(TestCase):
+class testVariousModelVersions(TestCase):
 
     def test_load_and_run_model(self):
         script_module_v4 = pytorch_test_dri / "cpp" / "jit" / "script_module_v4.ptl"

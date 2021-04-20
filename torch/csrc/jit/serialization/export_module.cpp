@@ -412,12 +412,11 @@ class ScriptModuleSerializer {
     }
   }
 
-  void useTensorsArchiveTable(bool enable) {
-    use_tensors_archive_table_ = enable;
-  }
-
  private:
-  void writeArchive(const std::string& archive_name, const IValue& value) {
+  void writeArchive(
+      const std::string& archive_name,
+      const IValue& value,
+      bool use_tensors_archive_table = false) {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
     std::vector<c10::ClassTypePtr> memoizedClassTypes;
@@ -430,7 +429,7 @@ class ScriptModuleSerializer {
           return type_name_uniquer_.getUniqueName(t);
         },
         &memoizedClassTypes);
-    if (use_tensors_archive_table_ && !tensors_archive_table_.empty()) {
+    if (use_tensors_archive_table && !tensors_archive_table_.empty()) {
       data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
     }
     data_pickle.protocol();
@@ -439,10 +438,10 @@ class ScriptModuleSerializer {
     size_t i = 0;
     std::string prefix = archive_name + "/";
 
-    // Store all tensors from archives in the tensors_archive_table_resources_
+    // Store all tensors from archives in the tensors_archive_table_writers_
     // list to tensors_archive_table_
-    if (tensors_archive_table_resources_.find(archive_name) !=
-        tensors_archive_table_resources_.end()) {
+    if (tensors_archive_table_writers_.find(archive_name) !=
+        tensors_archive_table_writers_.end()) {
       const auto tensor_candidates = data_pickle.tensorData();
       for (size_t tensor_index = 0; tensor_index < tensor_candidates.size();
            tensor_index++) {
@@ -452,9 +451,9 @@ class ScriptModuleSerializer {
     }
 
     bool can_use_tensors_archive_table =
-        (use_tensors_archive_table_ &&
-         tensors_archive_table_users_.find(archive_name) !=
-             tensors_archive_table_users_.end());
+        (use_tensors_archive_table &&
+         tensors_archive_table_readers_.find(archive_name) !=
+             tensors_archive_table_readers_.end());
 
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
@@ -578,7 +577,7 @@ class ScriptModuleSerializer {
     moduleMethodsTuple(
         module, elements, debug_info_elements, save_mobile_debug_info);
     auto telements = Tup(std::move(elements));
-    writeArchive("bytecode", telements);
+    writeArchive("bytecode", telements, true);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
       writeArchive("mobile_debug", debug_info_telements);
@@ -617,12 +616,27 @@ class ScriptModuleSerializer {
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
 
-  bool use_tensors_archive_table_ = true;
+  // key: tensor, value: pair(arhive_name, index).
+  // This map is used for deduplication tensors from different archive.
   TensorIndexMap tensors_archive_table_;
 
-  std::unordered_set<std::string> tensors_archive_table_resources_ = {
+  // Introduce tensors_archive_table writer and reader here to avoid
+  // duplicate tensors. The tensors from tensors_archive_table_writers_
+  // will be stored in tensors_archive_table_. Currently only tensors from
+  // `constant` archive is in the writer list.
+
+  // Only archive in tensors_archive_table_writers_ set can write tensors to
+  // tensors_archive_table_.
+  std::unordered_set<std::string> tensors_archive_table_writers_ = {
       kArchiveNameConstants};
-  std::unordered_set<std::string> tensors_archive_table_users_ = {
+  // Only archive in tensors_archive_table_readers_ set can use
+  // tensors_archive_table_ as the storage root key. If the tensor exist in
+  // tensors_archive_table_, the storage root key will be {achive_name}/{index},
+  // instead of {index}. The corresponding tensors won't be exported again.
+  // Currently, only archive `bytecode` uses tensors_archive_table_. If another
+  // archive registers in tensors_archive_table_readers_, please be careful with
+  // forward compatiblity breakage.
+  std::unordered_set<std::string> tensors_archive_table_readers_ = {
       kArchiveNameBytecode};
 
   std::unordered_set<c10::NamedTypePtr> converted_types_;
@@ -705,26 +719,5 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   return std::vector<std::string>(names.begin(), names.end());
 }
 
-namespace mobile {
-
-std::set<std::string> _export_operator_list(
-    torch::jit::mobile::Module& module) {
-  std::set<std::string> operator_list;
-  for (Method func : module.get_methods()) {
-    const Function& function = func.function();
-    const std::shared_ptr<Code> cptr = function.get_code();
-    // op_names below isn't a list of unique operator names. In fact
-    // it can contain the same operator name many many times, so we need
-    // to de-dup the list by adding all the operator names into
-    // an std::set<std::string>.
-    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
-    for (auto& op_name : op_names) {
-      operator_list.insert(toString(op_name));
-    }
-  }
-  return operator_list;
-}
-
-} // namespace mobile
 } // namespace jit
 } // namespace torch
