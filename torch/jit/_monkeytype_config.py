@@ -1,6 +1,3 @@
-# !/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 from typing import Optional, Iterable, List, Dict
 from collections import defaultdict
 
@@ -13,8 +10,8 @@ try:
     from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
-    print("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType"
-          "to enable Profile-Directed Typing in TorchScript. Refer https://github.com/Instagram/MonkeyType/blob/master/README.rst"
+    print("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
+          "to enable Profile-Directed Typing in TorchScript. Refer https://github.com/Instagram/MonkeyType/blob/master/README.rst "
           "to install MonkeyType. ")
 
 def get_qualified_name(func):
