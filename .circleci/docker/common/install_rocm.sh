@@ -12,6 +12,8 @@ install_magma() {
     echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
     echo 'DEVCCFLAGS += --amdgpu-target=gfx803 --amdgpu-target=gfx900 --amdgpu-target=gfx906 --amdgpu-target=gfx908 --gpu-max-threads-per-block=256' >> make.inc
     export PATH="${PATH}:/opt/rocm/bin"
+    # Adding env for debugging env
+    env
     make -f make.gen.hipMAGMA -j $(nproc)
     make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
     make testing/testing_dgemm -j $(nproc) MKLROOT=/opt/conda
