@@ -1042,6 +1042,8 @@ class TestCase(expecttest.TestCase):
     def setUp(self):
 
         check_slow_test_from_stats(self)
+        if "test_randperm" not in (self._testMethodName):
+            raise unittest.SkipTest("not interested")
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
