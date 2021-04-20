@@ -5039,9 +5039,6 @@
   structured_delegate: digamma.out
   variants: method
 
-- func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
-  variants: method
-
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
   variants: method
   dispatch:
@@ -5808,6 +5805,11 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: polygamma
+
+- func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CompositeExplicitAutograd: polygamma_
 
 - func: erfinv(Tensor self) -> Tensor
   structured_delegate: erfinv.out
@@ -7444,6 +7446,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool2d_out_cpu
     CUDA: adaptive_max_pool2d_out_cuda
@@ -7451,9 +7454,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d(Tensor self, int[2] output_size) -> (Tensor, Tensor)
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool2d_cpu
-    CUDA: adaptive_max_pool2d_cuda
+  structured_delegate: adaptive_max_pool2d.out
 
 - func: adaptive_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -7470,6 +7471,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool3d_out_cpu
     CUDA: adaptive_max_pool3d_out_cuda
@@ -7477,9 +7479,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d(Tensor self, int[3] output_size) -> (Tensor, Tensor)
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool3d_cpu
-    CUDA: adaptive_max_pool3d_cuda
+  structured_delegate: adaptive_max_pool3d.out
 
 - func: adaptive_max_pool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
