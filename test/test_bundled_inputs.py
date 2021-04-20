@@ -271,12 +271,12 @@ class TestBundledInputs(TestCase):
         m = torch.jit.script(SingleTensorModel())
         torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
             m,
-            inputs=[(torch.ones(1),)]  # type: ignore
+            inputs=[(torch.ones(1),)]
         )
         with self.assertRaisesRegex(Exception, "Models can only be augmented with bundled inputs once."):
             torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
                 m,
-                inputs=[(torch.ones(1),)]  # type: ignore
+                inputs=[(torch.ones(1),)]
             )
 
 if __name__ == '__main__':
