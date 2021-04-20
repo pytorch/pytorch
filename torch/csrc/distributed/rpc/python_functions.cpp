@@ -164,7 +164,7 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
               return;
             }
 
-            child->markCompletedWithDataPtrs(ivalue, std::move(dataPtrs));
+            child->markCompleted(ivalue, std::move(dataPtrs));
           }
         }));
     return child;
