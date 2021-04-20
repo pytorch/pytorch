@@ -43,6 +43,7 @@ class CorePool:
         self._min_core_id: int = min_core_id
         self._max_core_id: int = max_core_id
         self._num_cores = max_core_id - min_core_id + 1
+        print(f"Core pool created: {self._num_cores} cores")
 
         self._available: List[bool] = [
             True for _ in range(min_core_id, min_core_id + self._num_cores)]
@@ -83,7 +84,7 @@ class Runner:
         core_pool: Optional[CorePool] = None,
     ) -> None:
         self._work_items: Tuple[WorkOrder, ...] = work_items
-        self._core_pool: CorePool = core_pool or CorePool(0, min(CPU_COUNT - 4, int(CPU_COUNT * 0.75)))
+        self._core_pool: CorePool = core_pool or CorePool(0, min(CPU_COUNT - 4, 40))
 
         # Working state.
         self._work_queue: List[WorkOrder] = list(work_items)
