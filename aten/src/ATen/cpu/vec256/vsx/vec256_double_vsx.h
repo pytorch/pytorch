@@ -30,7 +30,8 @@ class Vec256<double> {
   using value_type = double;
   using vec_internal_type = vfloat64;
   using vec_internal_mask_type = vbool64;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 4;
   }
   Vec256() {}
@@ -226,6 +227,9 @@ class Vec256<double> {
   }
   Vec256<double> atan2(const Vec256<double>& b) const {
      return {Sleef_atan2d2_u10vsx(_vec0, b._vec0), Sleef_atan2d2_u10vsx(_vec1, b._vec1)};
+  }
+  Vec256<double> copysign(const Vec256<double> &sign) const {
+    return {Sleef_copysignd2_vsx(_vec0, sign._vec0), Sleef_copysignd2_vsx(_vec1, sign._vec1)};
   }
   Vec256<double> erf() const {
      return {Sleef_erfd2_u10vsx(_vec0), Sleef_erfd2_u10vsx(_vec1)};
