@@ -393,7 +393,7 @@ def get_module_concrete_type(nn_module, share_types=True):
 
     return concrete_type
 
-def create_script_module(nn_module, stubs_fn, share_types=True):
+def create_script_module(nn_module, stubs_fn, share_types: bool = True) -> "torch.jit.RecursiveScriptModule":
     """
     Creates a new ScriptModule from an nn.Module
 
@@ -411,7 +411,7 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
     AttributeTypeIsSupportedChecker().check(nn_module)
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
-def create_script_module_impl(nn_module, concrete_type, stubs_fn):
+def create_script_module_impl(nn_module, concrete_type, stubs_fn) -> "torch.jit.RecursiveScriptModule":
     """
     Convert an nn.Module to a RecursiveScriptModule.
 

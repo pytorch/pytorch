@@ -13,7 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Type, TypeVar
 
 
 import torch
@@ -35,6 +35,8 @@ from torch.jit._state import (
 )
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic)
+
+T = TypeVar("T")
 
 torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
@@ -114,9 +116,11 @@ def _get_function_from_type(cls, name):
 
 # ScriptClasses must be new-style classes because we construct them using their
 # __new__ method.
-def _is_new_style_class(cls):
+def _is_new_style_class(cls) -> bool:
     if hasattr(cls, "__class__"):
         return "__dict__" in dir(cls) or hasattr(cls, "__slots__")
+    else:
+        return False
 
 
 def _compile_and_register_class(obj, rcb, qualified_name):
@@ -1124,7 +1128,7 @@ def _check_directly_compile_overloaded(obj):
         )
 
 
-def interface(obj):
+def interface(obj: Type[T]) -> Type[T]:
     if not inspect.isclass(obj):
         raise RuntimeError("interface must be applied to a class")
     if not _is_new_style_class(obj):
@@ -1151,7 +1155,7 @@ def interface(obj):
     mangled_classname = torch._C._jit_script_interface_compile(
         qualified_name, ast, rcb, is_module_interface
     )
-    obj.__torch_script_interface__ = mangled_classname
+    obj.__torch_script_interface__ = mangled_classname  # type: ignore
     return obj
 
 
@@ -1166,7 +1170,7 @@ def _recursive_compile_class(obj, loc):
 CompilationUnit = torch._C.CompilationUnit
 set_module(CompilationUnit, "torch.jit")
 
-def _unwrap_optional(x):
+def _unwrap_optional(x: Optional[T]) -> T:
     assert x is not None, "Unwrapping null optional"
     return x
 
