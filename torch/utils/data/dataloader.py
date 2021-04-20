@@ -112,8 +112,8 @@ class DataLoader(Generic[T_co]):
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
         generator (torch.Generator, optional): If not ``None``, this RNG will be used
-            by RandomSampler and multiprocessing to generate `base_seed` for workers.
-            (default: ``None``)
+            by RandomSampler to generate random indexes and multiprocessing to generate
+            `base_seed` for workers. (default: ``None``)
         prefetch_factor (int, optional, keyword-only arg): Number of samples loaded
             in advance by each worker. ``2`` means there will be a total of
             2 * num_workers samples prefetched across all workers. (default: ``2``)
