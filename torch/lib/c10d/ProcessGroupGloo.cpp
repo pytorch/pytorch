@@ -709,7 +709,9 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
   // Bump collective counter
-  sequenceNum_->increment();
+  if (sequenceNum_) {
+    sequenceNum_->increment();
+  }
   workQueue_.push_back(std::move(work));
   lock.unlock();
 
