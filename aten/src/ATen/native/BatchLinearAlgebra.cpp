@@ -1606,9 +1606,8 @@ std::tuple<Tensor&, Tensor&> triangular_solve_out(const Tensor& self, const Tens
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template<typename scalar_t>
-static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
-                        std::vector<int64_t>& infos) {
+template <typename scalar_t>
+static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n) {
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
@@ -1627,6 +1626,7 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
   int lwork = -1;
   scalar_t wkopt;
   lapackGeqrf<scalar_t>(m, n, self_data, m, tau_data, &wkopt, lwork, &info);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
   lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
@@ -1636,10 +1636,10 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 
     // now compute the actual R and TAU
     lapackGeqrf<scalar_t>(m, n, self_working_ptr, m, tau_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
+
+    // info from lapackGeqrf only reports if the i-th parameter is wrong
+    // so we don't need to check it all the time
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
   }
 #endif
 }
@@ -1647,7 +1647,6 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string mode) {
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = _parse_qr_mode(mode);
-  std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
 
   // Setup inputs for apply_geqrf
@@ -1682,13 +1681,8 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string
   q_working_copy.narrow(-1, 0, n).copy_(self);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cpu", [&]{
-    apply_geqrf<scalar_t>(q_working_copy, tau_working_copy, m, n, infos);
+    apply_geqrf<scalar_t>(q_working_copy, tau_working_copy, m, n);
   });
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "qr_cpu");
-  } else {
-    singleCheckErrors(infos[0], "qr_cpu");
-  }
 
   R = q_working_copy.slice(-2, 0, n_columns_q).slice(-1, 0, n).triu();
   if (!compute_q) {
