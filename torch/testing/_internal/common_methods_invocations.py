@@ -4716,40 +4716,28 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.complex64])
                    )),
-    OpInfo('radd',
+    OpInfo('__radd__',
            op=torch.Tensor.__radd__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/53797
-               # JIT doesn't understand complex literals
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,),
-    OpInfo('rdiv',
+    OpInfo('__rdiv__',
            op=torch.Tensor.__rdiv__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/53797
-               # JIT doesn't understand complex literals
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,),
-    OpInfo('rmul',
+    OpInfo('__rmul__',
            op=torch.Tensor.__rmul__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/53797
-               # JIT doesn't understand complex literals
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,),
-    OpInfo('rpow',
+    OpInfo('__rpow__',
            op=torch.Tensor.__rpow__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
@@ -4760,10 +4748,14 @@ op_db: List[OpInfo] = [
                SkipInfo('TestOpInfo', 'test_supported_backward', device_type='cpu',
                         dtypes=(torch.float16,)),
 
-               # Reference: https://github.com/pytorch/pytorch/issues/53797
-               # JIT doesn't understand complex literals
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
+           assert_autodiffed=True,),
+    OpInfo('__rsub__',
+           op=torch.Tensor.__rsub__,
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_rbinops,
+           supports_out=False,
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,),
     OpInfo('rsub',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
