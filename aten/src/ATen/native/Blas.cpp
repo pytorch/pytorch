@@ -22,6 +22,10 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
 }
 
 TORCH_META_FUNC(mv)(const Tensor &self, const Tensor &vec) {
+  TORCH_CHECK((self.dim() == 2 && vec.dim() == 1),
+    "matrix x vector expected, got ", self.dim(), ", ", vec.dim());
+  TORCH_CHECK(self.size(1) == vec.size(0),
+     "size mismatch, got ", self.size(0), ", ""x", vec.size(0));
   set_output(0, {self.size(0)}, self.options());
 }
 
