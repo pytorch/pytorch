@@ -18,7 +18,7 @@ Features described in this documentation are classified by release status:
   breaking changes can happen and notice will be given one release ahead
   of time).
 
-  *Beta:*  Features are tagged as Beta because the API may change based on
+  *Beta:*  These features are tagged as Beta because the API may change based on
   user feedback, because the performance needs to improve, or because
   coverage across operators is not yet complete. For Beta features, we are
   committing to seeing the feature through to the Stable classification.

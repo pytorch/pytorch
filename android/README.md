@@ -201,8 +201,7 @@ After that, you can use libtorch C++ API from your native code.
 namespace pytorch_testapp_jni {
 namespace {
     struct JITCallGuard {
-      torch::autograd::AutoGradMode no_autograd_guard{false};
-      torch::AutoNonVariableTypeMode non_var_guard{true};
+      c10::InferenceMode guard;
       torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard{false};
     };
 }
