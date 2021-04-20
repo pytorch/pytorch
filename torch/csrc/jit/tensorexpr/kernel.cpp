@@ -1434,6 +1434,47 @@ Tensor* TensorExprKernel::computeOperandValue(
              const ExprHandle& end,
              const ExprHandle& weight) { return a + weight * (end - a); });
     } break;
+    case aten::remainder: {
+      auto imodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return Mod::make(lhs, rhs);
+      };
+      auto fmodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        auto lhs_t = promoteHalfToFloat(lhs);
+        auto rhs_t = promoteHalfToFloat(rhs);
+        return fmod((rhs_t + fmod(lhs_t, rhs_t)), rhs_t);
+      };
+      {
+        auto const& shape =
+            broadcastShapes(valueShape(inputs[0]), valueShape(inputs[1]));
+        return Compute(
+            "aten_remainder",
+            c10::fmap<DimArg>(shape),
+            [&](const std::vector<VarHandle>& axes) {
+              std::vector<ExprHandle> indices(axes.begin(), axes.end());
+              std::vector<ExprHandle> exprInputs = {
+                  tensorOrConstant(inputs[0], indices),
+                  tensorOrConstant(inputs[1], indices),
+              };
+
+              promoteInputs(exprInputs);
+              bool allInt = true;
+              for (auto& e : exprInputs) {
+                if (e.dtype().is_floating_point()) {
+                  allInt = false;
+                  break;
+                }
+              }
+              if (allInt) {
+                return demoteOutput(
+                    imodImpl(exprInputs[0], exprInputs[1]), outputType);
+              } else {
+                return demoteOutput(
+                    fmodImpl(exprInputs[0], exprInputs[1]), outputType);
+              }
+            });
+      }
+
+    } break;
     case aten::acos: {
       return computeOneOperand(
           "aten_acos",
@@ -1709,47 +1750,6 @@ Tensor* TensorExprKernel::computeOperandValue(
           },
           false /* promote_inputs */);
     } break;
-    case aten::remainder: {
-      auto imodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
-        return Mod::make(lhs, rhs);
-      };
-      auto fmodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
-        auto lhs_t = promoteHalfToFloat(lhs);
-        auto rhs_t = promoteHalfToFloat(rhs);
-        return fmod((rhs_t + fmod(lhs_t, rhs_t)), rhs_t);
-      };
-      {
-        auto const& shape =
-            broadcastShapes(valueShape(inputs[0]), valueShape(inputs[1]));
-        return Compute(
-            "aten_remainder",
-            c10::fmap<DimArg>(shape),
-            [&](const std::vector<VarHandle>& axes) {
-              std::vector<ExprHandle> indices(axes.begin(), axes.end());
-              std::vector<ExprHandle> exprInputs = {
-                  tensorOrConstant(inputs[0], indices),
-                  tensorOrConstant(inputs[1], indices),
-              };
-
-              promoteInputs(exprInputs);
-              bool allInt = true;
-              for (auto& e : exprInputs) {
-                if (e.dtype().is_floating_point()) {
-                  allInt = false;
-                  break;
-                }
-              }
-              if (allInt) {
-                return demoteOutput(
-                    imodImpl(exprInputs[0], exprInputs[1]), outputType);
-              } else {
-                return demoteOutput(
-                    fmodImpl(exprInputs[0], exprInputs[1]), outputType);
-              }
-            });
-      }
-
-    } break;
     case aten::rand_like: {
       return computeOneOperand(
           "aten_rand_like",
@@ -1909,6 +1909,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::pow:
     case aten::fmod:
     case aten::lerp:
+    case aten::remainder:
     case aten::acos:
     case aten::asin:
     case aten::cosh:
@@ -1930,7 +1931,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::frac:
     case aten::lgamma:
     case aten::clamp:
-    case aten::remainder:
     case aten::slice:
     case aten::unsqueeze:
     case aten::batch_norm: {
