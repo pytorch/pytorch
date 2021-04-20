@@ -67,7 +67,7 @@ Examples::
             [1.9586+2.0626j, 9.4160+0.0000j]], dtype=torch.complex128)
 
     >>> a = torch.randn(3, 2, 2, dtype=torch.float64)
-    >>> a = a @ a.transpose(-2, -1) + torch.eye(2).squeeze(0)  # creates a batch of SPD matrices
+    >>> a = a @ a.transpose(-2, -1) + torch.eye(2).squeeze(0)  # symmetric positive definite  matrices
     >>> l = torch.linalg.cholesky(a)
     >>> a
     tensor([[[ 1.1629,  2.0237],
@@ -94,7 +94,7 @@ Examples::
 inv = _add_docstr(_linalg.linalg_inv, r"""
 linalg.inv(input, *, out=None) -> Tensor
 
-Computes the `inverse`_ of square matrix if it exists. Supports batched inputs
+Computes the `inverse`_ of square matrix if it exists. Supports batched inputs.
 
 Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
 
@@ -106,8 +106,8 @@ Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
 
 .. seealso::
 
-        :func:`torch.linalg.pinv` computes the Moore-Penrose pseudoinverse of matrices of
-        any shape.
+        :func:`torch.linalg.pinv` computes the pseudoinverse (Moore-Penrose inverse) of matrices
+        of any shape.
 
         :func:torch.linalg.solve computes ``input.inv() @ other``.
         It is always prefered to use :func:`torch.linalg.solve` when possible, as it is
@@ -121,7 +121,7 @@ Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:
-    RuntimeError: if the :attr:`input` matrix or any matrix in the batch :attr:`input` is not invertible
+    RuntimeError: if the :attr:`input` matrix or any matrix in the batch :attr:`input` is not invertible.
 
 Examples::
 
@@ -169,8 +169,9 @@ Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
 
 .. seealso::
 
-        :func:`torch.linalg.slogdet` computes the sign and logarithm of the norm of
-        the determinant of square matrices.
+        :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
+        absolute value (resp. modulus) of the determinant of real-valued (resp. complex)
+        square matrices.
 
 Args:
     input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
@@ -211,9 +212,10 @@ Example::
 slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
 linalg.slogdet(input, *, out=None) -> (Tensor, Tensor)
 
-Computes the sign and logarithm of the norm of the determinant of a square matrix. Supports batched inputs.
+Computes the sign and natural logarithm of the absolute value of the determinant of a square matrix.
+Supports batched inputs.
 
-For a complex :attr:`input`, it returns the angle and the logarithm of the modulus of the
+For a complex :attr:`input`, it returns the angle and the natural logarithm of the modulus of the
 determinant, that is, a logarithmic polar decomposition of the determinant.
 
 It returns a named tuple `(sign, logabsdet)`.
@@ -266,13 +268,13 @@ For a square matrix :math:`A`, this is defined as
 
 .. math::
 
-    A = V \operatorname{diag}(L) V^{-1}
+    A = V \operatorname{diag}(\Lambda) V^{-1}
 
 This decomposition exists if and only if :math:`A` is `diagonalizable`_. This is the case when all its eigenvalues are different.
 
 The returned decomposition is a named tuple `(eigenvalues, eigenvectors)`,
-which corresponds to :math:`L`, :math:`V` above. If :attr:`input` is a batch of matrices,
-then `L` and `V` are also batched with the same batch dimensions.
+which corresponds to :math:`\Lambda`, :math:`V` above. If :attr:`input` is a batch of matrices,
+then `eigenvalues` and `eigenvectors` are also batched with the same batch dimensions.
 
 Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
 The output tensors `eigenvalues` and `eigenvectors` will always be complex-valued, even when :attr:`input` is real.
@@ -387,10 +389,10 @@ For a complex Hermitian or real symmetric matrix :math:`A`, this is defined as
 
 .. math::
 
-    A = V \operatorname{diag}(L) V^{\text{H}}
+    A = Q \operatorname{diag}(\Lambda) Q^{\text{H}}
 
-where :math:`V^{\text{H}}` is the conjugate transpose when :math:`V` is complex, and the transpose when :math:`V` is real-valued.
-The matrix :math:`V` (and thus :math:`V^{\text{H}}`) is orthogonal in the real case,
+where :math:`Q^{\text{H}}` is the conjugate transpose when :math:`Q` is complex, and the transpose when :math:`Q` is real-valued.
+The matrix :math:`Q` (and thus :math:`Q^{\text{H}}`) is orthogonal in the real case,
 and unitary in the complex case.
 
 :attr:`input` is assumed to be Hermitian (resp. symmetric), but this is not checked internally.
@@ -398,8 +400,8 @@ When :attr:`UPLO` is `'L'` (default), only the lower triangular part of each mat
 When :attr:`UPLO` is `'U'`, only the upper triangular part of each matrix is used.
 
 The returned decomposition is represented as a namedtuple `(eigenvalues, eigenvectors)`,
-which corresponds to :math:`L`, :math:`V` above. If :attr:`input` is a batch of matrices,
-then `L` and `V` are also batched with the same batch dimensions.
+which corresponds to :math:`\Lambda`, :math:`Q` above. If :attr:`input` is a batch of matrices,
+then `eigenvalue` and `eigenvectors` are also batched with the same batch dimensions.
 
 The eigenvalues are returned in ascending order.
 
@@ -423,8 +425,8 @@ The output tensor `eigenvectors` will have the same dtype as :attr:`input`.
              platforms, like NumPy, or inputs on different devices, may produce different
              eigenvectors.
 
-.. warning:: If `V` is used to compute gradients, the gradient will only be finite when
-             :attr:`input` does not have repeated eigenvalues.
+.. warning:: If the `eigenvectors` are used to compute gradients, the gradient will only be
+             finite when :attr:`input` does not have repeated eigenvalues.
              Furthermore, if the distance between any two eigvalues is close to zero,
              the gradient will be numerically unstable, as it depends on the eigenvalues
              :math:`\lambda_i` through the computation of
@@ -572,7 +574,8 @@ See `Representation of Orthogonal or Unitary Matrices`_ for further details.
 
 .. seealso::
 
-        :func:`torch.geqrf` is used together with this function to form the Q from the QR decomposition.
+        :func:`torch.geqrf` can be used together with this function to form the `Q` from the
+        :func:`~qr` decomposition.
 
 Args:
     input (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
@@ -583,7 +586,7 @@ Keyword args:
 
 Raises:
     RuntimeError: if :attr:`input` doesn't satisfy the requirement `m >= n`,
-                  or :attr:`tau` doesn't satisfy the requirement `n >= r`
+                  or :attr:`tau` doesn't satisfy the requirement `n >= k`.
 
 Examples::
 
@@ -656,8 +659,8 @@ four tensors `(solution, residuals, rank, singular_values)` containing:
   otherwise it is an empty tensor.
 
 .. note::
-    The solution to this problem can be computed in terms of the Moore-Penrose pseudoinverse of
-    `A` as `A.pinv() @ B`.
+    The solution to this problem can be computed in terms of the pseudoinverse
+    (Moore-Penrose inverse) of `A` as `A.pinv() @ B`.
     For this reason, this function is a faster and more stable way of computing `A.pinv() @ B`.
 
 .. note::
@@ -1385,7 +1388,7 @@ Examples::
 pinv = _add_docstr(_linalg.linalg_pinv, r"""
 linalg.pinv(input, rcond=1e-15, hermitian=False, *, out=None) -> Tensor
 
-Computes the Moore-Penrose pseudoinverse of a matrix. Supports batched inputs.
+Computes the pseudoinverse (Moore-Penrose inverse) of a matrix. Supports batched inputs.
 
 If :attr:`hermitian`\ `= True`, :attr:`input` should be a complex Hermitian or real symmetric
 matrix or batch of matrices. In this case, it will just use the lower-triangular half of the matrix.
@@ -1523,7 +1526,7 @@ Keyword args:
 
 Raises:
     RuntimeError: if the :attr:`input` matrix is not invertible or any matrix in a batched :attr:`input`
-                  is not invertible
+                  is not invertible.
 
 Examples::
 
@@ -1718,14 +1721,15 @@ Differences with `numpy.linalg.qr`:
 
 .. note:: This function uses LAPACK and MAGMA for CPU and CUDA inputs respectively.
 
-.. warning:: The QR decomposition is only locally unique when the input matrix has
-             independent columns. If this is not the case, different platforms, like NumPy,
+.. warning:: The QR decomposition is only unique up to sign of the diagonal of `R` when the
+             input matrix has independent columns.
+             If this is not the case, different platforms, like NumPy,
              or inputs on different devices, may produce different valid decompositions.
 
 .. warning:: Backpropagation is only supported if the first `k = min(m, n)` columns
              of every matrix in :attr:`input` are linearly independent.
              If this condition is not met, no error will be thrown, but the gradient produced
-             may be anything.
+             will be incorrect.
              This is because the QR decomposition is not differentiable at these points.
 
 Args:
