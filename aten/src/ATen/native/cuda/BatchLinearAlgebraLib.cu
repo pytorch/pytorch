@@ -60,6 +60,7 @@ void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
   at::cuda::blas::geqrfBatched(handle, m, n, input_ptr_array_data, lda, tau_ptr_array_data, &info, batch_size);
 
   // info only indicates wrong arguments to geqrfBatched call
+  // info is a host variable, we can check it without device synchronization
   TORCH_INTERNAL_ASSERT(info == 0);
 #endif
 }
