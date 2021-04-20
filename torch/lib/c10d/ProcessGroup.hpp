@@ -10,6 +10,7 @@
 #include <ATen/ATen.h>
 
 #include <c10d/Types.hpp>
+#include <c10d/Utils.hpp>
 #include <c10d/sequence_num.hpp>
 
 // *************************************************************************
@@ -326,6 +327,9 @@ class ProcessGroup : public torch::CustomClassHolder {
   const int size_;
   // Optional sequence number structure for matching collectives.
   c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
+  // Debug level setting. It is parsed once when ProcessGroup is constructed and
+  // remains the same across use of this process group.
+  DistributedDebugLevel dist_debug_level_;
 };
 
 } // namespace c10d
