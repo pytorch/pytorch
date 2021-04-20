@@ -114,7 +114,8 @@ class _ObserverBase(ObserverBase):
     eps: torch.Tensor
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 reduce_range=False, quant_min=None, quant_max=None):
+                 reduce_range=False, quant_min=None, quant_max=None, factory_kwargs=None) -> None:
+        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         super(_ObserverBase, self).__init__(dtype=dtype)
         self.qscheme = qscheme
         if reduce_range:
@@ -123,7 +124,7 @@ class _ObserverBase(ObserverBase):
                     reduce_range will be deprecated in a future release of PyTorch."
             )
         self.reduce_range = reduce_range
-        self.register_buffer('eps', torch.tensor([torch.finfo(torch.float32).eps]))
+        self.register_buffer('eps', torch.tensor([torch.finfo(torch.float32).eps], **factory_kwargs))
         assert self.qscheme in (
             torch.per_tensor_affine,
             torch.per_tensor_symmetric,
@@ -367,21 +368,23 @@ class MinMaxObserver(_ObserverBase):
     max_val: torch.Tensor
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 reduce_range=False, quant_min=None, quant_max=None):
+                 reduce_range=False, quant_min=None, quant_max=None, factory_kwargs=None) -> None:
+
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
         # instruction does not overflow. We allow for a reduce_range argument to
         # observers that reduces the quantized range to (0,127) or (-64, 63).
         # For more details see aten/src/ATen/native/quantized/cpu/qconv.cpp
         # This is not an optimal choice for non x86 backends as it loses a bit
         # of precision for activations.
-
         super(MinMaxObserver, self).__init__(dtype=dtype,
                                              qscheme=qscheme,
                                              reduce_range=reduce_range,
                                              quant_min=quant_min,
-                                             quant_max=quant_max)
-        self.register_buffer('min_val', torch.tensor(float('inf')))
-        self.register_buffer('max_val', torch.tensor(float('-inf')))
+                                             quant_max=quant_max,
+                                             factory_kwargs=factory_kwargs)
+        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
+        self.register_buffer('min_val', torch.tensor(float('inf'), **factory_kwargs))
+        self.register_buffer('max_val', torch.tensor(float('-inf'), **factory_kwargs))
         if self.qscheme == torch.per_tensor_symmetric and \
            self.reduce_range and \
            self.dtype == torch.quint8:
@@ -456,13 +459,14 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
     """
     def __init__(self, averaging_constant=0.01, dtype=torch.quint8,
                  qscheme=torch.per_tensor_affine, reduce_range=False,
-                 quant_min=None, quant_max=None):
+                 quant_min=None, quant_max=None, **kwargs) -> None:
         self.averaging_constant = averaging_constant
         super(MovingAverageMinMaxObserver, self).__init__(dtype=dtype,
                                                           qscheme=qscheme,
                                                           reduce_range=reduce_range,
                                                           quant_min=quant_min,
-                                                          quant_max=quant_max)
+                                                          quant_max=quant_max,
+                                                          **kwargs)
 
     def forward(self, x_orig):
         if x_orig.numel() == 0:
@@ -514,15 +518,17 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     def __init__(self, ch_axis=0, dtype=torch.quint8,
                  qscheme=torch.per_channel_affine, reduce_range=False,
-                 quant_min=None, quant_max=None):
+                 quant_min=None, quant_max=None, factory_kwargs=None) -> None:
         super(PerChannelMinMaxObserver, self).__init__(dtype=dtype,
                                                        qscheme=qscheme,
                                                        reduce_range=reduce_range,
                                                        quant_min=quant_min,
-                                                       quant_max=quant_max)
+                                                       quant_max=quant_max,
+                                                       factory_kwargs=factory_kwargs)
+        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.ch_axis = ch_axis
-        self.register_buffer('min_vals', torch.tensor([]))
-        self.register_buffer('max_vals', torch.tensor([]))
+        self.register_buffer('min_vals', torch.tensor([], **factory_kwargs))
+        self.register_buffer('max_vals', torch.tensor([], **factory_kwargs))
         if (
             self.qscheme == torch.per_channel_symmetric
             and self.reduce_range
@@ -637,10 +643,10 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
 
     def __init__(self, averaging_constant=0.01, ch_axis=0, dtype=torch.quint8,
                  qscheme=torch.per_channel_affine, reduce_range=False,
-                 quant_min=None, quant_max=None):
+                 quant_min=None, quant_max=None, **kwargs) -> None:
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
             ch_axis=ch_axis, dtype=dtype, qscheme=qscheme,
-            reduce_range=reduce_range, quant_min=quant_min, quant_max=quant_max)
+            reduce_range=reduce_range, quant_min=quant_min, quant_max=quant_max, **kwargs)
         self.averaging_constant = averaging_constant
 
     def forward(self, x_orig):
@@ -703,16 +709,19 @@ class HistogramObserver(_ObserverBase):
         upsample_rate: int = 128,
         dtype: torch.dtype = torch.quint8,
         qscheme=torch.per_tensor_affine,
-        reduce_range=False
-    ):
+        reduce_range=False,
+        factory_kwargs=None,
+    ) -> None:
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(dtype=dtype,
                                                 qscheme=qscheme,
-                                                reduce_range=reduce_range)
+                                                reduce_range=reduce_range,
+                                                factory_kwargs=factory_kwargs)
+        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.bins = bins
-        self.register_buffer('histogram', torch.zeros(self.bins))
-        self.register_buffer('min_val', torch.tensor(float('inf')))
-        self.register_buffer('max_val', torch.tensor(float('-inf')))
+        self.register_buffer('histogram', torch.zeros(self.bins, **factory_kwargs))
+        self.register_buffer('min_val', torch.tensor(float('inf'), **factory_kwargs))
+        self.register_buffer('max_val', torch.tensor(float('-inf'), **factory_kwargs))
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         self.upsample_rate = upsample_rate
 
@@ -1010,7 +1019,7 @@ class PlaceholderObserver(ObserverBase):
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
     """
-    def __init__(self, dtype=torch.float32, custom_op_name="", compute_dtype=None):
+    def __init__(self, dtype=torch.float32, custom_op_name="", compute_dtype=None) -> None:
         super(PlaceholderObserver, self).__init__(dtype=dtype)
         # dtype of input of the target operator, e.g. for dynamic quantization
         # ops, the dtype will be float32
@@ -1070,7 +1079,7 @@ class NoopObserver(ObserverBase):
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
     """
-    def __init__(self, dtype=torch.float16, custom_op_name=""):
+    def __init__(self, dtype=torch.float16, custom_op_name="") -> None:
         super(NoopObserver, self).__init__(dtype=dtype)
         self.dtype = dtype
         self.custom_op = custom_op_name
