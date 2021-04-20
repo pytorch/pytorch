@@ -4114,6 +4114,7 @@ else:
         test_func(self, device, 'method')
         test_func(self, device, 'out')
 
+    @onlyOnCPUAndCUDA
     def test_nondeterministic_alert_gather(self, device):
         def test_func(op_call):
             a = torch.randn(3, 3, device=device, requires_grad=True)
