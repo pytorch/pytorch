@@ -1,13 +1,13 @@
 from torch.utils.data import IterDataPipe, functional_datapipe
 from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
-from .callable import MapIterDataPipe
+from .callable import _CallableIterDataPipe
 
 T_co = TypeVar('T_co', covariant=True)
 
 
 @functional_datapipe('filter')
-class FilterIterDataPipe(MapIterDataPipe):
+class FilterIterDataPipe(_CallableIterDataPipe):
     r""" :class:`FilterIterDataPipe`.
 
     Iterable DataPipe to filter elements from datapipe according to filter_fn.
@@ -28,7 +28,7 @@ class FilterIterDataPipe(MapIterDataPipe):
     def __iter__(self) -> Iterator[T_co]:
         res: bool
         for data in self.datapipe:
-            res = self.fn(data, *self.args, **self.kwargs)
+            res = self.fn[0](data, *self.args[0], **self.kwargs[0])
             if not isinstance(res, bool):
                 raise ValueError("Boolean output is required for "
                                  "`filter_fn` of FilterIterDataPipe")
