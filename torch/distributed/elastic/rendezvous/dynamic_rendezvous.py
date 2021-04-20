@@ -140,6 +140,18 @@ class RendezvousTimeout:
             setattr(self, "_" + name, timeout)
 
 
+@dataclass(repr=False, eq=False, frozen=True)
+class RendezvousSettings:
+    """Holds the settings of the rendezvous."""
+
+    run_id: str
+    min_nodes: int
+    max_nodes: int
+    timeout: RendezvousTimeout
+    keep_alive_interval: timedelta
+    keep_alive_max_attempt: int
+
+
 @dataclass(eq=True, frozen=True)
 class _NodeDesc:
     """Describes a node in the rendezvous.
@@ -250,11 +262,9 @@ class DynamicRendezvousHandler(RendezvousHandler):
     """
 
     _run_id: str
+    _settings: RendezvousSettings
     _store: Store
     _backend: RendezvousBackend
-    _min_nodes: int
-    _max_nodes: int
-    _timeout: RendezvousTimeout
 
     def __init__(
         self,
@@ -279,20 +289,22 @@ class DynamicRendezvousHandler(RendezvousHandler):
                 f"minimum number of nodes ({min_nodes})."
             )
 
-        self._run_id = run_id
+        self._settings = RendezvousSettings(
+            run_id,
+            min_nodes,
+            max_nodes,
+            timeout or RendezvousTimeout(),
+            keep_alive_interval=timedelta(seconds=5),
+            keep_alive_max_attempt=3,
+        )
 
         self._store = store
         self._backend = backend
 
-        self._min_nodes = min_nodes
-        self._max_nodes = max_nodes
-
-        self._timeout = timeout or RendezvousTimeout()
-
     @property
-    def run_id(self) -> str:
-        """Gets the run id of the rendezvous."""
-        return self._run_id
+    def settings(self) -> RendezvousSettings:
+        """Gets the settings of the rendezvous."""
+        return self._settings
 
     @property
     def store(self) -> Store:
@@ -303,21 +315,6 @@ class DynamicRendezvousHandler(RendezvousHandler):
     def backend(self) -> RendezvousBackend:
         """Gets the backend used to hold the rendezvous state."""
         return self._backend
-
-    @property
-    def min_nodes(self) -> int:
-        """Gets the minimum number of nodes to admit to the rendezvous."""
-        return self._min_nodes
-
-    @property
-    def max_nodes(self) -> int:
-        """Gets the maximum number of nodes to admit to the rendezvous."""
-        return self._max_nodes
-
-    @property
-    def timeout(self) -> RendezvousTimeout:
-        """Gets the timeout configuration of the rendezvous."""
-        return self._timeout
 
     def get_backend(self) -> str:
         """See base class."""
@@ -341,7 +338,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
     def get_run_id(self) -> str:
         """See base class."""
-        return self._run_id
+        return self.settings.run_id
 
     def shutdown(self) -> bool:
         """See base class."""
