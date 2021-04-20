@@ -59,7 +59,7 @@ class SequentialSampler(Sampler[int]):
     """
     data_source: Sized
 
-    def __init__(self, data_source: Sized) -> None:
+    def __init__(self, data_source: Sized) -> None:  # type: ignore
         self.data_source = data_source
 
     def __iter__(self) -> Iterator[int]:
