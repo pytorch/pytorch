@@ -11,8 +11,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
-#include <csignal>
-#include <iostream>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
