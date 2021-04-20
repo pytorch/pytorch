@@ -117,7 +117,7 @@ struct DeepAndWideFast : torch::nn::Module {
       // tensor views on the output that are passed to the _out ops above.
       at::native::_cat_out_cpu(
           {prealloc_tensors[5], prealloc_tensors[2]}, 1, prealloc_tensors[6]);
-      at::addmm_out(
+      at::cpu::addmm_out(
           fc_b_, prealloc_tensors[6], fc_w_t_, 1, 1, prealloc_tensors[7]);
       at::native::sigmoid_out(prealloc_tensors[7], prealloc_tensors[8]);
 
