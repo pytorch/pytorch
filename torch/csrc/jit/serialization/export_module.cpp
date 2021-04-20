@@ -438,10 +438,10 @@ class ScriptModuleSerializer {
     size_t i = 0;
     std::string prefix = archive_name + "/";
 
-    // TODO: currently there exists logic only for archive constant and bytecode,
-    // to avoid exporting duplicate tensors. The logic can be more generic such that it
-    // can be used by other tensors from other archive, to avoid deduplicating tensors
-    // among different archives.
+    // TODO: currently there exists logic only for archive constant and
+    // bytecode, to avoid exporting duplicate tensors. The logic can be more
+    // generic such that it can be used by other tensors from other archive, to
+    // avoid deduplicating tensors among different archives.
 
     // Store all tensors from archives `constants` to tensors_archive_table_
     if (archive_name == kArchiveNameConstants) {
@@ -453,8 +453,8 @@ class ScriptModuleSerializer {
       }
     }
 
-    // Export deduplicate tensors only if use_tensors_archive_table is set to true and
-    // archive name is `bytecode`
+    // Export deduplicate tensors only if use_tensors_archive_table is set to
+    // true and archive name is `bytecode`
     bool can_use_tensors_archive_table =
         (use_tensors_archive_table && archive_name == kArchiveNameBytecode);
 
