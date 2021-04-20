@@ -468,6 +468,9 @@ if _TORCH_TEST_DEVICES:
 
 PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 
+PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY = 'PYTORCH_TESTING_DEVICE_ONLY_FOR'
+PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
+
 
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
@@ -503,8 +506,8 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     # Usage:
     # export PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda,cpu
     # export PYTORCH_TESTING_DEVICE_EXCEPT_FOR=xla
-    env_only_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_ONLY_FOR", ''))
-    env_except_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_EXCEPT_FOR", ''))
+    env_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, ''))
+    env_except_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, ''))
 
     desired_device_type_test_bases = filter_desired_device_types(desired_device_type_test_bases,
                                                                  env_except_for, env_only_for)

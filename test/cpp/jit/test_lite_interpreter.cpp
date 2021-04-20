@@ -612,7 +612,7 @@ TEST(LiteInterpreterTest, LoadAndRunByteCodeModel) {
   AT_ASSERT(compare_tensor(jit_module_v4_output, expected_result));
   AT_ASSERT(compare_tensor(jit_module_v5_output, expected_result));
   AT_ASSERT(compare_tensor(mobile_module_v4_output, expected_result));
-  AT_ASSERT(compare_tensor(mobile_module_v4_output, expected_result));
+  AT_ASSERT(compare_tensor(mobile_module_v5_output, expected_result));
 }
 
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
