@@ -107,7 +107,7 @@ class PackageExporter:
         self.extern_modules: List[str] = []
         self.provided: Dict[str, bool] = {}
         self.verbose = verbose
-        self.ts_serializer = torch._C.TorchScriptSerializer(self.zip_file)
+        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
 
         if isinstance(importer, Importer):
             self.importer = importer
@@ -631,7 +631,7 @@ node [shape=box];
             self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
         contents = "\n".join(self.extern_modules) + "\n"
         self._write(".data/extern_modules", contents)
-        self.ts_serializer.write_files()
+        self.script_module_serializer.write_files()
         self._finalize_zip()
 
     def _finalize_zip(self):
