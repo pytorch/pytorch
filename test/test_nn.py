@@ -620,30 +620,26 @@ class TestNN(NNTestCase):
         mod(inp, False).sum().backward()
         self.assertEqual(hook_called[0], 1)
 
-        # Input inplace error should throw an error (warning during deprecation cycle)
-        with self.assertWarnsRegex(UserWarning, "Output 0 of BackwardHookFunctionBackward is "
-                                   "a view and is being modified inplace."):
+        # Input inplace error should throw an error
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                    "a view and is being modified inplace."):
             mod(inp.clone(), True)
 
         # Input inplace error should throw an error if we try to re-use the view after they have
-        # been modified (warning during deprecation cycle)
+        # been modified
         local_inp = inp.clone()
         out = mod(local_inp, False)
         local_inp[0] *= 1
-        with self.assertWarnsRegex(UserWarning, "Output 0 of BackwardHookFunctionBackward is "
-                                   "a view and its base or another view"):
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                    "a view and its base or another view"):
             # Any operation involving the view will fail here
             mod.inp + 2
 
-        # Output inplace error should throw an error (warning during deprecation cycle)
-        with self.assertWarnsRegex(UserWarning, "BackwardHookFunctionBackward is a view "
-                                   "and is being modified inplace."):
-            # This error won't happen once the warning above is a proper error
-            with self.assertRaisesRegex(RuntimeError, "Module backward hook for grad_input is "
-                                        "called before the grad_output one."):
-                out = mod(inp, False)
-                out += 1
-                out.sum().backward()
+        # Output inplace error should throw an error
+        out = mod(inp, False)
+        with self.assertRaisesRegex(RuntimeError, "BackwardHookFunctionBackward is a view "
+                                    "and is being modified inplace."):
+            out += 1
 
     def test_hook_non_full_warning(self):
         def noop(*args):
@@ -13276,7 +13272,8 @@ class TestNNDeviceType(NNTestCase):
                     for dim in [0, 1]:
                         ref_output = fn(ref_input, dtype=torch.float, dim=dim)
                         output = fn(input, dtype=torch.float, dim=dim)
-                        grad_output = torch.rand_like(output)
+                        grad_output = torch.rand(size, device=device, dtype=dtype)
+                        grad_output = grad_output[shift[0]:, shift[1]:]
                         ref_grad_output = grad_output.clone().cpu().detach()
                         grad_input, = torch.autograd.grad(output, input, grad_outputs=(grad_output), create_graph=True)
                         ref_grad_input, = torch.autograd.grad(ref_output, ref_input,
