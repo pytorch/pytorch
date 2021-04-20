@@ -12,9 +12,10 @@ from .utils import getattr_from_fqn, return_first_non_observer_node
 from .ns_types import (
     NSSingleResultValuesType,
     NSSingleResultType,
+    NSNodeTargetType,
 )
 
-from typing import List, Optional, Set, Tuple, Callable
+from typing import List, Optional, Set, Tuple
 
 def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
     if (
@@ -131,7 +132,7 @@ def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
 def extract_weight_from_node(
     node: Node,
     gm: GraphModule,
-    type_a_related_to_b: Set[Tuple[Callable, Callable]],
+    type_a_related_to_b: Set[Tuple[NSNodeTargetType, NSNodeTargetType]],
 ) -> Optional[NSSingleResultType]:
     res_type = NSSingleResultValuesType.WEIGHT.value
     if node.op == 'call_function':
