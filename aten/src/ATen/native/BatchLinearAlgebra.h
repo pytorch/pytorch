@@ -30,6 +30,9 @@ template <class scalar_t>
 void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t* a, int lda, scalar_t* b, int ldb, int* info);
 
 template <class scalar_t>
+void lapackLu(int m, int n, scalar_t *a, int lda, int *ipiv, int *info);
+
+template <class scalar_t>
 void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
 
 #endif
@@ -66,6 +69,13 @@ using triangular_solve_fn = void (*)(
     bool /*conjugate_transpose*/,
     bool /*unitriangular*/);
 DECLARE_DISPATCH(triangular_solve_fn, triangular_solve_stub);
+
+using lu_fn = void (*)(
+    const Tensor& /*input*/,
+    const Tensor& /*pivots*/,
+    const Tensor& /*infos*/,
+    bool /*compute_pivots*/);
+DECLARE_DISPATCH(lu_fn, lu_stub);
 
 using lu_solve_fn = void (*)(
     const Tensor& /*b*/,
