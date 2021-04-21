@@ -458,9 +458,11 @@ def init_process_group(backend,
         group_name (str, optional, deprecated): Group name.
         pg_options (ProcessGroupOptions, optional): process group options
             specifying what additional options need to be passed in during
-            the construction of specific process groups. i.e. for the ``nccl``
+            the construction of specific process groups. As of now, the only
+            options we support is ``ProcessGroupNCCL.Options`` for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
-            process group can pick up high priority cuda streams.
+            the nccl backend can pick up high priority cuda streams when
+            there're compute kernels waiting.
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.

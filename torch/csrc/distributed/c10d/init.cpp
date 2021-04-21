@@ -1125,7 +1125,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
 
   intrusive_ptr_class_<::c10d::ProcessGroupGloo::Options>(
-      processGroupGloo, "Options", processGroupOptions)
+      processGroupGloo, "_Options", processGroupOptions)
       .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
       .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
@@ -1236,6 +1236,7 @@ Arguments:
     is_high_priority_stream (bool, optional): flag to enable/disable process
             group to pick up high priority cuda streams. It lets CUDA driver
             to prioritize NCCL kernels when there are compute kernels waiting.
+            Default is False.
 
 Example::
     >>> import torch.distributed as dist
