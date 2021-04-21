@@ -14,6 +14,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/UnaryOps.h>
 
 #include <algorithm>
 #include <cctype>
@@ -618,7 +619,7 @@ Tensor scalar_tensor(const Scalar& s,
     // revert this to following:
     //   auto result = at::empty({}, options);
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd non_var_type_mode(true);
     auto result = empty_cpu({}, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
     at::native::fill_(result, s);
     return result;
