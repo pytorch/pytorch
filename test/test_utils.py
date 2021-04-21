@@ -1,5 +1,7 @@
 import sys
 import os
+import contextlib
+import io
 import re
 import shutil
 import random
@@ -25,6 +27,16 @@ from urllib.error import URLError
 load_tests = load_tests
 
 HAS_CUDA = torch.cuda.is_available()
+
+def check_breakpad():
+    try:
+        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
+        return True
+    except RuntimeError as e:
+        return "Minidump handler is uninintialized, make sure to call" in str(e)
+
+HAS_BREAKPAD = check_breakpad()
+
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 
@@ -419,7 +431,7 @@ class TestBottleneck(TestCase):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
 
-        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa: P204
                              stderr=subprocess.PIPE, shell=True)
         try:
             output, err = p.communicate(timeout=timeout)
@@ -704,7 +716,7 @@ class TestHub(TestCase):
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
-        from torch.utils.hipify import hipify_python # noqa
+        from torch.utils.hipify import hipify_python  # noqa: F401
 
 
 class TestAssert(TestCase):
@@ -733,6 +745,30 @@ class TestAssert(TestCase):
         ms(x)
         with self.assertRaisesRegex(torch.jit.Error, "foo"):  # type: ignore[type-var]
             ms(torch.tensor([False], dtype=torch.bool))
+
+
+class TestCrashHandler(TestCase):
+    @unittest.skipIf(not HAS_BREAKPAD, "Crash handler lib was not linked in")
+    def test_python_exception_writing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            torch.utils._crash_handler.enable_minidump_collection(temp_dir)
+
+            files = os.listdir(temp_dir)
+            self.assertEqual(len(files), 0)
+
+            f = io.StringIO()
+            with contextlib.redirect_stderr(f):
+                try:
+                    @torch.jit.script
+                    def x(i: int):
+                        return i + "2"  # type: ignore[operator]
+                except RuntimeError as e:
+                    pass
+
+            files = os.listdir(temp_dir)
+            self.assertEqual(len(files), 1)
+            self.assertTrue(files[0].endswith(".dmp"))
+            torch.utils._crash_handler.disable_minidump_collection()
 
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")

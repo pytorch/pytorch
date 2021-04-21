@@ -41,7 +41,8 @@ MobileDebugTable::MobileDebugTable(
   }
 }
 
-std::string MobileDebugTable::getSourceDebugString(const int64_t debug_handle) const {
+std::string MobileDebugTable::getSourceDebugString(
+    const int64_t debug_handle) const {
   const auto it = source_range_map_.find(debug_handle);
   if (it == source_range_map_.end()) {
     return "";
