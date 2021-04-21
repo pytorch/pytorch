@@ -240,7 +240,9 @@ struct TORCH_API Module : public Object {
   // will be preserved as well
   Module clone(
       bool inplace = false,
-      std::unordered_set<std::string> const& ignored_methods =
+      const std::unordered_set<std::string>& ignored_methods =
+          std::unordered_set<std::string>(),
+      const std::unordered_set<std::string>& ignored_attributes =
           std::unordered_set<std::string>()) const;
 
   void clone_method(const Module& orig, const std::string& name);
@@ -263,7 +265,8 @@ struct TORCH_API Module : public Object {
       std::unordered_map<TypePtr, TypePtr>& type_remap,
       bool inplace,
       IValue::HashAliasedIValueMap memo,
-      std::unordered_set<std::string> const& ignored_methods) const;
+      const std::unordered_set<std::string>& ignored_methods,
+      const std::unordered_set<std::string>& ignored_attributes) const;
 
   void clone_method(
       const Module& orig,

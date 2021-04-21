@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/api/module.h>
+#include "ATen/core/interned_strings.h"
 
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
@@ -15,6 +16,111 @@
 
 namespace torch {
 namespace jit {
+
+namespace {
+
+std::vector<Node*> findAllNodes(
+    c10::ArrayRef<torch::jit::Block*> blocks,
+    Symbol kind,
+    bool recurse) {
+  std::vector<Node*> ret;
+  for (Block* block : blocks) {
+    for (Node* n : block->nodes()) {
+      if (n->kind() == kind) {
+        ret.push_back(n);
+      }
+      if (recurse) {
+        auto nodes = findAllNodes(n->blocks(), kind, recurse);
+        ret.insert(ret.end(), nodes.begin(), nodes.end());
+      }
+    }
+  }
+  return ret;
+}
+
+void assert_ignored_methods_not_called(
+    torch::jit::Function* fn,
+    const std::unordered_set<std::string>& ignored_methods) {
+  if (ignored_methods.empty()) {
+    return;
+  }
+  const bool recurse = true;
+  std::vector<Node*> all_nodes =
+      findAllNodes({fn->graph()->block()}, c10::prim::CallMethod, recurse);
+  if (all_nodes.empty()) {
+    return;
+  }
+
+  // Extract method names from these nodes.
+  std::unordered_set<std::string> encountered_ignored_methods;
+
+  for (Node* n : all_nodes) {
+    if (ignored_methods.count(n->s(attr::name)) > 0) {
+      encountered_ignored_methods.insert(n->s(attr::name));
+    }
+  }
+
+  std::string encountered_ignored_methods_str;
+  int i = 0;
+  for (const std::string& mn : encountered_ignored_methods) {
+    if (i > 0) {
+      encountered_ignored_methods_str += ", ";
+    }
+    encountered_ignored_methods_str += mn;
+    ++i;
+  }
+
+  TORCH_CHECK(
+      false,
+      "Preserved method '",
+      fn->name(),
+      "' references ignored method(s) '",
+      encountered_ignored_methods_str,
+      "'. This is not permitted.");
+}
+
+void assert_ignored_attributes_not_referenced(
+    torch::jit::Function* fn,
+    const std::unordered_set<std::string>& ignored_attributes) {
+  if (ignored_attributes.empty()) {
+    return;
+  }
+
+  const bool recurse = true;
+  std::vector<Node*> all_nodes =
+      findAllNodes({fn->graph()->block()}, c10::prim::GetAttr, recurse);
+  if (all_nodes.empty()) {
+    return;
+  }
+  // Extract attribute names from these nodes.
+  std::unordered_set<std::string> encountered_ignored_attributes;
+
+  for (Node* n : all_nodes) {
+    if (ignored_attributes.count(n->s(attr::name)) > 0) {
+      encountered_ignored_attributes.insert(n->s(attr::name));
+    }
+  }
+
+  std::string encountered_ignored_attributes_str;
+  int i = 0;
+  for (const std::string& an : encountered_ignored_attributes) {
+    if (i > 0) {
+      encountered_ignored_attributes_str += ", ";
+    }
+    encountered_ignored_attributes_str += an;
+    ++i;
+  }
+
+  TORCH_CHECK(
+      false,
+      "Preserved method '",
+      fn->name(),
+      "' references ignored attribute(s) '",
+      encountered_ignored_attributes_str,
+      "'. This is not permitted.");
+}
+
+} // namespace
 
 static ObjectPtr create_module_object(
     c10::QualifiedName class_name,
@@ -218,17 +324,20 @@ Module Module::deepcopy() const {
 
 Module Module::clone(
     bool inplace,
-    std::unordered_set<std::string> const& ignored_methods) const {
+    const std::unordered_set<std::string>& ignored_methods,
+    const std::unordered_set<std::string>& ignored_attributes) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
   IValue::HashAliasedIValueMap memo;
-  return clone_impl(type_remap, inplace, memo, ignored_methods);
+  return clone_impl(
+      type_remap, inplace, memo, ignored_methods, ignored_attributes);
 }
 
 Module Module::clone_impl(
     std::unordered_map<TypePtr, TypePtr>& type_remap,
     bool inplace,
     IValue::HashAliasedIValueMap memo,
-    std::unordered_set<std::string> const& ignored_methods) const {
+    const std::unordered_set<std::string>& ignored_methods,
+    const std::unordered_set<std::string>& ignored_attributes) const {
   // Create a new _ivalue in the same compilation unit.
   // Since now we have shared ClassType, we need to preserve the shared
   // ClassType during cloning, so we first need to check if the type
@@ -252,11 +361,18 @@ Module Module::clone_impl(
   for (size_t i = 0; i < N; ++i) {
     IValue s = _ivalue()->getSlot(i);
     std::string attr_name = type()->getAttributeName(i);
+
+    // If this attribute is in the list of ignored attributes, skip clone it.
+    if (ignored_attributes.count(attr_name) != 0) {
+      continue;
+    }
+
     TypePtr attr_type = type()->getAttribute(i);
     if (attr_type->is_module()) {
       const Module& orig = Module(s.toObject());
-      Module cloned = orig.clone_impl(
-          type_remap, inplace, memo, std::unordered_set<std::string>());
+      const std::unordered_set<std::string> empty_set;
+      Module cloned =
+          orig.clone_impl(type_remap, inplace, memo, empty_set, empty_set);
       type_remap[orig.type()] = cloned.type();
       // NOTE: why do we need to manually setattr on object instead of using
       // register_module here? because the attr can be a module interface
@@ -290,7 +406,10 @@ Module Module::clone_impl(
     }
     // clone methods, remapping the types to the cloned ones.
     for (auto& fn : type()->methods()) {
+      // If this method is not in the list of ignored methods, clone it.
       if (ignored_methods.count(fn->name()) == 0) {
+        assert_ignored_methods_not_called(fn, ignored_methods);
+        assert_ignored_attributes_not_referenced(fn, ignored_attributes);
         r.clone_method(*this, *fn, type_remap);
       }
     }
