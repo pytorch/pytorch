@@ -177,6 +177,8 @@ void BoundShapeInferencer::InferOps(
     InferTranspose(op);
   } else if (op.type() == "Bucketize") {
     InferBucketize(op);
+  } else if (op.type() == "Cast") {
+    InferCast(op);
   } else {
     InferCommonOp(op);
   }
@@ -960,7 +962,7 @@ void BoundShapeInferencer::InferTranspose(const OperatorDef& op) {
 
   auto it = shape_info_.find(op.input(0));
   if (it == shape_info_.end()) {
-    LOG(WARNING) << "Didn't find shape info for the input of Softmax";
+    LOG(WARNING) << "Didn't find shape info for the input of Transpose";
     return;
   }
 
@@ -997,6 +999,26 @@ void BoundShapeInferencer::InferTranspose(const OperatorDef& op) {
       dimTypes,
       dims,
       it->second.shape.data_type(),
+      false);
+}
+
+void BoundShapeInferencer::InferCast(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.input_size(), 1, op.type(), " must have 1 input");
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+
+  auto it = shape_info_.find(op.input(0));
+  if (it == shape_info_.end()) {
+    LOG(WARNING) << "Didn't find shape info for the input of Cast";
+    return;
+  }
+
+  ArgumentHelper helper(op);
+  auto dtype = helper.GetSingleArgument<int>("to", 1);
+  CheckAndSetTensorBoundShape(
+      op.output(0),
+      setDimTypeWithFirst(it->second.getDimType(0), it->second.shape.dims_size()),
+      ConvertToVec(it->second.shape.dims()),
+      static_cast<TensorProto::DataType>(dtype),
       false);
 }
 

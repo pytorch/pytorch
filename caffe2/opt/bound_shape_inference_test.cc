@@ -1061,3 +1061,30 @@ TEST(BoundShapeInference, Transpose) {
       {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
       {16, 1});
 }
+
+TEST(BoundShapeInference, Cast) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Cast",
+      "",
+      {"input"},
+      {"output"},
+      {MakeArgument<int>("to", 2)}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "input",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {1, 16}));
+  BoundShapeSpec spec(32, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "output",
+      {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
+      {1, 16},
+      TensorProto_DataType_INT32);
+}
