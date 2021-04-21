@@ -180,7 +180,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     auto k = node->kind();
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
         k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
-        k == prim::MKLDNNRelu6) {
+        k == prim::MKLDNNRelu6 || k == prim::MKLDNNSoftPlus) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -227,7 +227,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
 // innermost dimension is padded with 0s. The precondition, `aten_op(0) == 0`
 // allows us to avoid any special casing of padded elements.
 Operation createUnaryOp(
-    std::function<void(at::Tensor output, at::Tensor input)> aten_op,
+    std::function<void(at::Tensor output, at::Tensor input, Stack*)> aten_op,
     bool inplace = false) {
   return [aten_op, inplace](Stack* stack) {
     auto a = pop(stack).toTensor();
@@ -264,7 +264,7 @@ Operation createUnaryOp(
     auto nelem = a_it.get_desc().get_size() / elementSize(a.scalar_type());
     auto out_aten = at::from_blob(
         out_raw_data, {static_cast<int64_t>(nelem)}, a_options_with_strided);
-    aten_op(out_aten, in_aten);
+    aten_op(out_aten, in_aten, stack);
     push(stack, out);
   };
 }
@@ -355,7 +355,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSwish_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, at::Tensor input, Stack*) {
               at::cpu::hardswish_out(output, input);
             },
             true),
@@ -363,7 +363,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSigmoid_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, at::Tensor input, Stack*) {
               at::cpu::hardsigmoid_out(output, input);
             },
             true),
@@ -371,15 +371,25 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNRelu6_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, at::Tensor input, Stack*) {
               at::cpu::hardtanh_out(output, input, 0.f, 6.f);
+            },
+            true),
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNSoftPlus(Tensor(a) self, Scalar beta=1, Scalar threshold=20) -> Tensor(a)",
+        createUnaryOp(
+            [](at::Tensor output, at::Tensor input, Stack* stack) {
+              at::Scalar beta, thh;
+              pop(stack, beta, thh);
+              at::cpu::softplus_out(output, input, beta, thh);
             },
             true),
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
         "prim::MKLDNNHardSwish(Tensor a) -> Tensor",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, at::Tensor input, Stack*) {
               at::cpu::hardswish_out(output, input);
             },
             false),
@@ -387,7 +397,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSigmoid(Tensor a) -> Tensor",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, at::Tensor input, Stack*) {
               at::cpu::hardsigmoid_out(output, input);
             },
             false),
@@ -395,8 +405,18 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNRelu6(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, at::Tensor input, Stack*) {
               at::cpu::hardtanh_out(output, input, 0.f, 6.f);
+            },
+            false),
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNSoftPlus(Tensor(a) self, Scalar beta=1, Scalar threshold=20) -> Tensor(a)",
+        createUnaryOp(
+            [](at::Tensor output, at::Tensor input, Stack* stack) {
+              at::Scalar beta, thh;
+              pop(stack, beta, thh);
+              at::cpu::softplus_out(output, input, beta, thh);
             },
             false),
         AliasAnalysisKind::FROM_SCHEMA),
@@ -620,6 +640,12 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       body_node->replaceInput(1, node->outputs().at(1));
     }
 
+    if (body_node->kind() == aten::softplus) {
+      body_node->replaceWithNewSymbol(prim::MKLDNNSoftPlus);
+      body_node->destroy();
+      continue;
+    }
+
     if (body_node->kind() == aten::hardswish) {
       body_node->replaceWithNewSymbol(prim::MKLDNNHardSwish);
       body_node->destroy();
@@ -811,6 +837,7 @@ class MKLDNNSubgraphSlicer {
       case aten::sigmoid:
       case aten::hardsigmoid:
       case aten::hardswish:
+      case aten::softplus:
       // TODO: max_pool on mkldnn can be slower than in eager. ideally, we'd
       // only fuse it if we knew including max_pool lead to fewer layout
       // conversions. from initial testing including it speeds up models
@@ -949,7 +976,7 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
           aten::dropout_,
           aten::sigmoid_,
           aten::hardsigmoid_,
-      };
+          aten::softplus_};
       return mkldnn_ops.count(node_to_functionalize->kind()) != 0;
     });
     AliasDb db(graph);
