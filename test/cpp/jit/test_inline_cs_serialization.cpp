@@ -25,8 +25,8 @@ namespace jit {
 
 namespace {
 bool validate_debug_info(
-    const DelegateDebugInfoType& pre_serialize,
-    const DelegateDebugInfoType& post_serialize) {
+    const DebugInfoPair& pre_serialize,
+    const DebugInfoPair& post_serialize) {
   auto sr1 = pre_serialize.first;
   auto sr2 = post_serialize.first;
   if (sr1 != sr2) {

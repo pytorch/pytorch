@@ -1,6 +1,5 @@
 import torch
 import torch.utils.bundled_inputs
-from torch.utils.mobile_optimizer import optimize_for_mobile
 import io
 from typing import Dict, List, NamedTuple
 from collections import namedtuple

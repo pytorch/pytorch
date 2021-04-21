@@ -21,7 +21,7 @@ namespace {
 // will be TopM(A).MyModule(B).SomeModule(C).Conv2d(conv)
 // Source level stack information will be from model source code.
 std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
-    const DelegateDebugInfoType& sr_callstack,
+    const DebugInfoPair& sr_callstack,
     const std::string& root_scope_string,
     const std::string& top_module_type_name) {
   constexpr size_t kSourceRange = 1;
@@ -103,7 +103,8 @@ MobileDebugTable::MobileDebugTable(
         // byte_offset, debug_handle (=source range tag), source range
         if (tup_elems.size() == 3) {
           int64_t debug_handle = tup_elems[kSourceRangeTagIndex].toInt();
-          auto source_range = deserializer.deserialize(tup_elems[kSourceRangeIndex]);
+          auto source_range =
+              deserializer.deserialize(tup_elems[kSourceRangeIndex]);
           source_range_map.emplace(debug_handle, std::move(source_range));
         }
       }
