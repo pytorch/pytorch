@@ -17,7 +17,7 @@ from torch._C._jit_tree_views import (
     DictComp,
 )
 from torch._utils_internal import get_source_lines_and_file
-
+from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
 from torch._jit_internal import SourceContext, should_drop, is_static_fn
 import torch.jit.annotations
 
@@ -292,9 +292,10 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     # If MonkeyType is installed, get all the consolidated type traces
     # for the arguments from type_trace_db
     type_trace_db = torch.jit._script._get_type_trace_db()
-    args_and_types = None  # type: ignore[name-defined]
-    if type_trace_db.trace_records:
-        args_and_types = type_trace_db.get_args_types(fn.__qualname__)  # type: ignore[name-defined]
+    args_and_types = None
+    if monkeytype_trace:
+        _qualname = get_qualified_name(fn)
+        args_and_types = type_trace_db.get_args_types(_qualname)
 
     return build_def(ctx, fn_def, type_line, def_name, self_name=self_name, args_and_types=args_and_types)
 
@@ -354,8 +355,8 @@ def build_param_list(ctx, py_args, self_name, args_and_types=None):
             if arg is not None:
                 ctx_range = build_expr(ctx, arg).range()
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
-    result = [build_param(ctx, arg, self_name, False, args_and_types) for arg in py_args.args]
-    result += [build_param(ctx, arg, self_name, True, args_and_types) for arg in py_args.kwonlyargs]
+    result = [build_param(ctx, arg, self_name, kwarg_only=False, args_and_types=args_and_types) for arg in py_args.args]
+    result += [build_param(ctx, arg, self_name, kwarg_only=True, args_and_types=args_and_types) for arg in py_args.kwonlyargs]
     return result
 
 
@@ -365,8 +366,8 @@ def build_param(ctx, py_arg, self_name, kwarg_only, args_and_types=None):
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
-    elif args_and_types:  # type: ignore[name-defined]
-        annotation_expr = Var(Ident(r, args_and_types[name].pop()))  # type: ignore[name-defined]
+    elif args_and_types:
+        annotation_expr = Var(Ident(r, args_and_types[name].pop()))
     elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
     else:
