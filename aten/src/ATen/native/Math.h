@@ -1333,6 +1333,15 @@ calc_i0e(T _x) {
 // Upcast bfloat16 input to float for numerical accuracy purposes
 inline c10::BFloat16 calc_i0e(c10::BFloat16 a) { return calc_i0e(static_cast<float>(a)); }
 
+/*
+ * This function is derived from the implementation of the i0e function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ *
+ * Computes an approximation of the first order modified Bessel function of the first kind.
+ * The approximation is actually two (sub)approximations, both using a Chebyshev polynomial expansion.
+ * One approximates the function over [0, 8], and the other over (8, infinity). This function takes the absolute value
+ * of all inputs to convert them into the domain of the approximation.
+ */
 template <typename T>
 static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i1(T _x) {
@@ -1357,7 +1366,7 @@ inline c10::BFloat16 calc_i1(c10::BFloat16 a) { return calc_i1(static_cast<float
  * This function is derived from the implementation of the i0e function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  *
- * Computes an approximation of the exponentially scaled zeroth order modified Bessel function of the first kind.
+ * Computes an approximation of the exponentially scaled first order modified Bessel function of the first kind.
  * The approximation is actually two (sub)approximations, both using a Chebyshev polynomial expansion.
  * One approximates the function over [0, 8], and the other over (8, infinity). This function takes the absolute value
  * of all inputs to convert them into the domain of the approximation.
