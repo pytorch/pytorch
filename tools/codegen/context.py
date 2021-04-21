@@ -1,5 +1,6 @@
 from tools.codegen.utils import S, T, context
-from tools.codegen.model import NativeFunction, NativeFunctionsGroup
+from tools.codegen.model import (NativeFunction, NativeFunctionsGroup, ExternalBackendFunction,
+                                 ExternalBackendFunctionsGroup)
 import tools.codegen.local as local
 
 import functools
@@ -8,11 +9,25 @@ import contextlib
 
 # Helper functions for defining generators on things in the model
 
-F = TypeVar('F', NativeFunction, NativeFunctionsGroup, Union[NativeFunction, NativeFunctionsGroup])
+F = TypeVar(
+    'F',
+    NativeFunction,
+    NativeFunctionsGroup,
+    ExternalBackendFunction,
+    ExternalBackendFunctionsGroup,
+    Union[NativeFunction, NativeFunctionsGroup],
+    Union[ExternalBackendFunctionsGroup, ExternalBackendFunction],
+    Union[NativeFunction, NativeFunctionsGroup, ExternalBackendFunction, ExternalBackendFunctionsGroup]
+)
 
 @contextlib.contextmanager
-def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunction]) -> Iterator[None]:
-    if isinstance(g, NativeFunctionsGroup):
+def native_function_manager(g: Union[
+        NativeFunctionsGroup, NativeFunction, ExternalBackendFunction, ExternalBackendFunctionsGroup]) -> Iterator[None]:
+    if isinstance(g, ExternalBackendFunctionsGroup):
+        f = g.primary.native_function
+    elif isinstance(g, ExternalBackendFunction):
+        f = g.native_function
+    elif isinstance(g, NativeFunctionsGroup):
         # By default, we associate all errors with structured native functions
         # with the out variant.  In some cases, it might be better to have
         # a more specific place to hang things; if so, use
@@ -20,7 +35,7 @@ def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunction]) -> I
         f = g.out
     else:
         f = g
-    with context(f'in {f.loc}:\n  {f.func}'):
+    with context(f'in native_functions.yaml line {f.loc}:\n  {f.func}'):
         with local.parametrize():
             yield
 
