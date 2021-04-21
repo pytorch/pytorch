@@ -85,7 +85,7 @@ jobs:
         run: |
           (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
 
-  python2-setup-compat:
+  py2-setup-validate-errormsg:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
