@@ -1087,6 +1087,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   {
     at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
     std::vector<c10::DeviceIndex> deviceIndices;
+    deviceIndices.reserve(devices.size());
     for (const at::Device& device : devices) {
       TORCH_INTERNAL_ASSERT(device.is_cuda());
       deviceIndices.push_back(device.index());

@@ -35,10 +35,8 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         device_indices = []
         for d in devices:
             d = torch.device(d)
-            if d.type == "cpu":
-                continue
             if d.type != "cuda":
-                raise ValueError(f"Expected CPU or CUDA devices, got {d}")
+                raise ValueError(f"Expected CUDA devices, got {d}")
             device_indices.append(d.index)
         super().__init__(device_indices)
 
