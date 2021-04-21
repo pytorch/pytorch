@@ -55,6 +55,7 @@ from .graph_module import (
 
 from .quantization_patterns import (
     binary_op_supported_dtypes,
+    binary_reference_op_supported_dtypes,
     BinaryOpQuantizeHandler,
     CatQuantizeHandler,
     CopyNodeQuantizeHandler,
@@ -344,6 +345,48 @@ def insert_observer_for_input_arg_of_observed_node(
                     activation_post_process_indexes,
                     env, observed_graph, load_arg, observed_node_names_set, quants)
 
+def insert_observer_for_output_of_model(
+        node: Node,
+        model: torch.nn.Module,
+        qconfig_map: Dict[str, QConfigAny],
+        activation_post_process_map: Dict[str, List[str]],
+        activation_post_process_indexes: Dict[str, int],
+        env: Dict[Any, Any], observed_graph: Graph, load_arg: Callable,
+        observed_node_names_set: Set[str],
+        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]]):
+    if isinstance(node, Node):
+        assert qconfig_map is not None
+        local_qconfig = qconfig_map[node.name]
+        assert local_qconfig is not None, \
+            'qconfig of a node before a quantized output must exist'
+        if node.name not in observed_node_names_set:
+            insert_observer(
+                node, local_qconfig.activation(),
+                model,
+                activation_post_process_map,
+                activation_post_process_indexes,
+                env, observed_graph, load_arg, observed_node_names_set, quants)
+    elif isinstance(node, list) or isinstance(node, tuple):
+        for n in node:
+            insert_observer_for_output_of_model(
+                n,
+                model,
+                qconfig_map,
+                activation_post_process_map,
+                activation_post_process_indexes,
+                env, observed_graph, load_arg, observed_node_names_set, quants)
+    elif isinstance(node, dict):
+        for n in node.values():
+            insert_observer_for_output_of_model(
+                n,
+                model,
+                qconfig_map,
+                activation_post_process_map,
+                activation_post_process_indexes,
+                env, observed_graph, load_arg, observed_node_names_set, quants)
+    else:
+        raise Exception("hardcoding output to be quantized not supported: " + str(type(node)))
+
 def insert_observers_for_model(
         model: GraphModule,
         modules: Dict[str, torch.nn.Module],
@@ -377,20 +420,13 @@ def insert_observers_for_model(
             output_node_seen_cnt += 1
             if cur_output_node_idx in output_quantized_idxs:
                 prev_node = node.args[0]
-                assert isinstance(prev_node, Node), \
-                    ('hardcoding list/dict outputs to be quantized is ' +
-                     'not supported')
-                if prev_node.name not in observed_node_names_set:
-                    assert qconfig_map is not None
-                    local_qconfig = qconfig_map[prev_node.name]
-                    assert local_qconfig is not None, \
-                        'qconfig of a node before a quantized output must exist'
-                    insert_observer(
-                        prev_node, local_qconfig.activation(),
-                        model,
-                        activation_post_process_map,
-                        activation_post_process_indexes,
-                        env, observed_graph, load_arg, observed_node_names_set, quants)
+                insert_observer_for_output_of_model(
+                    prev_node,
+                    model,
+                    qconfig_map,
+                    activation_post_process_map,
+                    activation_post_process_indexes,
+                    env, observed_graph, load_arg, observed_node_names_set, quants)
 
             observed_graph.output(load_arg(node.args[0]))
             result_node = node
@@ -1394,10 +1430,28 @@ class Quantizer:
                                 dtypes = get_qconfig_dtypes(this_node_qconfig)
                                 # TODO(future PR): update the pattern to quantize
                                 # handler logic to take this into account.
-                                skip_this_match = (
+
+
+                                # This needs to handle 3 cases
+                                # 1) op and dtype is in either [is_ref or non-ref] list -> don't skip
+                                # 2) op is not in either list (i.e. relu) -> don't skip
+                                # 3) op is in non-ref list, but not for dtype, and op+dtype not in is_ref list -> skip
+
+                                # note: the value of is_reference is unknown at prepare, so we have to cover both cases
+                                # handle is_reference = False
+                                skip_match_not_is_reference = (
                                     (base_node.target in binary_op_supported_dtypes) and
                                     (dtypes not in binary_op_supported_dtypes[base_node.target])
                                 )
+
+                                # handle is_reference = True
+                                supported_is_reference = (
+                                    (base_node.target in binary_reference_op_supported_dtypes) and
+                                    (dtypes in binary_reference_op_supported_dtypes[base_node.target])
+                                )
+
+                                # only skip if not reference says skip and is_reference doesn't support
+                                skip_this_match = skip_match_not_is_reference and not supported_is_reference
 
                         if not skip_this_match:
                             matched: List[Any] = []

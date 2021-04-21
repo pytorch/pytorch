@@ -19,7 +19,6 @@ TorchScript
 
 .. toctree::
     :maxdepth: 1
-    :caption: Language Reference
 
     jit_language_reference_v2
 

@@ -105,6 +105,14 @@ def augment_many_model_functions_with_bundled_inputs(
     if not inputs:
         raise Exception("Please provide inputs for at least 1 function")
 
+    if hasattr(model, "get_all_bundled_inputs") or hasattr(model, "get_bundled_inputs_functions_and_info"):
+        raise Exception(
+            "Models can only be augmented with bundled inputs once. "
+            "This Model seems to have already been augmented with "
+            "bundled inputs. Please start afresh with one that "
+            "doesn't have bundled inputs.",
+        )
+
     get_bundled_inputs_functions_and_info_template = ""
 
     for function, input_list in inputs.items():
