@@ -616,17 +616,15 @@ Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, boo
   * `self` - Tensor with the directions of the elementary reflectors below the diagonal,
               it will be overwritten with the result
   * `tau` - Tensor containing the magnitudes of the elementary reflectors
-  * `infos` - Tensor to store cuSOLVER's error codes
   * `n_columns` - The number of columns of Q to be computed
 
   For further details, please see the cuSOLVER documentation for ORGQR and UNGQR.
 */
 template <typename scalar_t>
-inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+inline static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
-  auto infos_data = infos.data_ptr<int>();
   auto self_matrix_stride = matrixStride(self);
   auto batchsize = cuda_int_cast(batchCount(self), "batch size");
   auto m = cuda_int_cast(self.size(-2), "m");
@@ -652,10 +650,12 @@ inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos,
   at::cuda::solver::orgqr_buffersize<scalar_t>(
     at::cuda::getCurrentCUDASolverDnHandle(), m, n, k, self_data, lda, tau_data, &lwork);
 
+  auto info = at::zeros({1}, self.options().dtype(at::kInt));
+  auto info_data = info.data_ptr<int>();
+
   for (auto i = decltype(batchsize){0}; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
-    int* info_working_ptr = &infos_data[i];
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
     // allocate workspace storage
@@ -669,15 +669,19 @@ inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos,
       tau_working_ptr,
       static_cast<scalar_t*>(work_data.get()),
       lwork,
-      info_working_ptr
+      info_data
     );
+
+    // info from orgqr only reports if the i-th parameter is wrong
+    // so we don't need to check it all the time
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.item().toInt() == 0);
   }
 }
 
-// This is a type dispatching helper function for 'apply_orgqr_cusolver'
-Tensor& orgqr_helper_cuda_lib(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+// This is a type dispatching helper function for 'apply_orgqr'
+Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau, int64_t n_columns) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "orgqr_cuda", [&]{
-    apply_orgqr_cusolver<scalar_t>(result, tau, infos, n_columns);
+    apply_orgqr<scalar_t>(result, tau, n_columns);
   });
   return result;
 }
