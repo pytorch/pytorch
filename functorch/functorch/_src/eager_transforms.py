@@ -3,10 +3,10 @@ from functools import partial
 import collections
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.make_functional import make_functional, make_functional_with_buffers
 import gc
 
 from .vmap import vmap
+from .make_functional import make_functional, make_functional_with_buffers
 
 from functorch._C import (
     _wrap_for_grad,
@@ -14,13 +14,6 @@ from functorch._C import (
     _grad_increment_nesting,
     _grad_decrement_nesting,
 )
-
-# x = torch.ones(2, 3)
-# y = torch.ones(2, 3)
-# # result = vmap(torch.add)(x, y)
-# result = vmap(vmap(torch.add))(x, y)
-
-# assert torch.allclose(result, x + y)
 
 # TODO: replace all of these with pytrees
 def _create_differentiable(tensor_or_tuple_of_tensors, level=None):
@@ -95,46 +88,6 @@ def jacrev(f):
         result = result.view(*output.shape, *primal.shape)
         return result
     return wrapper_fn
-
-# 
-# 
-# def jacrev(f, diff_argnums=(0,)):
-#     def wrapper(*args):
-#         torch._C._grad_increment_nesting()
-#         output = None
-#         grad_outputs = None
-#         try:
-#             args = [_create_differentiable(arg) if i in diff_argnums else arg
-#                     for i, arg in enumerate(args)]
-#             output = f(*args)
-#             # Only support single tensor output for now
-#             assert isinstance(output, torch.Tensor)
-#             output_numel = output.numel()
-#             if output_numel != 0:
-#                 grad_output = torch.eye(output_numel).view(output_numel, *output.shape)
-# 
-#             diff_args = [args[i] for i in diff_argnums]
-#             single_diff_arg = isinstance(diff_args[0], torch.Tensor) and len(diff_args) == 1
-#             # TODO: quick hack...
-#             if len(diff_args) == 1 and isinstance(diff_args[0], tuple):
-#                 diff_args = diff_args[0]
-#             # NB: need create_graph so that backward pass isn't run in no_grad mode
-# 
-#             def compute_vjp(v):
-#                 return torch.autograd.grad(output, diff_args, v, create_graph=True)
-# 
-#             if output_numel == 0:
-#                 grad_input = compute_vjp(grad_output)
-#             else:
-#                 grad_input = vmap(compute_vjp)(grad_output)
-# 
-#             if single_diff_arg:
-#                 grad_input = grad_input[0]
-#         finally:
-#             _undo_create_differentiable(args)
-#             torch._C._grad_decrement_nesting()
-#         return grad_input, output
-#     return wrapper
 
 def grad_with_value(f, diff_argnums=(0,), has_aux=False):
     def wrapper(*args):

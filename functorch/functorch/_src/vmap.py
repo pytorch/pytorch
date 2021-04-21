@@ -8,8 +8,8 @@ import warnings
 from functorch._C import (
     _add_batch_dim,
     _remove_batch_dim,
-    _vmapmode_decrement_nesting,
-    _vmapmode_increment_nesting,
+    _vmap_decrement_nesting,
+    _vmap_increment_nesting,
 )
 
 in_dims_t = Union[int, Tuple]
@@ -244,14 +244,6 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         vmap does not provide general autobatching or handle variable-length
         sequences out of the box.
     """
-    warnings.warn(
-        'functorch.vmap is an experimental prototype that is subject to '
-        'change and/or deletion. Please use at your own risk. There may be '
-        'unexpected performance cliffs due to certain operators not being '
-        'implemented. To see detailed performance warnings please use '
-        '`torch._C._debug_only_display_vmap_fallback_warnings(True) '
-        'before the call to `vmap`.',
-        stacklevel=2)
     return _vmap(func, in_dims, out_dims)
 
 # A version of vmap but without the initial "experimental prototype" warning
@@ -259,12 +251,14 @@ def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> C
     @functools.wraps(func)
     def wrapped(*args):
         _check_out_dims_is_int_or_int_tuple(out_dims, func)
-        vmap_level = _vmapmode_increment_nesting()
+        vmap_level = _vmap_increment_nesting()
+        torch._C._vmapmode_increment_nesting()
         try:
             batched_inputs, batch_size = _create_batched_inputs(in_dims, args, vmap_level, func)
             batched_outputs = func(*batched_inputs)
             _validate_outputs(batched_outputs, func)
             return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func)
         finally:
-            _vmapmode_decrement_nesting()
+            torch._C._vmapmode_decrement_nesting()
+            _vmap_decrement_nesting()
     return wrapped
