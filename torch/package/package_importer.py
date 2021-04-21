@@ -288,7 +288,8 @@ class PackageImporter(Importer):
             if not isinstance(cur, _PackageNode) or atom not in cur.children:
                 raise ModuleNotFoundError(
                     f'No module named "{name}" in self-contained archive "{self.filename}"'
-                    f" and the module is also not in the list of allowed external modules: {self.extern_modules}"
+                    f" and the module is also not in the list of allowed external modules: {self.extern_modules}",
+                    name=name,
                 )
             cur = cur.children[atom]
             if isinstance(cur, _ExternNode):
