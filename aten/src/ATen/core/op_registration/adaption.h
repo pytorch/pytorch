@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ATen/TensorUtils.h>
+#include <ATen/core/List.h>
 #include <c10/core/TensorOptions.h>
 
 /*
@@ -55,6 +57,36 @@ check_tensor_options_and_extract_memory_format(
     return memory_format;
   } else {
     return options.memory_format_opt();
+  }
+}
+
+inline void undefined_device_check_failure(at::CheckedFrom methodName, at::CheckedFrom argName) {
+  TORCH_CHECK(false,
+    "Tensor is undefined."
+    "(when checking arugment for argument ", argName, " in method ", methodName, ")");
+}
+
+inline void assert_defined_tensor(const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
+  if (C10_UNLIKELY(!tensor.defined())) {
+    undefined_device_check_failure(methodName, argName);
+  }
+}
+
+inline void assert_defined_tensor(const optional<at::Tensor>& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
+  if (tensor.has_value()) {
+    assert_defined_tensor(tensor.value(), methodName, argName);
+  }
+}
+
+inline void assert_defined_tensor(at::TensorList tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
+  for (const auto& tensor : tensors) {
+    assert_defined_tensor(tensor, methodName, argName);
+  }
+}
+
+inline void assert_defined_tensor(const List<optional<at::Tensor>>& tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
+  for (const auto& tensor : tensors) {
+    assert_defined_tensor(tensor, methodName, argName);
   }
 }
 } // namespace impl

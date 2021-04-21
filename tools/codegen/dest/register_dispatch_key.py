@@ -155,6 +155,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             args_exprs_str = ', '.join(a.name for a in args)
 
+            defined_tensor_assertion = ""
+            for arg in f.func.arguments.flat_positional:
+                if arg.type.is_tensor_like():
+                    defined_tensor_assertion += f'  c10::impl::assert_defined_tensor({arg.name}, "{name}", "{arg.name}");\n'
+
             device_guard = "// DeviceGuard omitted"  # default
 
             if f.device_guard and is_cuda_dispatch_key(self.dispatch_key):
@@ -184,6 +189,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 namespace {{
 
 {returns_type} {name}({args_str}) {{
+{defined_tensor_assertion}
   {device_guard}
   return {impl_name}({args_exprs_str});
 }}
