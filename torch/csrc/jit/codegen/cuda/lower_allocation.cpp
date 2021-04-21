@@ -126,16 +126,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
          init_loop_it != init_dims.rend();
          ++init_loop_it) {
       auto id = *init_loop_it;
-      kir::ForLoop* new_loop = nullptr;
-      if (isParallelTypeThread((*init_loop_it)->parallelType())) {
-        std::stringstream ss;
-        ss << id->parallelType();
-        new_loop = ir_builder.create<kir::ForLoop>(
-            ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int), id);
-      } else {
-        new_loop = ir_builder.create<kir::ForLoop>(
-            ir_builder.create<kir::Int>(c10::nullopt), id);
-      }
+      kir::ForLoop* new_loop = ir_builder.create<kir::ForLoop>(id);
       new_loop->body().push_back(init_expr);
       init_expr = new_loop;
     }

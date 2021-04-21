@@ -1232,25 +1232,24 @@ class TORCH_CUDA_CU_API Scope {
 //! be smaller than the extent of iter_domain_.
 class TORCH_CUDA_CU_API ForLoop final : public Expr {
  public:
-  //! By default, the loop extent is set as the extent of iter_domain.
-  //! It can be overwritten if extent is not null.
+  //! By default, start and stop are the same as those of iter_domain.
+  //! Step is one by default.
+  //!
+  //! TODO: cleaner way to set options?
   ForLoop(
       Passkey passkey,
-      Val* index,
       IterDomain* iter_domain,
-      Val* extent = nullptr,
-      bool unroll = false,
-      Val* shift = nullptr);
-
-  //! Same as the above but explicitly enable/disable the vectorization.
-  ForLoop(
-      Passkey passkey,
       Val* index,
-      IterDomain* iter_domain,
+      Val* start,
+      Val* stop,
+      Val* step,
+      bool unroll,
       bool vectorize,
-      Val* extent = nullptr,
-      bool unroll = false,
-      Val* shift = nullptr);
+      Val* vectorize_shift);
+
+  ForLoop(Passkey passkey, IterDomain* iter_domain);
+
+  ForLoop(Passkey passkey, const ForLoop* other);
 
   void accept(IrVisitor* visitor) const override {
     visitor->visit(this);
@@ -1264,19 +1263,14 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
     return index_;
   }
 
-  //! Return the extent of the loop, which is by default the extent of
-  //! iter_domain_ but may be the one setat the constructor call.
-  Val* extent() const {
-    TORCH_INTERNAL_ASSERT(iter_domain_ != nullptr);
-    return extent_ != nullptr ? extent_ : iter_domain_->extent();
-  }
+  Val* start() const;
 
-  bool vectorize() const {
-    return vectorize_;
-  }
+  Val* stop() const;
 
-  kir::Val* shift() const {
-    return shift_;
+  Val* step() const;
+
+  Val* vectorize_shift() const {
+    return vectorize_shift_;
   }
 
   IterDomain* iter_domain() const {
@@ -1295,20 +1289,28 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
     return unroll_;
   }
 
+  bool vectorize() const {
+    return vectorize_;
+  }
+
  private:
-  Val* const index_ = nullptr;
   IterDomain* const iter_domain_ = nullptr;
+
+  Val* index_ = nullptr;
+  Val* start_ = nullptr;
+  Val* stop_ = nullptr;
+  Val* step_ = nullptr;
+
+  bool unroll_ = false;
+
   // vectorize is true when the for-loop contains a vectorize set
   // the flag is used to omit the for-loop from the kernel
   bool vectorize_ = false;
-  //! Extent of the loop, which may be smaller than the extent of iter_domain_
-  Val* const extent_ = nullptr;
-  Scope body_;
-  bool unroll_ = false;
-
   // [pre | vectorize | post] <= inner-most, merged root domain
-  // shift_ is applied to the vectorize and post sections.
-  Val* shift_ = nullptr;
+  // shift_ is applied to vectorize and post sections.
+  Val* vectorize_shift_ = nullptr;
+
+  Scope body_;
 };
 
 //! IfThenElse provides scoping for an boolean operator. Exprs placed in its

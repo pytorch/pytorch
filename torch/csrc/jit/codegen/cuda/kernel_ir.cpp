@@ -451,40 +451,94 @@ void Scope::clear() {
 
 ForLoop::ForLoop(
     Passkey passkey,
-    Val* index,
     IterDomain* iter_domain,
-    bool vectorize,
-    Val* extent,
+    Val* index,
+    Val* start,
+    Val* stop,
+    Val* step,
     bool unroll,
-    Val* shift)
+    bool vectorize,
+    Val* vectorize_shift)
     : Expr(passkey),
-      index_{index},
       iter_domain_{iter_domain},
-      vectorize_(vectorize),
-      extent_{extent},
-      body_(this),
+      index_(index),
+      start_(start),
+      stop_(stop),
+      step_(step),
       unroll_(unroll),
-      shift_{shift} {
+      vectorize_(vectorize),
+      vectorize_shift_(vectorize_shift),
+      body_(this) {
   TORCH_INTERNAL_ASSERT(index->dtype() == DataType::Int);
   addInput(index);
   addInput(iter_domain);
+  if (start_ == nullptr && iter_domain->isThread()) {
+    start_ =
+        IrBuilder(GpuLower::current()->kernel())
+            .create<kir::NamedScalar>(
+                stringifyThread(iter_domain->parallelType()), DataType::Int);
+  }
+  if (step_ == nullptr) {
+    if (iter_domain->isThread()) {
+      step_ = IrBuilder(GpuLower::current()->kernel())
+                  .create<kir::NamedScalar>(
+                      stringifyThreadSize(iter_domain->parallelType()),
+                      DataType::Int);
+    } else {
+      step_ = IrBuilder(GpuLower::current()->kernel()).one();
+    }
+  }
 }
 
-ForLoop::ForLoop(
-    Passkey passkey,
-    Val* index,
-    IterDomain* iter_domain,
-    Val* extent,
-    bool unroll,
-    Val* shift)
+ForLoop::ForLoop(Passkey passkey, IterDomain* iter_domain)
     : ForLoop(
           passkey,
-          index,
           iter_domain,
+          IrBuilder(GpuLower::current()->kernel())
+              .create<kir::Int>(c10::nullopt),
+          nullptr,
+          nullptr,
+          nullptr,
+          false,
           isParallelTypeVectorize(iter_domain->parallelType()),
-          extent,
-          unroll,
-          shift) {}
+          nullptr) {}
+
+ForLoop::ForLoop(Passkey passkey, const ForLoop* other)
+    : ForLoop(
+          passkey,
+          other->iter_domain(),
+          other->index(),
+          other->start(),
+          other->stop(),
+          other->step(),
+          other->unroll(),
+          other->vectorize(),
+          other->vectorize_shift()) {}
+
+Val* ForLoop::start() const {
+  if (start_ != nullptr) {
+    return start_;
+  } else {
+    // clang-tidy complains without this
+    TORCH_INTERNAL_ASSERT(iter_domain_ != nullptr);
+    return iter_domain_->start();
+  }
+}
+
+Val* ForLoop::stop() const {
+  if (stop_ != nullptr) {
+    return stop_;
+  } else {
+    // clang-tidy complains without this
+    TORCH_INTERNAL_ASSERT(iter_domain_ != nullptr);
+    return iter_domain_->extent();
+  }
+}
+
+Val* ForLoop::step() const {
+  TORCH_INTERNAL_ASSERT(step_ != nullptr);
+  return step_;
+}
 
 IfThenElse::IfThenElse(Passkey passkey, Bool* cond)
     : Expr(passkey), cond_{cond}, then_body_(this), else_body_(this) {

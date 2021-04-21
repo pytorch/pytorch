@@ -876,7 +876,7 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
     }
   }
 
-  auto vectorize_shift = loops.back()->shift();
+  auto vectorize_shift = loops.back()->vectorize_shift();
 
   // Global striding
   std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zero());
@@ -1333,7 +1333,7 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
     }
   }
 
-  auto vectorize_shift = loops.back()->shift();
+  auto vectorize_shift = loops.back()->vectorize_shift();
 
   // Global striding
   std::vector<kir::Val*> strided_inds(root_dom.size(), ir_builder.zero());
@@ -1663,9 +1663,12 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
         within_unswitch = true;
       }
 
-      if (within_unswitch && !loop->iter_domain()->isThread()) {
-        loop_to_ind_map[loop] =
-            ir_builder.subExpr(loop->iter_domain()->extent(), one);
+      if (within_unswitch) {
+        if (loop->iter_domain()->isThread()) {
+          loop_to_ind_map[loop] = loop->start();
+        } else {
+          loop_to_ind_map[loop] = ir_builder.subExpr(loop->stop(), one);
+        }
       }
     }
   }

@@ -135,6 +135,101 @@ class KernelIrScanner : private kir::IrVisitor {
   }
 };
 
+//! Make sure tensors have valid allocations even when parallelized
+//! loops potentially have larger iteration counts than the number of
+//! threads.
+//!
+//! When an IterDomain of a tensor is parallelized, the IterDomain
+//! may not contribute to the allocation of the tensor. For example,
+//! it is assumed that an allocation of a local-memory tensor does not
+//! need to be accounted for an parallelied IterDomain. This is true
+//! when it is guaranteed that each thread only needs to execute the
+//! loop body once. However, if not, the allocation is invalid as it
+//! only has a space for one value per thread.
+//!
+//! ValidateAllocation checks all tensor allocations and sees if any
+//! tensor may have a parallelized loop whose iteration count may
+//! be larger than the number of threads. If so, an error is thrown if
+//! the tensor is not allocated on thread-shared memories. Note that
+//! when allocated on a shared memory (i.e., MemoryType::Shared or
+//! MemoryType::Global for tensors parallelized with threadIdx, or
+//! MemoryType::Global for tensors parallelized with blockIdx), it is
+//! assumed that allocation is properly extended for the iteration
+//! count.
+class ValidateAllocation : private kir::IrVisitor {
+ public:
+  static void validate(const Kernel* kernel) {
+    ValidateAllocation validate_allocation(kernel);
+  }
+
+ private:
+  explicit ValidateAllocation(const Kernel* kernel) {
+    live_allocations_.emplace_back(std::vector<const Allocate*>());
+    for (const auto& ir_node : kernel->topLevelExprs()) {
+      ir_node->accept(this);
+    }
+    live_allocations_.pop_back();
+    TORCH_INTERNAL_ASSERT(live_allocations_.empty());
+  }
+
+  void visit(const kir::Allocate* allocate) final {
+    TORCH_INTERNAL_ASSERT(!live_allocations_.empty());
+    live_allocations_.back().push_back(allocate);
+  }
+
+  // for_loop is parallelized and its stop value is not guaranteed to
+  // be <= the number of threads, which breaks an assumption made
+  // during in the allocation lowering if it's thread-parallel and not
+  // allocated on shared or global memories, or if it's block-parallel
+  // ando not allocated on global memory.
+  void validate(const kir::ForLoop* for_loop) {
+    const auto loop_id = for_loop->iter_domain();
+    const auto gpu_lower = GpuLower::current();
+    for (const auto& allocations : live_allocations_) {
+      for (const auto& allocate : allocations) {
+        const auto tv = allocate->buffer()->as<kir::TensorView>();
+        for (const auto& axis : tv->domain()->domain()) {
+          if (!gpu_lower->caParallelMap().areMapped(loop_id, axis)) {
+            continue;
+          }
+          if (isParallelTypeThreadDim(loop_id->parallelType())) {
+            TORCH_INTERNAL_ASSERT(
+                tv->memoryType() == MemoryType::Shared ||
+                tv->memoryType() == MemoryType::Global);
+          } else if (isParallelTypeBlockDim(loop_id->parallelType())) {
+            TORCH_INTERNAL_ASSERT(tv->memoryType() == MemoryType::Global);
+          }
+        }
+      }
+    }
+  }
+
+  void visit(const kir::ForLoop* for_loop) final {
+    if (for_loop->stop() != for_loop->iter_domain()->extent() &&
+        isParallelTypeThread(for_loop->iter_domain()->parallelType())) {
+      validate(for_loop);
+    }
+
+    live_allocations_.emplace_back(std::vector<const Allocate*>());
+    for (const auto& expr : for_loop->body().exprs()) {
+      expr->accept(this);
+    }
+    live_allocations_.pop_back();
+  }
+
+  void visit(const kir::IfThenElse* ite) final {
+    for (const auto& expr : ite->thenBody().exprs()) {
+      expr->accept(this);
+    }
+    for (const auto& expr : ite->elseBody().exprs()) {
+      expr->accept(this);
+    }
+  }
+
+ private:
+  std::vector<std::vector<const Allocate*>> live_allocations_;
+};
+
 } // namespace
 
 // TODO(kir): Kernel IR validation
@@ -146,6 +241,7 @@ void Kernel::finalize(
   top_level_exprs_ = std::move(top_level_exprs);
   predicate_map_ =
       std::make_unique<ThreadPredicateMap>(std::move(predicate_map));
+  ValidateAllocation::validate(this);
   analyze();
 }
 

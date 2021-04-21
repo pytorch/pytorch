@@ -199,6 +199,10 @@ class CudaKernelGenerator : private kir::IrVisitor {
   std::string gen(const kir::Node* node) {
     std::stringstream tmp_code;
     std::swap(tmp_code, code_);
+    auto replacement = replacement_map_.find(node);
+    if (replacement != replacement_map_.end()) {
+      node = replacement->second;
+    }
     node->accept(this);
     std::swap(tmp_code, code_);
     return tmp_code.str();
@@ -895,15 +899,40 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
   void visit(const kir::ForLoop* node) final {
     // TODO(kir): handle this during lowering
-    if (node->iter_domain()->isThread() || node->iter_domain()->isBroadcast() ||
-        node->vectorize()) {
+    if (node->iter_domain()->isBroadcast() || node->vectorize()) {
       vectorize_scope_ = node->vectorize();
       handleScope(node->body());
       vectorize_scope_ = false;
       return;
     }
 
-    if (node->extent()->isOneInt()) {
+    // By default, a parallelized loop would look like:
+    //
+    //   for (int x = threadIdx.x; x < stop; x += blockDim.x) {
+    //     do_some_comp(x);
+    //   }
+    //
+    // When stop is guaranteed to be smaller or equal to the number of
+    // threads, the for-loop is not necessary. In the above case, we
+    // would just generate the loop body without the for clause but
+    // references to the loop index replaced by the loop start value.
+    //
+    // When the loop end is the same as the IterDomain extent, the
+    // assumption can be safely made. This is more conservative than
+    // necessary since the loop stop value just needs to be <= the
+    // IterDomain extent. However, at this point, this conservative
+    // analysis seems sufficient.
+    if (node->stop() == node->iter_domain()->extent() &&
+        node->iter_domain()->isThread()) {
+      // Register a replacement of references to the loop index with
+      // the loop start value.
+      replacement_map_.insert({node->index(), node->start()});
+      handleScope(node->body());
+      replacement_map_.erase(node->index());
+      return;
+    }
+
+    if (node->start()->isZeroInt() && node->stop()->isOneInt()) {
       indent() << "constexpr " << node->index()->dtype() << " "
                << gen(node->index()) << " = 0;\n";
       handleScope(node->body());
@@ -911,14 +940,22 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
 
     const auto gen_index = gen(node->index());
-    const auto gen_start = genInline(node->iter_domain()->start());
-    const auto gen_extent = genInline(node->extent());
+    const auto gen_start = genInline(node->start());
+    const auto gen_stop = genInline(node->stop());
+    const auto gen_step = genInline(node->step());
+
     if (!node->unroll()) {
       indent() << "#pragma unroll 1\n";
     }
+    std::stringstream step_code;
+    if (node->step()->isOneInt()) {
+      step_code << "++" << gen_index;
+    } else {
+      step_code << gen_index << " += " << gen_step;
+    }
     indent() << "for(size_t " << gen_index << " = " << gen_start << "; "
-             << gen_index << " < " << gen_extent << "; ++" << gen_index << ") ";
-
+             << gen_index << " < " << gen_stop << "; " << step_code.str()
+             << ") ";
     startBlock(true);
     handleScope(node->body());
     endBlock();
@@ -1014,6 +1051,9 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
   // Mark when we are inside of a vectorized for-loop
   bool vectorize_scope_ = false;
+
+  //! Holds active replacement mappings during codegen
+  std::unordered_map<const kir::Node*, const kir::Node*> replacement_map_;
 };
 
 } // namespace

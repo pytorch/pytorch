@@ -75,13 +75,7 @@ void IndexLowering::visit(const kir::ForLoop* for_loop) {
   const auto prev_scope_expr = active_scope_expr_;
   const auto prev_scope = active_scope_;
 
-  auto new_for_loop = ir_builder_.create<kir::ForLoop>(
-      for_loop->index(),
-      for_loop->iter_domain(),
-      for_loop->vectorize(),
-      for_loop->extent(),
-      for_loop->unroll(),
-      for_loop->shift());
+  auto new_for_loop = ir_builder_.create<kir::ForLoop>(for_loop);
   pushBack(new_for_loop);
 
   active_scope_expr_ = new_for_loop;

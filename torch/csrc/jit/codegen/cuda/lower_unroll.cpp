@@ -23,7 +23,14 @@ namespace {
 kir::ForLoop* cloneLoopNest(const kir::ForLoop* for_loop, bool unroll = false) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
   const auto new_loop = ir_builder.create<kir::ForLoop>(
-      for_loop->index(), for_loop->iter_domain(), for_loop->extent(), unroll);
+      for_loop->iter_domain(),
+      for_loop->index(),
+      for_loop->start(),
+      for_loop->stop(),
+      for_loop->step(),
+      unroll,
+      for_loop->vectorize(),
+      for_loop->vectorize_shift());
   for (auto expr : for_loop->body().exprs()) {
     if (auto nested_for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
       expr = cloneLoopNest(nested_for_loop, unroll);
@@ -61,11 +68,13 @@ void cloneVectorizeLoopNests(
     TORCH_INTERNAL_ASSERT(!has_vectorize_op || fl->body().exprs().size() == 1);
 
     const auto new_loop = ir_builder.create<kir::ForLoop>(
-        fl->index(),
         fl->iter_domain(),
-        vectorize && has_vectorize_op,
+        fl->index(),
+        ir_builder.zero(),
         extent,
+        ir_builder.one(),
         false,
+        vectorize && has_vectorize_op,
         shift);
 
     for (auto expr : fl->body().exprs()) {
@@ -180,8 +189,7 @@ kir::ForLoop* handleMisalignedVectorization(
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
   // create new base For-Loop
-  const auto new_loop = ir_builder.create<kir::ForLoop>(
-      for_loop->index(), for_loop->iter_domain(), for_loop->extent());
+  const auto new_loop = ir_builder.create<kir::ForLoop>(for_loop);
 
   // Find child For-Loops and add remaining expressions to base For-Loop
   auto child_loops = parseVectorizedForLoop(for_loop, new_loop);
