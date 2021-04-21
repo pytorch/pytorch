@@ -408,6 +408,9 @@ def einsum(equation, *operands, optimize=None):
                 [ 0.3311,  5.5201, -3.0356]])
 
         # custom contraction path
+        >>> torch.einsum('bn,anm,bm->ba', l, A, r, optimize=[(1, 2), (0, 1)])
+        tensor([[-3.1469,  8.0020, -0.0642],
+                [ 4.1302,  7.5634,  9.8182]])
     """
     if has_torch_function(operands):
         return handle_torch_function(einsum, operands, equation, *operands)
@@ -429,7 +432,7 @@ def einsum(equation, *operands, optimize=None):
             for a, b in optimize:
                 path.append(a)
                 path.append(b)
-        return _VF.einsum(equation, operands, optimize=path)  # type: ignore
+        return _VF.einsum(equation, operands, optimize=path)  # type: ignore[attr-defined]
 
     return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 
