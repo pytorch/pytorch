@@ -115,8 +115,6 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
 
   Inline(*graph);
 
-  // TODO: to use it for mobile, you need to enable it here.
-  // torch::jit::Code code(graph, func.name(), true);
   torch::jit::MobileCode code(graph, func.name());
   auto instructions_copy = code.instructions();
 

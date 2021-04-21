@@ -3,6 +3,7 @@
 #include <ATen/Parallel.h>
 #include <c10/core/DeviceType.h>
 #include <test/cpp/jit/test_utils.h>
+#include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/jit.h>
 #include <torch/script.h>
 #include <torch/torch.h>
@@ -151,7 +152,17 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   ASSERT_TRUE(op_to_specified_args.size() == 2);
   ASSERT_TRUE(op_to_specified_args["aten::slice.Tensor"] == 4);
   ASSERT_TRUE(op_to_specified_args["aten::slice.str"] == 1);
-
+  // TODO: this portion will be enabled later
+  // auto instructions_copy = function.instructions();
+  // int count = 0;
+  // for (auto inst: instructions_copy) {
+  //   if (inst.op == DROPR) {
+  //     count++;
+  //   }
+  // }
+  // // threee inputs should have been dropped
+  // ASSERT_TRUE(count == 5) << "five inputs should have been dropped but "
+  //                         << count << " dropped\n";
   auto graph_vararg = build_mobile_export_analysis_graph_with_vararg();
   MobileCode function_vararg(graph_vararg, "");
   auto op_to_specified_args_vararg = function_vararg.op_to_num_specified_args();
@@ -165,6 +176,12 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   auto op_to_specified_args_nested = function_nested.op_to_num_specified_args();
   ASSERT_TRUE(op_to_specified_args_nested["aten::slice.Tensor"] == 4);
   ASSERT_TRUE(op_to_specified_args_nested["aten::slice.str"] == 1);
+
+  auto graph_non_const = build_mobile_export_analysis_graph_non_const();
+  MobileCode function_non_const(graph_non_const, "");
+  auto op_to_specified_args_non_const =
+      function_non_const.op_to_num_specified_args();
+  ASSERT_TRUE(op_to_specified_args_non_const["aten::conv2d"] == 6);
 }
 
 TEST(InterpreterTest, runAsyncBasicTest) {

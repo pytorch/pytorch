@@ -506,7 +506,8 @@ struct CodeImpl {
   CodeImpl(
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
-      size_t remaining_bailout_depth)
+      size_t remaining_bailout_depth,
+      bool emit_instructions = true)
       : function_name_(std::move(function_name)),
         preprocess_(*graph),
         current_node_(preprocess_.graph->return_node()),
@@ -520,13 +521,16 @@ struct CodeImpl {
           fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
     }
     n_inputs = graph_->inputs().size();
+    if (emit_instructions) {
+      run();
+    }
   }
 
   // since subclass of CodeImpl needs to populate
   // op_to_num_specified_args, we seperate the calls
   // that changes internals of CodeImpl into a separate
-  // function. User must manually call run() before using it
-  void run() {
+  // function.
+  virtual void run() {
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
     // we deferred the emission of bailout blocks so they appear at the end
@@ -639,12 +643,14 @@ struct CodeImpl {
       OpCode op;
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
-      } else if (drop) {
-        op = DROPR;
       } else if (moved) {
         op = MOVE;
       } else {
         op = LOAD;
+      }
+
+      if (drop) {
+        op = DROPR;
       }
       insertInstruction(op, reg);
     }
@@ -668,7 +674,7 @@ struct CodeImpl {
     }
   }
 
-  void emitOperator(Node* node) {
+  virtual void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
     const Operator& op = node->getOperator();
     if (op.hasOperation() && op.schema().is_vararg()) {
@@ -1087,9 +1093,11 @@ struct MobileCodeImpl : CodeImpl {
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
       size_t remaining_bailout_depth)
-      : CodeImpl(graph, function_name, remaining_bailout_depth) {}
+      : CodeImpl(graph, function_name, remaining_bailout_depth, false) {
+    run();
+  }
 
-  void run() {
+  void run() override {
     process_ops_for_mobile();
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
@@ -1132,12 +1140,18 @@ struct MobileCodeImpl : CodeImpl {
       if (!schema_args.at(schema_idx).default_value().has_value()) {
         return schema_idx + 1;
       } else {
-        auto schema_value = schema_args.at(schema_idx).default_value().value();
+        auto schema_value =
+            schema_args.at(schema_idx).default_value().value().toIValue();
         // non-const value will become nullptr here, so will be marked necessary
+        // non-const would include prim::ListConstruct, prim::DictConstruct as
+        // well.
         auto actual_value = toIValue(actual_inputs[schema_idx]);
+        if (!actual_value.has_value()) {
+          return schema_idx + 1;
+        }
         // if the IR has same value as default value of the schema,
         // it is not neccessary argument.
-        if (schema_value != actual_value) {
+        if (schema_value != actual_value.value()) {
           return schema_idx + 1;
         }
       }
@@ -1145,28 +1159,28 @@ struct MobileCodeImpl : CodeImpl {
     return 0;
   }
 
-  // void emitOperator(Node* node) {
-  //   const Operator& op = node->getOperator();
-  //   if (op.hasOperation() && op.schema().is_vararg()) {
-  //     emitLoadInputs(node->inputs());
-  //     insertInstruction(OPN, operator_table_.size(), node->inputs().size());
-  //   } else {
-  //     auto unique_op_name = op.schema().overload_name() != ""
-  //       ? op.schema().name() + "." + op.schema().overload_name()
-  //       : op.schema().name();
-  //     auto num_include = node->inputs().size();
-  //     // make sure we only do this for mobile code
-  //     if (op_to_num_specified_args_.find(unique_op_name) !=
-  //             op_to_num_specified_args_.end()) {
-  //       num_include = op_to_num_specified_args_[unique_op_name];
-  //     }
-  //     emitLoadInputs(node->inputs(), num_include);
-  //     insertInstruction(OP, operator_table_.size());
-  //   }
-  //
-  //   operator_table_.emplace_back(op.getOperation(node));
-  //
-  // }
+  void emitOperator(Node* node) override {
+    CodeImpl::emitOperator(node);
+    // const Operator& op = node->getOperator();
+    // if (op.hasOperation() && op.schema().is_vararg()) {
+    //   emitLoadInputs(node->inputs());
+    //   insertInstruction(OPN, operator_table_.size(), node->inputs().size());
+    // } else {
+    //   auto unique_op_name = op.schema().overload_name() != ""
+    //     ? op.schema().name() + "." + op.schema().overload_name()
+    //     : op.schema().name();
+    //   auto num_include = node->inputs().size();
+    //   // make sure we only do this for mobile code
+    //   if (op_to_num_specified_args_.find(unique_op_name) !=
+    //           op_to_num_specified_args_.end()) {
+    //     num_include = op_to_num_specified_args_[unique_op_name];
+    //   }
+    //   emitLoadInputs(node->inputs(), num_include);
+    //   insertInstruction(OP, operator_table_.size());
+    // }
+
+    // operator_table_.emplace_back(op.getOperation(node));
+  }
 };
 
 // InterpreterState state that and used to compute a Code
@@ -1858,19 +1872,9 @@ Code::Code(
     : pImpl(new CodeImpl(
           graph,
           std::move(function_name),
-          remaining_bailout_depth)) {
-  pImpl->run();
-}
+          remaining_bailout_depth)) {}
 
-Code::Code(CodeImpl* codeImpl) : pImpl(codeImpl) {
-  // if it is mobile, run mobile method
-  if (auto mobileImpl = static_cast<MobileCodeImpl*>(codeImpl)) {
-    mobileImpl->run();
-  } else {
-    codeImpl->run();
-  }
-}
-
+Code::Code(CodeImpl* codeImpl) : pImpl(codeImpl) {}
 Code::~Code() = default;
 
 MobileCode::MobileCode(

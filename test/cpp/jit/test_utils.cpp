@@ -167,6 +167,23 @@ std::shared_ptr<Graph> build_mobile_export_analysis_graph_with_vararg() {
   return g;
 }
 
+std::shared_ptr<Graph> build_mobile_export_analysis_graph_non_const() {
+  const auto graph_string = R"IR(
+      graph(%input.1 : Tensor):
+        %7 : int = prim::Constant[value=1]() # <string>:3:58
+        %9 : int = prim::Constant[value=0]() # <string>:3:66
+        %8 : int[] = prim::ListConstruct(%7, %7)
+        %10 : int[] = prim::ListConstruct(%9, %9)
+        %11 : int[] = prim::ListConstruct(%7, %7)
+        %12 : Tensor = aten::conv2d(%input.1, %input.1, %input.1, %8, %10, %11, %7)
+        return (%12))IR";
+
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->lint();
+  return g;
+}
+
 at::Tensor t_use(at::Tensor x) {
   return x;
 }
