@@ -7,7 +7,15 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-absolute-value")
   string(APPEND CMAKE_C_FLAGS " -Wno-absolute-value")
 endif(NOT MSVC)
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
 # Can be compiled standalone
 if(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DIR OR NOT AT_INSTALL_SHARE_DIR)
   set(AT_INSTALL_BIN_DIR "bin" CACHE PATH "AT install binary subdirectory")
@@ -118,7 +126,15 @@ file(GLOB native_sparse_hip_cpp "native/sparse/hip/*.cpp")
 file(GLOB native_quantized_hip_hip "native/quantized/hip/*.hip")
 file(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
 file(GLOB native_utils_cpp "native/utils/*.cpp")
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
 # XNNPACK
 file(GLOB native_xnnpack "native/xnnpack/*.cpp")
 
@@ -191,7 +207,15 @@ if(USE_ROCM)
   set(all_hip_cpp ${native_sparse_hip_cpp} ${native_quantized_hip_cpp} ${hip_cpp} ${native_hip_cpp} ${cuda_generated_cpp} ${ATen_HIP_SRCS})
   set(all_hip_cpp ${native_miopen_cpp} ${native_cudnn_hip_cpp} ${miopen_cpp} ${all_hip_cpp})
 endif()
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
 filter_list(generated_h generated_cpp "\\.h$")
 filter_list(cuda_generated_h cuda_generated_cpp "\\.h$")
 filter_list(core_generated_h core_generated_cpp "\\.h$")
@@ -283,6 +307,16 @@ endif(MKLDNN_FOUND)
 
 list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
+
 if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
   # Preserve values for the main build
   set(__aten_sleef_build_shared_libs ${BUILD_SHARED_LIBS})
@@ -372,7 +406,15 @@ if(USE_CUDA AND NOT USE_ROCM)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
   endif($ENV{ATEN_STATIC_CUDA})
 endif()
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
 
   if(USE_MAGMA)
     if(USE_CUDA)
@@ -507,3 +549,13 @@ set(ATen_VULKAN_INCLUDE ${ATen_VULKAN_INCLUDE} PARENT_SCOPE)
 set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS} PARENT_SCOPE)
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
