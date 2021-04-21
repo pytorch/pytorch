@@ -110,7 +110,7 @@ class Batch:
     def _setitem_by_index(self, index: int, value: Tensor) -> None:
         if not self.atomic:
             i = index
-            self.value = self.value[:i] + (value,) + self.value[i + 1 :]  # type: ignore
+            self.value = self.value[:i] + (value,) + self.value[i + 1 :]  # type: ignore[operator]
             return
 
         if index != 0:
