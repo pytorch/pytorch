@@ -5676,8 +5676,6 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def _test_cuda_future_extraction(self, wrapper, unwrapper):
         # We check proper CUDA stream synchronization by filling the tensor with
         # the expected value in one stream, and reading it from another stream.
-        # We copy between two (pre-allocated) CUDA tensor for it to be async.
-        source = torch.ones((100,), device="cuda:0")
         tensor = torch.zeros((100,), device="cuda:0")
         future = Future(["cuda:0"])
         with torch.cuda.device("cuda:0"):
@@ -5685,7 +5683,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             another_stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
                 torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
-                tensor.copy_(source, non_blocking=True)
+                tensor.fill_(1)
                 future.set_result(wrapper(tensor))
             with torch.cuda.stream(another_stream):
                 self.assertTrue(torch.equal(
@@ -5714,8 +5712,6 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def test_cuda_future_callback_changes_devices(self):
         # We check proper CUDA stream synchronization by filling the tensor with
         # the expected value in one stream, and reading it from another stream.
-        # We copy between two (pre-allocated) CUDA tensor for it to be async.
-        source = torch.ones((100,), device="cuda:0")
         tensor0 = torch.zeros((100,), device="cuda:0")
         tensor1 = torch.zeros((100,), device="cuda:1")
         parent_future = Future(["cuda:0", "cuda:1"])
@@ -5730,8 +5726,42 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
                 torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
-                tensor0.copy_(source, non_blocking=True)
+                tensor0.fill_(1)
                 parent_future.set_result(tensor0)
+        with torch.cuda.device("cuda:1"):
+            another_stream = torch.cuda.Stream()
+            with torch.cuda.stream(another_stream):
+                self.assertTrue(torch.equal(
+                    child_future.wait().cpu(), torch.ones((100,))
+                ))
+
+    @skip_if_lt_x_gpu(2)
+    def test_cuda_future_value_on_bad_device(self):
+        tensor0 = torch.zeros((100,), device="cuda:0")
+        tensor1 = torch.zeros((100,), device="cuda:1")
+        parent_future = Future(["cuda:1"])
+
+        # As a plus, we test that futures still invoke callbacks even in case of
+        # error, and that the child futures are successful if those callbacks
+        # don't access the parent future.
+        def cb(fut):
+            torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+            tensor1.fill_(1)
+            return tensor1
+
+        child_future = parent_future.then(cb)
+        with torch.cuda.device("cuda:0"):
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                tensor0.fill_(1)
+                parent_future.set_result(tensor0)
+        with self.assertRaisesRegex(
+            ValueError,
+            r"The result contained tensors residing on device\(s\) cuda:0 "
+            r"which are not among the expected device\(s\) cuda:1",
+        ):
+            parent_future.wait()
         with torch.cuda.device("cuda:1"):
             another_stream = torch.cuda.Stream()
             with torch.cuda.stream(another_stream):
