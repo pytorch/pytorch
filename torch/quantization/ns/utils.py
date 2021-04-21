@@ -2,15 +2,19 @@ import enum
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.nn.quantized as nnq
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
-import torch.nn.quantized.dynamic as nnqd
 toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.fx.quantize import is_activation_post_process
+from .mappings import (
+    FUNS_IO_TYPE_FP32,
+    FUNS_IO_TYPE_INT8,
+    FUNS_IO_TYPE_FP32_OR_INT8,
+    MODS_IO_TYPE_FP32,
+    MODS_IO_TYPE_INT8,
+    MODS_IO_TYPE_FP32_OR_INT8,
+    METHS_IO_TYPE_FP32_OR_INT8,
+)
 
 from typing import Any, Tuple, Callable
 
@@ -31,60 +35,12 @@ class NodeInputOrOutputType(enum.Enum):
     INT8 = enum.auto()  # torch.qint8 or torch.quint8
     FP16 = enum.auto()  # torch.float16
     UNKNOWN = enum.auto()  # we cannot determine input/output dtype
+    # TODO(future PR): while these functions can support multiple dtypes,
+    #   for the purposes of numerical debugging we want to get the actual
+    #   dtype used in the model. We will likely need some kind of dtype
+    #   propagation to estimate this.
+    FP32_OR_INT8 = enum.auto()  # either torch.float or torch.quint8 or torch.qint8
     # TODO(future PRs): dynamic quant, fake quant, etc
-
-
-# TODO(future PR): make configurable
-# TODO(future PR): fill out coverage
-fp32_funs = set([
-    F.linear,
-    F.conv1d,
-    F.conv2d,
-    F.conv3d,
-    # TODO(future PR): move this to a new category, since
-    # i/o can be fp32 or int8
-    torch.cat,
-    F.relu,
-])
-
-# TODO(future PR): make configurable
-# TODO(future PR): fill out coverage
-int8_funs = set([
-    toq.linear,
-    toq.linear_relu,
-    toq.conv1d,
-    toq.conv1d_relu,
-    toq.conv2d,
-    toq.conv2d_relu,
-    toq.conv3d,
-    toq.conv3d_relu,
-    toq.cat,
-])
-
-# TODO(future PR): make configurable
-# TODO(future PR): fill out coverage
-fp32_mods = set([
-    nn.Linear,
-    nn.Conv1d,
-    nn.Conv2d,
-    nni.ConvReLU2d,
-    nn.Conv3d,
-    nn.LSTM,
-    # note: nnqd.Linear is an instance of nnq.Linear, so this
-    # check has to happen before the int8 module check
-    nnqd.Linear,
-    nnqd.LSTM,
-])
-
-# TODO(future PR): make configurable
-# TODO(future PR): fill out coverage
-int8_mods = set([
-    nnq.Linear,
-    nnq.Conv1d,
-    nnq.Conv2d,
-    nniq.ConvReLU2d,
-    nnq.Conv3d,
-])
 
 
 def get_node_first_input_and_output_type(
@@ -93,10 +49,12 @@ def get_node_first_input_and_output_type(
     logger_cls: Callable,
 ) -> Tuple[NodeInputOrOutputType, NodeInputOrOutputType]:
     if node.op == 'call_function':
-        if node.target in fp32_funs:
+        if node.target in FUNS_IO_TYPE_FP32:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
-        elif node.target in int8_funs:
+        elif node.target in FUNS_IO_TYPE_INT8:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
+        elif node.target in FUNS_IO_TYPE_FP32_OR_INT8:
+            return (NodeInputOrOutputType.FP32_OR_INT8, NodeInputOrOutputType.FP32_OR_INT8)
         else:
             return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
@@ -113,17 +71,21 @@ def get_node_first_input_and_output_type(
                 get_node_first_input_and_output_type(
                     first_arg, gm, logger_cls)
             return (prev_node_output_type, prev_node_output_type)
-        # For now, hacky check to see which mod is in which namespace
         is_known_fp32_input_module = any(
-            isinstance(mod, target_type) for target_type in fp32_mods
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32
         )
         is_known_int8_input_module = any(
-            isinstance(mod, target_type) for target_type in int8_mods
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_INT8
+        )
+        is_known_fp32_or_int8_input_module = any(
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8
         )
         if is_known_fp32_input_module:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
         elif is_known_int8_input_module:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
+        elif is_known_fp32_or_int8_input_module:
+            return (NodeInputOrOutputType.FP32_OR_INT8, NodeInputOrOutputType.FP32_OR_INT8)
         else:
             return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
@@ -153,6 +115,9 @@ def get_node_first_input_and_output_type(
                 f"{cur_node_dtype_target} handling needs to be added"
 
             return (prev_node_output_type, NodeInputOrOutputType.FP16)
+
+        elif node.target in METHS_IO_TYPE_FP32_OR_INT8:
+            return (NodeInputOrOutputType.FP32_OR_INT8, NodeInputOrOutputType.FP32_OR_INT8)
 
         return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
     else:
@@ -217,7 +182,7 @@ def get_target_type_str(node: Node, gm: GraphModule) -> str:
     pointed to by this node, or '' for other op types.
     """
     target_type = ''
-    if node.op == 'call_function':
+    if node.op in ('call_function', 'call_method'):
         target_type = str(node.target)
     elif node.op == 'call_module':
         assert isinstance(node.target, str)
