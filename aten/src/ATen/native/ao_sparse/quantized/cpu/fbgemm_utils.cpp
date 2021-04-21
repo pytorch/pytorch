@@ -6,18 +6,20 @@
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
 
-torch::class_<SparseLinearPackedParamsBase> register_sparse_linear_params() {
+namespace ao {
+namespace sparse {
+torch::class_<LinearPackedParamsBase> register_linear_params() {
   static auto register_linear_params =
-      torch::class_<SparseLinearPackedParamsBase>(
-          "sparse", "SparseLinearPackedParamsBase")
+      torch::class_<LinearPackedParamsBase>(
+          "sparse", "LinearPackedParamsBase")
           .def_pickle(
-              [](const c10::intrusive_ptr<SparseLinearPackedParamsBase>& params)
-                  -> SerializationTypeSparseLinearPacked { // __getstate__
+              [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
+                  -> LinearPackedSerializationType { // __getstate__
                 return params->unpack();
               },
-              [](SerializationTypeSparseLinearPacked state)
+              [](LinearPackedSerializationType state)
                   -> c10::intrusive_ptr<
-                      SparseLinearPackedParamsBase> { // __setstate__
+                      LinearPackedParamsBase> { // __setstate__
                 at::Tensor weight;
                 c10::optional<at::Tensor> bias;
                 int64_t out_features_block_size, in_features_block_size;
@@ -29,7 +31,7 @@ torch::class_<SparseLinearPackedParamsBase> register_sparse_linear_params() {
 #ifdef USE_FBGEMM
                 if (at::globalContext().qEngine() == at::QEngine::FBGEMM) {
                   if (weight.scalar_type() == at::kQInt8) {
-                    return SparsePackedLinearWeight::prepack(
+                    return PackedLinearWeight::prepack(
                         weight,
                         bias,
                         out_features_block_size,
@@ -39,14 +41,14 @@ torch::class_<SparseLinearPackedParamsBase> register_sparse_linear_params() {
                         false,
                         "Unsupported data type",
                         c10::toString(weight.scalar_type()),
-                        " in serialized SparseLinearPackedParams object!");
+                        " in serialized LinearPackedParams object!");
                   }
                 }
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
                 if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
                   if (weight.scalar_type() == at::kQInt8) {
-                    return SparsePackedLinearWeightQnnp::prepack(
+                    return PackedLinearWeightQnnp::prepack(
                         weight,
                         bias,
                         out_features_block_size,
@@ -66,5 +68,7 @@ torch::class_<SparseLinearPackedParamsBase> register_sparse_linear_params() {
 }
 
 namespace {
-static auto sparse_linear_params = register_sparse_linear_params();
-}
+static auto linear_params = register_linear_params();
+}  // namespace
+
+}}  // namespace ao::sparse

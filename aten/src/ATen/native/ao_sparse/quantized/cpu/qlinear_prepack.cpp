@@ -9,7 +9,10 @@
 
 #include <algorithm>
 
-torch::class_<SparseLinearPackedParamsBase> register_sparse_linear_params();
+namespace ao {
+namespace sparse {
+
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 namespace {
@@ -38,7 +41,7 @@ void calc_col_offsets_transpose(
 }
 } // namespace
 
-c10::intrusive_ptr<SparseLinearPackedParamsBase> SparsePackedLinearWeight::
+c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::
     prepack(
         const at::Tensor& weight,
         const c10::optional<at::Tensor>& bias,
@@ -46,7 +49,7 @@ c10::intrusive_ptr<SparseLinearPackedParamsBase> SparsePackedLinearWeight::
         const int64_t in_features_block_size) {
   TORCH_CHECK(
       weight.dim() == 2,
-      "The weight tensor for ao::sparse::sparse_qlinear_prepack (fbgemm) should"
+      "The weight tensor for ao::sparse::qlinear_prepack (fbgemm) should"
       " be 2-dimensional.");
 
   auto N = weight.size(0);
@@ -69,7 +72,7 @@ c10::intrusive_ptr<SparseLinearPackedParamsBase> SparsePackedLinearWeight::
           weight_zero_points_int32.cbegin(),
           weight_zero_points_int32.cend(),
           [](int32_t i) { return i == 0; }),
-      "zero point(s) should be 0 for the weight tensor of sparse qlinear op");
+      "zero point(s) should be 0 for the weight tensor of ao::sparse::qlinear op");
   std::vector<float> weight_scales_float(1, 0.0);
   if (qtype == c10::kPerTensorAffine) {
     weight_scales_float[0] = weight.q_scale();
@@ -103,7 +106,7 @@ c10::intrusive_ptr<SparseLinearPackedParamsBase> SparsePackedLinearWeight::
   }
 
   auto bcsr = fbgemm::fbgemmDenseToBCSR<int8_t>(N, K, weight_ptr_int8);
-  auto ret_ptr = c10::make_intrusive<SparsePackedLinearWeight>(
+  auto ret_ptr = c10::make_intrusive<PackedLinearWeight>(
       std::move(bcsr),
       bias_contig,
       col_offsets,
@@ -118,30 +121,30 @@ c10::intrusive_ptr<SparseLinearPackedParamsBase> SparsePackedLinearWeight::
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
-c10::intrusive_ptr<SparseLinearPackedParamsBase> SparsePackedLinearWeightQnnp::
+c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightQnnp::
     prepack(
         const at::Tensor& weight,
         const c10::optional<at::Tensor>& bias,
         const int64_t out_features_block_size,
         const int64_t in_features_block_size) {
   at::native::initQNNPACK();
-  return c10::make_intrusive<SparsePackedLinearWeightQnnp>(
+  return c10::make_intrusive<PackedLinearWeightQnnp>(
       weight, bias, out_features_block_size, in_features_block_size);
 }
 
-SparsePackedLinearWeightQnnp::SparsePackedLinearWeightQnnp(
+PackedLinearWeightQnnp::PackedLinearWeightQnnp(
     const at::Tensor& weight,
     const c10::optional<at::Tensor>& bias,
     const int64_t out_features_block_size,
     const int64_t in_features_block_size)
-    : SparseLinearPackedParamsBase(
+    : LinearPackedParamsBase(
           out_features_block_size,
           in_features_block_size),
       orig_weight_(weight),
       orig_bias_(bias) {
   TORCH_CHECK(
       weight.dim() == 2,
-      "sparse_qlinear (qnnpack): Weight tensor rank should be == 2");
+      "ao::sparse::qlinear (qnnpack): Weight tensor rank should be == 2");
   TORCH_CHECK(out_features_block_size > 0, "Row block size must be > 0.");
   TORCH_CHECK(in_features_block_size > 0, "Row block size must be > 0.");
 
@@ -153,7 +156,7 @@ SparsePackedLinearWeightQnnp::SparsePackedLinearWeightQnnp(
   }
   TORCH_CHECK(
       (bias_.ndimension() == 1 && bias_.size(0) == rows_w),
-      "sparse_qlinear_prepack (qnnpack): Given weight of size ",
+      "ao::sparse::qlinear_prepack (qnnpack): Given weight of size ",
       weight.sizes(),
       ", expected bias to be 1-dimensional with ",
       rows_w,
@@ -194,9 +197,9 @@ SparsePackedLinearWeightQnnp::SparsePackedLinearWeightQnnp(
 
 namespace {
 
-class SparseQLinearPackWeightInt8 final {
+class QLinearPackWeightInt8 final {
  public:
-  static c10::intrusive_ptr<SparseLinearPackedParamsBase> run(
+  static c10::intrusive_ptr<LinearPackedParamsBase> run(
       const at::Tensor& weight,
       const c10::optional<at::Tensor>& bias,
       const int64_t out_features_block_size,
@@ -205,26 +208,27 @@ class SparseQLinearPackWeightInt8 final {
 
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
-      return SparsePackedLinearWeight::prepack(
+      return PackedLinearWeight::prepack(
           weight, bias, out_features_block_size, in_features_block_size);
     }
 #endif
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      return SparsePackedLinearWeightQnnp::prepack(
+      return PackedLinearWeightQnnp::prepack(
           weight, bias, out_features_block_size, in_features_block_size);
     }
 #endif
     TORCH_CHECK(
         false,
-        "Didn't find engine for operation ao::sparse::sparse_qlinear_prepack ",
+        "Didn't find engine for operation ao::sparse::qlinear_prepack ",
         toString(ctx.qEngine()));
   }
 };
 
 TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse_qlinear_prepack"),
-      TORCH_FN(SparseQLinearPackWeightInt8::run));
+      TORCH_SELECTIVE_NAME("sparse::qlinear_prepack"),
+      TORCH_FN(QLinearPackWeightInt8::run));
 }
-} // namespace
+}  // namespace
+}}  // namespace ao::sparse

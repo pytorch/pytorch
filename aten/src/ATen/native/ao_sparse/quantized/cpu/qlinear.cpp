@@ -6,12 +6,15 @@
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 
-torch::class_<SparseLinearPackedParamsBase> register_sparse_linear_params();
+namespace ao {
+namespace sparse {
+
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 
 template <bool ReluFused>
-at::Tensor SparsePackedLinearWeight::apply_impl(
+at::Tensor PackedLinearWeight::apply_impl(
     const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
@@ -198,14 +201,14 @@ at::Tensor SparsePackedLinearWeight::apply_impl(
   return output;
 }
 
-at::Tensor SparsePackedLinearWeight::apply(
+at::Tensor PackedLinearWeight::apply(
     const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
   return apply_impl<false>(input, output_scale, output_zero_point);
 }
 
-at::Tensor SparsePackedLinearWeight::apply_relu(
+at::Tensor PackedLinearWeight::apply_relu(
     const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
@@ -214,18 +217,14 @@ at::Tensor SparsePackedLinearWeight::apply_relu(
 
 #endif // USE_FBGEMM
 
-namespace torch {
-namespace ao {
-namespace sparse {
-
 namespace {
 
 template <bool ReluFused>
-class SparseQLinearInt8 final {
+class QLinearInt8 final {
  public:
   static at::Tensor run(
       const at::Tensor& input,
-      const c10::intrusive_ptr<SparseLinearPackedParamsBase>& packed_weight,
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
     if (ReluFused) {
@@ -238,12 +237,12 @@ class SparseQLinearInt8 final {
 
 TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse_qlinear"),
-      TORCH_FN(SparseQLinearInt8<false>::run));
+      TORCH_SELECTIVE_NAME("sparse::qlinear"),
+      TORCH_FN(QLinearInt8<false>::run));
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse_qlinear_relu"),
-      TORCH_FN(SparseQLinearInt8<true>::run));
+      TORCH_SELECTIVE_NAME("sparse::qlinear_relu"),
+      TORCH_FN(QLinearInt8<true>::run));
 }
 
 } // namespace
-}}} // namespace torch::ao::sparse
+}} // namespace ao::sparse

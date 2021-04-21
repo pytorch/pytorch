@@ -9,11 +9,14 @@
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
 
-torch::class_<SparseLinearPackedParamsBase> register_sparse_linear_params();
+namespace ao {
+namespace sparse {
+
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_PYTORCH_QNNPACK
 template <>
-at::Tensor SparsePackedLinearWeightQnnp::apply_dynamic_impl<true>(
+at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<true>(
     const at::Tensor& input) {
   TORCH_INTERNAL_ASSERT(
       false,
@@ -23,7 +26,7 @@ at::Tensor SparsePackedLinearWeightQnnp::apply_dynamic_impl<true>(
 }
 
 template <>
-at::Tensor SparsePackedLinearWeightQnnp::apply_dynamic_impl<false>(
+at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
     const at::Tensor& input) {
   TORCH_CHECK(
       input.dim() >= 2,
@@ -139,30 +142,26 @@ at::Tensor SparsePackedLinearWeightQnnp::apply_dynamic_impl<false>(
   return output;
 }
 
-at::Tensor SparsePackedLinearWeightQnnp::apply_dynamic(
+at::Tensor PackedLinearWeightQnnp::apply_dynamic(
     const at::Tensor& input) {
   return apply_dynamic_impl<false>(input);
 }
 
-at::Tensor SparsePackedLinearWeightQnnp::apply_dynamic_relu(
+at::Tensor PackedLinearWeightQnnp::apply_dynamic_relu(
     const at::Tensor& input) {
   return apply_dynamic_impl<true>(input);
 }
 
 #endif // USE_PYTORCH_QNNPACK
 
-namespace torch {
-namespace ao {
-namespace sparse {
-
 namespace {
 
 template <bool ReluFused>
-class SparseQLinearDynamicInt8 final {
+class QLinearDynamicInt8 final {
  public:
   static at::Tensor run(
       const at::Tensor& input,
-      const c10::intrusive_ptr<SparseLinearPackedParamsBase>& packed_weight) {
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     auto& ctx = at::globalContext();
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
@@ -175,19 +174,19 @@ class SparseQLinearDynamicInt8 final {
 #endif
     TORCH_CHECK(
         false,
-        "Didn't find engine for operation ao::sparse::sparse_qlinear_dynamic",
+        "Didn't find engine for operation ao::sparse::qlinear_dynamic",
         toString(ctx.qEngine()));
   }
 };
 
 TORCH_LIBRARY_IMPL(sparse, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse_qlinear_dynamic"),
-      TORCH_FN(SparseQLinearDynamicInt8<false>::run));
+      TORCH_SELECTIVE_NAME("sparse::qlinear_dynamic"),
+      TORCH_FN(QLinearDynamicInt8<false>::run));
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse_qlinear_relu_dynamic"),
-      TORCH_FN(SparseQLinearDynamicInt8<true>::run));
+      TORCH_SELECTIVE_NAME("sparse::qlinear_relu_dynamic"),
+      TORCH_FN(QLinearDynamicInt8<true>::run));
 }
 
 } // namespace
-}}} // namespace torch::ao::sparse
+}} // namespace ao::sparse

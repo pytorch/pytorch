@@ -4,13 +4,16 @@
 
 #include <ATen/core/ivalue.h>
 
+namespace ao {
+namespace sparse {
+
 // <Weight, bias, out_features_block_size, in_features_block_size>
-using SerializationTypeSparseLinearPacked =
+using LinearPackedSerializationType =
     std::tuple<at::Tensor, c10::optional<at::Tensor>, std::vector<int64_t>>;
 
-struct SparseLinearPackedParamsBase : public torch::jit::CustomClassHolder {
+struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
  public:
-  SparseLinearPackedParamsBase(
+  LinearPackedParamsBase(
       const int64_t out_features_block_size,
       const int64_t in_features_block_size)
       : out_features_block_size_(out_features_block_size),
@@ -28,7 +31,7 @@ struct SparseLinearPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual at::Tensor apply_dynamic(const at::Tensor& input) = 0;
   virtual at::Tensor apply_dynamic_relu(const at::Tensor& input) = 0;
 
-  virtual SerializationTypeSparseLinearPacked unpack() = 0;
+  virtual LinearPackedSerializationType unpack() = 0;
 
   virtual c10::optional<at::Tensor> bias() = 0;
 
@@ -41,3 +44,5 @@ struct SparseLinearPackedParamsBase : public torch::jit::CustomClassHolder {
  protected:
   const int64_t out_features_block_size_, in_features_block_size_;
 };
+
+}}  // namespace ao::sparse
