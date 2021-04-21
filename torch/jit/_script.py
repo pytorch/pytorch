@@ -58,7 +58,7 @@ if _enabled:
     Attribute = collections.namedtuple("Attribute", ["value", "type"])
 else:
 
-    def Attribute(value, type):  # type: ignore
+    def Attribute(value, type):  # type: ignore[no-redef]
         return value
 
 Attribute.__doc__ = """
@@ -293,13 +293,13 @@ class ScriptMeta(type):
                 for name in ("_parameters", "_buffers", "_modules"):
                     delattr(self, name)
 
-        cls.__init__ = init_then_script  # type: ignore
+        cls.__init__ = init_then_script  # type: ignore[misc]
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
 class _CachedForward(object):
     def __get__(self, obj, cls):
-        return self.__getattr__("forward")  # type: ignore
+        return self.__getattr__("forward")  # type: ignore[attr-defined]
 
 
 class ScriptWarning(Warning):
@@ -343,7 +343,7 @@ if _enabled:
     # did nothing, __getattr__ would not be called. Instead we'd get nn.Module.forward
     # which always throws an exception.
 
-    class ScriptModule(with_metaclass(ScriptMeta, Module)):  # type: ignore
+    class ScriptModule(with_metaclass(ScriptMeta, Module)):  # type: ignore[misc]
         r"""
         A wrapper around C++ ``torch::jit::Module``. ``ScriptModule``\s
         contain methods, attributes, parameters, and
@@ -485,7 +485,7 @@ if _enabled:
             Args:
                 cpp_module: The C++ module that this RecursiveScriptModule will be rebuilt around.
             """
-            self.__init__(cpp_module)  # type: ignore
+            self.__init__(cpp_module)  # type: ignore[misc]
 
             # Copy the concrete type from the C++ module to this ScriptModule.
             self._concrete_type = torch._C.ConcreteModuleType.from_jit_type(
@@ -700,7 +700,7 @@ if _enabled:
         # it is not overridden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
-            if self_method.__func__ == _get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore[attr-defined]
                 RecursiveScriptModule, "__dir__"
             ):
                 return super(RecursiveScriptModule, self).__dir__()
@@ -711,7 +711,7 @@ if _enabled:
         # class throws if it isn't overridden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
-            if self_method.__func__ == _get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore[attr-defined]
                 RecursiveScriptModule, "__bool__"
             ):
                 return True
@@ -806,11 +806,11 @@ if _enabled:
 
 else:
     # TODO MAKE SURE THAT DISABLING WORKS
-    class ScriptModule(torch.nn.Module):  # type: ignore
+    class ScriptModule(torch.nn.Module):  # type: ignore[no-redef]
         def __init__(self, arg=None):
             super().__init__()
 
-    class RecursiveScriptModule(ScriptModule):  # type: ignore
+    class RecursiveScriptModule(ScriptModule):  # type: ignore[no-redef]
         def __init__(self, arg=None):
             super().__init__()
 
@@ -825,7 +825,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
     if obj_id in memo:
         return memo[id(obj)]
 
-    obj = obj.__prepare_scriptable__() if hasattr(obj, '__prepare_scriptable__') else obj  # type: ignore
+    obj = obj.__prepare_scriptable__() if hasattr(obj, '__prepare_scriptable__') else obj  # type: ignore[operator]
     # Record obj in memo to avoid infinite recursion in the case of cycles in the module
     # hierarchy when recursing below.
     memo[obj_id] = obj
