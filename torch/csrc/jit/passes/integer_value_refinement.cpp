@@ -56,8 +56,8 @@ struct IntegerValueRefiner {
             IntegerRefinement refine;
             refine[n->inputs().at(1 - const_index)] = *ival;
             info_[n->output()] = n->kind() == aten::eq
-                ? BoolRefinements::TrueRefinements(std::move(refine))
-                : BoolRefinements::FalseRefinements(std::move(refine));
+                ? BooleanRefinementMapping::TrueRefinements(std::move(refine))
+                : BooleanRefinementMapping::FalseRefinements(std::move(refine));
           }
         }
       }
@@ -186,7 +186,7 @@ struct IntegerValueRefiner {
   // A stack of active refinements, one for each block
   std::vector<ListRefinement*> active_refinements_;
   // A map from Boolean Value * -> associated refinements
-  std::unordered_map<Value*, BoolRefinements> info_;
+  std::unordered_map<Value*, BooleanRefinementMapping> info_;
   std::unordered_set<Block*> throwing_blocks_;
   bool changed_ = false;
 };
