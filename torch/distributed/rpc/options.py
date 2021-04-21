@@ -19,9 +19,9 @@ def _to_device_index(device: DeviceType) -> int:
     return device.index
 
 
-def _to_device_index_map(device_map: Dict[DeviceType, DeviceType]):
-    device_index_map = {}
-    reverse_map = {}
+def _to_device_index_map(device_map: Dict[DeviceType, DeviceType]) -> Dict[int, int]:
+    device_index_map : Dict[int, int] = {}
+    reverse_map : Dict[int, int] = {}
     for k in device_map:
         v = device_map[k]
         k, v = torch.device(k), torch.device(v)
@@ -41,7 +41,7 @@ def _to_device_index_map(device_map: Dict[DeviceType, DeviceType]):
     return device_index_map
 
 
-def _to_device_index_list(devices: List[DeviceType]):
+def _to_device_index_list(devices: List[DeviceType]) -> List[int]:
     return list(map(_to_device_index, devices))
 
 
@@ -163,7 +163,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
                         f" to map {k} to {v} and {curr_device_maps[to][k]}"
                     )
 
-        super().set_device_map(to, device_index_map)
+        super()._set_device_map(to, device_index_map)
 
     def set_devices(self, devices: List[DeviceType]):
         r"""

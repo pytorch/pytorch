@@ -1,4 +1,4 @@
-from typing import Tuple, Dict, Optional, List, Any, overload
+from typing import Any, Dict, List, Optional, Tuple, Union, overload
 from datetime import timedelta
 import enum
 import torch
@@ -106,7 +106,7 @@ class _TensorPipeRpcBackendOptionsBase(RpcBackendOptions):
         init_method: str = _DEFAULT_INIT_METHOD,
         device_maps: Dict[str, Dict[int, int]] = dict(),
         devices: List[int] = list()): ...
-    def set_device_map(self, to: str, device_map: Dict[str, Dict[int, int]]): ...
+    def _set_device_map(self, to: str, device_map: Dict[int, int]): ...
 
 class TensorPipeAgent(RpcAgent):
     def __init__(
