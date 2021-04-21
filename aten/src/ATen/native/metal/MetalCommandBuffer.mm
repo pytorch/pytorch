@@ -29,8 +29,8 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
   return cb;
 }
 
-- (bool)valid {
-  return _buffer;
+- (BOOL)valid {
+  return _buffer != nil;
 }
 
 - (void)addSubscriber:(id<PTMetalCommandBuffer>)subscriber {
@@ -59,12 +59,12 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
 }
 
 - (void)commit {
-  [self beginSynchronization];
   if (_buffer.status == 0) {
+    [self beginSynchronization];
     [_buffer commit];
     [_buffer waitUntilCompleted];
+    [self endSynchronization];
   }
-  [self endSynchronization];
 }
 
 - (void)beginSynchronization {
