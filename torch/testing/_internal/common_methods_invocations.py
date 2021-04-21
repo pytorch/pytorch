@@ -177,6 +177,7 @@ class OpInfo(object):
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
                  variant_test_name='',  # additional string to include in the test name
                  supports_autograd=True,  # support for autograd
+                 check_gradgrad=True, # support second order gradients
                  supports_inplace_autograd=None,  # whether the operation supports inplace autograd
                                                   # defaults to supports_autograd's value
                  supports_complex_autograd=None,  # whether the operation supports complex autograd
@@ -234,6 +235,7 @@ class OpInfo(object):
             self.supports_complex_autograd = supports_autograd
 
         self.gradcheck_wrapper = gradcheck_wrapper
+        self.check_gradgrad = check_gradgrad
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
 
@@ -895,6 +897,12 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(
             make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(shape,)) for size, shape in test_cases)
+
+def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
+    return (SampleInput(
+                make_tensor((S, 21, 2), device, dtype, requires_grad=requires_grad),
+                args=(make_tensor((S, 22, 2), device, dtype, requires_grad=requires_grad),)),)
+
 
 def sample_inputs_comparison_ops(self, device, dtype, requires_grad, **kwargs):
     test_cases = (
@@ -3293,6 +3301,14 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=None,
                    dtypesIfROCM=None,
                    supports_autograd=False),
+    OpInfo('cdist',
+           dtypes=floating_types(),
+           supports_out=False,
+           check_gradgrad=False,
+           skips=(
+                # jit consistency always checks gradgrad
+                SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cpu'),),
+           sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
                    dtypes=floating_types_and(torch.half),

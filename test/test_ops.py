@@ -188,7 +188,21 @@ class TestGradients(TestCase):
     @_gradcheck_ops(op_db)
     def test_fn_gradgrad(self, device, dtype, op):
         self._skip_helper(op, dtype)
+        if not op.check_gradgrad:
+            self.skipTest("Skipped! Operation does not support gradgrad")
         self._gradgrad_test_helper(device, dtype, op, op.get_op())
+
+    # Test that gradients of gradients are properly raising
+    @_gradcheck_ops(op_db)
+    def test_fn_fail_gradgrad(self, device, dtype, op):
+        self._skip_helper(op, dtype)
+        if op.check_gradgrad:
+            self.skipTest("Skipped! Operation does support gradgrad")
+
+        err_msg = r"the derivative for '.*' is not implemented\."
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            self._gradgrad_test_helper(device, dtype, op, op.get_op())
+
 
     # Method gradgrad (and grad, see above) tests are disabled since they're
     #   costly and redundant with function gradgrad (and grad) tests
