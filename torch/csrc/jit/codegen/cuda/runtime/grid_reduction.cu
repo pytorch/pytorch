@@ -125,9 +125,9 @@ offset_in_reduction_segment(const _dim3bi& block_idx, const _dim3gd& grid_dim) {
 template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename _dim3>
 __device__ dim3 dimension_of_reduction_block(const _dim3& block_dim) {
   return dim3{
-      X_THREAD ? (unsigned)block_dim.x : 1,
-      Y_THREAD ? (unsigned)block_dim.y : 1,
-      Z_THREAD ? (unsigned)block_dim.z : 1};
+      X_THREAD ? (unsigned)block_dim.x : 1U,
+      Y_THREAD ? (unsigned)block_dim.y : 1U,
+      Z_THREAD ? (unsigned)block_dim.z : 1U};
 }
 
 // Returns the number of threads of each reduction block.
