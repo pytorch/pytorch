@@ -2157,6 +2157,18 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_default_pg_nccl(self):
+        torch.cuda.set_device(self.rank)
+        self._test_sequence_num_set_default_pg(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_nccl_new_group(self):
+        torch.cuda.set_device(self.rank)
+        self._test_sequence_num_set_new_group(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_pass_nccl_options_high_priority_stream(self):
         pg_opts = c10d.ProcessGroupNCCL.Options()
         pg_opts.is_high_priority_stream = True

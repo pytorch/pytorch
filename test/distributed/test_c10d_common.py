@@ -885,6 +885,36 @@ class AbstractCommTest(object):
     def world_size(self):
         return 2
 
+    def _test_sequence_num_set_default_pg(self, backend):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        default_pg = c10d.distributed_c10d._get_default_group()
+        seq_num = default_pg._get_sequence_number_for_group()
+        obj_list = [None for _ in range(dist.get_world_size())]
+        dist.all_gather_object(obj_list, seq_num)
+        self.assertEqual(len(set(obj_list)), 1)
+
+    def _test_sequence_num_set_new_group(self, backend):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        subgroup = dist.new_group([0, 1])
+        subgroup_seq = subgroup._get_sequence_number_for_group()
+        obj_list = [None for _ in range(dist.get_world_size())]
+        dist.all_gather_object(obj_list, subgroup_seq)
+        self.assertEqual(len(set(obj_list)), 1)
+
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
