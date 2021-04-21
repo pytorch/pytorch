@@ -1,5 +1,4 @@
 import collections
-import contextlib
 import functools
 import itertools
 import math
@@ -7,7 +6,7 @@ import os
 import random
 import re
 import unittest
-from typing import Any, Callable, Iterator, List, Tuple, Type
+from typing import Any, Callable, Iterator, List, Tuple
 
 import torch
 
