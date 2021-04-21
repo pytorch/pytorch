@@ -151,6 +151,18 @@ void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors) {
   checkAllSame(c, tensors, checkSameGPU);
 }
 
+void checkTensorsSameDevice(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
+  TORCH_CHECK(
+    t1->get_device() == t2->get_device(),
+    "Expected tensor for ", t1, " to have the same device as tensor for ", t2,
+    "; but device ", t1->get_device(), " does not equal ", t2->get_device(),
+    " (while checking arguments for ", c, ")");
+}
+
+void checkAllSameDevice(CheckedFrom c, ArrayRef<TensorArg> tensors) {
+  checkAllSame(c, tensors, checkTensorsSameDevice);
+}
+  
 void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
   TORCH_CHECK(
     t1->options().type_equal(t2->options()),
