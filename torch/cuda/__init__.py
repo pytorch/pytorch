@@ -67,7 +67,7 @@ def _check_capability():
     old_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
     PyTorch no longer supports this GPU because it is too old.
-    The minimum cuda capability that we support is 3.5.
+    The minimum cuda capability that we support is 3.0.
     """
 
     if torch.version.cuda is not None:  # on ROCm we don't want this check
@@ -77,7 +77,7 @@ def _check_capability():
             major = capability[0]
             minor = capability[1]
             name = get_device_name(d)
-            if capability == (3, 0) or major < 3:
+            if capability < (3, 0) or major < 3:
                 warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
             elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
                 warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
