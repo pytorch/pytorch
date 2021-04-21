@@ -3119,10 +3119,10 @@ def index_add(g, self, dim, index, other):
                           1
                           for i in range(self_dim_rank)]
 
-        new_shape = sym_help._slice_helper(g, 
-                                           self, 
-                                           axes=new_shape_axes, 
-                                           starts=new_shape_starts, 
+        new_shape = sym_help._slice_helper(g,
+                                           self,
+                                           axes=new_shape_axes,
+                                           starts=new_shape_starts,
                                            ends=new_shape_ends)
         other = expand_as(g, other, new_shape)
     else:
