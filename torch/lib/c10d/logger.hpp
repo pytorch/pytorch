@@ -1,4 +1,5 @@
 #include <c10d/reducer.hpp>
+#include "c10/util/Logging.h"
 
 namespace c10d {
 
@@ -16,7 +17,7 @@ class Logger {
   // An interface for users to get DDPLoggingData and log them
   // in the applications. Explanation of logging fields are in
   // "struct DDPLoggingData" of "torch/c10/util/Logging.h".
-  c10::DDPLoggingData get_ddp_logging_data();
+  at::DDPLoggingData get_ddp_logging_data();
 
   // Stream insertion operator for logging data to stream under
   // TORCH_DISTRIBUTED_DEBUG.
@@ -59,7 +60,7 @@ class Logger {
  private:
   // ddp_logging_data_ is used to hold all the ddp related logging
   // data fields.
-  std::unique_ptr<c10::DDPLoggingData> ddp_logging_data_;
+  std::unique_ptr<at::DDPLoggingData> ddp_logging_data_;
   std::shared_ptr<c10d::Reducer> reducer_;
   // track the number of iterations when runtime stats are collected so far.
   long num_iterations_stats_recorded_ = 0;
