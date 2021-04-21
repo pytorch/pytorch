@@ -295,6 +295,20 @@ class TestQuantizeFx(QuantizationTestCase):
         is_dynamic, ModuleClass, module_constructor_inputs,
         inputs, quantized_node, weight_prepack_op
         """
+        class Conv1d(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+                self.stride = 1
+                self.padding = 0
+                self.dilation = 1
+                self.groups = 1
+
+            def forward(self, x):
+                return F.conv1d(x, self.weight, None, self.stride, self.padding, self.dilation, self.groups)
+
+        conv1d_input = torch.rand(1, 3, 224)
+        conv1d_weight = torch.rand(3, 3, 3)
 
         class Conv2d(torch.nn.Module):
             def __init__(self, weight):
@@ -356,6 +370,14 @@ class TestQuantizeFx(QuantizationTestCase):
         linear_module_input = torch.rand(8, 5)
 
         tests = [
+            (
+                False,
+                Conv1d,
+                (conv1d_weight,),
+                (conv1d_input,),
+                ns.call_function(torch.ops.quantized.conv1d),
+                ns.call_function(torch.ops.quantized.conv1d_prepack),
+            ),
             (
                 False,
                 Conv2d,
@@ -2342,7 +2364,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # is unfused
                 linear_fun: 1,
                 # activation, weight, bias and output
-                ns.call_method("to"): 3 + int(use_bias)
+                ns.call_method("to"): 3 + int(use_bias),
+                # TODO: because CopyNode is not handled properly currently, there is
+                # a dequantize that is missing, will need to fix and
+                # remove (- int(not has relu))
+                ns.call_method("dequantize"): 3 + int(use_bias) - int(not has_relu)
             }
             self.checkGraphModeFxOp(
                 model, data, QuantType.DYNAMIC, linear_fun,
@@ -2823,8 +2849,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
             prepare_custom_config_dict=prepare_custom_config_dict)
 
     @skipIfNoFBGEMM
-    def test_quantized_cat(self):
-        """ quantization of the output of cat will be depend on the
+    def test_cat(self):
+        """ quantization of the output of cat will depend on the
         input of cat. we only quantize the output of cat when its inputs are quantized.
         """
         class QuantizedInput(torch.nn.Module):
@@ -2851,6 +2877,15 @@ class TestQuantizeFxOps(QuantizationTestCase):
         for quant_type in self.static_quant_types:
             self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node)
             self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node)
+
+        # check cat is using the same observer for input and output
+        m = QuantizedInput().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        # two inputs and one output of torch.cat are using same observer, so we have
+        # 2 observers that's replicated
+        all_observers = len(dict(m.named_modules(remove_duplicate=False)))
+        distinct_observers = len(dict(m.named_modules()))
+        self.assertEqual(all_observers, distinct_observers + 2)
 
 
     @skipIfNoFBGEMM
