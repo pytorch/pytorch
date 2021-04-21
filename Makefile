@@ -48,6 +48,7 @@ quick_checks:
 		--step 'Ensure no non-breaking spaces' \
 		--step 'Ensure canonical include' \
 		--step 'Ensure no unqualified noqa' \
+		--step 'Ensure no unqualified type ignore' \
 		--step 'Ensure no direct cub include' \
 		--step 'Ensure correct trailing newlines'
 
