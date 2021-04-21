@@ -24,7 +24,7 @@ std::tuple<torch::Tensor, torch::Tensor> GenerateProposals(
     double clip_angle_thresh_,
     bool legacy_plus_one_,
     c10::optional<std::vector<torch::Tensor>> = {}) {
-  // call the cpu ops
+  // call the cpu ops  
   auto result = caffe2::fb::GenerateProposalsCPUKernel(
       scores.cpu(),
       bbox_deltas.cpu(),
