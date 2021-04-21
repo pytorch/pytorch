@@ -1,8 +1,10 @@
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch._C.key as key
 import torch.fx as fx
+torch._C._jit_override_can_fuse_on_cpu(True)
 # import torch.autograd.functional
 from types import FunctionType, CodeType
 
@@ -69,18 +71,25 @@ def grad(f, inps):
     return f_out
 
 def f(a, b):
-    c = a*b
-    return torch.dot(torch.sin(c), a)
-inps = (torch.randn(3), torch.randn(3))
+    c = a*b*a*b
+    return (torch.sin(c)+ a).sum()
+inps = (torch.randn(30000), torch.randn(30000))
 grad_f = fx.symbolic_trace(grad(f, inps))
-grad_f = torch.jit.trace(grad_f, inps)
 
-grads = grad_f(*inps)
-for grad in grads:
-    print(grad)
+grad_f = torch.jit.trace(grad_f, inps)
+print(grad_f.graph)
+
+iters = 1000
+for _ in range(3):
+        grads = grad_f(*inps)
+begin = time.time()
+for _ in range(iters):
+    grad_f(*inps)
+print(time.time() - begin)
+
 for inp in inps:
     inp.requires_grad = True
-print()
-f(*inps).backward()
-for inp in inps:
-    print(inp.grad)
+begin = time.time()
+for _ in range(iters):
+    f(*inps).backward()
+print(time.time() - begin)
