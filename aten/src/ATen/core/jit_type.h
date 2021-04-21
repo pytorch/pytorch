@@ -1554,14 +1554,14 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
   if (typ->isSubtypeOf(IntType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {
-    return TensorType::createContiguous(at::kFloat, at::kCPU, {});
+    return TensorType::createContiguous(at::kDouble, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
-    return TensorType::createContiguous(at::kLong, at::kCPU, {});
+    return TensorType::createContiguous(at::kBool, at::kCPU, {});
   }
   TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }
 inline TypePtr TensorType::fromBoolType() {
-  return TensorType::createContiguous(at::kLong, at::kCPU, {});
+  return TensorType::createContiguous(at::kBool, at::kCPU, {});
 }
 
 inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
