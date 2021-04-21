@@ -6,11 +6,13 @@
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
 
-torch::class_<SparseLinearPackedParamsBase> register_sparse_linear_params();
+namespace ao {
+namespace sparse {
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 
-SerializationTypeSparseLinearPacked SparsePackedLinearWeight::unpack() {
+LinearPackedSerializationType PackedLinearWeight::unpack() {
   auto packW = w.get();
 
   int64_t N = static_cast<int64_t>(packW->R);
@@ -48,7 +50,7 @@ SerializationTypeSparseLinearPacked SparsePackedLinearWeight::unpack() {
 
 #ifdef USE_PYTORCH_QNNPACK
 
-SerializationTypeSparseLinearPacked SparsePackedLinearWeightQnnp::unpack() {
+LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
   std::vector<int64_t> block_pattern(
       {out_features_block_size_, in_features_block_size_});
   return std::make_tuple(orig_weight_, orig_bias_, std::move(block_pattern));
@@ -58,17 +60,18 @@ SerializationTypeSparseLinearPacked SparsePackedLinearWeightQnnp::unpack() {
 
 namespace {
 
-class SparseQLinearUnpackWeightInt8 final {
+class QLinearUnpackWeightInt8 final {
  public:
-  static SerializationTypeSparseLinearPacked run(
-      const c10::intrusive_ptr<SparseLinearPackedParamsBase>& packed_weight) {
+  static LinearPackedSerializationType run(
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     return packed_weight->unpack();
   }
 };
 
 TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse_qlinear_unpack"),
-      TORCH_FN(SparseQLinearUnpackWeightInt8::run));
+      TORCH_SELECTIVE_NAME("sparse::qlinear_unpack"),
+      TORCH_FN(QLinearUnpackWeightInt8::run));
 }
-} // namespace
+}  // namespace
+}}  // namespace ao::sparse

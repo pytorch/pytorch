@@ -8,10 +8,20 @@
 #include <fbgemm/FbgemmSparse.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 
-struct TORCH_API SparsePackedLinearWeight
-    : public SparseLinearPackedParamsBase {
-  SparsePackedLinearWeight(std::unique_ptr<fbgemm::BCSRMatrix<int8_t>> w, c10::optional<at::Tensor> bias, std::vector<int32_t> col_offsets, std::vector<float> w_scale, std::vector<int32_t> w_zp, c10::QScheme q_scheme, const int64_t out_features_block_size /* block sparsity size across output_features */, const int64_t in_features_block_size /* block sparsity size across input_features */)
-      : SparseLinearPackedParamsBase(
+namespace ao {
+namespace sparse {
+
+struct TORCH_API PackedLinearWeight
+    : public LinearPackedParamsBase {
+  PackedLinearWeight(std::unique_ptr<fbgemm::BCSRMatrix<int8_t>> w,
+                     c10::optional<at::Tensor> bias,
+                     std::vector<int32_t> col_offsets,
+                     std::vector<float> w_scale,
+                     std::vector<int32_t> w_zp,
+                     c10::QScheme q_scheme,
+                     const int64_t out_features_block_size /* block sparsity size across output_features */,
+                     const int64_t in_features_block_size /* block sparsity size across input_features */)
+      : LinearPackedParamsBase(
             out_features_block_size,
             in_features_block_size),
         w(std::move(w)),
@@ -51,13 +61,13 @@ struct TORCH_API SparsePackedLinearWeight
     return at::Tensor();
   }
 
-  SerializationTypeSparseLinearPacked unpack() override;
+  LinearPackedSerializationType unpack() override;
 
   c10::optional<at::Tensor> bias() override {
     return bias_;
   }
 
-  static c10::intrusive_ptr<SparseLinearPackedParamsBase> prepack(
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
       const at::Tensor& weight,
       const c10::optional<at::Tensor>& bias,
       const int64_t out_features_block_size,
@@ -70,5 +80,7 @@ struct TORCH_API SparsePackedLinearWeight
       double output_scale,
       int64_t output_zero_point);
 };
+
+}}  // namespace ao::sparse
 
 #endif // USE_FBGEMM
