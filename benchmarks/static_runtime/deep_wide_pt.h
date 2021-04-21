@@ -66,7 +66,7 @@ struct DeepAndWideFast : torch::nn::Module {
       fc_w_t_ = torch::t(fc_w_);
       auto fc1 = torch::addmm(fc_b_, input, fc_w_t_);
 
-      auto pred = at::native::sigmoid(fc1);
+      auto pred = at::cpu::sigmoid(fc1);
 
       prealloc_tensors = {
           wide_offset,
@@ -119,7 +119,7 @@ struct DeepAndWideFast : torch::nn::Module {
           {prealloc_tensors[5], prealloc_tensors[2]}, 1, prealloc_tensors[6]);
       at::native::addmm_cpu_out(
           fc_b_, prealloc_tensors[6], fc_w_t_, 1, 1, prealloc_tensors[7]);
-      at::native::sigmoid_out(prealloc_tensors[7], prealloc_tensors[8]);
+      at::cpu::sigmoid_out(prealloc_tensors[7], prealloc_tensors[8]);
 
       return prealloc_tensors[8];
     }
