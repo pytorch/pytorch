@@ -2161,7 +2161,8 @@ def gradcheck(fn, inputs, **kwargs):
     }
 
     if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
-        default_values["fast_mode"] = True
+        print("PYTORCH_TEST_WITH_SLOW_GRADCHECK is set to ON")
+        default_values["fast_mode"] = False
 
     for key, value in default_values.items():
         kwargs[key] = kwargs.get(key, value)
@@ -2179,7 +2180,8 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     }
 
     if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
-        default_values["fast_mode"] = True
+        print("PYTORCH_TEST_WITH_SLOW_GRADCHECK is set to ON")
+        default_values["fast_mode"] = False
 
     for key, value in default_values.items():
         kwargs[key] = kwargs.get(key, value)
