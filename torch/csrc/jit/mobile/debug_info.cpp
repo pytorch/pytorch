@@ -12,10 +12,9 @@ namespace jit {
 MobileDebugTable::MobileDebugTable(
     std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader) {
   const std::vector<std::string>& record_names = reader->getAllRecords();
-  const c10::string_view suffix("debug_pkl");
+  const c10::string_view suffix(".debug_pkl");
   for (const auto& record_name : record_names) {
-    if (c10::string_view(record_name.data(), record_name.size())
-            .ends_with(suffix)) {
+    if (c10::string_view(record_name).ends_with(suffix)) {
       at::DataPtr debug_data;
       size_t debug_size{0};
       std::tie(debug_data, debug_size) = reader->getRecord(record_name);
@@ -24,16 +23,15 @@ MobileDebugTable::MobileDebugTable(
               reinterpret_cast<const char*>(debug_data.get()), debug_size)
               .toTuple()
               ->elements();
-      std::unique_ptr<SourceRangeDeserializer> deserializer =
-          std::make_unique<SourceRangeDeserializer>();
+      SourceRangeDeserializer deserializer;
       for (auto& val : ivalues) {
         auto tup_elems = val.toTuple()->elements();
         // For BC we decode only tuples with 3 elements
         // assuming it contains
         // byte_offset, debug_handle (=source range tag), source range
         if (tup_elems.size() == 3) {
-          int64_t debug_handle = tup_elems[1].toInt();
-          auto source_range = deserializer->deserialize(tup_elems[2]);
+          int64_t debug_handle = tup_elems[kSourceRangeTagIndex].toInt();
+          auto source_range = deserializer.deserialize(tup_elems[kSourceRangeIndex]);
           source_range_map_.emplace(debug_handle, std::move(source_range));
         }
       }
