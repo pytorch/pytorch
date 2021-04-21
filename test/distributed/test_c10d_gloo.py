@@ -2045,6 +2045,16 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             self._test_broadcast_coalesced(process_group, device, root_rank)
 
     @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_default_pg_gloo(self):
+        self._test_sequence_num_set_default_pg(backend="gloo")
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_gloo_new_group(self):
+        self._test_sequence_num_set_new_group(backend="gloo")
+
+    @requires_gloo()
     def test_pass_gloo_options(self):
         pg_opts = c10d.ProcessGroupGloo.Options()
         pg_opts.timeout = timedelta(seconds=10)
