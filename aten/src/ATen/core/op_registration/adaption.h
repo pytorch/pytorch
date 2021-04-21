@@ -61,7 +61,7 @@ check_tensor_options_and_extract_memory_format(
   }
 }
 
-void common_device_check_failure(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName);
+TORCH_API void common_device_check_failure(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName);
 
 inline void check_or_update_common_device(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
   // TODO: Remove this check once all tensors are guaranteed to be defined
