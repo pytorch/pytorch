@@ -7,7 +7,7 @@ import functools
 import itertools
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma
+    skipCUDAIfNoMagma, onlyOnCPUAndCUDA
 import types
 from functools import partial
 
@@ -16,19 +16,19 @@ from functorch import grad, vjp, vmap, make_functional, jacrev
 
 
 class TestGradTransform(TestCase):
-    def test_primitive(self):
-        x = torch.randn([])
+    def test_primitive(self, device):
+        x = torch.randn([], device=device)
         result = grad(torch.sin)(x)
         self.assertEqual(result, torch.cos(x))
 
-    def test_composite_simple(self):
-        x = torch.randn(2, 3, 4)
+    def test_composite_simple(self, device):
+        x = torch.randn(2, 3, 4, device=device)
         result = grad(lambda x: torch.flatten(x).sum())(x)
         self.assertEqual(result, torch.ones_like(x))
 
-    def test_composite_complicated(self):
-        x = torch.randn(3)
-        y = torch.randn(3, 5)
+    def test_composite_complicated(self, device):
+        x = torch.randn(3, device=device)
+        y = torch.randn(3, 5, device=device)
 
         def foo(x, y):
             result = x @ y
@@ -42,10 +42,10 @@ class TestGradTransform(TestCase):
 
         self.assertEqual(result, expected)
 
-    def test_composite_two_ops(self):
+    def test_composite_two_ops(self, device):
         N, C = 2, 5
-        y = torch.randn(N, C)
-        targets = torch.randint(0, C, (N,))
+        y = torch.randn(N, C, device=device)
+        targets = torch.randint(0, C, (N,), device=device)
 
         def foo(y, targets):
             return F.cross_entropy(y, targets)
@@ -57,8 +57,8 @@ class TestGradTransform(TestCase):
 
         self.assertEqual(result, expected)
 
-    def _test_attributes(self, get_attr_lambda):
-        x = torch.randn(2, 3, 5, dtype=torch.double)
+    def _test_attributes(self, get_attr_lambda, device):
+        x = torch.randn(2, 3, 5, dtype=torch.double, device=device)
         expected = get_attr_lambda(x)
 
         def foo(x):
@@ -67,20 +67,20 @@ class TestGradTransform(TestCase):
 
         grad(foo)(x)
 
-    def test_shape(self):
-        self._test_attributes(lambda x: x.shape)
+    def test_shape(self, device):
+        self._test_attributes(lambda x: x.shape, device)
 
-    def test_dtype(self):
-        self._test_attributes(lambda x: x.dtype)
+    def test_dtype(self, device):
+        self._test_attributes(lambda x: x.dtype, device)
 
-    def test_is_cuda(self):
-        self._test_attributes(lambda x: x.is_cuda)
+    def test_is_cuda(self, device):
+        self._test_attributes(lambda x: x.is_cuda, device)
 
-    def test_numel(self):
-        self._test_attributes(lambda x: x.numel())
+    def test_numel(self, device):
+        self._test_attributes(lambda x: x.numel(), device)
 
-    def test_inplace(self):
-        x = torch.randn([])
+    def test_inplace(self, device):
+        x = torch.randn([], device=device)
 
         def foo(x):
             return x.clone().sin_()
@@ -88,8 +88,8 @@ class TestGradTransform(TestCase):
         result = grad(foo)(x)
         self.assertEqual(result, x.cos())
 
-    def test_inplace_on_view(self):
-        x = torch.randn(3)
+    def test_inplace_on_view(self, device):
+        x = torch.randn(3, device=device)
 
         def foo(x):
             y = x.clone()
@@ -105,8 +105,8 @@ class TestGradTransform(TestCase):
 
         self.assertEqual(result, expected)
 
-    def test_inplace_on_view_base(self):
-        x = torch.randn(3)
+    def test_inplace_on_view_base(self, device):
+        x = torch.randn(3, device=device)
 
         def foo(x):
             y = x.clone()
@@ -122,13 +122,13 @@ class TestGradTransform(TestCase):
 
         self.assertEqual(result, expected)
 
-    def test_nesting_simple(self):
-        x = torch.randn([])
+    def test_nesting_simple(self, device):
+        x = torch.randn([], device=device)
         result = grad(grad(torch.sin))(x)
         self.assertEqual(result, -torch.sin(x))
 
-    def test_escaped_wrappers_are_marked_as_dead(self):
-        x = torch.randn([])
+    def test_escaped_wrappers_are_marked_as_dead(self, device):
+        x = torch.randn([], device=device)
         escaped = []
         def foo(x):
             y = x.sin()
@@ -136,10 +136,10 @@ class TestGradTransform(TestCase):
             return y
 
         result = grad(foo)(x)
-        self.assertEqual(escaped[0].dlevel(), -1)
+        self.assertEqual(functorch._C.dlevel(escaped[0]), -1)
 
-    def test_escaped_wrappers_are_ignored(self):
-        x = torch.randn([])
+    def test_escaped_wrappers_are_ignored(self, device):
+        x = torch.randn([], device=device)
         escaped = []
         def foo(x):
             y = x.sin()
@@ -149,28 +149,28 @@ class TestGradTransform(TestCase):
         result = grad(foo)(x)
 
         something = escaped[0].sum()
-        self.assertEqual(something.dlevel(), 0)
+        self.assertEqual(functorch._C.dlevel(something), 0)
         self.assertEqual(something, x.sin().sum())
 
-    def test_vjp(self):
-        x = torch.randn([])
+    def test_vjp(self, device):
+        x = torch.randn([], device=device)
         out, vjp_fn = vjp(torch.sin, x)
         self.assertEqual(out, x.sin())
 
-        v = torch.randn([])
+        v = torch.randn([], device=device)
         result, = vjp_fn(v)
         self.assertEqual(result, v * x.cos())
 
-    def test_composed_with_autograd(self):
-        x = torch.randn([], requires_grad=True)
+    def test_composed_with_autograd(self, device):
+        x = torch.randn([], requires_grad=True, device=device)
 
         y = grad(torch.sin)(x)
         result, = torch.autograd.grad(y, x)
         self.assertEqual(result, -x.sin())
 
-    def test_grad_of_vjp_composition(self):
-        x = torch.randn([])
-        y = torch.randn([])
+    def test_grad_of_vjp_composition(self, device):
+        x = torch.randn([], device=device)
+        y = torch.randn([], device=device)
 
         def foo(x, y):
             out, vjp_fn = vjp(torch.sin, x)
@@ -180,9 +180,9 @@ class TestGradTransform(TestCase):
         expected = x.cos()
         self.assertEqual(result, expected)
 
-    def test_vjp_of_grad_composition(self):
-        x = torch.randn([])
-        y = torch.randn([])
+    def test_vjp_of_grad_composition(self, device):
+        x = torch.randn([], device=device)
+        y = torch.randn([], device=device)
 
         def foo(x, y):
             out, vjp_fn = vjp(grad(torch.sin), x)
@@ -192,9 +192,9 @@ class TestGradTransform(TestCase):
         expected = -y * x.sin()
         self.assertEqual(result, expected)
 
-    def test_grad_of_vjp_of_grad_composition(self):
-        x = torch.randn([])
-        y = torch.randn([])
+    def test_grad_of_vjp_of_grad_composition(self, device):
+        x = torch.randn([], device=device)
+        y = torch.randn([], device=device)
 
         def foo(x, y):
             df, vjp_fn = vjp(grad(lambda x: -torch.cos(x)), x)
@@ -204,9 +204,9 @@ class TestGradTransform(TestCase):
         expected = x.cos()
         self.assertEqual(result, expected)
 
-    def test_views(self):
-        x = torch.randn([], requires_grad=True)
-        y = torch.randn([], requires_grad=True)
+    def test_views(self, device):
+        x = torch.randn([], requires_grad=True, device=device)
+        y = torch.randn([], requires_grad=True, device=device)
 
         def silly_sin(x):
             x = x.view([])
@@ -223,34 +223,34 @@ class TestGradTransform(TestCase):
         self.assertEqual(grads[0], -x.sin())
         self.assertEqual(grads[1], -y.sin())
 
-    def test_view_inplace_simple(self):
+    def test_view_inplace_simple(self, device):
         def foo(x):
             x = x.clone()
             x.view([]).sin_()
             return x
 
-        x = torch.randn([], requires_grad=True)
+        x = torch.randn([], requires_grad=True, device=device)
         result = grad(foo)(x)
         self.assertEqual(result, x.cos())
 
 
 class TestVmapOfGrad(TestCase):
-    def test_per_sample_grads_inplace_view(self):
+    def test_per_sample_grads_inplace_view(self, device):
         def compute_loss(weight, x, t):
             x = x.mm(weight)
             y = x.squeeze_(0)
             return (y - t).sum()
 
-        weight = torch.randn(16, 2)
-        x = torch.randn(64, 1, 16)
-        t = torch.randn(64, 2)
+        weight = torch.randn(16, 2, device=device)
+        x = torch.randn(64, 1, 16, device=device)
+        t = torch.randn(64, 2, device=device)
         result = vmap(partial(grad(compute_loss), weight))(x, t)
         expected = [grad(compute_loss)(weight, x[i], t[i]) for i in range(64)]
         expected = torch.stack(expected)
         # TODO: Check if the rtol is a problem
         self.assertEqual(result, expected, atol=0, rtol=5e-4)
 
-    def test_new_zeros_materializes_tensor(self):
+    def test_new_zeros_materializes_tensor(self, device):
         N = 3
         C = 5
 
@@ -259,25 +259,25 @@ class TestVmapOfGrad(TestCase):
             result.copy_(y)
             return result.sum()
 
-        x = torch.randn(N)
-        y = torch.randn(N, C)
+        x = torch.randn(N, device=device)
+        y = torch.randn(N, C, device=device)
         result = vmap(grad(foo))(x, y)
 
-    def test_per_sample_grads_simple(self):
+    def test_per_sample_grads_simple(self, device):
         def compute_loss(weight, x, t):
             y = x @ weight
             return ((y - t) ** 2).sum()
 
-        weight = torch.randn(16, 2)
-        x = torch.randn(64, 16)
-        t = torch.randn(64, 2)
+        weight = torch.randn(16, 2, device=device)
+        x = torch.randn(64, 16, device=device)
+        t = torch.randn(64, 2, device=device)
         result = vmap(partial(grad(compute_loss), weight))(x, t)
         expected = [grad(compute_loss)(weight, x[i], t[i]) for i in range(64)]
         expected = torch.stack(expected)
         # TODO: Check if the rtol is a problem
         self.assertEqual(result, expected, atol=0, rtol=5e-4)
 
-    def test_per_sample_grads_embeddingnet(self):
+    def test_per_sample_grads_embeddingnet(self, device):
         class SampleNet(nn.Module):
             def __init__(self, vocab_size: int):
                 super().__init__()
@@ -301,11 +301,11 @@ class TestVmapOfGrad(TestCase):
         vocab_size = 1000
         batch_shape = [64]
         words_per_sentence = 5
-        data = torch.randint(0, vocab_size, (*batch_shape, words_per_sentence))
-        targets = torch.randint(0, 1, (*batch_shape,))
+        data = torch.randint(0, vocab_size, (*batch_shape, words_per_sentence), device=device)
+        targets = torch.randint(0, 1, (*batch_shape,), device=device)
 
         # Construct our module
-        net = SampleNet(vocab_size)
+        net = SampleNet(vocab_size).to(device=device)
         criterion = nn.CrossEntropyLoss()
 
         params = dict(net.named_parameters())
@@ -326,42 +326,42 @@ class TestVmapOfGrad(TestCase):
             self.assertEqual(r, e, atol=0, rtol=1e-4)
 
 class TestJacrev(TestCase):
-    def test_simple(self):
-        x = torch.randn(3)
+    def test_simple(self, device):
+        x = torch.randn(3, device=device)
         y = jacrev(torch.sin)(x)
         expected = torch.diagflat(x.cos())
         assert torch.allclose(y, expected)
 
-    def test_simple_not_flat(self):
-        x = torch.randn(2, 3)
+    def test_simple_not_flat(self, device):
+        x = torch.randn(2, 3, device=device)
         y = jacrev(torch.sin)(x)
         expected = torch.diagflat(x.view(-1).cos())
         expected = expected.view(2, 3, 2, 3)
         assert torch.allclose(y, expected)
 
-    def test_vmap_on_jacrev_simple(self):
-        x = torch.randn(2, 3)
+    def test_vmap_on_jacrev_simple(self, device):
+        x = torch.randn(2, 3, device=device)
         y = vmap(jacrev(torch.sin))(x)
         expected = torch.stack([torch.diagflat(x[i].cos()) for i in range(2)])
         assert torch.allclose(y, expected)
 
-    def test_hessian_simple(self):
+    def test_hessian_simple(self, device):
         def foo(x):
             return x.sin().sum()
 
-        x = torch.randn(3)
+        x = torch.randn(3, device=device)
         y = jacrev(jacrev(foo))(x)
         expected = torch.diagflat(-x.sin())
         assert torch.allclose(y, expected)
 
 
 class TestComposability(TestCase):
-    def test_grad_grad(self):
-        x = torch.randn([])
+    def test_grad_grad(self, device):
+        x = torch.randn([], device=device)
         y = grad(grad(torch.sin))(x)
         self.assertEqual(y, -x.sin())
 
-    def test_grad_vmap(self):
+    def test_grad_vmap(self, device):
         def foo(x):
             y = vmap(torch.sin)(x)
             return y.sum()
@@ -370,8 +370,8 @@ class TestComposability(TestCase):
         y = grad(foo)(x)
         self.assertEqual(y, x.cos())
 
-    def test_grad_vjp(self):
-        x = torch.randn(3)
+    def test_grad_vjp(self, device):
+        x = torch.randn(3, device=device)
 
         def foo(x):
             _, vjp_fn = vjp(torch.sin, x)
@@ -381,18 +381,18 @@ class TestComposability(TestCase):
         expected = grad(lambda x: (x * x.cos()).sum())(x)
         self.assertEqual(y, expected)
 
-    def test_vmap_grad(self):
-        x = torch.randn(3)
+    def test_vmap_grad(self, device):
+        x = torch.randn(3, device=device)
         y = vmap(grad(torch.sin))(x)
         self.assertEqual(y, x.cos())
 
-    def test_vmap_vmap(self):
-        x = torch.randn(2, 3)
+    def test_vmap_vmap(self, device):
+        x = torch.randn(2, 3, device=device)
         y = vmap(vmap(torch.sin))(x)
         self.assertEqual(y, x.sin())
 
-    def test_vmap_vjp(self):
-        x = torch.randn(3)
+    def test_vmap_vjp(self, device):
+        x = torch.randn(3, device=device)
         _, vjp_fn = vjp(torch.sin, x)
 
         def foo(x):
@@ -406,24 +406,24 @@ class TestComposability(TestCase):
         expected = torch.stack([vjp_fn(x)[0] for x in xs])
         self.assertEqual(vmap(lambda x: vjp_fn(x)[0])(xs), expected)
 
-    def test_vjp_grad(self):
-        x = torch.randn([])
+    def test_vjp_grad(self, device):
+        x = torch.randn([], device=device)
         y, vjp_fn = vjp(grad(torch.sin), x)
         self.assertEqual(y, x.cos())
 
         v = torch.randn([])
         self.assertEqual(vjp_fn(v)[0], -x.sin() * v)
 
-    def test_vjp_vmap(self):
-        x = torch.randn(3)
+    def test_vjp_vmap(self, device):
+        x = torch.randn(3, device=device)
         y, vjp_fn = vjp(vmap(torch.sin), x)
         self.assertEqual(y, x.sin())
 
-        v = torch.randn(3)
+        v = torch.randn(3, device=device)
         self.assertEqual(vjp_fn(v)[0], x.cos() * v)
 
-    def test_vjp_vjp(self):
-        x = torch.randn(3)
+    def test_vjp_vjp(self, device):
+        x = torch.randn(3, device=device)
         y, vjp_fn = vjp(torch.sin, x)
         self.assertEqual(y, x.sin())
 
@@ -432,6 +432,27 @@ class TestComposability(TestCase):
 
         y = vjp_fn(x)[0]
         # Honestly IDK what the result here is... but at least it runs
+
+instantiate_device_type_tests(
+    TestGradTransform,
+    globals(),
+    None,
+)
+instantiate_device_type_tests(
+    TestVmapOfGrad,
+    globals(),
+    None,
+)
+instantiate_device_type_tests(
+    TestJacrev,
+    globals(),
+    None,
+)
+instantiate_device_type_tests(
+    TestComposability,
+    globals(),
+    None,
+)
 
 
 if __name__ == '__main__':
