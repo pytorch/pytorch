@@ -1321,18 +1321,6 @@ std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& 
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
 
-// This is a type dispatching helper function for 'apply_solve'
-Tensor& _linalg_solve_out_helper_cuda(Tensor& result, Tensor& input, Tensor& infos) {
-  // 'result' and 'input' should be in column major order (it should be checked before calling this function)
-  // the content of 'result', 'input' and 'infos' is overwritten by 'apply_solve'
-  // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
-  // 'input' should contain data of origianl 'input' tensor (left-hand-side of the linear system)
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
-    apply_solve<scalar_t>(result, input, infos);
-  });
-  return result;
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /*

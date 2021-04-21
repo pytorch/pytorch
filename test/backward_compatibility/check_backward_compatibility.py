@@ -39,6 +39,7 @@ allow_list = [
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
+    ("aten::_linalg_solve_out_helper_", datetime.date(9999, 1, 1)),
     ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
     ("aten::_lu_solve_helper", datetime.date(9999, 1, 1)),
