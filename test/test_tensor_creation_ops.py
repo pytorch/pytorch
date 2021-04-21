@@ -3188,8 +3188,9 @@ class TestRandomTensorCreation(TestCase):
                     continue
                 with torch.random.fork_rng(devices=rng_device):
                     res1 = torch.randperm(n, dtype=dtype, device=device)
-                res2 = torch.empty(0, dtype=dtype, device=device)
-                torch.randperm(n, out=res2, dtype=dtype, device=device)
+                # res2 = torch.empty(0, dtype=dtype, device=device)
+                # torch.randperm(n, out=res2, dtype=dtype, device=device)
+                res2 = torch.randperm(n, dtype=dtype, device=device)
                 self.assertEqual(res1, res2, atol=0, rtol=0)
                 self.assertEqual(res1.sort().values.long(), torch.arange(n, device=device))
 
