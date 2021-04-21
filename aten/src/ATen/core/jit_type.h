@@ -1541,6 +1541,8 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const Stride& s);
 // what is the type, ignoring extra size/shape information?
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
+// xxx: be careful with calls because this can be very slow. If calling this on a graph
+// use `EraseShapeInformation` in shape_analysis.h
 inline TypePtr unshapedType(const TypePtr& type) {
   if (type->isSubtypeOf(TensorType::get())) {
     return TensorType::get();
@@ -1890,7 +1892,8 @@ struct TORCH_API ClassType : public NamedType {
       c10::optional<QualifiedName> qualifiedName,
       std::weak_ptr<CompilationUnit> cu,
       bool is_module = false,
-      std::string doc_string = "");
+      std::string doc_string = "",
+      std::vector<std::string> unresolved_class_attributes = {});
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
@@ -1990,6 +1993,8 @@ struct TORCH_API ClassType : public NamedType {
                [&](const ClassAttribute& attr) { return attr.getName() == name; }) !=
         attributes_.cend();
   }
+
+  bool isUnresolvedClassAttribute(const std::string& name) const;
 
   at::ArrayRef<TypePtr> containedTypes() const override {
     return attributeTypes_;
@@ -2212,8 +2217,9 @@ struct TORCH_API ClassType : public NamedType {
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module,
-      std::string doc_string);
+      bool is_module = false,
+      std::string doc_string = "",
+      std::vector<std::string> unresolved_class_attributes = {});
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     const auto& n = name().value();
@@ -2258,6 +2264,9 @@ struct TORCH_API ClassType : public NamedType {
 
   // Doc string of class.
   std::string doc_string_ = "";
+
+  // For error reporting accesses to class level attributes.
+  std::vector<std::string> unresolved_class_attributes_;
 };
 
 struct InterfaceType;
