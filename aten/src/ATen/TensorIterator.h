@@ -73,7 +73,7 @@ struct DimCounter {
 struct TORCH_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
   OperandInfo() {}
-  explicit OperandInfo(Tensor t) : tensor(std::move(t)) {
+  explicit OperandInfo(Tensor&& t) : tensor(std::move(t)) {
     if (tensor.defined()) {
       device = tensor.device();
       target_dtype = tensor.scalar_type();
@@ -204,7 +204,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   const Tensor& tensor(int arg) const { return operands_[arg].tensor; }
   Tensor& tensor(int arg) { return operands_[arg].tensor; }
 
-  Tensor output(int arg=0) const {
+  const Tensor& output(int arg=0) const {
     AT_ASSERT(arg < num_outputs_);
     return operands_[arg].tensor;
   }
@@ -331,6 +331,7 @@ public:
 
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 
+  void build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_unary_float_op(const Tensor& out, const Tensor& a);
   void build_unary_op(const Tensor& out, const Tensor& a);
@@ -430,6 +431,10 @@ protected:
   /// we will do the internal computation in TensorIterator.  Typically,
   /// this matches the dtype of the output tensors, but not always!
   ScalarType common_dtype_ = ScalarType::Undefined;
+
+  /// This is currently defined as kCPU, or the device of the first non-CPU
+  /// tensor argument. See TensorIteratorBase::compute_types for details.
+  Device common_device_ = kCPU;
 
   /// Set by split(), see should_accumulate() and is_final_output()
   bool accumulate_ = false;

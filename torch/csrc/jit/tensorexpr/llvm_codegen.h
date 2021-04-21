@@ -4,6 +4,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
@@ -13,6 +14,8 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+DECLARE_TRIGGER(llvm_codegen_parallel_dispatched);
 
 class LLVMCodeGenImpl;
 

@@ -24,6 +24,7 @@ Tensor max_pool2d(
     IntArrayRef dilation,
     bool ceil_mode) {
   TORCH_CHECK(input.is_metal());
+  TORCH_CHECK(input.dim() == 3 || input.dim() == 4);
   TORCH_CHECK(
       dilation[0] == dilation[1] == 1, "dilation is not supported on MPSCNN");
   const int64_t iN = input.sizes()[0];

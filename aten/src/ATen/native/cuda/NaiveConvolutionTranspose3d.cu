@@ -543,7 +543,11 @@ void slow_conv_transpose3d_backward_out_cuda_template(
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
-          if (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1) {
+          if (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1 ||
+              stride_depth != 1 || stride_height != 1 || stride_width != 1 ||
+              dilation_depth != 1 || dilation_height != 1 ||
+              dilation_width != 1 || padding_depth != 0 ||
+              padding_height != 0 || padding_width != 0) {
             // Extract columns:
             at::native::vol2col<scalar_t>(
                 at::cuda::getCurrentCUDAStream(),
@@ -579,8 +583,14 @@ void slow_conv_transpose3d_backward_out_cuda_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          auto gemm_in_ptr = (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1) ?
-              grad_columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+          auto gemm_in_ptr =
+              (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1 ||
+               stride_depth != 1 || stride_height != 1 || stride_width != 1 ||
+               dilation_depth != 1 || dilation_height != 1 ||
+               dilation_width != 1 || padding_depth != 0 ||
+               padding_height != 0 || padding_width != 0)
+              ? grad_columns.data_ptr<scalar_t>()
+              : grad_output_n.data_ptr<scalar_t>();
           at::cuda::blas::gemm<scalar_t>(
               'n',
               'n',
@@ -785,7 +795,11 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
             // Matrix mulitply per output:
             input_n = input.select(0, elt);
 
-            if (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1) {
+            if (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1 ||
+                stride_depth != 1 || stride_height != 1 || stride_width != 1 ||
+                dilation_depth != 1 || dilation_height != 1 ||
+                dilation_width != 1 || padding_depth != 0 ||
+                padding_height != 0 || padding_width != 0) {
               // Extract columns:
               at::native::vol2col<scalar_t>(
                   at::cuda::getCurrentCUDAStream(),
@@ -820,8 +834,14 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            auto gemm_in_ptr = (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1) ?
-                columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+            auto gemm_in_ptr =
+                (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1 ||
+                 stride_depth != 1 || stride_height != 1 || stride_width != 1 ||
+                 dilation_depth != 1 || dilation_height != 1 ||
+                 dilation_width != 1 || padding_depth != 0 ||
+                 padding_height != 0 || padding_width != 0)
+                ? columns.data_ptr<scalar_t>()
+                : grad_output_n.data_ptr<scalar_t>();
             at::cuda::blas::gemm<scalar_t>(
                 't',
                 'n',
@@ -874,16 +894,17 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
 
 } // namespace
 
-Tensor& slow_conv_transpose3d_out_cuda(
-    Tensor& output,
-    const Tensor& input,
+Tensor& slow_conv_transpose3d_out_cuda(const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
-    IntArrayRef dilation) {
+    IntArrayRef dilation,
+    Tensor& output) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor finput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor fgrad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
@@ -906,12 +927,14 @@ Tensor& slow_conv_transpose3d_out_cuda(
 Tensor slow_conv_transpose3d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor finput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor fgrad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -932,11 +955,7 @@ Tensor slow_conv_transpose3d_cuda(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cuda(
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias,
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cuda(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -945,7 +964,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cuda(
     IntArrayRef output_padding,
     IntArrayRef dilation,
     const Tensor& finput,
-    const Tensor& fgrad) {
+    const Tensor& fgrad,
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias) {
   if (grad_input.defined()) {
     slow_conv_transpose3d_backward_out_cuda_template(
         input,

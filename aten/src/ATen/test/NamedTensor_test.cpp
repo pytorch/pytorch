@@ -5,6 +5,7 @@
 #include <ATen/TensorNames.h>
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
+#include <c10/util/irange.h>
 
 using at::Dimname;
 using at::DimnameList;
@@ -38,7 +39,7 @@ static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
   if (names.size() != other.size()) {
     return false;
   }
-  for (auto i = 0; i < names.size(); i++) {
+  for (const auto i : c10::irange(names.size())) {
     const auto& name = names[i];
     const auto& other_name = other[i];
     if (name.type() != other_name.type() || name.symbol() != other_name.symbol()) {
@@ -232,5 +233,3 @@ TEST(NamedTensorTest, TensorNamesCheckUnique) {
     ASSERT_THROW(tensornames.checkUnique("op_name"), c10::Error);
   }
 }
-
-

@@ -70,7 +70,6 @@ class Adam(Optimizer):
             grads = []
             exp_avgs = []
             exp_avg_sqs = []
-            state_sums = []
             max_exp_avg_sqs = []
             state_steps = []
             beta1, beta2 = group['betas']
@@ -111,10 +110,10 @@ class Adam(Optimizer):
                    exp_avg_sqs,
                    max_exp_avg_sqs,
                    state_steps,
-                   group['amsgrad'],
-                   beta1,
-                   beta2,
-                   group['lr'],
-                   group['weight_decay'],
-                   group['eps'])
+                   amsgrad=group['amsgrad'],
+                   beta1=beta1,
+                   beta2=beta2,
+                   lr=group['lr'],
+                   weight_decay=group['weight_decay'],
+                   eps=group['eps'])
         return loss

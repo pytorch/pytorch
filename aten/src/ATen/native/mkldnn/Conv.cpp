@@ -7,7 +7,7 @@
 namespace at { namespace native {
 
 Tensor mkldnn_convolution(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
   TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
@@ -85,12 +85,14 @@ ideep::tensor _mkldnn_convolution(
 
 Tensor mkldnn_convolution(
     const Tensor& input,
-    const Tensor& weight,
-    const Tensor& bias,
+    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");

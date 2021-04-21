@@ -60,13 +60,14 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
+      {"NoneType", NoneType::get()},
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
       {"AnyClassType", at::AnyClassType::get()},
       {"AnyEnumType", at::AnyEnumType::get()},
   };
   auto tok = L.cur();
-  if (!L.nextIf(TK_NONE)) {
+  if (!L.nextIf(TK_NONE) && !L.nextIf(TK_NONE_TYPE)) {
     L.expect(TK_IDENT);
   }
   std::string text = tok.text();

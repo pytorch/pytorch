@@ -20,8 +20,8 @@ c10::intrusive_ptr<xnnpack::Conv2dOpContext>
         std::vector<int64_t> padding,
         std::vector<int64_t> dilation,
         int64_t groups,
-        c10::optional<Scalar> output_min,
-        c10::optional<Scalar> output_max);
+        const c10::optional<Scalar>& output_min,
+        const c10::optional<Scalar>& output_max);
 
 c10::intrusive_ptr<xnnpack::TransposeConv2dOpContext>
     createConv2dTransposeClampPrePackOpContext(
@@ -32,8 +32,8 @@ c10::intrusive_ptr<xnnpack::TransposeConv2dOpContext>
         std::vector<int64_t> output_padding,
         std::vector<int64_t> dilation,
         int64_t groups,
-        c10::optional<Scalar> output_min,
-        c10::optional<Scalar> output_max);
+        const c10::optional<Scalar>& output_min,
+        const c10::optional<Scalar>& output_max);
 
 Tensor conv2d_clamp_run(
     const Tensor& input,

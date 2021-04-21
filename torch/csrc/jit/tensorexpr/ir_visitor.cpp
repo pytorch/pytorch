@@ -94,7 +94,6 @@ void IRVisitor::visit(const Load* v) {
   for (const Expr* ind : v->indices()) {
     ind->accept(this);
   }
-  v->mask()->accept(this);
 }
 
 void IRVisitor::visit(const Buf* v) {
@@ -107,7 +106,6 @@ void IRVisitor::visit(const Store* v) {
     ind->accept(this);
   }
   v->value()->accept(this);
-  v->mask()->accept(this);
 }
 
 void IRVisitor::visit(const AtomicAdd* v) {
@@ -155,20 +153,10 @@ void IRVisitor::visit(const IfThenElse* v) {
   v->false_value()->accept(this);
 }
 
-void IRVisitor::visit(const BaseCallNode* v) {
+void IRVisitor::visit(const Intrinsics* v) {
   for (int i = 0; i < v->nparams(); i++) {
     v->param(i)->accept(this);
   }
-}
-
-void IRVisitor::visit(const Intrinsics* v) {
-  const BaseCallNode* base = v;
-  this->visit(base);
-}
-
-void IRVisitor::visit(const FunctionCall* v) {
-  const BaseCallNode* base = v;
-  this->visit(base);
 }
 
 void IRVisitor::visit(const Allocate* v) {

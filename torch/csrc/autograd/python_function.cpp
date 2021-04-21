@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -76,7 +77,7 @@ auto PyNode::legacy_apply(const variable_list& inputs) -> variable_list {
         msg += "')'";
         throw std::runtime_error(msg);
       }
-      tensor_results[i] = ((THPVariable*)obj)->cdata.tensor_data();
+      tensor_results[i] = THPVariable_Unpack(obj).tensor_data();
     }
   }
 
@@ -181,7 +182,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
         msg += ")";
         throw std::runtime_error(msg);
       }
-      results.emplace_back(((THPVariable*)output)->cdata);
+      results.emplace_back(THPVariable_Unpack(output));
     }
   }
 
@@ -330,9 +331,9 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction *self)
         "only accept variables, but argument %d is of type %s", i,
         THPUtils_typename(obj));
 
-    dirty_inputs.insert(((THPVariable*)obj)->cdata.unsafeGetTensorImpl());
-    auto variable = (THPVariable*)obj;
-    torch::autograd::impl::bump_version(variable->cdata);
+    const auto& tensor = THPVariable_Unpack(obj);
+    dirty_inputs.insert(tensor.unsafeGetTensorImpl());
+    torch::autograd::impl::bump_version(tensor);
   }
   // We're not going to ever need this so let's remove references now
   Py_CLEAR(self->dirty_tensors);
@@ -362,30 +363,39 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     self->output_info.reserve(num_outputs);
   }
 
-  auto as_variable = [&](PyObject* obj, int i) -> Variable {
-    if (THPVariable_Check(obj)) {
-      return ((THPVariable*)obj)->cdata;
-    }
-    throw TypeError("%s.forward: expected Tensor or tuple of Tensor (got %s) for return value %d",
-        Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i);
-  };
-
   auto non_differentiable = _parse_non_differentiable(self);
   auto dirty_inputs = _mark_dirty(self);
 
-  std::vector<Variable> raw_output_vars;
+  std::vector<c10::optional<Variable>> raw_output_vars;
   raw_output_vars.reserve(num_outputs);
   for(int i = 0; i < num_outputs; ++i){
     PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
-    raw_output_vars.push_back(as_variable(obj,i));
+    // Only process tensors as outputs for autograd purposes.
+    if (THPVariable_Check(obj)) {
+      raw_output_vars.emplace_back(THPVariable_Unpack(obj));
+    } else {
+      raw_output_vars.emplace_back();
+    }
   }
 
+  // Wrap only the tensor outputs.
   auto wrapped_outputs = _wrap_outputs(input_vars, non_differentiable, dirty_inputs, raw_output_vars, cdata_if_executable);
+
   for (int i = 0; i < num_outputs; i++) {
-    if (is_executable) {
-      self->output_info.emplace_back(wrapped_outputs[i]);
+    PyObject* obj = PyTuple_GetItem(raw_output, i);
+    // Keep the non-tensor outputs as is.
+    if (!THPVariable_Check(obj)) {
+      if (is_executable) {
+        self->output_info.emplace_back();
+      }
+      Py_INCREF(obj);
+      PyTuple_SetItem(outputs, i, obj);
+    } else {
+      if (is_executable) {
+        self->output_info.emplace_back(*wrapped_outputs[i]);
+      }
+      PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
     }
-    PyTuple_SET_ITEM(outputs, i, THPVariable_Wrap(wrapped_outputs[i]));
   }
 }
 
@@ -406,11 +416,11 @@ static void _save_variables(const std::shared_ptr<PyNode>& cdata_ptr, THPFunctio
       self->saved_variables.emplace_back();
       continue;
     } else if (THPVariable_Check(obj)) {
-      auto variable = (THPVariable*)obj;
-      bool is_output = variable->cdata.grad_fn().get() == cdata_ptr.get();
-      self->saved_variables.emplace_back(variable->cdata, is_output);
+      const auto& tensor = THPVariable_Unpack(obj);
+      bool is_output = tensor.grad_fn().get() == cdata_ptr.get();
+      self->saved_variables.emplace_back(tensor, is_output);
     } else {
-      throw TypeError(
+      throw torch::TypeError(
           "save_for_backward can only save variables, but argument %d is of "
           "type %s", i, Py_TYPE(obj)->tp_name);
     }
@@ -435,7 +445,7 @@ _parse_non_differentiable(THPFunction *self)
     PyObject *t = PyTuple_GET_ITEM(self->non_differentiable, i);
     THPFunction_assert(THPVariable_Check(t), "mark_non_differentiable "
         "only accepts variable arguments, but got %s", THPUtils_typename(t));
-    set.insert(((THPVariable*)t)->cdata.unsafeGetTensorImpl());
+    set.insert(THPVariable_Unpack(t).unsafeGetTensorImpl());
   }
   Py_CLEAR(self->non_differentiable);
   return set;
@@ -476,9 +486,9 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
       Py_INCREF(Py_False);
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
     } else {
-      THPVariable* variable = (THPVariable*)arg;
-      unpacked.input_vars.push_back(variable->cdata);
-      PyObject* needs_grad = variable->cdata.requires_grad() ? Py_True : Py_False;
+      const auto& tensor = THPVariable_Unpack(arg);
+      unpacked.input_vars.push_back(tensor);
+      PyObject* needs_grad = tensor.requires_grad() ? Py_True : Py_False;
       Py_INCREF(needs_grad);
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
     }
@@ -492,7 +502,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
 }
 
 static void _assert_not_tracing(const char* name, const variable_list& input_vars) {
-  if (tracer::isTracing()) {
+  if (jit::tracer::isTracing()) {
     std::ostringstream oss;
     oss << "Attempted to trace " << name;
     oss << ", but tracing of legacy functions is not supported";
@@ -557,11 +567,14 @@ static void _trace_post_record(
     node = unpacked;
   }
   for (int i = 0; i < num_outputs; ++i) {
-    auto var = (THPVariable*)PyTuple_GET_ITEM(output_objects, i);
-    Value* value = node->outputs()[i];
-    if (var->cdata.defined()) {
-      value->inferTypeFrom(var->cdata);
-      jit::tracer::setValueTrace(var->cdata, value);
+    PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
+    if (THPVariable_Check(obj)) {
+      Value* value = node->outputs()[i];
+      const auto& tensor = THPVariable_Unpack(obj);
+      if (tensor.defined()) {
+        value->inferTypeFrom(tensor);
+        jit::tracer::setValueTrace(tensor, value);
+      }
     }
   }
 }
@@ -806,9 +819,10 @@ PyObject* THPFunction__register_hook_dict(PyObject *_self, PyObject *_var)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPVariable_Check(_var), "_register_hook_dict expected a variable");
-  THPVariable *var = (THPVariable*)_var;
+  THPVariable* var = reinterpret_cast<THPVariable*>(_var);
+  const auto& tensor = THPVariable_Unpack(var);
   std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(
-      var->backward_hooks, var->cdata.output_nr()));
+      var->backward_hooks, tensor.output_nr()));
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
   TORCH_CHECK(cdata,

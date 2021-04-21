@@ -364,14 +364,16 @@ Tensor q_batch_norm_impl(
 } // namespace
 
 Tensor quantized_batch_norm(
-    const Tensor& qx,
-    const Tensor& weight /* optional */,
-    const Tensor& bias /* optional */,
+    const Tensor& qx, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     const Tensor& mean /* optional */,
     const Tensor& var /* optional */,
     double eps,
     double output_scale,
     int64_t output_zero_point) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor qy;
   // TODO: this should arguably support 3d as well
   qy = q_batch_norm2d_impl<false>(

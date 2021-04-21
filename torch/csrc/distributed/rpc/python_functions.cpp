@@ -17,6 +17,7 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/python_compat.h>
+#include <exception>
 
 namespace torch {
 namespace distributed {
@@ -45,9 +46,9 @@ IValue toPyIValue(const Message& message) {
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       // Need GIL to destruct the py::object returned by deserialize()
       py::gil_scoped_acquire acquire;
-      return jit::toIValue(
-          pythonRpcHandler.deserialize(resp.serializedPyObj()),
-          PyObjectType::get());
+      py::object value = pythonRpcHandler.deserialize(resp.serializedPyObj());
+      pythonRpcHandler.handleException(value);
+      return jit::toIValue(value, PyObjectType::get());
     }
     default: {
       TORCH_CHECK(false, "Unrecognized response message type ", msgType);
@@ -152,8 +153,18 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
             for (const auto& tensor : message.tensors()) {
               dataPtrs.emplace_back(tensor.storage().data_ptr());
             }
-            child->markCompletedWithDataPtrs(
-                toPyIValue(message), std::move(dataPtrs));
+
+            // toPyIValue might throw and we need to record the appropriate
+            // exception.
+            IValue ivalue;
+            try {
+              ivalue = toPyIValue(message);
+            } catch (std::exception& e) {
+              child->setErrorIfNeeded(std::current_exception());
+              return;
+            }
+
+            child->markCompletedWithDataPtrs(ivalue, std::move(dataPtrs));
           }
         }));
     return child;

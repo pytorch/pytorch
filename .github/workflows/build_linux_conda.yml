@@ -9,14 +9,11 @@ on:
 jobs:
   generate-build-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     container:
       image: python:3.9
-    env:
-      # We don't currently build conda packages for rocm
-      NO_ROCM: 1
     steps:
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
@@ -24,7 +21,7 @@ jobs:
         id: set-matrix
         run: |
           # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py)
+          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py conda)
           echo "${MATRIX}"
           echo "::set-output name=matrix::${MATRIX}"
   build-conda:
@@ -34,8 +31,9 @@ jobs:
     strategy:
       matrix:
         ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
+      fail-fast: false
     container:
-      image: ${{ matrix.conda_container_image }}
+      image: ${{ matrix.container_image }}
     env:
       DESIRED_PYTHON: ${{ matrix.python_version }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -57,6 +55,8 @@ jobs:
       PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
     steps:
+      - name: Clean runner workspace
+        run: rm -rf "$GITHUB_WORKSPACE"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -72,17 +72,17 @@ jobs:
         run: |
           version=$(.github/scripts/generate_pytorch_version.py)
           echo "Generated version: ${version}"
-          echo "PYTORCH_BUILD_VERSION=${version}" >> $GITHUB_ENV
+          echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
       - name: Set BUILD_SPLIT_CUDA
         if: ${{ matrix.gpu_arch_type == 'cuda' && matrix.gpu_arch_version == '11.1' }}
         run: |
-          echo "BUILD_SPLIT_CUDA=1" >> $GITHUB_ENV
+          echo "BUILD_SPLIT_CUDA=1" >> "$GITHUB_ENV"
       # TODO: Remove this once we remove the need for the directories to be
       #       in specific locations
       - name: Symlink repositories to root directory (for legacy scripts purposes)
         run: |
-          mv $(pwd)/pytorch /pytorch
-          mv $(pwd)/builder /builder
+          mv "$PWD"/pytorch /pytorch
+          mv "$PWD"/builder /builder
       # TODO: Bundle the correct build script in the base container image so
       #       that we don't have to do this type of specification
       - name: Build PyTorch binary

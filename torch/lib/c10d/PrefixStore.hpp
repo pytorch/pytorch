@@ -36,6 +36,10 @@ class PrefixStore : public Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
 
+  const std::chrono::milliseconds& getTimeout() const noexcept override;
+
+  void setTimeout(const std::chrono::milliseconds& timeout) override;
+
  protected:
   std::string prefix_;
   c10::intrusive_ptr<Store> store_;

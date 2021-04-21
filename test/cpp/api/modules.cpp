@@ -55,6 +55,15 @@ TEST_F(ModulesTest, Conv1d) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
 }
 
+TEST_F(ModulesTest, Conv1dSameStrided) {
+  auto options = Conv1dOptions(3, 2, 3);
+  options.stride(1).padding(torch::kSame);
+  Conv1d model_valid(options);
+  ASSERT_THROWS_WITH(
+    [&]{ Conv1d model_invalid(options.stride(2)); }(),
+    "padding='same' is not supported for strided convolutions");
+}
+
 TEST_F(ModulesTest, Conv2dEven) {
   Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(torch::arange(54, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 3}));
@@ -95,6 +104,18 @@ TEST_F(ModulesTest, Conv2dUneven) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
 }
 
+TEST_F(ModulesTest, Conv2dSameStrided) {
+  auto options = Conv2dOptions(3, 2, {3, 4});
+  options.stride(1).padding(torch::kSame);
+  Conv2d model_valid(options);
+  ASSERT_THROWS_WITH(
+    [&]{ Conv2d model_invalid(options.stride(2)); }(),
+    "padding='same' is not supported for strided convolutions");
+  ASSERT_THROWS_WITH(
+    [&]{ Conv2d model_invalid(options.stride({1, 2})); }(),
+    "padding='same' is not supported for strided convolutions");
+}
+
 TEST_F(ModulesTest, Conv3d) {
   Conv3d model(Conv3dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(torch::arange(162, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 3, 3}));
@@ -129,6 +150,18 @@ TEST_F(ModulesTest, Conv3d) {
   s.backward();
   ASSERT_EQ(s.ndimension(), 0);
   ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
+}
+
+TEST_F(ModulesTest, Conv3dSameStrided) {
+  auto options = Conv3dOptions(3, 2, {3, 4, 5});
+  options.stride(1).padding(torch::kSame);
+  Conv3d model_valid(options);
+  ASSERT_THROWS_WITH(
+    [&]{ Conv3d model_invalid(options.stride(2)); }(),
+    "padding='same' is not supported for strided convolutions");
+  ASSERT_THROWS_WITH(
+    [&]{ Conv3d model_invalid(options.stride({1, 2, 1})); }(),
+    "padding='same' is not supported for strided convolutions");
 }
 
 TEST_F(ModulesTest, ConvTranspose1d) {
@@ -4535,6 +4568,9 @@ TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
   ASSERT_EQ(
       c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum))),
       "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=kSum)");
+  ASSERT_EQ(
+      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum).padding_idx(5))),
+      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=kSum, padding_idx=5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintL1Loss) {

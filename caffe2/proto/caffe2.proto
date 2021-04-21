@@ -49,6 +49,8 @@ message TensorProto {
     // the protobuf typed fields, although in some cases raw little endian data
     // is stored in the byte_data field instead.
     FMT_PROTOBUF = 0;
+    // bfloat16 data stored in the raw_data field.
+    FMT_BFLOAT16 = 1;
   }
   // data_format is a SerializationFormat enum value.
   // However, we intentionally store it as an integer value so we can
@@ -504,6 +506,19 @@ message BlobSerializationOptions {
   // - a chunk size of -1 means to disable chunking, and serialize the blob in
   //   a single chunk.
   optional int64 chunk_size = 2;
+
+  enum FloatFormat {
+    // Use the current default serialization format, as chosen by the
+    // current version of the code.  (At the time of writing this is PROTOBUF)
+    FLOAT_DEFAULT = 0;
+    // Store the data in the TensorProto's float_data field
+    FLOAT_PROTOBUF = 1;
+    // Serialize float values as bfloat16.  Note that this conversion is lossy.
+    FLOAT_BFLOAT16 = 2;
+  }
+
+  // Settings for how to serialize tensors containing float values
+  optional FloatFormat float_format = 3;
 }
 
 message SerializationOptions {

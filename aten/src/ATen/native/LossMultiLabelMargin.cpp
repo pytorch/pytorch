@@ -262,12 +262,11 @@ static void multilabel_margin_loss_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> multilabel_margin_loss_forward_out_cpu(
-    Tensor& output,
-    Tensor& is_target,
-    const Tensor& self,
+std::tuple<Tensor&, Tensor&> multilabel_margin_loss_forward_out_cpu(const Tensor& self,
     const Tensor& target,
-    int64_t reduction) {
+    int64_t reduction,
+    Tensor& output,
+    Tensor& is_target) {
   multilabel_margin_loss_forward_out_cpu_template(
       self, target, output, is_target, reduction);
   return std::tuple<Tensor&, Tensor&>(output, is_target);
@@ -279,18 +278,17 @@ std::tuple<Tensor, Tensor> multilabel_margin_loss_forward_cpu(
     int64_t reduction) {
   auto output = at::empty({0}, self.options());
   auto is_target = at::empty({0}, self.options());
-  multilabel_margin_loss_forward_out_cpu(
-      output, is_target, self, target, reduction);
+  at::native::multilabel_margin_loss_forward_out_cpu(
+      self, target, reduction, output, is_target);
   return std::make_tuple(output, is_target);
 }
 
-Tensor& multilabel_margin_loss_backward_cpu_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
+Tensor& multilabel_margin_loss_backward_cpu_out(const Tensor& grad_output,
     const Tensor& self,
     const Tensor& target,
     int64_t reduction,
-    const Tensor& is_target) {
+    const Tensor& is_target,
+    Tensor& grad_input) {
   multilabel_margin_loss_backward_out_cpu_template(
       grad_input, grad_output, self, target, reduction, is_target);
   return grad_input;
@@ -303,12 +301,12 @@ Tensor multilabel_margin_loss_backward_cpu(
     int64_t reduction,
     const Tensor& is_target) {
   auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  multilabel_margin_loss_backward_cpu_out(
-      grad_input, grad_output, self, target, reduction, is_target);
+  at::native::multilabel_margin_loss_backward_cpu_out(
+      grad_output, self, target, reduction, is_target, grad_input);
   return grad_input;
 }
 
-Tensor & multilabel_margin_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
+Tensor & multilabel_margin_loss_out(const Tensor & self, const Tensor & target, int64_t reduction, Tensor & output) {
   Tensor is_target = at::empty({0}, self.options());
   return std::get<0>(at::multilabel_margin_loss_forward_out(output, is_target, self, target, reduction));
 }

@@ -50,16 +50,10 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathMagma.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorIndex.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCSortUtils.cu
   ${extra_src}
-  PARENT_SCOPE)
-
-set(ATen_CUDA_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY}
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMode.cu
   PARENT_SCOPE)
 
 install(FILES
@@ -72,11 +66,9 @@ install(FILES
           THCTensor.h
           THCTensorCopy.h
           THCTensorCopy.hpp
-          THCTensorRandom.h
           THCTensorMath.h
           THCApply.cuh
           THCReduce.cuh
-          THCReduceAll.cuh
           THCReduceApplyUtils.cuh
           THCTensorMathReduce.cuh
           THCAsmUtils.cuh
@@ -111,10 +103,8 @@ install(FILES
           THCTensorInfo.cuh
           THCTensorMathPointwise.cuh
           THCTensorTypeUtils.cuh
-          THCTensorRandom.cuh
           THCTensorMathMagma.cuh
           THCThrustAllocator.cuh
-          THCTensorMode.cuh
           THCTensorTopK.cuh
           # See Note [TH abstraction violation]
           THCTensor.hpp
@@ -146,14 +136,8 @@ install(FILES
           generic/THCTensorMathReduce.cu
           generic/THCTensorScatterGather.h
           generic/THCTensorScatterGather.cu
-          generic/THCTensorIndex.h
-          generic/THCTensorIndex.cu
           generic/THCTensorSort.h
           generic/THCTensorSort.cu
-          generic/THCTensorRandom.h
-          generic/THCTensorRandom.cu
-          generic/THCTensorMode.h
-          generic/THCTensorMode.cu
           generic/THCTensorTopK.h
           generic/THCTensorTopK.cu
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")

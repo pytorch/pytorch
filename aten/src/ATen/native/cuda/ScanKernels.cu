@@ -4,11 +4,12 @@
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/native/Resize.h>
 #include <c10/util/accumulate.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
 
-#include <cub/device/device_scan.cuh>
+#include <ATen/cuda/cub.cuh>
 
 
 namespace at { namespace native {
@@ -542,7 +543,7 @@ void scan_dim(const Tensor& self, Tensor& result,
   }
 }
 
-Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   result.resize_(self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
@@ -581,16 +582,16 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
 
 Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _logcumsumexp_out_cuda(result, self, dim);
+  return _logcumsumexp_out_cuda(self, dim, result);
 }
 
-Tensor& _cumsum_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _cumsum_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   TensorArg output_arg{result, "output", 1};
   TensorArg input_arg{self, "input", 2};
   checkAllSameGPU("cumsum", {output_arg, input_arg});
   checkSameType("cumsum", output_arg, input_arg);
 
-  result.resize_(self.sizes());
+  at::native::resize_output(result, self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
     return result;
@@ -617,16 +618,16 @@ Tensor& _cumsum_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
 
 Tensor _cumsum_cuda(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _cumsum_out_cuda(result, self, dim);
+  return at::native::_cumsum_out_cuda(self, dim, result);
 }
 
-Tensor& _cumprod_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _cumprod_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   TensorArg output_arg{result, "output", 1};
   TensorArg input_arg{self, "input", 2};
   checkAllSameGPU("cumprod", {output_arg, input_arg});
   checkSameType("cumprod", output_arg, input_arg);
 
-  result.resize_(self.sizes());
+  at::native::resize_output(result, self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
     return result;
@@ -653,7 +654,7 @@ Tensor& _cumprod_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
 
 Tensor _cumprod_cuda(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _cumprod_out_cuda(result, self, dim);
+  return at::native::_cumprod_out_cuda(self, dim, result);
 }
 
 }} // namespace at::native

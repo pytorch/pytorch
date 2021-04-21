@@ -26,7 +26,7 @@ Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::op
   return get_tensor(scalarTypeToTypeMeta(dtype_or_default(dtype)), size);
 }
 
-Tensor& add_out_override(const Tensor & a, const Tensor & b , Scalar c, Tensor & out) {
+Tensor& add_out_override(const Tensor & a, const Tensor & b , const Scalar& c, Tensor & out) {
   test_int = 1;
   return out;
 }

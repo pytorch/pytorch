@@ -52,8 +52,8 @@ bool broadcast_first_input(const vTensor& input1, const vTensor& input2) {
 
 Tensor arithmetic_scalar(
     const Tensor& self_arg,
-    const Scalar other,
-    const c10::optional<Scalar> alpha_arg,
+    const Scalar& other,
+    const c10::optional<Scalar>& alpha_arg,
     const api::Shader::Descriptor& shader_descriptor) {
   api::Context* const context = api::context();
 
@@ -112,8 +112,8 @@ Tensor arithmetic_scalar(
 
 Tensor& arithmetic_scalar_(
     Tensor& self,
-    const Scalar other,
-    const c10::optional<Scalar> alpha_arg,
+    const Scalar& other,
+    const c10::optional<Scalar>& alpha_arg,
     const api::Shader::Descriptor& shader_descriptor) {
   api::Context* const context = api::context();
 
@@ -168,7 +168,7 @@ Tensor& arithmetic_scalar_(
 Tensor arithmetic_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
-    const c10::optional<Scalar> alpha_arg,
+    const c10::optional<Scalar>& alpha_arg,
     const api::Shader::Descriptor& shader_descriptor) {
   check_inputs(self_arg, other_arg);
   api::Context* const context = api::context();
@@ -242,7 +242,7 @@ Tensor arithmetic_tensor(
 Tensor& arithmetic_tensor_(
     Tensor& self,
     const Tensor& other_arg,
-    const c10::optional<Scalar> alpha_arg,
+    const c10::optional<Scalar>& alpha_arg,
     const api::Shader::Descriptor& shader_descriptor) {
   check_inputs(self, other_arg);
   api::Context* const context = api::context();
@@ -307,13 +307,13 @@ Tensor& arithmetic_tensor_(
 
 Tensor add_scalar(
     const Tensor& self_arg,
-    const Scalar other,
-    const Scalar alpha) {
+    const Scalar& other,
+    const Scalar& alpha) {
   return arithmetic_scalar(
       self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar));
 }
 
-Tensor& add_scalar_(Tensor& self, const Scalar other, const Scalar alpha) {
+Tensor& add_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return arithmetic_scalar_(
       self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_));
 }
@@ -321,20 +321,20 @@ Tensor& add_scalar_(Tensor& self, const Scalar other, const Scalar alpha) {
 Tensor add_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
-    const Scalar alpha) {
+    const Scalar& alpha) {
   return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
 }
 
-Tensor& add_tensor_(Tensor& self, const Tensor& other_arg, const Scalar alpha) {
+Tensor& add_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
   return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
 }
 
 Tensor sub_scalar(
     const Tensor& self_arg,
-    const Scalar other,
-    const Scalar alpha) {
+    const Scalar& other,
+    const Scalar& alpha) {
   return arithmetic_scalar(
       self_arg,
       other,
@@ -342,7 +342,7 @@ Tensor sub_scalar(
       VK_KERNEL(add_scalar));
 }
 
-Tensor& sub_scalar_(Tensor& self, const Scalar other, const Scalar alpha) {
+Tensor& sub_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return arithmetic_scalar_(
       self,
       other,
@@ -353,22 +353,22 @@ Tensor& sub_scalar_(Tensor& self, const Scalar other, const Scalar alpha) {
 Tensor sub_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
-    const Scalar alpha) {
+    const Scalar& alpha) {
   return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
 }
 
-Tensor& sub_tensor_(Tensor& self, const Tensor& other_arg, const Scalar alpha) {
+Tensor& sub_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
   return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
 }
 
-Tensor mul_scalar(const Tensor& self_arg, const Scalar other) {
+Tensor mul_scalar(const Tensor& self_arg, const Scalar& other) {
   return arithmetic_scalar(
       self_arg, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar));
 }
 
-Tensor& mul_scalar_(Tensor& self, const Scalar other) {
+Tensor& mul_scalar_(Tensor& self, const Scalar& other) {
   return arithmetic_scalar_(
       self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_));
 }
@@ -383,7 +383,7 @@ Tensor& mul_tensor_(Tensor& self, const Tensor& other_arg) {
       self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_));
 }
 
-Tensor div_scalar(const Tensor& self_arg, const Scalar other) {
+Tensor div_scalar(const Tensor& self_arg, const Scalar& other) {
   return arithmetic_scalar(
       self_arg,
       1.0 / other.to<float>(),
@@ -391,7 +391,7 @@ Tensor div_scalar(const Tensor& self_arg, const Scalar other) {
       VK_KERNEL(mul_scalar));
 }
 
-Tensor& div_scalar_(Tensor& self, const Scalar other) {
+Tensor& div_scalar_(Tensor& self, const Scalar& other) {
   return arithmetic_scalar_(
       self,
       1.0 / other.to<float>(),

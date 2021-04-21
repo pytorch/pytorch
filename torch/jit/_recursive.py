@@ -15,7 +15,7 @@ from torch.nn import Module
 
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
-PropertyStub = collections.namedtuple('Property', ('resolution_callback', 'def_'))
+PropertyStub = collections.namedtuple('PropertyStub', ('resolution_callback', 'def_'))
 
 
 # TODO: there should be a more principled way of doing this.

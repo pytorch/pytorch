@@ -10,8 +10,15 @@ import json
 from dataclasses import dataclass
 
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.model import *
-from tools.codegen.api.types import *
+from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
+                                 Location, NativeFunction,
+                                 NativeFunctionsGroup, OperatorName,
+                                 OptionalType, SchemaKind, SelfArgument,
+                                 TensorOptionsArguments, Type, Variant,
+                                 assert_never, is_cuda_dispatch_key,
+                                 is_generic_dispatch_key)
+from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
+                                     DispatcherSignature, NativeSignature)
 from tools.codegen.api import cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
@@ -19,15 +26,17 @@ import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import *
-from tools.codegen.context import *
+from tools.codegen.utils import Target, concatMap, context, mapMaybe
+from tools.codegen.context import (method_with_native_function,
+                                   native_function_manager,
+                                   with_native_function)
 import tools.codegen.dest as dest
 
 try:
     # use faster C loader if available
-    from yaml import CLoader as Loader
+    from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import Loader  # type: ignore
+    from yaml import SafeLoader as Loader  # type: ignore
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
@@ -124,8 +133,8 @@ def static_dispatch_extra_headers(backend: Optional[DispatchKey]) -> str:
         return ''
     return f"""
 #include <ATen/{backend}Functions.h>
-#include <ATen/DefaultBackendFunctions.h>
-#include <ATen/MathFunctions.h>
+#include <ATen/CompositeExplicitAutogradFunctions.h>
+#include <ATen/CompositeImplicitAutogradFunctions.h>
 """
 
 def static_dispatch(
@@ -147,7 +156,7 @@ def static_dispatch(
         # migrate math/default_backend ops to use structured delegate.
         return f'return at::{backend.lower()}::{name}({exprs_str});'
 
-    for dispatch_key in (backend, DispatchKey.DefaultBackend, DispatchKey.Math):
+    for dispatch_key in (backend, DispatchKey.CompositeExplicitAutograd, DispatchKey.CompositeImplicitAutograd):
         if dispatch_key in f.dispatch:
             return f'return at::{dispatch_key.lower()}::{name}({exprs_str});'
 
@@ -319,65 +328,10 @@ class ComputeTensorMethod:
 def compute_aten_op(f: NativeFunction) -> str:
     return f'{{"aten::{f.func.name.name}", "{f.func.name.overload_name}"}},'
 
-# Generates NativeFunctions.h, a list of forward declarations of all
-# actual kernel definitions we keep in aten/src/ATen/native/
-@with_native_function
-def compute_native_function_declaration(g: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
-    if isinstance(g, StructuredNativeFunctions):
-        # only out has dispatch
-        meta_name = meta.name(g)
-        rs = []
-        seen: Set[Any] = set()
-        out_args = structured.impl_arguments(g)
-        for k, n in g.out.dispatch.items():
-            if n in seen:
-                continue
-            if not is_structured_dispatch_key(k):
-                continue
-            seen.add(n)
-            rs.append(f"""\
-struct TORCH_API structured_{n} : public at::meta::{meta_name} {{
-    void impl({', '.join(a.decl() for a in out_args)});
-}};
-""")
-
-        seen = set()
-        for f in g.functions():
-            returns_type = native.returns_type(f.func.returns)
-            args = native.arguments(f.func)
-            for k, n in f.dispatch.items():
-                if n in seen:
-                    continue
-                if is_structured_dispatch_key(k):
-                    continue
-                seen.add(n)
-                args_str = ', '.join(a.decl() for a in args)
-                rs.append(f"TORCH_API {returns_type} {n}({args_str});")
-
-        return rs
-
-    else:
-        f = g
-        ns = list(f.dispatch.values())
-
-        rs = []
-        # Sometimes a function name shows up multiple times; only generate
-        # it once!
-        seen = set()
-        for n in ns:
-            if n in seen:
-                continue
-            if "legacy::" in n:
-                continue
-            seen.add(n)
-            returns_type = native.returns_type(f.func.returns)
-            args = native.arguments(f.func)
-            rs.append(f"TORCH_API {returns_type} {n}({', '.join(a.decl() for a in args)});")
-
-        return rs
-
 # Generates MetaFunctions.h
-def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
+def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
+    if not g.structured:
+        return None
     with native_function_manager(g.out):
         name = meta.name(g)
         args = structured.meta_arguments(g)
@@ -505,7 +459,7 @@ def dynamic_type(t: Type) -> str:
     # Note we don't use t.is_tensor_like() here because it would
     # also include Tensor[]
     if str(t) == 'Tensor':
-        return 'Tensor'
+        return 'at::Tensor'
     return cpp.argumenttype_type(t, mutable=False, binds='__placeholder__').cpp_type()
 
 def compute_method_of_yaml(variants: Set[Variant]) -> List[str]:
@@ -567,7 +521,7 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
         ret = {
             'dynamic_type': dynamic_type(r.type),
             'name': name,
-            'type': cpp.return_type(r),
+            'type': cpp.return_type(r).cpp_type(),
         }
 
         if r.name:
@@ -586,7 +540,7 @@ def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_
     if isinstance(cpp_a.argument, TensorOptionsArguments):
         arg: Dict[str, object] = {
             'annotation': None,
-            'dynamic_type': 'TensorOptions',
+            'dynamic_type': 'at::TensorOptions',
             'is_nullable': False,
             'name': cpp_a.name,
             'type': cpp_a.type,
@@ -662,7 +616,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
             a, method=False, cpp_no_default_args=set(), faithful=False, has_tensor_options=False)
     ]
 
-    cpp_returns = cpp.returns_type(f.func.returns)
+    cpp_returns = cpp.returns_type(f.func.returns).cpp_type()
     schema_order_cpp_signature = f"{cpp_returns} ({', '.join(cpp_schema_order_types)})"
 
     is_factory_method = any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) \
@@ -674,7 +628,6 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('overload_name', str(f.func.name.overload_name)),
         ('manual_kernel_registration', f.manual_kernel_registration),
         ('category_override', f.category_override if f.category_override is not None else ''),
-        ('matches_jit_signature', True),
         ('schema_string', f'aten::{f.func}'),
         ('arguments', arguments),
         ('schema_order_cpp_signature', schema_order_cpp_signature),
@@ -689,20 +642,25 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
-        ('has_math_kernel', DispatchKey.Math in f.dispatch),
+        ('has_math_kernel', DispatchKey.CompositeImplicitAutograd in f.dispatch),
     ])
+
+# See Note [Auto generated composite kernels]
+def has_autogenerated_composite_kernel(f: NativeFunction) -> bool:
+    return (f.structured or f.structured_delegate is not None) and \
+        (f.func.kind() == SchemaKind.functional or f.func.kind() == SchemaKind.inplace)
 
 @with_native_function
 def compute_registration_declarations(f: NativeFunction) -> str:
     name = dispatcher.name(f.func)
-    returns_type = dispatcher.returns_type(f.func.returns)
+    returns_type = dispatcher.returns_type(f.func.returns).cpp_type_registration_declarations()
     args = dispatcher.arguments(f.func)
-    args_str = ', '.join(a.no_default().decl() for a in args)
+    args_str = ', '.join(a.no_default().decl_registration_declarations() for a in args)
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         # TODO: What exactly is the semantics of the 'dispatch' field?
-        'dispatch': str(f.dispatch.keys() != {DispatchKey.Math}),
-        'default': str(any(is_generic_dispatch_key(k) for k in f.dispatch))
+        'dispatch': str(f.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}),
+        'default': str(any(is_generic_dispatch_key(k) for k in f.dispatch) or has_autogenerated_composite_kernel(f))
     }
     return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
 """
@@ -864,8 +822,8 @@ def main() -> None:
         assert f.func.kind() not in d
         d[f.func.kind()] = f
 
-    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, StructuredNativeFunctions]]:
-        r = StructuredNativeFunctions.from_dict(d)
+    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
+        r = NativeFunctionsGroup.from_dict(d)
         if r is None:
             return list(d.values())
         else:
@@ -873,7 +831,7 @@ def main() -> None:
 
     # TODO: how come ValuesView isn't a Sequence lol
     grouped_native_functions = list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
-    structured_native_functions = [g for g in grouped_native_functions if isinstance(g, StructuredNativeFunctions)]
+    structured_native_functions = [g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)]
 
     template_dir = os.path.join(options.source_path, "templates")
 
@@ -912,13 +870,15 @@ def main() -> None:
     dispatch_keys = [
         DispatchKey.CPU,
         DispatchKey.SparseCPU,
+        DispatchKey.SparseCsrCPU,
         DispatchKey.MkldnnCPU,
         DispatchKey.CUDA,
         DispatchKey.SparseCUDA,
+        DispatchKey.SparseCsrCUDA,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
-        DispatchKey.Math,
-        DispatchKey.DefaultBackend,
+        DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.CompositeExplicitAutograd,
         # Meta is a magic key: it is automatically generated for structured
         # kernels
         DispatchKey.Meta,
@@ -928,8 +888,8 @@ def main() -> None:
     functions_keys = {
         DispatchKey.CPU,
         DispatchKey.CUDA,
-        DispatchKey.Math,
-        DispatchKey.DefaultBackend,
+        DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.CompositeExplicitAutograd,
     }
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist]
@@ -986,7 +946,7 @@ def main() -> None:
     })
 
     cpu_fm.write('MetaFunctions.h', lambda: {
-        'declarations': list(map(compute_meta_function_declaration, structured_native_functions)),
+        'declarations': list(mapMaybe(compute_meta_function_declaration, structured_native_functions)),
     })
 
     schema_selector = selector
@@ -1027,7 +987,7 @@ def main() -> None:
         'aten_ops': list(mapMaybe(compute_aten_op, native_functions)),
     })
     cpu_fm.write('NativeFunctions.h', lambda: {
-        'native_function_declarations': list(concatMap(compute_native_function_declaration, grouped_native_functions)),
+        'native_function_declarations': list(concatMap(dest.compute_native_function_declaration, grouped_native_functions)),
     })
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))

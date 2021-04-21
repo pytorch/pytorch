@@ -16,6 +16,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
+  set_has_contiguity_policy(HasContiguityPolicy::CustomBehavior);
   checkInvariants();
 
   const auto public_dims = value_.dim() - bdims_.size();
@@ -74,7 +75,7 @@ void BatchedTensorImpl::checkInvariants() const {
 }
 
 // The following are publically exposed as methods of Tensor
-bool BatchedTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
+bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
       "NYI: querying is_contiguous inside of vmap for memory_format ",
       "other than torch.contiguous_format");

@@ -19,12 +19,16 @@ Package InterpreterManager::load_package(const std::string& uri) {
   return Package(uri, this);
 }
 
+Package InterpreterManager::load_package(std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader) {
+  return Package(reader, this);
+}
+
 Obj InterpreterSession::from_movable(const ReplicatedObj& obj) {
   return impl_->unpickle_or_get(obj.pImpl_->object_id_, obj.pImpl_->data_);
 }
 
 InterpreterSession ReplicatedObj::acquire_session(
-    const Interpreter* on_this_interpreter) {
+    const Interpreter* on_this_interpreter) const {
   InterpreterSession I = on_this_interpreter
       ? on_this_interpreter->acquire_session()
       : pImpl_->manager_->acquire_one();
