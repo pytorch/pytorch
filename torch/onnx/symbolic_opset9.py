@@ -2004,13 +2004,17 @@ def repeat_interleave(g, self, repeats, dim=None):
         if not sym_help._is_tensor(repeats):
             repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
         if input_sizes[dim] == 0:
-            raise NotImplementedError("Unsupported repeat_interleave along dimension with unknown input size")
+            return sym_help._onnx_opset_unsupported_detailed('repeat_interleave', 9, 11,
+                                                             'Unsupported along dimension with unknown input size')
         else:
             reps = input_sizes[dim]
             repeats = expand(g, repeats, g.op("Constant", value_t=torch.tensor([reps])), None)
 
     # Cases where repeats is a 1 dim Tensor
     elif repeats_dim == 1:
+        if input_sizes[dim] == 0:
+            return sym_help._onnx_opset_unsupported_detailed('repeat_interleave', 9, 11,
+                                                             'Unsupported along dimension with unknown input size')
         assert repeats_sizes[0] == input_sizes[dim], "repeats must have the same size as input along dim"
         reps = repeats_sizes[0]
     else:
