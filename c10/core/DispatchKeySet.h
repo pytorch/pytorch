@@ -213,6 +213,11 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
     DispatchKey::InplaceOrView,
 });
 
+constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
+    // DispatchKey::AutocastCPU,
+    DispatchKey::AutocastCUDA,
+});
+
 constexpr DispatchKeySet autograd_dispatch_keyset_with_InplaceOrView =
   autograd_dispatch_keyset | DispatchKeySet(DispatchKey::InplaceOrView);
 
@@ -265,6 +270,9 @@ C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 
 // Returns a DispatchKeySet of autograd related keys mapped to backend.
 C10_API DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t);
+
+// Returns a DispatchKeySet of autocast related keys mapped to backend.
+C10_API DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t);
 
 // This API exists because we have a use case for checking
 // getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefined)
