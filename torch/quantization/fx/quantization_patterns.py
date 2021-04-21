@@ -281,19 +281,8 @@ class CatQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not self.all_node_args_are_tensors:
             return NotImplemented
-        cur_idx = quantizer.activation_post_process_indexes[node.name]
-        activation_post_process = \
-            quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
         quantizer.activation_post_process_indexes[node.name] += 1
-        scale, zero_point = activation_post_process.calculate_qparams()
-        scale = float(scale)
-        zero_point = int(zero_point)
-
-        scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
-
-        kwargs = {**load_arg(quantized=False)(node.kwargs), 'scale': scale_arg, 'zero_point': zero_point_arg}
-        return quantizer.quantized_graph.create_node(
-            'call_function', torch.ops.quantized.cat, load_arg(quantized=[0])(node.args), kwargs)
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=True))
 
 # handle conv, maybe followed by relu
 # NB: matching order is reversed, that is we match from the bottom of this list to the beginning
