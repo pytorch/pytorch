@@ -2139,8 +2139,13 @@ class TestReductions(TestCase):
                 # NumPy default is not compatible with torch.std (gh-50010)
                 numpy_kwargs['ddof'] = 1
 
-            numpy_res = np.var(array, **numpy_kwargs)
+            numpy_res = np.asarray(np.var(array, **numpy_kwargs))
             torch_res = torch.var(tensor, dim=dim, correction=correction, keepdim=keepdim)
+
+            # inf vs. nan results are sensitive to machine precision,
+            # just treat them as equivalent
+            numpy_res[np.isinf(numpy_res)] = np.nan
+            torch_res[torch_res.isinf()] = np.nan
 
             self.assertEqual(torch_res, numpy_res, exact_dtype=False)
 
@@ -2168,8 +2173,13 @@ class TestReductions(TestCase):
                 # NumPy default is incompatible with torch.std (gh-50010)
                 numpy_kwargs['ddof'] = 1
 
-            numpy_res = np.std(array, **numpy_kwargs)
+            numpy_res = np.asarray(np.std(array, **numpy_kwargs))
             torch_res = torch.std(tensor, dim=dim, correction=correction, keepdim=keepdim)
+
+            # inf vs. nan results are sensitive to machine precision,
+            # just treat them as equivalent
+            numpy_res[np.isinf(numpy_res)] = np.nan
+            torch_res[torch_res.isinf()] = np.nan
 
             self.assertEqual(torch_res, numpy_res, exact_dtype=False)
 
