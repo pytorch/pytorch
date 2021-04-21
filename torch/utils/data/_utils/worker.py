@@ -139,8 +139,6 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
         torch.manual_seed(seed)
         if HAS_NUMPY:
             import numpy as np
-            # Taking suggestion from https://github.com/pytorch/pytorch/issues/5059#issuecomment-817392562
-            # to generatre better seed
             ss = np.random.SeedSequence([worker_id, base_seed])
             np.random.seed(ss.generate_state(4))
 
