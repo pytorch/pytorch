@@ -960,7 +960,7 @@ void BoundShapeInferencer::InferTranspose(const OperatorDef& op) {
 
   auto it = shape_info_.find(op.input(0));
   if (it == shape_info_.end()) {
-    LOG(WARNING) << "Didn't find shape info for the input of Softmax";
+    LOG(WARNING) << "Didn't find shape info for the input of Transpose";
     return;
   }
 
