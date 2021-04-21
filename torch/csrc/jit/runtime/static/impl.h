@@ -306,17 +306,16 @@ class MemoryPlanner {
   std::vector<IValue*> unmanaged_ivalues_;
 
   // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of StorageImpl's that should be backed by that same data
+  // and a vector of Tensors that should be backed by that same data.
   // Thus, if memonger is disabled, all vectors are of size 1.
-  std::vector<std::pair<size_t, std::vector<c10::StorageImpl*>>>
-      managed_tensor_storage_;
+  std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
   size_t managed_bytes_{0};
   size_t reused_tensors_{0};
   at::DataPtr buffer_; // allocated each time we call Run()
 
   // since output tensors are alive after one inference, their storage
   // is managed differently (e.g., deallocation happens at client side)
-  // std::vector<std::pair<sizse_t, std::vector<c10::StorageImpl*>>>
+  // std::vector<std::pair<sizse_t, std::vector<at::Tensor*>>>
   //     managed_output_storage_;
   // size_t managed_output_bytes_{0};
   // size_t reused_output_tensors_{0};
