@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import subprocess
+import sys
 import os
 import argparse
 import yaml
@@ -27,7 +28,10 @@ def color(the_color: str, text: str) -> str:
 
 
 def cprint(the_color: str, text: str) -> None:
-    print(color(the_color, text))
+    if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+        print(color(the_color, text))
+    else:
+        print(text)
 
 
 def git(args: List[str]) -> List[str]:
