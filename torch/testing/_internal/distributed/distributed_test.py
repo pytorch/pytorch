@@ -1002,13 +1002,13 @@ class DistributedTest:
         def test_send_recv(self):
             self._test_send_recv(profiler_cls=None)
 
-        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
+        @unittest.skipIf(BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl")
         def test_send_recv_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_send_recv(profiler_cls=autograd_profiler_ctx)
             print("all asserts passed")
 
-        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
+        @unittest.skipIf(BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl")
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode causes hang")
         @unittest.skipIf(
             IS_MACOS or IS_WINDOWS,
@@ -1145,12 +1145,12 @@ class DistributedTest:
         def test_send_recv_with_tag(self):
             self._test_send_recv_with_tag(profiler_cls=None)
 
-        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
+        @unittest.skipIf(BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl")
         def test_send_recv_with_tag_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             return self._test_send_recv_with_tag(profiler_cls=autograd_profiler_ctx)
 
-        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
+        @unittest.skipIf(BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl")
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
         @unittest.skipIf(
             IS_MACOS or IS_WINDOWS,
@@ -1628,6 +1628,10 @@ class DistributedTest:
 
             if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 events = get_profiling_event(profiling_title_postfix, autograd_profiler_ctx)
+                print(f'profiling title postfix: {profiling_title_postfix}')
+                print(f'all events: {prof.function_events}')
+                print(f'events: {events}')
+                print(f'op_calls: {op_calls}')
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertEqual(e.count, 1)
@@ -4273,8 +4277,6 @@ class DistributedTest:
                 for i in range(num_iters):
                     loss = net(inp).sum()
                     loss.backward()
-
-                torch.cuda.synchronize(device=self.rank)
 
             all_reduce_event_name = f"{dist.get_backend()}:all_reduce"
             events = get_profiling_event(all_reduce_event_name, prof)
