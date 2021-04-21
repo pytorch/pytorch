@@ -162,8 +162,6 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def(
-          "_jit_pass_symbolic_shape_analysis", PropagateShapesWithShapeFunction)
-      .def(
           "_jit_register_operator_shape_function",
           RegisterOperatorShapeFunction)
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
@@ -638,6 +636,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def("_jit_set_texpr_reductions_enabled", &setTexprReductionsEnabled)
       .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
+      .def("_jit_set_texpr_parallel_cpu_enabled", &setTexprParallelCPUEnabled)
+      .def("_jit_texpr_parallel_cpu_enabled", &texprParallelCPUEnabled)
       .def(
           "_jit_set_te_generate_block_code",
           [](bool gen_block_code) {

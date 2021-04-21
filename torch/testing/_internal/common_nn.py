@@ -1192,7 +1192,7 @@ def multimarginloss_weights_no_reduce_test():
 
 
 def fractional_max_pool2d_test(test_case):
-    random_samples = torch.DoubleTensor(1, 3, 2).uniform_()
+    random_samples = torch.empty((1, 3, 2), dtype=torch.double).uniform_()
     if test_case == 'ratio':
         return dict(
             constructor=lambda: nn.FractionalMaxPool2d(
@@ -1228,7 +1228,7 @@ def fractional_max_pool2d_test(test_case):
 
 
 def fractional_max_pool3d_test(test_case):
-    random_samples = torch.DoubleTensor(2, 4, 3).uniform_()
+    random_samples = torch.empty((2, 4, 3), dtype=torch.double).uniform_()
     if test_case == 'ratio':
         return dict(
             constructor=lambda: nn.FractionalMaxPool3d(
@@ -2685,6 +2685,29 @@ new_module_tests = [
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
         desc='max',
+    ),
+    dict(
+        fullname='EmbeddingBag_mean_padding_idx',
+        constructor=lambda: nn.EmbeddingBag(4, 3, padding_idx=1),
+        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).padding_idx(1)',
+        input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
+        check_gradgrad=False,
+    ),
+    dict(
+        fullname='EmbeddingBag_sum_padding_idx',
+        constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'sum', padding_idx=1),
+        cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum).padding_idx(1)''',
+        input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
+        check_gradgrad=False,
+    ),
+    dict(
+        fullname='EmbeddingBag_max_padding_idx',
+        constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'max', padding_idx=1),
+        cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax).padding_idx(1)''',
+        input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
+        check_gradgrad=False,
     ),
     dict(
         fullname='EmbeddingBag_sparse',
