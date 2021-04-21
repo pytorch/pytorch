@@ -4223,24 +4223,22 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "qr received unrecognized mode 'hello'"):
             torch.linalg.qr(t2, mode='hello')
 
+    def _check_einsum(self, equation, *operands):
+        np_operands = [operand.cpu().numpy() for operand in operands]
+        ref = np.einsum(equation, *np_operands)
+        res = torch.einsum(equation, operands)
+        self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
+
+        # Get optimized contraction path to test optimize parameter
+        path = np.einsum_path(equation, *np_operands)[0]
+        ref = np.einsum(equation, *np_operands, optimize=path)
+        # path is ['einsum_path', (i, j), ...] so we skip the first element
+        # since the path from the opt_einsum library is only the tuples
+        res = torch.einsum(equation, operands, optimize=path[1:])
+        self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
+
     @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
-        def check(equation, *operands):
-            np_operands = [operand.cpu().numpy() for operand in operands]
-            ref = np.einsum(equation, *np_operands)
-            res = torch.einsum(equation, operands)
-            self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
-
-            # Test optimize parameter
-            path = np.einsum_path(equation, *np_operands)[0][1:]
-            self.assertEqual(res, torch.einsum(equation, operands, optimize=path))
-
-            # Check autograd
-            ops = [op.detach().requires_grad_() for op in operands]
-            self.assertTrue(gradcheck(lambda *ops: torch.einsum(equation, ops), ops))
-            for op in ops:
-                self.assertTrue(op._version == 0)
-
         # Test cases from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
         x = torch.rand(5, device=device, dtype=dtype)
         y = torch.rand(7, device=device, dtype=dtype)
@@ -4258,62 +4256,55 @@ class TestLinalg(TestCase):
         # calls to clone below. (see https://github.com/pytorch/pytorch/issues/9282)
 
         # Vector operations
-        check('i->', x)                     # sum
-        check('i,i->', x, x.clone())        # dot
-        check('i,i->i', x, x.clone())       # vector element-wisem mul
-        check('i,j->ij', x, y)              # outer
+        self._check_einsum('i->', x)                     # sum
+        self._check_einsum('i,i->', x, x.clone())        # dot
+        self._check_einsum('i,i->i', x, x.clone())       # vector element-wisem mul
+        self._check_einsum('i,j->ij', x, y)              # outer
 
         # Matrix operations
-        check("ij->ji", A)                  # transpose
-        check("ij->j", A)                   # row sum
-        check("ij->i", A)                   # col sum
-        check("ij,ij->ij", A, A.clone())    # matrix element-wise mul
-        check("ij,j->i", A, x)              # matrix vector multiplication
-        check("ij,kj->ik", A, B)            # matmul
-        check("ij,ab->ijab", A, E)          # matrix outer product
+        self._check_einsum("ij->ji", A)                  # transpose
+        self._check_einsum("ij->j", A)                   # row sum
+        self._check_einsum("ij->i", A)                   # col sum
+        self._check_einsum("ij,ij->ij", A, A.clone())    # matrix element-wise mul
+        self._check_einsum("ij,j->i", A, x)              # matrix vector multiplication
+        self._check_einsum("ij,kj->ik", A, B)            # matmul
+        self._check_einsum("ij,ab->ijab", A, E)          # matrix outer product
 
         # Tensor operations
-        check("aij,ajk->aik", C, D)         # batch matmul
-        check("ijk,jk->i", C, A)            # tensor matrix contraction
-        check("aij,jk->aik", D, E)          # tensor matrix contraction
-        check("abcd,dfg->abcfg", F, G)      # tensor tensor contraction
-        check("ijk,jk->ik", C, A)           # tensor matrix contraction with double indices
-        check("ijk,jk->ij", C, A)           # tensor matrix contraction with double indices
-        check("ijk,ik->j", C, B)            # non contiguous
-        check("ijk,ik->jk", C, B)           # non contiguous with double indices
+        self._check_einsum("aij,ajk->aik", C, D)         # batch matmul
+        self._check_einsum("ijk,jk->i", C, A)            # tensor matrix contraction
+        self._check_einsum("aij,jk->aik", D, E)          # tensor matrix contraction
+        self._check_einsum("abcd,dfg->abcfg", F, G)      # tensor tensor contraction
+        self._check_einsum("ijk,jk->ik", C, A)           # tensor matrix contraction with double indices
+        self._check_einsum("ijk,jk->ij", C, A)           # tensor matrix contraction with double indices
+        self._check_einsum("ijk,ik->j", C, B)            # non contiguous
+        self._check_einsum("ijk,ik->jk", C, B)           # non contiguous with double indices
 
         # Test diagonals
-        check("ii", H)                      # trace
-        check("ii->i", H)                   # diagonal
-        check('iji->j', I)                  # non-contiguous trace
-        check('ngrg...->nrg...', torch.rand((2, 1, 3, 1, 4), device=device, dtype=dtype))
+        self._check_einsum("ii", H)                      # trace
+        self._check_einsum("ii->i", H)                   # diagonal
+        self._check_einsum('iji->j', I)                  # non-contiguous trace
+        self._check_einsum('ngrg...->nrg...', torch.rand((2, 1, 3, 1, 4), device=device, dtype=dtype))
 
         # Test ellipsis
-        check("i...->...", H)
-        check("ki,...k->i...", A.t(), B)
-        check("k...,jk->...", A.t(), B)
-        check('...ik, ...j -> ...ij', C, x)
-        check('bik,k...j->i...j', C, torch.rand(5, 3, device=device, dtype=dtype))
-        check('i...j, ij... -> ...ij', C, torch.rand(2, 5, 2, 3, device=device, dtype=dtype))
+        self._check_einsum("i...->...", H)
+        self._check_einsum("ki,...k->i...", A.t(), B)
+        self._check_einsum("k...,jk->...", A.t(), B)
+        self._check_einsum('...ik, ...j -> ...ij', C, x)
+        self._check_einsum('bik,k...j->i...j', C, torch.rand(5, 3, device=device, dtype=dtype))
+        self._check_einsum('i...j, ij... -> ...ij', C, torch.rand(2, 5, 2, 3, device=device, dtype=dtype))
 
         # torch.bilinear with noncontiguous tensors
         l = torch.randn(10, 5, device=device, dtype=dtype).transpose(0, 1)
         r = torch.randn(20, 5, device=device, dtype=dtype).transpose(0, 1)
         w = torch.randn(15, 10, 20, device=device, dtype=dtype)
-        check("bn,anm,bm->ba", l, w, r)
+        self._check_einsum("bn,anm,bm->ba", l, w, r)
 
         # with strided tensors
-        check("bn,anm,bm->ba", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
+        self._check_einsum("bn,anm,bm->ba", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum_random(self, device, dtype):
-        def check(equation, *operands):
-            np_operands = [op.cpu().numpy() for op in operands]
-            path = np.einsum_path(equation, *np_operands)[0]
-            ref = np.einsum(equation, *np_operands, optimize=path)
-            res = torch.einsum(equation, operands, optimize=path[1:])
-            self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
-
         for _ in range(20):
             # Create a random number of input operands, each with a random
             # number of dimensions randomly labeled.
@@ -4345,7 +4336,7 @@ class TestLinalg(TestCase):
             equation = equation[:-1]
 
             # Test with implicit output
-            check(equation, *ops)
+            self._check_einsum(equation, *ops)
 
             # Randomly choose some labels to be part of the output
             out_labels = np.unique(np.random.choice(list(valid_labels), random.randint(1, len(valid_labels))))
@@ -4355,7 +4346,7 @@ class TestLinalg(TestCase):
             equation += '->' + ''.join(out_labels)
 
             # Randomly test the output
-            check(equation, *ops)
+            self._check_einsum(equation, *ops)
 
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):

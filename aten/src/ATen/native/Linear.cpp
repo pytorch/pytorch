@@ -417,7 +417,7 @@ Tensor einsum(
   }
 
   // Check if operands broadcast and count for each dim the number of operands
-  // with size != 1 for that dim.
+  // with size > 1 for that dim.
   std::vector<std::size_t> dim_count(perm_index);
   bool has_zero_size_dim = false;
   for (const auto dim : c10::irange(perm_index)) {
@@ -452,7 +452,8 @@ Tensor einsum(
   auto it = path.begin();
 
   while (permuted_operands.size() > 1) {
-    decltype(permuted_operands.size()) i = 0, j = 1;
+    auto i = decltype(permuted_operands.size()){0};
+    auto j = decltype(permuted_operands.size()){1};
 
     if (optimize.has_value()) {
       if (*it < *(it + 1)) {
@@ -477,14 +478,15 @@ Tensor einsum(
     permuted_operands.erase(permuted_operands.begin() + j);
     permuted_operands.erase(permuted_operands.begin() + i);
 
+    // sumproduct_pair does not work with zero sized dims
     if (has_zero_size_dim) {
       permuted_operands.emplace_back(a.mul(b));
       continue;
     }
 
-    // Contract dimensions for which no other operands have size != 1
+    // Contract dimensions for which no other operands have size > 1
     std::vector<int64_t> sum_dims;
-    for (int64_t dim = out_size; dim < perm_index; ++dim) {
+    for (auto dim = out_size; dim < perm_index; ++dim) {
       if (a.size(dim) > 1) {
         --dim_count[dim];
       }
@@ -503,6 +505,7 @@ Tensor einsum(
     permuted_operands.emplace_back(result);
   }
 
+  // Squeeze contracted dimensions
   std::vector<int64_t> sum_dims;
   for (int64_t dim = out_size; dim < perm_index; ++dim) {
     sum_dims.emplace_back(dim);
