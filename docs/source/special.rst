@@ -27,4 +27,6 @@ Functions
 .. autofunction:: exp2
 .. autofunction:: gammaln
 .. autofunction:: i0e
+.. autofunction:: i1
+.. autofunction:: i1e
 .. autofunction:: logit
