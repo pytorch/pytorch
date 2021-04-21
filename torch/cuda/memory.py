@@ -512,7 +512,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
     """
 
     try:
-        import pynvml  # type: ignore
+        import pynvml  # type: ignore[import]
     except ModuleNotFoundError:
         return("pynvml module not found, please install pynvml")
     from pynvml import NVMLError_DriverNotLoaded
