@@ -126,7 +126,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
 
     if tensor_cls == torch.nn.parameter.Parameter:
         # It is crucial for integer tensors to receive
-        # the requires_grad as a parameter in the constructor
+        # the requires_grad=False as an argument in the constructor
         t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
     else:
         t.requires_grad = requires_grad

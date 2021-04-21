@@ -832,22 +832,30 @@ if __name__ == "__main__":
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
-    def test_integer_parameter_serialization(self):
-        for device in ['cpu', 'cuda']:
-            param = torch.nn.Parameter(
-                torch.tensor(0, dtype=torch.int64, device=device),
-                requires_grad=False
-            )
+    def test_integer_parameter_serialization_cpu(self):
+        self._test_integer_parameter_serialization(device='cpu')
 
-            ctx = mp.get_context('spawn')
-            p = ctx.Process(target=integer_parameter_serialization, args=(param,))
-            p.start()
-            p.join()
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_integer_parameter_serialization_cuda(self):
+        self._test_integer_parameter_serialization(device='cuda')
 
-            self.assertEqual(
-                0, p.exitcode,
-                msg=f'Failed to serialize successfully for "{device}" device!'
-            )
+    def _test_integer_parameter_serialization(self, device):
+        param = torch.nn.Parameter(
+            torch.tensor(0, dtype=torch.int64, device=device),
+            requires_grad=False
+        )
+
+        ctx = mp.get_context('spawn')
+        p = ctx.Process(target=integer_parameter_serialization, args=(param,))
+        p.start()
+        p.join()
+
+        self.assertEqual(
+            0, p.exitcode,
+            msg=f'Failed to serialize successfully for "{device}" device!'
+        )
 
     def test_empty_shared(self):
         t = torch.tensor([])
