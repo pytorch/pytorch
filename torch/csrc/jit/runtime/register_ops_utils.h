@@ -837,7 +837,7 @@ void listSetItem(Stack* stack);
   DEFINE_GENERIC_OP_WITH_COMPLEX(aten_op, op, op, op, int, float, complex), \
       DEFINE_INT_COMPLEX_OP(aten_op, op, complex),                          \
       DEFINE_FLOAT_COMPLEX_OP(aten_op, op, complex),                        \
-      DEFINE_INT_FLOAT_OP(aten_op, op, float)                               \
+      DEFINE_INT_FLOAT_OP(aten_op, op, float),                              \
       DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX(aten_op, op, op, op, Scalar)
 
 } // namespace jit
