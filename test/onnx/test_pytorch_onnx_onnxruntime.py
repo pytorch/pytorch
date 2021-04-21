@@ -1560,15 +1560,16 @@ class TestONNXRuntime(unittest.TestCase):
         y = 2
         self.run_test(ArithmeticModule(), (x, y))
 
-    def test_tuple(self):
-        class Tuple(torch.nn.Module):
+    @disableScriptTest
+    def test_tuple_with_none_outputs(self):
+        class TupleModel(torch.nn.Module):
             def forward(self, x):
                 l = (x, None, (x, None))
                 return (x, l)
 
-        model = Tuple()
+        model = TupleModel()
         x = torch.randn(3, 4)
-        self.run_model_test_with_external_data(Tuple(), (x,), example_outputs=model(x))
+        self.run_test(TupleModel(), (x,))
 
     # In scripting the first transpose node do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
