@@ -190,7 +190,7 @@ def main() -> None:
     else:
         relevant_steps = grab_all_steps_after(args.all_steps_after, job)
 
-    asyncio.run(run_steps(relevant_steps, args.job, changed_files))  # type: ignore [attr-defined]
+    asyncio.run(run_steps(relevant_steps, args.job, changed_files))  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":

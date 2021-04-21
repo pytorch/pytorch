@@ -13,10 +13,7 @@ if sys.version_info < (3, 8):
     sys.exit(0)
 
 
-# mypy doesn't know about 'IsolatedAsyncioTestCase', so the 'type: ignore' below
-# can't have a specific code (it infers it to be 'Any', then complains since we
-# have --disallow-subclassing-any turned on
-class TestRunner(unittest.IsolatedAsyncioTestCase):  # type: ignore
+class TestRunner(unittest.IsolatedAsyncioTestCase):  # type: ignore[misc, name-defined]
     def run(self, *args: List[Any], **kwargs: List[Dict[str, Any]]) -> Any:
         return super().run(*args, **kwargs)
 
