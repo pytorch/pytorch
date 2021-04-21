@@ -190,9 +190,39 @@ def _tensorpipe_construct_rpc_backend_options_handler(
     )
 
 
+def _tensorpipe_check_local_device_maps(name, options):
+    # Check local devices in device_maps and devices are all valid.
+    local_devices = set(options.devices) if options.devices else set()
+    device_maps = options.device_maps
+    for worker_name in device_maps:
+        device_map = device_maps[worker_name]
+        key_set = set(device_map.keys())
+        val_set = set(device_map.values())
+        if not all([
+            len(key_set) == len(device_map),
+            len(val_set) == len(device_map),
+        ]):
+            raise ValueError(
+                f"Invalid device_map configuration for {worker_name}, "
+                f"not 1-to-1 mapping:\ndevice_maps = {device_map}"
+            )
+        local_devices.update(options.device_maps[worker_name].keys())
+
+    if len(local_devices) > 0 and not all([
+        max(local_devices) < torch.cuda.device_count(),
+        min(local_devices) >= 0,
+    ]):
+        raise ValueError(
+            f"Invalid device in TensorPipe options on {name}:\n"
+            f"device_maps = {options.device_maps},\n"
+            f"devices = {options.devices}"
+        )
+
+
 # detect if any worker has invalid device_map configurations, and return
 # names of failed workers
-def _tensorpipe_check_device_maps(agent, device_maps):
+def _tensorpipe_check_remote_device_maps(agent, options):
+    device_maps = options.device_maps
     if device_maps is None:
         device_maps = {}
 
@@ -201,22 +231,19 @@ def _tensorpipe_check_device_maps(agent, device_maps):
         wrong_worker_names = set(device_maps) - set(all_device_counts)
         if wrong_worker_names:
             raise ValueError(f"Wrong worker names: {wrong_worker_names}")
-        for worker_name in all_device_counts:
-            remote_device_count = all_device_counts[worker_name]
-            if worker_name in device_maps:
-                device_map = device_maps[worker_name]
+        for remote_name in all_device_counts:
+            remote_device_count = all_device_counts[remote_name]
+            if remote_name in device_maps:
+                device_map = device_maps[remote_name]
                 key_set = set(device_map.keys())
                 val_set = set(device_map.values())
                 if not all([
-                    len(device_map) == len(key_set),
-                    len(device_map) == len(val_set),  # check 1-to-1 mapping
-                    min(key_set) >= 0,
-                    max(key_set) < device_count,  # check local range
                     min(val_set) >= 0,
                     max(val_set) < remote_device_count  # check remote range
                 ]):
                     raise ValueError(
-                        f"Invalid device_map configuration on {name}:\n"
+                        f"Invalid device_map configuration on {name} "
+                        f"for {remote_name}, remote device out of range:\n"
                         f"device_maps = {device_maps}"
                     )
 
@@ -265,6 +292,14 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         # process initializes its PyTorch CUDA states.
         torch.cuda.init()
 
+        _tensorpipe_check_local_device_maps(name, rpc_backend_options)
+    else:
+        if len(rpc_backend_options.devices) > 0:
+            raise ValueError(
+                f"CUDA is not available on {name}, but "
+                f"devices = {rpc_backend_options.devices}"
+            )
+
     # The agent's join method is required to behave like a barrier and perform
     # collective operations, for which it relies on a process group, instead of
     # re-implementing this on top of RPCs.
@@ -279,7 +314,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     api._init_rpc_states(agent)
 
     try:
-        _tensorpipe_check_device_maps(agent, rpc_backend_options.device_maps)
+        _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
         agent.join()
     except Exception:
         api.shutdown()
