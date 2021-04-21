@@ -4016,7 +4016,7 @@ class TestAutograd(TestCase):
             # even if raise_exception=False)
             x = torch.ones(1, dtype=torch.float64, requires_grad=True)
             x = x.expand((2, 2))
-            with self.assertRaisesRegex(ValueError, 'The 0th input has a dimension with stride 0'):
+            with self.assertRaisesRegex(RuntimeError, 'The 0th input has a dimension with stride 0'):
                 gradcheck(lambda x: x, (x,), raise_exception=False, fast_mode=fast_mode)
         check(fast_mode=True)
         check(fast_mode=False)

@@ -497,7 +497,7 @@ def check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
             # "any overlap in memory" once we have a proper function to check it.
             if content.layout is not torch._mkldnn:  # type: ignore
                 if not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
-                    raise ValueError(
+                    raise RuntimeError(
                         f'The {idx}th input has a dimension with stride 0. gradcheck only '
                         'supports inputs that are non-overlapping to be able to '
                         'compute the numerical gradients correctly. You should call '
@@ -1005,7 +1005,7 @@ def gradcheck(
         True if all differences satisfy allclose condition
     """
     # This is just a wrapper that handles the raise_exception logic
-    args = locals()
+    args = locals().copy()
     args.pop("raise_exception")
     if not raise_exception:
         try:
