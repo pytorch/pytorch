@@ -26,6 +26,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
+#include <c10/util/copysign.h>
 #include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/TypeCast.h>
@@ -43,12 +44,13 @@ namespace at {
 namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
-// at::Half should be treated as floating point
+// at::Half and at::BFloat16 should be treated as floating point
 template <typename T>
 struct is_floating_point:
     std::integral_constant<bool,
       std::is_floating_point<T>::value ||
-      std::is_same<T, at::Half>::value> {
+      std::is_same<T, at::Half>::value ||
+      std::is_same<T, at::BFloat16>::value> {
 };
 
 template<size_t n> struct int_of_size;
@@ -75,6 +77,7 @@ private:
   __at_align32__ T values[32 / sizeof(T)];
 public:
   using value_type = T;
+  using size_type = int;
   // Note [constexpr static function to avoid odr-usage compiler bug]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Why, you might ask, is size defined to be a static constexpr function,
@@ -107,7 +110,7 @@ public:
   // versions GCC/Clang have buggy determinations on whether or not an
   // identifier is odr-used or not, and in any case it's hard to tell if
   // a variable is odr-used or not.  So best to just cut the problem at the root.
-  static constexpr int size() {
+  static constexpr size_type size() {
     return 32 / sizeof(T);
   }
   Vec256() : values{0} {}
@@ -198,6 +201,17 @@ public:
       }
     }
     return mask;
+  }
+  Vec256<T> isnan() const {
+    Vec256<T> vec;
+    for (int64_t i = 0; i != size(); i++) {
+      if (_isnan(values[i])) {
+        std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));
+      } else {
+        std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));
+      }
+    }
+    return vec;
   }
   Vec256<T> map(T (*f)(T)) const {
     Vec256<T> ret;
@@ -313,6 +327,16 @@ public:
     Vec256<T> ret;
     for (int64_t i = 0; i < size(); i++) {
       ret[i] = std::atan2(values[i], exp[i]);
+    }
+    return ret;
+  }
+  template <
+    typename U = T,
+    typename std::enable_if_t<is_floating_point<U>::value, int> = 0>
+  Vec256<T> copysign(const Vec256<T> &sign) const {
+    Vec256<T> ret;
+    for (size_type i = 0; i < size(); i++) {
+      ret[i] = c10::copysign(values[i], sign[i]);
     }
     return ret;
   }
@@ -578,15 +602,6 @@ Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
-template <typename T>
-inline T maximum(const T& a, const T& b) {
-  T c = (a > b) ? a : b;
-  if (_isnan(a)) {
-    c = a;
-  }
-  return c;
-}
-
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <class T,
@@ -617,15 +632,6 @@ Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
       // ternary operator above.
       c[i] = a[i];
     }
-  }
-  return c;
-}
-
-template <typename T>
-inline T minimum(const T& a, const T& b) {
-  T c = (a < b) ? a : b;
-  if (_isnan(a)) {
-    c = a;
   }
   return c;
 }
