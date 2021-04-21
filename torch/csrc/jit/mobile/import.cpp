@@ -3,6 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -57,8 +58,9 @@
 // source_range_tag maps to .debug_pkl files where this tag maps it to
 // source range.
 // InlinedCallStack is serialized as:
-// IValue(InlinedCallStack) = {IValue(ModuleInstanceInfo), int64_t(source_range_tag), IValue(InlinedCallStack)}
-// ModuleInstanceInfo is serialized as a tuple of (class_type_name, instance_name)
+// IValue(InlinedCallStack) = {IValue(ModuleInstanceInfo),
+// int64_t(source_range_tag), IValue(InlinedCallStack)} ModuleInstanceInfo is
+// serialized as a tuple of (class_type_name, instance_name)
 
 // Note that currently the backward compatibility is not supported by bytecode.
 // This format and process need to be revisited and redesigned if we want to
@@ -706,5 +708,26 @@ void _load_extra_only_for_mobile(
   deserializer.deserialize_only_extra(device, extra_files);
 }
 
+namespace mobile {
+
+std::set<std::string> _export_operator_list(
+    torch::jit::mobile::Module& module) {
+  std::set<std::string> operator_list;
+  for (Method func : module.get_methods()) {
+    const Function& function = func.function();
+    const std::shared_ptr<Code> cptr = function.get_code();
+    // op_names below isn't a list of unique operator names. In fact
+    // it can contain the same operator name many many times, so we need
+    // to de-dup the list by adding all the operator names into
+    // an std::set<std::string>.
+    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    for (auto& op_name : op_names) {
+      operator_list.insert(toString(op_name));
+    }
+  }
+  return operator_list;
+}
+
+} // namespace mobile
 } // namespace jit
 } // namespace torch

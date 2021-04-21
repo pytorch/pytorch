@@ -95,8 +95,7 @@ void slot_named_params_recurse(
 
 std::string getTopeModuleTypeName(const Module& m) {
   std::string name;
-  if (m._ivalue()->type() &&
-      m._ivalue()->type()->name()) {
+  if (m._ivalue()->type() && m._ivalue()->type()->name()) {
     name = m._ivalue()->type()->name().value().name();
   }
   return name;
