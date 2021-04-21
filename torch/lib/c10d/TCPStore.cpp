@@ -111,9 +111,9 @@ TCPStoreWorkerDaemon::TCPStoreWorkerDaemon(int listenSocket)
 
 void TCPStoreWorkerDaemon::addCallback(
     std::string key,
-    StoreCallbackFunction callback) {
-  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex);
-  keyToCallbacks[key] = callback;
+    WatchKeyCallback callback) {
+  const std::lock_guard<std::mutex> lock(_keyToCallbacksMutex);
+  _keyToCallbacks[key] = callback;
 }
 
 // Runs all the callbacks that the worker has registered
@@ -122,7 +122,7 @@ void TCPStoreWorkerDaemon::callbackHandler(int socket) {
   if (watchResponse == WatchResponseType::KEY_CALLBACK_REGISTERED) {
     // Notify the waiting "watchKey" operation to return
     setCallbackRegisteredData(true);
-    callbackRegistered.notify_one();
+    getCallbackRegisteredCondVar().notify_one();
     return;
   }
   std::string key = tcputil::recvString(socket);
@@ -142,8 +142,8 @@ void TCPStoreWorkerDaemon::callbackHandler(int socket) {
   } else {
     newValue = std::string(newValueVec.begin(), newValueVec.end());
   }
-  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex);
-  keyToCallbacks.at(key)(currentValue, newValue);
+  const std::lock_guard<std::mutex> lock(_keyToCallbacksMutex);
+  _keyToCallbacks.at(key)(currentValue, newValue);
 }
 
 #ifdef _WIN32
@@ -726,9 +726,7 @@ bool TCPStore::deleteKey(const std::string& key) {
   return (numDeleted == 1);
 }
 
-void TCPStore::watchKey(
-    const std::string& key,
-    StoreCallbackFunction callback) {
+void TCPStore::watchKey(const std::string& key, WatchKeyCallback callback) {
   // Only allow one thread to perform watchKey() at a time
   const std::lock_guard<std::mutex> watchKeyLock(watchKeyMutex);
 
@@ -742,7 +740,7 @@ void TCPStore::watchKey(
   // Block until callback has been registered successfully
   std::unique_lock<std::mutex> callbackRegistrationLock(
       callbackRegistrationMutex);
-  tcpStoreWorkerDaemon_->getCallbackRegistered().wait(
+  tcpStoreWorkerDaemon_->getCallbackRegisteredCondVar().wait(
       callbackRegistrationLock,
       [&] { return tcpStoreWorkerDaemon_->getCallbackRegisteredData(); });
 

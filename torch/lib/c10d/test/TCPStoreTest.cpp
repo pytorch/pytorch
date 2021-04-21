@@ -158,7 +158,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   std::atomic<int> numCallbacksExecuted{0};
   const int numThreads = 16;
   const int keyChangeOperation = 3;
-  c10d::StoreCallbackFunction callback =
+  c10d::WatchKeyCallback callback =
       [&numCallbacksExecuted,
        &numCallbacksExecutedPromise,
        &numThreads,
@@ -166,7 +166,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
           c10::optional<std::string> /* unused */,
           c10::optional<std::string> /* unused */) {
         numCallbacksExecuted++;
-        if (numCallbacksExecuted == numThreads * keyChangeOperation) {
+        if (numCallbacksExecuted == numThreads * keyChangeOperation * 2) {
           numCallbacksExecutedPromise.set_value(numCallbacksExecuted);
         }
       };
@@ -175,14 +175,6 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   auto serverTCPStore = _createServer(numWorkers);
   auto serverStore =
       c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
-
-  // Start watching key
-  std::string internalKey = "internalKey";
-  for (auto i = 0; i < numThreads; i++) {
-    serverStore->watchKey(internalKey + std::to_string(i), callback);
-    serverStore->watchKey(
-        internalKey + "counter" + std::to_string(i), callback);
-  }
 
   // Each thread will have a client store to send/recv data
   std::vector<c10::intrusive_ptr<c10d::TCPStore>> clientTCPStores;
@@ -194,23 +186,34 @@ void testWatchKeyCallback(const std::string& prefix = "") {
         c10::make_intrusive<c10d::PrefixStore>(prefix, clientTCPStores[i]));
   }
 
+  // Start watching key on server and client stores
+  std::string internalKey = "internalKey";
+  std::string internalKeyCount = "internalKeyCount";
+  for (auto i = 0; i < numThreads; i++) {
+    serverStore->watchKey(internalKey + std::to_string(i), callback);
+    serverStore->watchKey(internalKeyCount + std::to_string(i), callback);
+    clientStores[i]->watchKey(internalKey + std::to_string(i), callback);
+    clientStores[i]->watchKey(internalKeyCount + std::to_string(i), callback);
+  }
+
   std::vector<std::thread> threads;
   std::atomic<int> keyChangeOperationCount{0};
   for (auto i = 0; i < numThreads; i++) {
     threads.emplace_back(std::thread([&clientStores,
                                       &internalKey,
+                                      &internalKeyCount,
                                       &keyChangeOperationCount,
                                       &keyChangeOperation,
                                       i] {
       // Let each thread set and get key on its client store
       std::string key = internalKey + std::to_string(i);
-      std::string keyCounter = internalKey + "counter" + std::to_string(i);
+      std::string keyCounter = internalKeyCount + std::to_string(i);
       std::string val = "thread_val_" + std::to_string(i);
       // The set, compareSet, add methods count as key change operations
       c10d::test::set(*clientStores[i], key, val);
       c10d::test::compareSet(*clientStores[i], key, val, "newValue");
       clientStores[i]->add(keyCounter, i);
-      keyChangeOperationCount += keyChangeOperation;
+      keyChangeOperationCount += keyChangeOperation * 2;
       c10d::test::check(*clientStores[i], key, "newValue");
       c10d::test::check(*clientStores[i], keyCounter, std::to_string(i));
     }));
@@ -258,28 +261,26 @@ void testKeyChangeHelper(
   std::promise<bool> callbackPromise;
 
   // Test the correctness of new_value and old_value
-  c10d::StoreCallbackFunction callback =
-      [expectedOldValue, expectedNewValue, &callbackPromise, &eptr, &key](
-          c10::optional<std::string> oldValue,
-          c10::optional<std::string> newValue) {
-        try {
-          EXPECT_EQ(
-              expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
-          EXPECT_EQ(
-              expectedNewValue.value_or("NONE"), newValue.value_or("NONE"));
-        } catch (...) {
-          eptr = std::current_exception();
-        }
-        callbackPromise.set_value(true);
-      };
+  c10d::WatchKeyCallback callback = [expectedOldValue,
+                                     expectedNewValue,
+                                     &callbackPromise,
+                                     &eptr,
+                                     &key](
+                                        c10::optional<std::string> oldValue,
+                                        c10::optional<std::string> newValue) {
+    try {
+      EXPECT_EQ(expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
+      EXPECT_EQ(expectedNewValue.value_or("NONE"), newValue.value_or("NONE"));
+    } catch (...) {
+      eptr = std::current_exception();
+    }
+    callbackPromise.set_value(true);
+  };
   store.watchKey(key, callback);
 
   // Perform the specified update according to key
-  if (key == "testEmptyKeyValue") {
-    c10d::test::set(store, key, expectedNewValue.value());
-  } else if (key == "testRegularKeyValue") {
-    c10d::test::set(store, key, expectedNewValue.value());
-  } else if (key == "testWatchKeyCreate") {
+  if (key == "testEmptyKeyValue" || key == "testRegularKeyValue" ||
+      key == "testWatchKeyCreate") {
     c10d::test::set(store, key, expectedNewValue.value());
   } else if (key == "testWatchKeyAdd") {
     store.add(key, std::stoi(expectedNewValue.value()));

@@ -101,24 +101,24 @@ class TCPStoreWorkerDaemon : public BackgroundThread {
       std::string key,
       std::function<
           void(c10::optional<std::string>, c10::optional<std::string>)> cb);
-  std::condition_variable& getCallbackRegistered() {
-    return callbackRegistered;
+  std::condition_variable& getCallbackRegisteredCondVar() {
+    return _callbackRegisteredCondVar;
   }
   bool getCallbackRegisteredData() const {
-    return callbackRegisteredData;
+    return _callbackRegisteredData;
   }
   void setCallbackRegisteredData(bool condition) {
-    callbackRegisteredData = condition;
+    _callbackRegisteredData = condition;
   }
 
  private:
   void run();
   void callbackHandler(int socket);
   // List of callbacks map each watched key
-  std::unordered_map<std::string, StoreCallbackFunction> keyToCallbacks;
-  std::mutex keyToCallbacksMutex;
-  std::condition_variable callbackRegistered;
-  bool callbackRegisteredData = false;
+  std::unordered_map<std::string, WatchKeyCallback> _keyToCallbacks;
+  std::mutex _keyToCallbacksMutex;
+  std::condition_variable _callbackRegisteredCondVar;
+  bool _callbackRegisteredData = false;
 };
 
 class TCPStore : public Store {
@@ -147,8 +147,7 @@ class TCPStore : public Store {
   bool deleteKey(const std::string& key) override;
 
   // NOTE: calling other TCPStore APIs inside the callback is NOT threadsafe
-  void watchKey(const std::string& key, StoreCallbackFunction callback)
-      override;
+  void watchKey(const std::string& key, WatchKeyCallback callback) override;
 
   bool check(const std::vector<std::string>& keys) override;
 
