@@ -1,4 +1,4 @@
-#!/bin/python3
+#!/usr/bin/env python3
 
 import subprocess
 import os
@@ -64,15 +64,13 @@ def find_changed_files(merge_base: str = "origin/master") -> List[str]:
     return [x.strip() for x in all_files if x.strip() != ""]
 
 
-CHANGED_FILES: Optional[List[str]] = None
-
-async def run_step(step: Dict[str, Any], job_name: str) -> bool:
+async def run_step(step: Dict[str, Any], job_name: str, files: Optional[List[str]]) -> bool:
     env = os.environ.copy()
     env["GITHUB_WORKSPACE"] = "/tmp"
-    if CHANGED_FILES is None:
+    if files is None:
         env["LOCAL_FILES"] = ""
     else:
-        env["LOCAL_FILES"] = " ".join(CHANGED_FILES)
+        env["LOCAL_FILES"] = " ".join(files)
     script = step["run"]
 
     PASS = "\U00002705"
@@ -83,8 +81,8 @@ async def run_step(step: Dict[str, Any], job_name: str) -> bool:
     script = script.replace("set -eux", "set -eu")
     name = f'{job_name}: {step["name"]}'
 
-    def header(proc: asyncio.subprocess.Process) -> None:
-        icon = PASS if proc.returncode == 0 else FAIL
+    def header(passed: bool) -> None:
+        icon = PASS if passed else FAIL
         cprint(col.BLUE, f"{icon} {name}")
 
     try:
@@ -99,10 +97,11 @@ async def run_step(step: Dict[str, Any], job_name: str) -> bool:
 
         stdout_bytes, stderr_bytes = await proc.communicate()
 
-        header(proc)
+        header(passed=proc.returncode == 0)
     except Exception as e:
-        header(proc)
+        header(passed=False)
         print(e)
+        return False
 
     stdout = stdout_bytes.decode().strip()
     stderr = stderr_bytes.decode().strip()
@@ -115,8 +114,8 @@ async def run_step(step: Dict[str, Any], job_name: str) -> bool:
     return proc.returncode == 0
 
 
-async def run_steps(steps: List[Dict[str, Any]], job_name: str) -> None:
-    coros = [run_step(step, job_name) for step in steps]
+async def run_steps(steps: List[Dict[str, Any]], job_name: str, files: Optional[List[str]]) -> None:
+    coros = [run_step(step, job_name, files) for step in steps]
     await asyncio.gather(*coros)
 
 
@@ -161,13 +160,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    changed_files = None
     if args.changed_only:
-        global CHANGED_FILES
-        CHANGED_FILES = []
+        changed_files = []
         for f in find_changed_files():
             for file_filter in args.file_filter:
                 if f.endswith(file_filter):
-                    CHANGED_FILES.append(f)
+                    changed_files.append(f)
                     break
 
     if args.step is None and args.all_steps_after is None:
@@ -191,7 +190,7 @@ def main() -> None:
     else:
         relevant_steps = grab_all_steps_after(args.all_steps_after, job)
 
-    asyncio.run(run_steps(relevant_steps, args.job))  # type: ignore [attr-defined]
+    asyncio.run(run_steps(relevant_steps, args.job, changed_files))  # type: ignore [attr-defined]
 
 
 if __name__ == "__main__":

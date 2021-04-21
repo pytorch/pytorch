@@ -142,7 +142,7 @@ jobs:
             markdown-toc --bullets='-' -i "$FILE"
           done
 
-          bash .github/scripts/report_git_status.sh
+          .github/scripts/report_git_status.sh
 
   flake8-py3:
     runs-on: ubuntu-18.04
@@ -176,7 +176,7 @@ jobs:
         run: |
           set -eux
           # shellcheck disable=SC2086
-          flake8 $LOCAL_FILES  # | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
+          flake8 $LOCAL_FILES | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
       - name: Translate annotations
         if: github.event_name == 'pull_request'
         env:
