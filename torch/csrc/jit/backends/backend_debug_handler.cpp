@@ -10,9 +10,10 @@ thread_local BackendDebugHandleManager* debug_handle_manager_ptr{nullptr};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<DebugHandleType> BackendDebugHandleManager::unique_debug_handle_{0};
 
-DebugHandleType BackendDebugHandleManager::getNextDebugHandleForInlinedCallStackPtr(
-    const SourceRange& range,
-    const InlinedCallStackPtr& cs_ptr) {
+DebugHandleType BackendDebugHandleManager::
+    getNextDebugHandleForInlinedCallStackPtr(
+        const SourceRange& range,
+        const InlinedCallStackPtr& cs_ptr) {
   DebugHandleType debug_handle = unique_debug_handle_;
   handles_to_inlined_callstack_ptrs_[debug_handle] =
       std::make_pair(range, cs_ptr);
@@ -22,8 +23,8 @@ DebugHandleType BackendDebugHandleManager::getNextDebugHandleForInlinedCallStack
   return debug_handle;
 }
 
-std::unordered_map<DebugHandleType, DelegateDebugInfoType> BackendDebugHandleManager::
-    getCallStackPtrMap() {
+std::unordered_map<DebugHandleType, DelegateDebugInfoType>
+BackendDebugHandleManager::getCallStackPtrMap() {
   // Note that this is return by copy and since
   // InlinedCallStackPtrs are intrusive ptr it will result in
   // bump of refcount. Not performant, but this is not intented
@@ -32,11 +33,19 @@ std::unordered_map<DebugHandleType, DelegateDebugInfoType> BackendDebugHandleMan
   return handles_to_inlined_callstack_ptrs_;
 }
 
-BackendModuleDebugInfoRecorder::BackendModuleDebugInfoRecorder(ObjectPtr module_ptr) {
-  TORCH_CHECK(debug_handle_manager_ptr == nullptr,
+BackendModuleDebugInfoRecorder::BackendModuleDebugInfoRecorder(
+    ObjectPtr module_ptr) {
+  TORCH_CHECK(
+      debug_handle_manager_ptr == nullptr,
       "Module debug recording alredy in progress.");
   debug_handle_manager_ptr = &debug_handle_manager;
   module_ptr_ = module_ptr;
+}
+
+BackendModuleDebugInfoRecorder::~BackendModuleDebugInfoRecorder() {
+  // If due to some exception within preprocess, such as compilation failure
+  // we throw, then we want to make sure the exit is clean
+  debug_handle_manager_ptr = nullptr;
 }
 
 void BackendModuleDebugInfoRecorder::stopRecording() {
@@ -54,9 +63,12 @@ BackendModuleDebugInfoMap* getStaticBackendModuleDebugInfoMapPtr() {
   return &module_debug_info_map;
 }
 
-void BackendModuleDebugInfoMap::addDebugInfoMap(const ObjectPtr& ptr, DelegateDebugInfoMapType&& debug_map) {
+void BackendModuleDebugInfoMap::addDebugInfoMap(
+    const ObjectPtr& ptr,
+    DelegateDebugInfoMapType&& debug_map) {
   std::unique_lock<std::mutex> lock(debug_info_mutex_);
-  TORCH_CHECK(debug_info_map_.count(ptr) == 0,
+  TORCH_CHECK(
+      debug_info_map_.count(ptr) == 0,
       "Debug info map already exists for the said module.");
   debug_info_map_.emplace(ptr, std::move(debug_map));
 }
@@ -70,7 +82,8 @@ void BackendModuleDebugInfoMap::removeDebugInfoMap(const ObjectPtr& ptr) {
   debug_info_map_.erase(it);
 }
 
-c10::optional<DelegateDebugInfoMapType> BackendModuleDebugInfoMap::getDebugInfoMap(const ObjectPtr& ptr) {
+c10::optional<DelegateDebugInfoMapType> BackendModuleDebugInfoMap::
+    getDebugInfoMap(const ObjectPtr& ptr) {
   std::unique_lock<std::mutex> lock(debug_info_mutex_);
   const auto& it = debug_info_map_.find(ptr);
   if (it == debug_info_map_.end()) {

@@ -26,11 +26,20 @@ class MobileDebugTable {
   std::string getSourceDebugString(
       const int64_t debug_handle,
       const std::string& top_module_type_name = "ModuleTypeUnknown") const;
+  std::string getSourceDebugString(
+      const std::vector<int64_t>& debug_handles,
+      const std::string& top_module_type_name = "ModuleTypeUnknown") const;
   std::string getModuleHierarchyInfo(
       const int64_t debug_handle,
       const std::string& top_module_type_name = "ModuleTypeUnknown") const;
+  std::string getModuleHierarchyInfo(
+      const std::vector<int64_t>& debug_handles,
+      const std::string& top_module_type_name = "ModuleTypeUnknown") const;
 
  private:
+  std::pair<std::string, std::string> getSourceDebugModuleHierarchyInfo(
+      const std::vector<int64_t>& debug_handles,
+      const std::string& top_module_type_name = "ModuleTypeUnknown") const;
   ska::flat_hash_map<int64_t, DelegateDebugInfoType> callstack_ptr_map_;
 };
 

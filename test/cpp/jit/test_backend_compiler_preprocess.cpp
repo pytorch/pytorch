@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/backends/generate_debug_handles.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
 namespace torch {
@@ -22,6 +23,11 @@ c10::IValue preprocess(
     auto graph = method.function().graph()->copy();
     // Must inline the graph for debug info map.
     Inline(*graph);
+    // This is here because to test module hierarchy we will have
+    // getattr nodes which after inlining dont serve any purpose.
+    // Without removing them we will run into compilation errors.
+    // So eliminate deadcode just remove those getattr nodes.
+    EliminateDeadCode(graph);
     auto key = method.name();
     auto node_debug_handles = generate_debug_handles(graph);
     std::stringstream ss;

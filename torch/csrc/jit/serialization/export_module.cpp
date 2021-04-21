@@ -142,16 +142,14 @@ std::pair<IValue, IValue> getFunctionTuple(
       auto node = code.instructions_source()[i];
       if (node->callstack().has_value()) {
         debug_handle =
-            debug_handle_manager_ptr
-                ->getNextDebugHandleForInlinedCallStackPtr(
-                    node->sourceRange(), node->callstack().value());
+            debug_handle_manager_ptr->getNextDebugHandleForInlinedCallStackPtr(
+                node->sourceRange(), node->callstack().value());
       } else {
         // If node has no callstack, it is the top level node.
         // In that case just save source range.
-        debug_handle = debug_handle_manager_ptr
-                           ->getNextDebugHandleForInlinedCallStackPtr(
-                               node->sourceRange(),
-                               c10::intrusive_ptr<InlinedCallStack>());
+        debug_handle =
+            debug_handle_manager_ptr->getNextDebugHandleForInlinedCallStackPtr(
+                node->sourceRange(), c10::intrusive_ptr<InlinedCallStack>());
       }
     }
     // Note 1-to-1 correspondence between instructions and debug handles
@@ -297,6 +295,62 @@ void setstateTuple(
           debug_info_elements,
           debug_handle_manager);
     }
+  }
+}
+
+// Check if the global static map of backend debug info
+// constaind debug info for this module and any of its children.
+// If so combine all the maps together and return one.
+DelegateDebugInfoMapType getBackendDebugInfoMap(const Module& m) {
+  DelegateDebugInfoMapType debug_map;
+  const auto& map =
+      getStaticBackendModuleDebugInfoMapPtr()->getDebugInfoMap(m._ivalue());
+  if (map) {
+    debug_map.insert(map.value().begin(), map.value().end());
+  }
+  for (const auto& c : m.children()) {
+    const auto& child_debug_map = getBackendDebugInfoMap(c);
+    debug_map.insert(child_debug_map.begin(), child_debug_map.end());
+  }
+  return debug_map;
+}
+
+SourceRangeRecords getBackendSourceRanges(const Module& m) {
+  constexpr size_t kSourceRange = 1;
+  SourceRangeRecords sr_records;
+  const auto& map =
+      getStaticBackendModuleDebugInfoMapPtr()->getDebugInfoMap(m._ivalue());
+  if (map) {
+    const auto& map_val = map.value();
+    // This map is map of debug handle-to-delegateDebugInfoType
+    // DelegateDebugInfoType = <source range, inlined_cs_ptr>
+    for (const auto& it : map_val) {
+      sr_records.emplace_back(
+          std::numeric_limits<size_t>::max(), it.second.first);
+      auto cs_ptr = it.second.second;
+      if (cs_ptr) {
+        for (const auto& e : cs_ptr->vec()) {
+          const auto sr = std::get<kSourceRange>(e);
+          sr_records.emplace_back(std::numeric_limits<size_t>::max(), sr);
+        }
+      }
+    }
+  }
+  for (const auto& c : m.children()) {
+    const auto& child_sr_records = getBackendSourceRanges(c);
+    sr_records.reserve(sr_records.size() + child_sr_records.size());
+    std::move(
+        child_sr_records.begin(),
+        child_sr_records.end(),
+        std::back_inserter(sr_records));
+  }
+  return sr_records;
+}
+
+void cleanupBackendModuleDebugInfoMap(const Module& m) {
+  getStaticBackendModuleDebugInfoMapPtr()->removeDebugInfoMap(m._ivalue());
+  for (const auto& c : m.children()) {
+    getStaticBackendModuleDebugInfoMapPtr()->removeDebugInfoMap(c._ivalue());
   }
 }
 } // namespace
@@ -534,21 +588,47 @@ class ScriptModuleSerializer {
     // TODO: Build utility to strip off debug map. It should also do the
     // same for debug_pkl files
     if (save_mobile_debug_info) {
+      static constexpr size_t kMinToCompress = 200;
+      // For delegated backends get source ranges that are in the debug info
+      // map. Since delegated backend replace original module with lowered
+      // module we will not serialize original module's code which is what would
+      // have contained source range. Since we dont have that anymore, extract
+      // source ranges out of delegated module and store in a separate archive.
+      // Note that we must do this first because in order to serialize inlined
+      // CS appropriate source_range_tags must have been generated.
+      auto backend_source_range_records = getBackendSourceRanges(module);
+      SourceRangePickler source_range_pickler;
+      updateSourceRangeTags(backend_source_range_records);
+      auto range_data = source_range_pickler.pickle(
+          backend_source_range_records, source_range_tags_);
+      std::string debugFilename = "delegated_backends.debug_pkl";
+      writer_.writeRecord(
+          debugFilename,
+          range_data.data(),
+          range_data.size(),
+          range_data.size() > kMinToCompress /*compress*/);
+
+      // For delegated backends get debug_info_map
+      // This is merged with other debug_info_map of other modules
+      // which were not delegated.
+      auto backend_debug_info_map = getBackendDebugInfoMap(module);
       // Now get the debug-handles-to-inlined-cs-ptr-map
       // And serialize that in a separate archive
       auto debug_handle_cs_ptr_map = debug_handle_manager->getCallStackPtrMap();
+      debug_handle_cs_ptr_map.insert(
+          backend_debug_info_map.begin(), backend_debug_info_map.end());
       InlinedCallStackPickler inlined_cs_pickler;
       auto cs_data = inlined_cs_pickler.pickle(
           debug_handle_cs_ptr_map, source_range_tags_);
       // Write out the debug-handle-to-InlinedCallStackPtr map
       std::string filename = "callstack_debug_map.pkl";
-      static constexpr size_t kMinToCompress = 200;
       writer_.writeRecord(
           filename,
           cs_data.data(),
           cs_data.size(),
           cs_data.size() > kMinToCompress /*compress*/);
     }
+    cleanupBackendModuleDebugInfoMap(module);
   }
 
   void convertNamedType(const c10::NamedTypePtr& class_type) {
@@ -688,26 +768,5 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   return std::vector<std::string>(names.begin(), names.end());
 }
 
-namespace mobile {
-
-std::set<std::string> _export_operator_list(
-    torch::jit::mobile::Module& module) {
-  std::set<std::string> operator_list;
-  for (Method func : module.get_methods()) {
-    const Function& function = func.function();
-    const std::shared_ptr<Code> cptr = function.get_code();
-    // op_names below isn't a list of unique operator names. In fact
-    // it can contain the same operator name many many times, so we need
-    // to de-dup the list by adding all the operator names into
-    // an std::set<std::string>.
-    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
-    for (auto& op_name : op_names) {
-      operator_list.insert(toString(op_name));
-    }
-  }
-  return operator_list;
-}
-
-} // namespace mobile
 } // namespace jit
 } // namespace torch

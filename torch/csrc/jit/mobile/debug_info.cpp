@@ -20,26 +20,19 @@ namespace {
 // A -> TopM, B->MyModule, C->SomeModule, then module hierarchy
 // will be TopM(A).MyModule(B).SomeModule(C).Conv2d(conv)
 // Source level stack information will be from model source code.
-std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
-    const DelegateDebugInfoType& sr_callstack,
-    const std::string& root_scope_string,
-    const std::string& top_module_type_name) {
+std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy(
+    const DelegateDebugInfoType& sr_callstack) {
   constexpr size_t kSourceRange = 1;
   constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
 
   const SourceRange& range = sr_callstack.first;
   InlinedCallStackPtr callstack_ptr = sr_callstack.second;
-  std::string module_info =
-      root_scope_string + "(" + top_module_type_name + ")";
+  std::string module_info;
   if (!callstack_ptr) {
     // If not cs then top level node
     entries.emplace_back(StackEntry{"FunctionName_UNKNOWN", range});
-    std::ostringstream ss;
-    format_stack_trace(ss, entries);
-    std::string stack_trace = "Module hierarchy:" + module_info + "\n";
-    stack_trace += ss.str();
-    return {std::move(stack_trace), std::move(module_info)};
+    return {std::move(entries), std::move(module_info)};
   } else {
     for (const auto& element : callstack_ptr->vec()) {
       const auto& opt_module_instance_info =
@@ -56,7 +49,10 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
               .append("(")
               .append(type_name)
               .append(")");
+        } else if (!module_instance_info.instance_name().empty()) {
+          module_info += "." + module_instance_info.instance_name();
         } else {
+          const auto& instance_name = module_instance_info.instance_name();
           module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
         }
       } else {
@@ -69,12 +65,28 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
           StackEntry{"FunctionName_UNKNOWN", std::get<kSourceRange>(element)});
     }
     entries.emplace_back(StackEntry{"FunctionName_UNKNOWN", range});
-    std::ostringstream ss;
-    format_stack_trace(ss, entries);
-    std::string stack_trace = "Module hierarchy:" + module_info + "\n";
-    stack_trace += ss.str();
-    return {std::move(stack_trace), std::move(module_info)};
+    return {std::move(entries), std::move(module_info)};
   }
+}
+
+std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
+    const std::vector<DelegateDebugInfoType>& sr_callstacks,
+    const std::string& root_scope_string,
+    const std::string& top_module_type_name) {
+  std::string stack_trace;
+  std::vector<StackEntry> stack_entries;
+  std::string module_info =
+      root_scope_string + "(" + top_module_type_name + ")";
+  for (const auto& debug_info : sr_callstacks) {
+    auto debug_info_pair = getStackTraceWithModuleHierarchy(debug_info);
+    auto entries = std::move(debug_info_pair.first);
+    stack_entries.insert(stack_entries.end(), entries.begin(), entries.end());
+    module_info += debug_info_pair.second;
+  }
+  std::ostringstream ss;
+  format_stack_trace(ss, stack_entries);
+  stack_trace = "Module hierarchy:" + module_info + "\n" + ss.str();
+  return {std::move(stack_trace), std::move(module_info)};
 }
 
 } // namespace
@@ -121,6 +133,7 @@ MobileDebugTable::MobileDebugTable(
     callstack_ptr_map_ = unpickler.unpickle(
         std::move(callstack_data), callstack_data_size, source_range_map, cu);
   }
+  auto cs = callstack_ptr_map_[2];
 }
 
 std::string MobileDebugTable::getModuleHierarchyInfo(
@@ -128,10 +141,18 @@ std::string MobileDebugTable::getModuleHierarchyInfo(
     const std::string& top_module_type_name) const {
   const auto it = callstack_ptr_map_.find(debug_handle);
   if (it == callstack_ptr_map_.end()) {
-    return "debug_handle:" + std::to_string(debug_handle);
+    return "Module info for handle, " + std::to_string(debug_handle) +
+        ", not found.";
   }
   return (getStackTraceWithModuleHierarchy(
-              it->second, "top", top_module_type_name))
+              {it->second}, "top", top_module_type_name))
+      .second;
+}
+
+std::string MobileDebugTable::getModuleHierarchyInfo(
+    const std::vector<int64_t>& debug_handles,
+    const std::string& top_module_type_name) const {
+  return getSourceDebugModuleHierarchyInfo(debug_handles, top_module_type_name)
       .second;
 }
 
@@ -140,11 +161,48 @@ std::string MobileDebugTable::getSourceDebugString(
     const std::string& top_module_type_name) const {
   const auto it = callstack_ptr_map_.find(debug_handle);
   if (it == callstack_ptr_map_.end()) {
-    return "debug_handle:" + std::to_string(debug_handle);
+    return "Debug info for handle, " + std::to_string(debug_handle) +
+        ", not found.";
   }
   return (getStackTraceWithModuleHierarchy(
-              it->second, "top", top_module_type_name))
+              {it->second}, "top", top_module_type_name))
       .first;
+}
+
+std::string MobileDebugTable::getSourceDebugString(
+    const std::vector<int64_t>& debug_handles,
+    const std::string& top_module_type_name) const {
+  return getSourceDebugModuleHierarchyInfo(debug_handles, top_module_type_name)
+      .first;
+}
+
+std::pair<std::string, std::string> MobileDebugTable::
+    getSourceDebugModuleHierarchyInfo(
+        const std::vector<int64_t>& debug_handles,
+        const std::string& top_module_type_name) const {
+  std::vector<DelegateDebugInfoType> debug_infos;
+  bool debug_handle_not_found{false};
+  for (auto it = debug_handles.rbegin(); it != debug_handles.rend(); ++it) {
+    auto debug_handle = *it;
+    const auto cs_it = callstack_ptr_map_.find(debug_handle);
+    if (cs_it == callstack_ptr_map_.end()) {
+      debug_handle_not_found = true;
+      break;
+    }
+    debug_infos.emplace_back(cs_it->second);
+  }
+  if (debug_handle_not_found) {
+    std::string debug_handles_string = "debug_handles:{";
+    for (const auto debug_handle : debug_handles) {
+      debug_handles_string += std::to_string(debug_handle);
+    }
+    debug_handles_string += "}";
+    debug_handles_string =
+        "Debug info for handles, " + debug_handles_string + ", not found.";
+    return {debug_handles_string, debug_handles_string};
+  }
+  return (getStackTraceWithModuleHierarchy(
+      debug_infos, "top", top_module_type_name));
 }
 
 } // namespace jit

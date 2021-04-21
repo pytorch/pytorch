@@ -16,15 +16,17 @@
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
-#include <unordered_set>
 #include <stack>
+#include <unordered_set>
 
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
 
 namespace {
-bool validate_debug_info(const DelegateDebugInfoType& pre_serialize, const DelegateDebugInfoType& post_serialize) {
+bool validate_debug_info(
+    const DelegateDebugInfoType& pre_serialize,
+    const DelegateDebugInfoType& post_serialize) {
   auto sr1 = pre_serialize.first;
   auto sr2 = post_serialize.first;
   if (sr1 != sr2) {
@@ -47,12 +49,12 @@ bool validate_debug_info(const DelegateDebugInfoType& pre_serialize, const Deleg
     auto rhs_module = std::get<2>(vec1[i]);
     auto lhs_module = std::get<2>(vec2[i]);
     if (!((rhs_module.has_value() == lhs_module.has_value()) &&
-        (rhs_module.has_value() &&
-          (rhs_module.value().class_type()->name().value() ==
-           rhs_module.value().class_type()->name().value()) &&
-          (rhs_module.value().instance_name() ==
-           lhs_module.value().instance_name())) &&
-        (rhs_sr == lhs_sr))) {
+          (rhs_module.has_value() &&
+           (rhs_module.value().class_type()->name().value() ==
+            lhs_module.value().class_type()->name().value()) &&
+           (rhs_module.value().instance_name() ==
+            lhs_module.value().instance_name())) &&
+          (rhs_sr == lhs_sr))) {
       return false;
     }
   }
@@ -60,17 +62,18 @@ bool validate_debug_info(const DelegateDebugInfoType& pre_serialize, const Deleg
 }
 
 TEST(InlineCSSerializaitionTest, TwoSubmodules) {
-  Module a("A");
+  std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
+  Module a("A", cu);
   a.define(R"JIT(
     def forward(self, x):
       return x + 1
   )JIT");
-  Module b("B");
+  Module b("B", cu);
   b.define(R"JIT(
     def forward(self, x):
       return x + 2
   )JIT");
-  Module c("C");
+  Module c("C", cu);
   c.register_module("A0", a);
   c.register_module("B0", b);
   c.define(R"JIT(
@@ -99,22 +102,19 @@ TEST(InlineCSSerializaitionTest, TwoSubmodules) {
       source_range_map[source_range_tag] = n->sourceRange();
       source_range_tag++;
       if (n->callstack().has_value()) {
-        debug_handle_manager
-          .getNextDebugHandleForInlinedCallStackPtr(
-              n->sourceRange(), n->callstack().value());
+        debug_handle_manager.getNextDebugHandleForInlinedCallStackPtr(
+            n->sourceRange(), n->callstack().value());
         if (n->callstack().value()) {
-        for (const auto& e : n->callstack().value()->vec()) {
-          auto sr = std::get<1>(e);
-          source_range_tags[sr] = source_range_tag;
-          source_range_map[source_range_tag] = sr;
-          source_range_tag++;
-        }
+          for (const auto& e : n->callstack().value()->vec()) {
+            auto sr = std::get<1>(e);
+            source_range_tags[sr] = source_range_tag;
+            source_range_map[source_range_tag] = sr;
+            source_range_tag++;
+          }
         }
       } else {
-        debug_handle_manager
-          .getNextDebugHandleForInlinedCallStackPtr(
-              n->sourceRange(),
-              c10::intrusive_ptr<InlinedCallStack>());
+        debug_handle_manager.getNextDebugHandleForInlinedCallStackPtr(
+            n->sourceRange(), c10::intrusive_ptr<InlinedCallStack>());
       }
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);
@@ -123,18 +123,18 @@ TEST(InlineCSSerializaitionTest, TwoSubmodules) {
   }
   auto debug_handle_cs_ptr_map = debug_handle_manager.getCallStackPtrMap();
   InlinedCallStackPickler inlined_cs_pickler;
-  auto cs_data = inlined_cs_pickler.pickle(
-      debug_handle_cs_ptr_map, source_range_tags);
+  auto cs_data =
+      inlined_cs_pickler.pickle(debug_handle_cs_ptr_map, source_range_tags);
   at::DataPtr data_ptr(cs_data.data(), DeviceType::CPU);
   InlinedCallStackUnpickler unpickler;
   // We wont really find any types
-  std::shared_ptr<CompilationUnit> cu = c._ivalue()->compilation_unit();
   auto deserialized_cs_map = unpickler.unpickle(
       std::move(data_ptr), cs_data.size(), source_range_map, cu);
   for (const auto& it : debug_handle_cs_ptr_map) {
     auto handle = it.first;
     auto debug_info_one = it.second;
-    TORCH_CHECK(deserialized_cs_map.count(handle),
+    TORCH_CHECK(
+        deserialized_cs_map.count(handle),
         "Serialized debug handle must be in deserialized map.");
     auto debug_info_two = deserialized_cs_map[handle];
     ASSERT_TRUE(validate_debug_info(debug_info_one, debug_info_two));

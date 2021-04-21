@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/backend_exception.h>
 
 namespace torch {
 namespace jit {
@@ -31,7 +32,8 @@ namespace jit {
 // (handle).
 
 namespace {
-std::vector<std::tuple<std::string, int64_t>> parseMethodHandle(const std::string& blob) {
+std::vector<std::tuple<std::string, int64_t>> parseMethodHandle(
+    const std::string& blob) {
   std::vector<std::tuple<std::string, int64_t>> result;
   std::stringstream s_stream(blob);
   constexpr char debug_handle_token[] = "<debug_handle>";
@@ -63,7 +65,8 @@ class BackendWithCompiler : public PyTorchBackendInterface {
       c10::IValue processed,
       c10::impl::GenericDict method_compile_spec) override {
     auto dict = processed.toGenericDict();
-    auto handles = c10::Dict<std::string, std::vector<std::tuple<std::string, int64_t>>>();
+    auto handles =
+        c10::Dict<std::string, std::vector<std::tuple<std::string, int64_t>>>();
     for (const auto& kv : dict) {
       auto tokens = parseMethodHandle(kv.value().toStringRef());
       handles.insert(kv.key().toStringRef(), tokens);
@@ -87,24 +90,28 @@ class BackendWithCompiler : public PyTorchBackendInterface {
       auto instruction = val.toTuple()->elements()[0].toStringRef();
       auto debug_handle = val.toTuple()->elements()[1].toInt();
       double const_val = 1.0;
-      if (instruction.rfind("prim::Constant", 0) == 0) {
-        TORCH_CHECK(
-            instruction.size() > 15,
-            "Constant value is expected in ",
-            instruction);
-        auto sub = instruction.substr(15);
-        const_val = stod(sub);
-      } else if (instruction == "aten::add") {
-        output_list.emplace_back(x.add(h, const_val));
-      } else if (instruction == "aten::sub") {
-        output_list.emplace_back(x.sub(h, const_val));
-      } else {
-        TORCH_CHECK(
-            false,
-            "Instruction, ",
-            instruction,
-            " is not supported. ",
-            "Contact the backend POC for details. ");
+      try {
+        if (instruction.rfind("prim::Constant", 0) == 0) {
+          TORCH_CHECK(
+              instruction.size() > 15,
+              "Constant value is expected in ",
+              instruction);
+          auto sub = instruction.substr(15);
+          const_val = stod(sub);
+        } else if (instruction == "aten::add") {
+          output_list.emplace_back(x.add(h, const_val));
+        } else if (instruction == "aten::sub") {
+          output_list.emplace_back(x.sub(h, const_val));
+        } else {
+          TORCH_CHECK(
+              false,
+              "Instruction, ",
+              instruction,
+              " is not supported. ",
+              "Contact the backend POC for details. ");
+        }
+      } catch (c10::Error& e) {
+        TORCH_DELEGATED_BACKEND_THROW(false, e.what(), debug_handle);
       }
     }
     return c10::impl::toList(output_list);

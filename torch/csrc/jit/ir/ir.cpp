@@ -1104,6 +1104,7 @@ bool Node::hasSideEffects() const {
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
+    case cuda::synchronize:
 #endif
     case prim::Enter:
     case prim::Exit:
@@ -1928,6 +1929,36 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+void inlineCallStackOfBlock(
+    Block* b,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entires,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info) {
+  for (auto n : b->nodes()) {
+    auto new_node_cs = n->callstack();
+
+    InlinedCallStack* raw_callstack_ptr =
+        new_node_cs ? new_node_cs->get() : nullptr;
+
+    if (!new_cs_entires.count(raw_callstack_ptr)) {
+      if (new_node_cs) {
+        new_cs_entires[raw_callstack_ptr] =
+            c10::make_intrusive<InlinedCallStack>(
+                *new_node_cs, callee, to_replace->sourceRange(), m_info);
+      } else {
+        new_cs_entires[raw_callstack_ptr] =
+            c10::make_intrusive<InlinedCallStack>(
+                callee, to_replace->sourceRange(), m_info);
+      }
+    }
+    n->setCallStack(new_cs_entires.at(raw_callstack_ptr));
+    for (auto block : n->blocks()) {
+      inlineCallStackOfBlock(block, new_cs_entires, callee, to_replace, m_info);
+    }
+  }
+}
+
 // inline_optimized_graph argument is used in substitute function call for
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
@@ -2024,6 +2055,17 @@ std::vector<Value*> inlineCallTo(
       }
     }
     new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
+    // We updated the inlined callstack of new_node.
+    // Same must be done for the nodes of the blocks of new_nodes.
+    // For exampl If node's block otherwise is not annotated appropriately.
+    for (auto block : new_node->blocks()) {
+      inlineCallStackOfBlock(
+          block,
+          new_callstack_entries,
+          callee,
+          to_replace,
+          module_instance_info);
+    }
   }
   const auto& old_outputs = to_replace->outputs();
 
