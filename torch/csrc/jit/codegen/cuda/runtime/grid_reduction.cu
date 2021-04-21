@@ -64,9 +64,9 @@ offset(const _dim3pos& pos, const _dim3dim& dim) {
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
 __device__ dim3 dimension_of_reduction_segment(const _dim3& grid_dim) {
   return dim3{
-      X_BLOCK ? (unsigned)grid_dim.x : 1,
-      Y_BLOCK ? (unsigned)grid_dim.y : 1,
-      Z_BLOCK ? (unsigned)grid_dim.z : 1};
+      X_BLOCK ? (unsigned)grid_dim.x : 1U,
+      Y_BLOCK ? (unsigned)grid_dim.y : 1U,
+      Z_BLOCK ? (unsigned)grid_dim.z : 1U};
 }
 
 // Returns the number of blocks in each reduction segment.
