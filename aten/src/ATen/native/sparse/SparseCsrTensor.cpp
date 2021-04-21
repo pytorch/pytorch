@@ -25,7 +25,6 @@ SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
   if (options.device().is_cuda()) {
     dispatch_key = DispatchKey::SparseCsrCUDA;
   } else {
-    TORCH_INTERNAL_ASSERT(options.device().is_cpu());
     dispatch_key = DispatchKey::SparseCsrCPU;
   }
 
