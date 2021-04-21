@@ -435,7 +435,9 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "fuse_loops",
           [](const std::vector<For*>& loops) {
-            return LoopNest::fuseLoops(loops);
+            For* fused_loop;
+            LoopNest::fuseLoops(loops, &fused_loop);
+            return fused_loop;
           },
           py::return_value_policy::reference)
       .def_static(

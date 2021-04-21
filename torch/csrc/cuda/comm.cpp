@@ -15,6 +15,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 namespace torch {
@@ -26,15 +27,18 @@ using namespace torch::autograd;
 // of a single type only. Adding this logic directly in the loop makes it a bit
 // ugly, so here's a helper for it.
 struct unique_type_checker {
-  void show(const at::DeprecatedTypeProperties& t) {
-    if (!unique)
+  void show(size_t type_id) {
+    if (!unique) {
       return;
-    if (!type)
-      type = &t;
-    unique = (type == &t);
+    }
+    if (!type_id_) {
+      type_id_ = type_id;
+    }
+
+    unique = type_id_.value() == type_id;
   }
 
-  const at::DeprecatedTypeProperties* type = nullptr;
+  optional<size_t> type_id_;
   bool unique = true;
 };
 
@@ -173,10 +177,10 @@ tensor_list2d broadcast_coalesced(
   unique_type_checker type_checker;
   at::cuda::CUDAGuard device_guard(devices[0]);
   for (auto& chunk : utils::take_tensors(tensors, buffer_size)) {
-    auto& type = chunk.type();
-    type_checker.show(type);
+    auto type_id = chunk.type_id();
+    type_checker.show(type_id);
     std::vector<at::Tensor> results;
-    if (chunk.type().is_sparse()) {
+    if (chunk.options().is_sparse()) {
       auto flat_tuple = utils::flatten_sparse_tensors(chunk.tensors);
       auto broadcast_indices = broadcast(flat_tuple.first, devices);
       auto broadcast_values = broadcast(flat_tuple.second, devices);

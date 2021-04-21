@@ -4690,9 +4690,10 @@ for shape in [(1,), ()]:
         inp_change_err = "Output {} of UnbindBackward is a view and is being modified inplace."
         run_test(grad_mode=True, requires_grad=True, is_view=True,
                  should_raise_tuple=(None, inp_change_err.format("0"), inp_change_err.format("1")))
-        leaf_grad_err = "A view was created in no_grad mode and is being modified inplace"
+        grad_mode_err = "A view was created in no_grad mode and is being modified inplace"
+        leaf_grad_err = "a leaf Variable that requires grad is being used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,
-                 should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
+                 should_raise_tuple=(leaf_grad_err, grad_mode_err, grad_mode_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
 
@@ -5384,10 +5385,8 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'expand', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'zero_',
-                '__radd__', 'sum', 'mul',
-                '__rmul__', 'dot', 'vdot', 'matmul',
-                'bmm', 'mv', 'ger', 'diagonal', 'fill_', 'sub',
-                'mean', 'inverse', 'linalg.tensorinv', 'matrix_exp',
+                '__radd__', 'mul', '__rmul__', 'matmul',
+                'diagonal', 'fill_', 'sub',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split',
                 'baddbmm'] + complex_list_filter + separate_complex_tests
 

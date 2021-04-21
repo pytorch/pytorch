@@ -807,3 +807,38 @@ bool test_hardtanh_() {
   return true;
 #endif
 }
+
+bool test_mean_dim() {
+    __block std::vector<int64_t> size{1, 5, 2, 2};
+    return TEST(size, __PRETTY_FUNCTION__, ^bool {
+      auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto Y1 = at::mean(X1, {2,3}, true);
+      auto X2 = X1.metal();
+      auto Y2 = at::mean(X2, {2,3}, true).cpu();
+      return almostEqual(Y1, Y2);
+    });
+}
+
+bool test_mean_dim2() {
+    __block std::vector<int64_t> size{1, 5, 2, 2};
+    return TEST(size, __PRETTY_FUNCTION__, ^bool {
+      auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto Y1 = at::mean(X1, {1,3}, false);
+      auto X2 = X1.metal();
+      auto Y2 = at::mean(X2, {1,3}, false).cpu();
+      return almostEqual(Y1, Y2);
+    });
+}
+
+bool test_mean_dim3() {
+    __block std::vector<int64_t> size{1, 5, 2, 2};
+    return TEST(size, __PRETTY_FUNCTION__, ^bool {
+      auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto Y1 = at::mean(X1, {0,1,2,3});
+      PRINT_TENSOR("Y1", Y1);
+      auto X2 = X1.metal();
+      auto Y2 = at::mean(X2, {0,1,2,3}).cpu();
+      PRINT_TENSOR("Y2", Y2);
+      return almostEqual(Y1, Y2);
+    });
+}
