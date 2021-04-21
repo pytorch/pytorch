@@ -23,8 +23,6 @@ c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   }
 }
 
-using ListRefinement = std::unordered_map<Value*, int64_t>;
-
 // see [value refinement algorithm]
 
 struct ListLenRefiner {
@@ -58,7 +56,7 @@ struct ListLenRefiner {
         continue;
       }
 
-      auto first_input = n->inputs().at(0);
+      auto first_input = n->input(0);
       if (first_input->type()->cast<ListType>() &&
           !mutated_lists_.count(first_input)) {
         if (!li_with_len_use.count(first_input)) {
@@ -77,27 +75,27 @@ struct ListLenRefiner {
           n->matches("aten::ne(int a, int b) -> bool")) {
         // check for one input constant and the other coming from len(li)
         for (size_t const_index : {0, 1}) {
-          auto ival = constant_as<int64_t>(n->inputs().at(const_index));
+          auto ival = constant_as<int64_t>(n->input(const_index));
           if (!ival) {
             continue;
           }
-          auto li_len = n->inputs().at(const_index - 1);
+          auto li_len = n->input(const_index - 1);
           if (!li_len->node()->matches("aten::len.t(t[] a) -> int") ||
               !lists_to_refine_.count(li_len->node()->input())) {
             continue;
           }
           ListRefinement refine;
           refine[li_len->node()->input()] = *ival;
-          info_[n->output()] = n->kind() == aten::eq
-              ? BoolRefinements::TrueRefinements(std::move(refine))
-              : BoolRefinements::FalseRefinements(std::move(refine));
+          boolean_value_refinements_[n->output()] = n->kind() == aten::eq
+              ? BooleanRefinementMapping::TrueRefinements(std::move(refine))
+              : BooleanRefinementMapping::FalseRefinements(std::move(refine));
         }
       }
       if (n->kind() == prim::RaiseException) {
         throwing_blocks_.insert(b);
       }
       if (n->kind() == aten::len) {
-        if (auto maybe_len = tryFindRefinement(n->inputs().at(0))) {
+        if (auto maybe_len = tryFindRefinement(n->input(0))) {
           changed_ = true;
           WithInsertPoint guard(n);
           n->output()->replaceAllUsesWith(
@@ -107,22 +105,19 @@ struct ListLenRefiner {
 
       if (n->kind() == prim::If) {
         IfView if_n(n);
-        bool has_cond_ref = info_.count(if_n.cond()) != 0;
+        bool has_cond_ref = boolean_value_refinements_.count(if_n.cond()) != 0;
         ListRefinement empty;
         auto true_block_refinements = RefineListLens(
             if_n.thenBlock(),
-            has_cond_ref ? info_[if_n.cond()].true_refine() : empty);
+            has_cond_ref ? boolean_value_refinements_[if_n.cond()].true_refine()
+                         : empty);
         auto false_block_refinements = RefineListLens(
             if_n.elseBlock(),
-            has_cond_ref ? info_[if_n.cond()].false_refine() : empty);
+            has_cond_ref
+                ? boolean_value_refinements_[if_n.cond()].false_refine()
+                : empty);
 
-        joinIfRefinements(
-            n,
-            throwing_blocks_,
-            block_refinements,
-            true_block_refinements,
-            false_block_refinements,
-            info_);
+        joinIfRefinements(n, throwing_blocks_, block_refinements, true_block_refinements, false_block_refinements, boolean_value_refinements_);
       }
     }
     active_refinements_.pop_back();
@@ -146,7 +141,8 @@ struct ListLenRefiner {
   // A stack of active refinements, one for each block
   std::vector<ListRefinement*> active_refinements_;
   // A map from Boolean Value * -> associated refinements
-  std::unordered_map<Value*, BoolRefinements> info_;
+  std::unordered_map<Value*, BooleanRefinementMapping>
+      boolean_value_refinements_;
   std::unordered_set<Block*> throwing_blocks_;
   bool changed_ = false;
 };
@@ -201,11 +197,11 @@ struct PeepholeOptimizeListIdiomsImpl {
 
       // only optimizing list ops
       if (node->inputs().size() == 0 ||
-          !node->inputs().at(0)->type()->cast<ListType>()) {
+          !node->input(0)->type()->cast<ListType>()) {
         continue;
       }
 
-      auto first_input = node->inputs().at(0);
+      auto first_input = node->input(0);
 
       // only optimizing ops with unmutated lists
       if (mutated_lists_.count(first_input)) {
@@ -222,11 +218,11 @@ struct PeepholeOptimizeListIdiomsImpl {
       } else if (node->kind() == aten::__getitem__) {
         auto list_creation_node = first_input->node();
         if (list_creation_node->kind() == prim::ListConstruct) {
-          if (auto index = toIValue(node->inputs().at(1))) {
+          if (auto index = toIValue(node->input(1))) {
             size_t list_size = list_creation_node->inputs().size();
             if (auto norm_index = normalizeIndex(index->toInt(), list_size)) {
               node->output()->replaceAllUsesWith(
-                  list_creation_node->inputs().at(*norm_index));
+                  list_creation_node->input(*norm_index));
               changed = true;
             }
           }
@@ -239,8 +235,7 @@ struct PeepholeOptimizeListIdiomsImpl {
             continue;
           }
           for (size_t i = 0; i < node->outputs().size(); ++i) {
-            node->output(i)->replaceAllUsesWith(
-                list_creation_node->inputs().at(i));
+            node->output(i)->replaceAllUsesWith(list_creation_node->input(i));
             changed = true;
           }
         }
@@ -248,7 +243,7 @@ struct PeepholeOptimizeListIdiomsImpl {
         if (node->inputs().size() != 2) {
           continue;
         }
-        auto second_input = node->inputs().at(1);
+        auto second_input = node->input(1);
         // already checked first, need to check second
         if (mutated_lists_.count(second_input)) {
           continue;

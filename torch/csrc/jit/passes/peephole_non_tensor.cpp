@@ -120,14 +120,12 @@ struct PeepholeOptimizeNonTensorImpl {
           continue;
         }
         auto inp_kind = node->inputs().at(0)->type()->kind();
-        // only handling common types here because other types like Tensor might
-        // throw on aten::eq even if both inputs are the same
+        // only handling common immutable types here because other types like
+        // Tensor or list of Tensor might throw on aten::eq
         switch (inp_kind) {
           case TypeKind::BoolType:
           case TypeKind::IntType:
-          case TypeKind::FloatType:
-          case TypeKind::ListType:
-          case TypeKind::DictType: {
+          case TypeKind::FloatType: {
             WithInsertPoint guard(node);
             node->output()->replaceAllUsesWith(
                 graph_->insertConstant(node->kind() == aten::eq));
