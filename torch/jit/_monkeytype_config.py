@@ -5,11 +5,11 @@ from collections import defaultdict
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
-    import monkeytype  # type: ignore
-    from monkeytype import trace as monkeytype_trace  # type: ignore
-    from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: ignore
-    from monkeytype.config import default_code_filter  # type: ignore
-    from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore
+    import monkeytype  # type: ignore[import]
+    from monkeytype import trace as monkeytype_trace
+    from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: ignore[import]
+    from monkeytype.config import default_code_filter  # type: ignore[import]
+    from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore[import]
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
 
@@ -117,4 +117,4 @@ else:
         def __init__(self):
             pass
 
-    monkeytype_trace = None  # type:  ignore[assignment]  # noqa F811
+    monkeytype_trace = None  # type:  ignore[assignment]  # noqa: F811
