@@ -658,6 +658,36 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     else:
         return (input, )
 
+def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
+    return (
+        SampleInput(
+            make_tensor((S, M, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            args=(
+                make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            )
+        ),
+    )
+
+def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
+    return (
+        SampleInput(
+            make_tensor((M, S, M, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            args=(
+                make_tensor((M, M, S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            )
+        ),
+    )
+
+def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
+    return (
+        SampleInput(
+            make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            args=(
+                make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            )
+        ),
+    )
+
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (((S,), (S, M), (M,), 1, 1, False),
                   ((S,), (S, M), (M,), 0.2, 0.6, False),
@@ -2657,46 +2687,47 @@ def sample_inputs_msort(op_info, device, dtype, requires_grad):
 
     return sample
 
-def sample_inputs_lerp(op_info, device, dtype, requires_grad):
-    def _make_tensor_helper(shape, low=None, high=None):
-        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     samples = (
         # no broadcast
-        SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)), 0.4)),
+        SampleInput(make_arg((S, S)), args=(make_arg((S, S)), 0.4)),
         # broadcast rhs
-        SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)), 0.4)),
+        SampleInput(make_arg((S, S)), args=(make_arg((S,)), 0.4)),
         # scalar tensor
-        SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper(()), 0.4)),
+        SampleInput(make_arg(()), args=(make_arg(()), 0.4)),
         # broadcast rhs scalar-tensor
-        SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper(()), 0.4)),
+        SampleInput(make_arg((S, S)), args=(make_arg(()), 0.4)),
         # broadcast rhs with weight tensor
-        SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)), _make_tensor_helper((S, S)))),
+        SampleInput(make_arg((S, S)), args=(make_arg((S,)), make_arg((S, S)))),
         # broadcast rhs and weight tensor
-        SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, 1)), _make_tensor_helper((S,)))),
-
-        # Broadcasts `self` : Issue with inplace-variants
-        # Reference: https://github.com/pytorch/pytorch/issues/50747
-        # SampleInput((_make_tensor_helper((S,)), _make_tensor_helper((S, S)), 0.4)),
-        # SampleInput((_make_tensor_helper(()), _make_tensor_helper((S, S)), 0.4)),
-        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), 0.4)),
-        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
+        SampleInput(make_arg((S, S)), args=(make_arg((S, 1)), make_arg((S,)))),
+        # broadcast_lhs
+        SampleInput(make_arg((S,)), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
+        # scalar broadcast_lhs
+        SampleInput(make_arg(()), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
+        # broadcast all
+        SampleInput(make_arg((S, 1)), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
+        # tensor broadcast all
+        SampleInput(make_arg((S, 1)), args=(make_arg((S, S)), make_arg((S, 1))),
+                    broadcasts_input=True),
     )  # type: ignore
 
     if dtype.is_complex:
         samples = samples + (  # type: ignore
             # no broadcast
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)), 0.4j)),
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)), 1.2 + 0.1j)),
+            SampleInput(make_arg((S, S)), args=(make_arg((S, S)), 0.4j)),
+            SampleInput(make_arg((S, S)), args=(make_arg((S, S)), 1.2 + 0.1j)),
             # broadcast rhs
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)), 0.4j)),
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)), 5.4 + 9j)),
+            SampleInput(make_arg((S, S)), args=(make_arg((S,)), 0.4j)),
+            SampleInput(make_arg((S, S)), args=(make_arg((S, S)), 5.4 + 9j)),
             # scalar tensor
-            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper(()), 0.4j)),
-            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper(()), 6.1 + 0.004j)),
+            SampleInput(make_arg(()), args=(make_arg(()), 0.4j)),
+            SampleInput(make_arg(()), args=(make_arg(()), 6.1 + 0.004j)),
             # broadcast rhs scalar-tensor
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper(()), 0.4j)),
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper(()), 1 + 2j)),
+            SampleInput(make_arg((S, S)), args=(make_arg(()), 0.4j)),
+            SampleInput(make_arg((S, S)), args=(make_arg(()), 1 + 2j)),
         )
 
     return samples
@@ -3046,8 +3077,7 @@ op_db: List[OpInfo] = [
     OpInfo('addbmm',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                           *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half),
            skips=(
                # addbmm does not correctly warn when resizing out= inputs
@@ -3060,6 +3090,50 @@ op_db: List[OpInfo] = [
                SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16, ),
                         device_type='cuda', active_if=not SM53OrLater)),
            sample_inputs_func=sample_inputs_addbmm),
+    OpInfo('dot',
+           dtypes=all_types_and_complex_and(torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           skips=(
+               # dot does not handle correctly out= dtypes
+               # https://github.com/pytorch/pytorch/issues/55561
+               SkipInfo('TestCommon', 'test_out'),
+           ),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_dot_vdot),
+    OpInfo('vdot',
+           dtypes=all_types_and_complex_and(torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           skips=(
+               # vdot does not handle correctly out= dtypes
+               # https://github.com/pytorch/pytorch/issues/55561
+               SkipInfo('TestCommon', 'test_out'),
+           ),
+           sample_inputs_func=sample_inputs_dot_vdot),
+    OpInfo('bmm',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           assert_autodiffed=True,
+           skips=(
+               # bmm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16, ),
+                        device_type='cuda', active_if=not SM53OrLater)),
+           sample_inputs_func=sample_inputs_bmm),
+    OpInfo('mv',
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           skips=(
+               # bmm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16,)),
+               # mv calls into addmv which doesn't fully support float16
+               # RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
+               SkipInfo('TestOpInfo', 'test_supported_dtypes', dtypes=(torch.float16,)),),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
@@ -3711,7 +3785,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_lstsq',
            op=torch.linalg.lstsq,
            dtypes=floating_and_complex_types(),
-           supports_out=False,
+           supports_out=True,
            sample_inputs_func=sample_inputs_linalg_lstsq,
            check_batched_grad=False,
            check_batched_gradgrad=False,
@@ -4405,9 +4479,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            dtypesIfROCM=floating_and_complex_types_and(torch.half),
            sample_inputs_func=sample_inputs_lerp,
-           skips=(
-               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
-           ),
            assert_autodiffed=True),
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
@@ -5220,10 +5291,6 @@ def method_tests():
         ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
         ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
         ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-        ('lerp', (S,), ((S, S, S), 0.4), 'broadcast_lhs', (True,)),
-        ('lerp', (S, 1, S), ((S, S), 0.4), 'broadcast_all', (True,)),
-        ('lerp', (), ((S, S, S), 0.4), 'scalar_broadcast_lhs', (True,)),
-        ('lerp', (S, 1, S), ((S, S), (S, 1, 1, S)), 'tensor_broadcast_all', (True,)),
         ('kthvalue', (S, S, S), (2,)),
         ('kthvalue', (S, S, S), (2, 1,), 'dim', (), [1]),
         ('kthvalue', (S, S, S), (2, 1,), 'dim_alert_nondeterministic', (), [1],
@@ -5276,10 +5343,6 @@ def method_tests():
         ('baddbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs'),
         ('baddbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs_coef', (), (), (), ident,
          {'beta': 0.2, 'alpha': 0.6}),
-        ('dot', (L,), ((L,),), '', (True,)),
-        ('vdot', (L,), ((L,),),),
-        ('bmm', (M, S, M), ((M, M, S),), '', (True,)),
-        ('mv', (S, M), ((M,),), '', (True,)),
         ('mvlgamma', torch.empty(S,).uniform_(0.5, 1), [1], "p=1"),
         ('mvlgamma', torch.empty(S,).uniform_(1, 2), [2], "p=2"),
         ('mvlgamma', torch.empty(S, S).uniform_(1.5, 3), [3], "p=3"),
