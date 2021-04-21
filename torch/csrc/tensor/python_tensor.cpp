@@ -80,7 +80,7 @@ static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
   HANDLE_TH_ERRORS
   auto self = (PyTensorType*)_self;
   if (THPVariable_Check(arg)) {
-    auto& var = ((THPVariable*)arg)->cdata;
+    const auto& var = THPVariable_Unpack(arg);
     // NB: This is a little unfortunate, in that if I do an isinstance check
     // against torch.cuda.FloatTensor, this will immediately initialize CUDA.
     // I originally thought that it would not be possible for aten_type_ to

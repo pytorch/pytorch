@@ -142,16 +142,14 @@ std::pair<IValue, IValue> getFunctionTuple(
       auto node = code.instructions_source()[i];
       if (node->callstack().has_value()) {
         debug_handle =
-            debug_handle_manager_ptr
-                ->getNextDebugHandleForInlinedCallStackPtr(
-                    node->sourceRange(), node->callstack().value());
+            debug_handle_manager_ptr->getNextDebugHandleForInlinedCallStackPtr(
+                node->sourceRange(), node->callstack().value());
       } else {
         // If node has no callstack, it is the top level node.
         // In that case just save source range.
-        debug_handle = debug_handle_manager_ptr
-                           ->getNextDebugHandleForInlinedCallStackPtr(
-                               node->sourceRange(),
-                               c10::intrusive_ptr<InlinedCallStack>());
+        debug_handle =
+            debug_handle_manager_ptr->getNextDebugHandleForInlinedCallStackPtr(
+                node->sourceRange(), c10::intrusive_ptr<InlinedCallStack>());
       }
     }
     // Note 1-to-1 correspondence between instructions and debug handles
@@ -688,26 +686,5 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   return std::vector<std::string>(names.begin(), names.end());
 }
 
-namespace mobile {
-
-std::set<std::string> _export_operator_list(
-    torch::jit::mobile::Module& module) {
-  std::set<std::string> operator_list;
-  for (Method func : module.get_methods()) {
-    const Function& function = func.function();
-    const std::shared_ptr<Code> cptr = function.get_code();
-    // op_names below isn't a list of unique operator names. In fact
-    // it can contain the same operator name many many times, so we need
-    // to de-dup the list by adding all the operator names into
-    // an std::set<std::string>.
-    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
-    for (auto& op_name : op_names) {
-      operator_list.insert(toString(op_name));
-    }
-  }
-  return operator_list;
-}
-
-} // namespace mobile
 } // namespace jit
 } // namespace torch
