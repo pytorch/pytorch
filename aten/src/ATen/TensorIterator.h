@@ -202,7 +202,6 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   bool is_cpu_scalar(int arg) const;
 
   const Tensor& tensor(int arg) const { return operands_[arg].tensor; }
-  Tensor& tensor(int arg) { return operands_[arg].tensor; }
 
   const Tensor& output(int arg=0) const {
     AT_ASSERT(arg < num_outputs_);
