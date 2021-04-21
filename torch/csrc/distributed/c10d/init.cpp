@@ -38,6 +38,46 @@
 
 #include <torch/custom_class.h>
 
+namespace {
+
+// Wrapper to ensure GIL is released before destructing ProcessGroupGloo
+// TODO: move this somewhere more generally useful
+template <typename T>
+class IntrusivePtrNoGilDestructor {
+  c10::intrusive_ptr<T> impl_;
+public:
+  IntrusivePtrNoGilDestructor() = default;
+  IntrusivePtrNoGilDestructor(const IntrusivePtrNoGilDestructor&) = default;
+  IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) = default;
+  IntrusivePtrNoGilDestructor& operator=(const IntrusivePtrNoGilDestructor&) = default;
+  IntrusivePtrNoGilDestructor& operator=(IntrusivePtrNoGilDestructor&&) = default;
+  /* implicit */ IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl) : impl_(std::move(impl)) {}
+  // This ctor is very important; see
+  // https://github.com/pybind/pybind11/issues/2957
+  explicit IntrusivePtrNoGilDestructor(T* impl) : impl_(c10::intrusive_ptr<T>::unsafe_steal_from_new(impl)) {}
+  ~IntrusivePtrNoGilDestructor() {
+    if (impl_) {
+      if (PyGILState_Check()) {
+        pybind11::gil_scoped_release release;
+        impl_.reset();
+      } else {
+        impl_.reset();
+      }
+    }
+  }
+  T& operator*() const noexcept { return *impl_; }
+  T* operator->() const noexcept { return impl_.get(); }
+  C10_NODISCARD T* get() const noexcept { return impl_.get(); }
+  void reset() noexcept { impl_.reset(); }
+  operator bool() const noexcept {
+    return impl_;
+  }
+};
+
+} // anonymous namespace
+
+PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true);
+
 namespace torch {
 namespace distributed {
 namespace c10d {
@@ -67,6 +107,9 @@ constexpr auto kDeprecationWarning =
     "if you see this warning";
 template <typename T>
 using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
+
+template <typename T>
+using intrusive_ptr_no_gil_destructor_class_ = py::class_<T, IntrusivePtrNoGilDestructor<T>>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -1078,6 +1121,14 @@ Arguments:
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_set_sequence_number_for_group",
+              &::c10d::ProcessGroup::setSequenceNumberForGroup,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_sequence_number_for_group",
+              &::c10d::ProcessGroup::getSequenceNumberForGroup,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "monitored_barrier",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::chrono::milliseconds& timeout,
@@ -1120,7 +1171,7 @@ distributed: (:class:`~torch.distributed.ProcessGroupGloo.Options` and
 #endif
 
 #ifdef USE_C10D_GLOO
-  auto processGroupGloo = intrusive_ptr_class_<::c10d::ProcessGroupGloo>(
+  auto processGroupGloo = intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
       module, "ProcessGroupGloo", processGroup);
 
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
@@ -1220,7 +1271,7 @@ Example::
 
 #ifdef USE_C10D_NCCL
   auto processGroupNCCL =
-      intrusive_ptr_class_<::c10d::ProcessGroupNCCL>(
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL", processGroup)
           .def(
               py::init<
@@ -1291,7 +1342,7 @@ Example::
 #endif
 
 #ifdef USE_C10D_MPI
-  auto processGroupMPI = intrusive_ptr_class_<::c10d::ProcessGroupMPI>(
+  auto processGroupMPI = intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupMPI>(
       module, "ProcessGroupMPI", processGroup);
 
   // Define static create function instead of a constructor, because
