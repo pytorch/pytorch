@@ -1126,6 +1126,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 
   intrusive_ptr_class_<::c10d::ProcessGroupGloo::Options>(
       processGroupGloo, "Options", processGroupOptions)
+      .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
       .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
 
