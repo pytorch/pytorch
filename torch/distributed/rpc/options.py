@@ -3,7 +3,47 @@ from . import constants as rpc_contants
 
 import torch
 
-from typing import Dict, List
+from typing import Dict, List, Optional, Union
+
+
+DeviceType = Union[int, str, torch.device]
+
+
+def _to_device_index(device: DeviceType) -> int:
+    device = torch.device(device)
+    if device.type != "cuda":
+        raise ValueError(
+            "`set_devices` expect a list of CUDA devices, but got "
+            f"device type {device.type}."
+        )
+    return device.index
+
+
+def _to_device_index_map(device_map: Dict[DeviceType, DeviceType]):
+    device_index_map = {}
+    reverse_map = {}
+    for k in device_map:
+        v = device_map[k]
+        k, v = torch.device(k), torch.device(v)
+        if k.type != 'cuda' or v.type != 'cuda':
+            raise ValueError(
+                "`set_device_map` only supports CUDA devices, "
+                f"but got device pair {k}: {v}"
+
+            )
+        if v.index in reverse_map:
+            raise ValueError(
+                "`device_map` only supports 1-to-1 mapping, "
+                f"trying to map {k} and {reverse_map[v.index]} to {v.index}"
+            )
+        device_index_map[k.index] = v.index
+        reverse_map[v.index] = k.index
+    return device_index_map
+
+
+def _to_device_index_list(devices: List[DeviceType]):
+    return list(map(_to_device_index, devices))
+
 
 
 class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
@@ -45,22 +85,30 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         num_worker_threads: int = rpc_contants.DEFAULT_NUM_WORKER_THREADS,
         rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
-        device_maps: Dict = None,
-        devices: List = None,
+        device_maps: Optional[Dict[str, Dict[DeviceType, DeviceType]]] = None,
+        devices: Optional[List[DeviceType]] = None,
         _transports: List = None,
         _channels: List = None,
     ):
+        device_index_maps = (
+            {} if device_maps is None else
+            {k : _to_device_index_map(v) for k, v in device_maps.items()}
+        )
+        device_index_list = (
+            [] if devices is None else
+            _to_device_index_list(devices)
+        )
         super().__init__(
             num_worker_threads,
             _transports,
             _channels,
             rpc_timeout,
             init_method,
-            device_maps if device_maps else {},
-            devices if devices else [],
+            device_index_maps,
+            device_index_list,
         )
 
-    def set_device_map(self, to: str, device_map: Dict):
+    def set_device_map(self, to: str, device_map: Dict[DeviceType, DeviceType]):
         r"""
         Set device mapping between each RPC caller and callee pair. This
         function can be called multiple times to incrementally add
@@ -104,28 +152,20 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             >>> print(rets[0])  # tensor([2., 2.], device='cuda:0')
             >>> print(rets[1])  # tensor([2., 2.], device='cuda:1')
         """
-        device_index_map = {}
+        device_index_map = _to_device_index_map(device_map)
         curr_device_maps = super().device_maps
-        for k in device_map:
-            v = device_map[k]
-            k, v = torch.device(k), torch.device(v)
-            if k.type != 'cuda' or v.type != 'cuda':
-                raise ValueError(
-                    "`set_device_map` only supports CUDA devices, "
-                    f"but got device pair {k}: {v}"
 
-                )
-            if to in curr_device_maps and k.index in curr_device_maps[to]:
-                curr_v = super().device_maps[to][k.index]
-                if curr_v != v.index:
+        if to in curr_device_maps:
+            for k, v in device_index_map.items():
+                if k in curr_device_maps[to] and v != curr_device_maps[to][k]:
                     raise ValueError(
-                        "`set_device_map` only supports 1-to-1 mapping, "
-                        f"trying to map {k} to {v} and {curr_v}"
+                        "`set_device_map` only supports 1-to-1 mapping, trying"
+                        f" to map {k} to {v} and {curr_device_maps[to][k]}"
                     )
-            device_index_map[k.index] = v.index
+
         super().set_device_map(to, device_index_map)
 
-    def set_devices(self, devices: List):
+    def set_devices(self, devices: List[DeviceType]):
         r"""
         Set local devices used by the TensorPipe RPC agent. When processing
         CUDA RPC requests, the TensorPipe RPC agent will properly synchronize
@@ -135,10 +175,4 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             devices (List of int, str, or torch.device): local devices used by
                 the TensorPipe RPC agent.
         """
-        def to_device_index(d):
-            d = torch.device(d)
-            if d.type == "cpu":
-                return -1
-            else:
-                return d.index
-        self.devices = list(map(to_device_index, devices))
+        self.devices = _to_device_index_list(devices)
