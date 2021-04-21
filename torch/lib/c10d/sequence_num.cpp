@@ -1,4 +1,4 @@
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 #include <ATen/ThreadLocalState.h>
 #include <c10d/sequence_num.hpp>
 
@@ -50,6 +50,7 @@ bool SequenceNum::isSet() const {
 }
 
 SequenceNum& SequenceNum::operator=(const SequenceNum& other) {
+  std::lock_guard<std::mutex> lock(lock_);
   if (!other.isSet()) {
     num_ = c10::nullopt;
   } else {

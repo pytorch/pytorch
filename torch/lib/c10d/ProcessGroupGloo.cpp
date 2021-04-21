@@ -110,6 +110,8 @@ namespace c10d {
 
 namespace {
 
+constexpr int kBytes = 8;
+
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
@@ -2826,7 +2828,7 @@ void ProcessGroupGloo::setSequenceNumberForGroup() {
     // Create and broadcast sequence number
     auto seq = 1 + rand();
     sequenceNum_ = c10d::SequenceNum(seq);
-    std::vector<char> values = c10d::toVec<char>(seq, 8);
+    std::vector<char> values = c10d::toVec<char>(seq, kBytes);
     store_->set(kSeqNumStoreKey, values);
   } else {
     // Read rank 0's sequence number from store.
