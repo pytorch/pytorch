@@ -5,7 +5,6 @@
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
 #include <functorch/csrc/VmapTransforms.h>
-#include <functorch/csrc/VmapMode.h>
 
 namespace at {
 namespace functorch {
@@ -155,7 +154,19 @@ int64_t _grad_increment_nesting() {
 }
 
 int64_t _grad_decrement_nesting() {
-  return popDynamicLayerAndDeleteMetadata().layerId();
+  auto layer = popDynamicLayerAndDeleteMetadata();
+  TORCH_INTERNAL_ASSERT(layer.key() == DispatchKey::Autograd);
+  return layer.layerId();
+}
+
+int64_t _vmap_increment_nesting() {
+  return initAndPushDynamicLayer(kBatchedKey);
+}
+
+int64_t _vmap_decrement_nesting() {
+  auto layer = popDynamicLayerAndDeleteMetadata();
+  TORCH_INTERNAL_ASSERT(layer.key() == kBatchedKey);
+  return layer.layerId();
 }
 
 
@@ -165,8 +176,8 @@ int64_t _grad_decrement_nesting() {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("_add_batch_dim", &at::functorch::_add_batch_dim, "add batch dim");
   m.def("_remove_batch_dim", &at::functorch::_remove_batch_dim, "remove batch dim");
-  m.def("_vmapmode_increment_nesting", &at::functorch::impl::VmapMode::increment_nesting, "add batch dim");
-  m.def("_vmapmode_decrement_nesting", &at::functorch::impl::VmapMode::decrement_nesting, "remove batch dim");
+  m.def("_vmap_increment_nesting", &at::functorch::_vmap_increment_nesting, "remove batch dim");
+  m.def("_vmap_decrement_nesting", &at::functorch::_vmap_decrement_nesting, "remove batch dim");
   m.def("_grad_increment_nesting", &at::functorch::_grad_increment_nesting, "remove batch dim");
   m.def("_grad_decrement_nesting", &at::functorch::_grad_decrement_nesting, "remove batch dim");
   m.def("_wrap_for_grad", &at::functorch::_wrap_for_grad, "add batch dim");
