@@ -308,9 +308,7 @@ Adapter Runtime::select(const Selector& selector) {
 Runtime* runtime() {
   static const std::unique_ptr<Runtime> runtime([]() -> Runtime* {
 #ifdef USE_VULKAN_WRAPPER
-    bool bInitVulkan = InitVulkan();
-    std::cout << "XXX initVulkan:" << bInitVulkan << std::endl;
-    if (!bInitVulkan) {
+    if (!InitVulkan()) {
       TORCH_WARN("Vulkan: Failed to initialize Vulkan Wrapper!");
       return nullptr;
     }
