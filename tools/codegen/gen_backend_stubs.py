@@ -3,7 +3,7 @@ import argparse
 import os
 import yaml
 from typing import List, Dict, Union, Tuple, Sequence
-from tools.codegen.gen import FileManager, get_grouped_native_functions, LineLoader, parse_native_yaml
+from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
 from tools.codegen.model import (ExternalBackendFunction, ExternalBackendFunctionsGroup,
                                  NativeFunction, NativeFunctionsGroup, OperatorName,
                                  ExternalBackendMetadata, assert_never)
@@ -11,24 +11,36 @@ from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import Target, concatMap
 import tools.codegen.dest as dest
 
+try:
+    # use faster C loader if available
+    from yaml import CSafeLoader as Loader
+except ImportError:
+    from yaml import SafeLoader as Loader  # type: ignore
+
+
 def parse_backend_yaml(
         backend_yaml_path: str,
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]]
 ) -> Tuple[str, List[Union[ExternalBackendFunction, ExternalBackendFunctionsGroup]]]:
     with open(backend_yaml_path, 'r') as f:
-        yaml_values = yaml.load(f, Loader=LineLoader)
+        yaml_values = yaml.load(f, Loader=Loader)
     assert isinstance(yaml_values, dict)
 
-    cpp_namespace = yaml_values.pop('cpp_namespace')
-    backend = yaml_values.pop('backend')
+    valid_keys = ['backend', 'cpp_namespace', 'supported', 'autograd']
+
+    backend = yaml_values.pop('backend', None)
+    assert backend is not None, 'You must provide a value for "backend"'
+    cpp_namespace = yaml_values.pop('cpp_namespace', None)
+    assert cpp_namespace is not None, 'You must provide a value for "cpp_namespace"'
 
     supported = yaml_values.pop('supported', [])
-    assert isinstance(supported, list), f'expected "supported" to be a list, but got: {supported}'
+    assert isinstance(supported, list), f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
     supported_autograd = yaml_values.pop('autograd', [])
     assert isinstance(supported, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
 
-    assert len(yaml_values.keys()) > 0, \
-        f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}'
+    assert len(yaml_values.keys()) == 0, \
+        f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
+Only the following keys are supported: {", ".join(valid_keys)}'
 
     metadata: Dict[OperatorName, ExternalBackendMetadata] = {}
     for op in supported:
@@ -57,8 +69,7 @@ def parse_backend_yaml(
         else:
             assert_never(g)
     for op_name in metadata.keys():
-        if op_name not in native_functions_map:
-            raise AssertionError(f"Found an invalid operator name: {op_name}")
+        assert op_name in native_functions_map, f"Found an invalid operator name: {op_name}"
     return cpp_namespace, [native_to_external(g) for g in grouped_native_functions]
 
 def main() -> None:
