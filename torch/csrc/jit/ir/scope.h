@@ -174,6 +174,6 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   }
 };
 
-using DelegateDebugInfoType = std::pair<SourceRange, InlinedCallStackPtr>;
+using DebugInfoPair = std::pair<SourceRange, InlinedCallStackPtr>;
 } // namespace jit
 } // namespace torch
