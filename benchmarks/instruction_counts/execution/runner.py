@@ -82,9 +82,11 @@ class Runner:
         self,
         work_items: Tuple[WorkOrder, ...],
         core_pool: Optional[CorePool] = None,
+        cadence: float = 1.0,
     ) -> None:
         self._work_items: Tuple[WorkOrder, ...] = work_items
         self._core_pool: CorePool = core_pool or CorePool(0, min(CPU_COUNT - 4, int(CPU_COUNT * 0.75), 39))
+        self._cadence = cadence
 
         # Working state.
         self._work_queue: List[WorkOrder] = list(work_items)
@@ -136,7 +138,7 @@ class Runner:
             self._update_active_jobs()
             self._enqueue_new_jobs()
             self._print_progress()
-            time.sleep(max(1.0 - (time.time() - t0), 0.0))
+            time.sleep(max(self._cadence - (time.time() - t0), 0.0))
         print(f"\nTotal time: {time.time() - self._start_time:.0f} seconds")
         return self._results.copy()
 
