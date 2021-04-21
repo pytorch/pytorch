@@ -564,7 +564,6 @@ def config_from_args(args) -> Tuple[LaunchConfig, List[str]]:
     return config, cmd
 
 
-@record
 def run(args):
     if args.standalone:
         etcd_server = EtcdServer()
