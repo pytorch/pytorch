@@ -93,7 +93,7 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   output_shape.insert(output_shape.end(), {r1, r2});
 
   Tensor result;
-  if (r1 == 0 || r2 == 0) {
+  if (r1 == 0 || r2 == 0 || expand_batch_product == 0) {
     result = at::empty(output_shape, x1.options());
   } else if (c1 == 0) {
     result = at::zeros(output_shape, x1.options());
@@ -119,9 +119,8 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
     NoNamesGuard guard;
     int64_t r1 = x1.size(-2);
     int64_t r2 = x2.size(-2);
-    int64_t c1 = x1.size(-1);
     // Special case for empty input: always call the version with explicit autograd to ensure the graph is properly connected
-    if (r1 == 0 || r2 == 0 || c1 == 0) {
+    if (x1.numel() == 0 || x2.numel() == 0) {
         return at::_cdist_forward(x1, x2, p, compute_mode);
     }
     int64_t mode = compute_mode.value_or(0);
