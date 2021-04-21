@@ -127,19 +127,17 @@ struct SymbolicShapeAnalyzer {
   void substituteInputTensorProperties(bool substitute_symbolic_dims) {
     // here we iteratively substitute properties of the node's input tensors
     // into the shape compute graph. in addition to direct constants we can
-    // substituted, like len(inp) or inp[0] if the tensor has fixed dimension
-    // and static first dimension value, respectively, we also try resolve
-    // symbolic shapes of the same symbolic value to the same Value *
-    // in the shape compute graph. for the shape logic:
-    // dim1 = inp1[0], dim2 = inp2[0]
-    // return dim1 if dim2 == 1 else dim2
+    // substitute, like len(inp) or inp[0] if the tensor has fixed length
+    // or first dimension, we also try to resolve symbolic shapes of the same
+    // symbolic value to the same Value * in the shape compute graph.
+    // for the shape logic:
+    // dim1 = inp1[0], dim2 = inp2[0]; return dim1 if dim2 == 1 else dim2
     // if we see that inp1[0] and inp2[0] both have the same symbolic shape
-    // value on the Tensor input properties, than it is a valid transformation
-    // to replace dim2 with dim1 or vice versa. to do this we collect
-    // all Value * for a particular symbolic dimension value and then
-    // Value * with their dominator of the same symbolic dimension value
-    // in the example above, this allows us to infer that the output
-    // will be the symbolic dimension value of dim1
+    // value, then it is a valid transformation to replace dim2 with dim1 or
+    // vice versa. to do this we collect  all Value * for a particular symbolic
+    // dimension value and then Value * with their dominator of the same
+    // symbolic dimension value in the example above, this allows us to infer
+    // that the output will be the symbolic dimension value of dim1
 
     std::unordered_map<int64_t, std::vector<Value*>> symbolic_shape_map;
 
