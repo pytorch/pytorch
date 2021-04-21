@@ -11,9 +11,12 @@
 #include <pack_block_sparse.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 
-struct TORCH_API SparsePackedLinearWeightQnnp
-    : public SparseLinearPackedParamsBase {
-  SparsePackedLinearWeightQnnp(const at::Tensor& weight, const c10::optional<at::Tensor>& bias, const int64_t out_features_block_size /* block sparsity size across output_features */, const int64_t in_features_block_size /* block sparsity size across input_features */);
+namespace ao {
+namespace sparse {
+
+struct TORCH_API PackedLinearWeightQnnp
+    : public LinearPackedParamsBase {
+  PackedLinearWeightQnnp(const at::Tensor& weight, const c10::optional<at::Tensor>& bias, const int64_t out_features_block_size /* block sparsity size across output_features */, const int64_t in_features_block_size /* block sparsity size across input_features */);
   at::Tensor orig_weight_;
   c10::optional<at::Tensor> orig_bias_;
   // Seperate copy of bias exist so that we can fill in zeros when
@@ -48,13 +51,13 @@ struct TORCH_API SparsePackedLinearWeightQnnp
   at::Tensor apply_dynamic(const at::Tensor& input) override;
   at::Tensor apply_dynamic_relu(const at::Tensor& input) override;
 
-  SerializationTypeSparseLinearPacked unpack() override;
+  LinearPackedSerializationType unpack() override;
 
   c10::optional<at::Tensor> bias() override {
     return orig_bias_;
   }
 
-  static c10::intrusive_ptr<SparseLinearPackedParamsBase> prepack(
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
       const at::Tensor& weight,
       const c10::optional<at::Tensor>& bias,
       const int64_t out_features_block_size,
@@ -69,5 +72,7 @@ struct TORCH_API SparsePackedLinearWeightQnnp
   template <bool ReluFused>
   at::Tensor apply_dynamic_impl(const at::Tensor& input);
 };
+
+}}  // namespace ao::sparse
 
 #endif // USE_PYTORCH_QNNPACK
