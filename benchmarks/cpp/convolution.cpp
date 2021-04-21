@@ -157,9 +157,24 @@ std::vector<ConvParams> ResNet50Params = {
     {{1, 512, 7, 7}, {2048, 512, 1, 1}, {}, {1, 1}, {0, 0}, {1, 1}, 1},
 };
 
+struct EnableMklDnn {
+  explicit EnableMklDnn(bool enable)
+      : prev_(at::globalContext().userEnabledMkldnn()) {
+    at::globalContext().setUserEnabledMkldnn(enable);
+  }
+
+  ~EnableMklDnn() {
+    at::globalContext().setUserEnabledMkldnn(prev_);
+  }
+
+  bool prev_;
+};
+
+template <bool WithMklDnn>
 static void BM_conv2d_native(
     benchmark::State& state,
     const ConvParams& params) {
+  EnableMklDnn mkl(WithMklDnn);
   auto input = at::randn(params.input);
   auto weight = at::randn(params.weight);
   auto bias = params.bias.size() > 0 ? at::randn(params.bias) : at::Tensor{};
@@ -213,7 +228,7 @@ static void BM_conv2d_mkldnn(
         std::move(r), at::kFloat, at::Device(at::kCPU));
   }
 
-  if (Reorder == WeightOnly) {
+  if (Reorder == WeightOnly || Reorder == WeightAndInput) {
     weight = at::mkldnn_reorder_conv2d_weight(
         weight.to_mkldnn(),
         params.padding,
@@ -262,7 +277,11 @@ std::string name(
 
 void registerOne(const char* base, const ConvParams& params) {
   benchmark::RegisterBenchmark(
-      name(base, "native", params).data(), BM_conv2d_native, params);
+      name(base, "native", params).data(), BM_conv2d_native<true>, params);
+  benchmark::RegisterBenchmark(
+      name(base, "native_nomkl", params).data(),
+      BM_conv2d_native<false>,
+      params);
   benchmark::RegisterBenchmark(
       name(base, "mkldnn_none", params).data(), BM_conv2d_mkldnn<None>, params);
   benchmark::RegisterBenchmark(
