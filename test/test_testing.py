@@ -1,5 +1,4 @@
 import collections
-import contextlib
 import functools
 import itertools
 import math
@@ -7,7 +6,7 @@ import os
 import random
 import re
 import unittest
-from typing import Any, Callable, Iterator, List, Tuple, Type
+from typing import Any, Callable, Iterator, List, Tuple
 
 import torch
 
@@ -1020,15 +1019,6 @@ class TestAsserts(TestCase):
                 AssertionError, re.escape(f"Greatest absolute difference: 1 at 0 (up to {atol} allowed)")
             ):
                 torch.testing.assert_close(*inputs, rtol=0.0, atol=atol)
-
-    @onlyCPU
-    def test_unknown_type(self, device):
-        actual = torch.empty((), device=device)
-        expected = {actual.clone()}
-
-        for fn in self.get_assert_fns():
-            with self.assertRaisesRegex(UsageError, str(type(expected))):
-                fn(actual, expected)
 
     @onlyCPU
     def test_sequence_mismatching_len(self, device):
