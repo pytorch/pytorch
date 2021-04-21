@@ -147,15 +147,15 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 namespace {
 
 bool einsum_check_label(char label) {
-  return std::isalpha(label, std::locale{"C"});
+  return std::isalpha(label);
 }
 
-int64_t einsum_label_to_index(char label) {
+int einsum_label_to_index(char label) {
   constexpr int NUM_OF_LETTERS = 'z' - 'a' + 1;
-  return std::islower(label, std::locale{"C"}) ? label - 'a'
-                                               : NUM_OF_LETTERS + label - 'A';
+  return std::islower(label) ? label - 'a' : NUM_OF_LETTERS + (label - 'A');
 }
-}
+
+} // namespace
 
 // There are roughly three parts to compute einsum:
 // 1. Parse equation to extract the labels for each input operand and output
