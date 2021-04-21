@@ -29,6 +29,9 @@ void lapackSyevd(char jobz, char uplo, int n, scalar_t* a, int lda, value_t* w, 
 template <class scalar_t>
 void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t* a, int lda, scalar_t* b, int ldb, int* info);
 
+template <class scalar_t>
+void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
+
 #endif
 
 using cholesky_inverse_fn = Tensor& (*)(Tensor& /*result*/, Tensor& /*infos*/, bool /*upper*/);
@@ -63,5 +66,11 @@ using triangular_solve_fn = void (*)(
     bool /*conjugate_transpose*/,
     bool /*unitriangular*/);
 DECLARE_DISPATCH(triangular_solve_fn, triangular_solve_stub);
+
+using lu_solve_fn = void (*)(
+    const Tensor& /*b*/,
+    const Tensor& /*lu*/,
+    const Tensor& /*pivots*/);
+DECLARE_DISPATCH(lu_solve_fn, lu_solve_stub);
 
 }} // namespace at::native
