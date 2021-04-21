@@ -275,7 +275,8 @@ Computes the exponentially scaled first order modified Bessel function of the fi
 for each element of :attr:`input`.
 
 .. math::
-    \text{out}_{i} = \exp(-|x|) * i1(x) = \exp(-|x|) * \frac{\text{input}_{i})}{2} * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!) * (k+1)!}
+    \text{out}_{i} = \exp(-|x|) * i1(x) =
+        \exp(-|x|) * \frac{\text{input}_{i})}{2} * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!) * (k+1)!}
 
 """ + r"""
 Args:
