@@ -162,7 +162,7 @@ void checkTensorsSameDevice(CheckedFrom c, const TensorArg& t1, const TensorArg&
 void checkAllSameDevice(CheckedFrom c, ArrayRef<TensorArg> tensors) {
   checkAllSame(c, tensors, checkTensorsSameDevice);
 }
-  
+
 void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
   TORCH_CHECK(
     t1->options().type_equal(t2->options()),
