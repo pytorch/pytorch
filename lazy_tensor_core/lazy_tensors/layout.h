@@ -9,9 +9,13 @@ class Tile {};
 
 class Layout {
  public:
+  int64 minor_to_major(int index) const { return minor_to_major_.at(index); }
+
   lazy_tensors::Span<const int64> minor_to_major() const {
     return minor_to_major_;
   }
+
+  std::vector<int64>* mutable_minor_to_major() { return &minor_to_major_; }
 
   Layout& add_minor_to_major(int64 value) {
     minor_to_major_.push_back(value);
