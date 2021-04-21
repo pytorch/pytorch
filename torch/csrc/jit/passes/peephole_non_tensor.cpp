@@ -137,12 +137,6 @@ struct PeepholeOptimizeNonTensorImpl {
             break;
         }
       }
-
-      // [aliasing sensitive optimizations]
-      // aliasing sensitive peephole transforms are not run at the moment,
-      // because compilation cost of creating alias db is not worth
-      // the limited speedup of these optimizations
-      // runAliasingSensitivePeepholeTransformations(node);
     }
     return changed;
   }
