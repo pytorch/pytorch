@@ -86,8 +86,8 @@ std::vector<char> SourceRangePickler::pickle(
     }
     std::vector<c10::IValue> row_elems{
         (int64_t)range.bytes,
-        static_cast<int64_t>(source_range_tag),
-        srs->serialize(range.range)};
+        srs->serialize(range.range),
+        static_cast<int64_t>(source_range_tag)};
     ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
   }
   std::vector<at::Tensor> table;
@@ -117,18 +117,9 @@ void ConcreteSourceRangeUnpickler::unpickle() {
   unpickled_records = std::make_shared<SourceRangeRecords>();
   for (auto& val : ivalues) {
     auto tup_elems = val.toTuple()->elements();
-    if (tup_elems.size() == 2) {
-      // This path is for BC.
-      // After this change debug_pkl stores {byte_offset, source_range_tag,
-      // source_range}
-      int64_t offset = tup_elems[0].toInt();
-      auto source_range = deserializer->deserialize(tup_elems[1]);
-      unpickled_records->emplace_back(offset, std::move(source_range));
-    } else {
-      int64_t offset = tup_elems[0].toInt();
-      auto source_range = deserializer->deserialize(tup_elems[2]);
-      unpickled_records->emplace_back(offset, std::move(source_range));
-    }
+    int64_t offset = tup_elems[kByteOffsetIndex].toInt();
+    auto source_range = deserializer->deserialize(tup_elems[kSourceRangeIndex]);
+    unpickled_records->emplace_back(offset, std::move(source_range));
   }
 }
 
