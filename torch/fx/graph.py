@@ -48,6 +48,7 @@ _register_custom_builtin('inf', 'from math import inf', math.inf)
 _register_custom_builtin('nan', 'from math import nan', math.nan)
 _register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
 _register_custom_builtin('torch', 'import torch', torch)
+_register_custom_builtin('device', 'from torch import device', torch.device)
 
 
 def _is_magic(x: str) -> bool:
@@ -178,8 +179,12 @@ class PythonCode:
 
 
 def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
-    args_s = ', '.join(repr(a) for a in args)
-    kwargs_s = ', '.join(f'{k} = {repr(v)}' for k, v in kwargs.items())
+    def repr2(a):
+        if isinstance(a, torch.device):
+            return f'torch.{repr(a)}'
+        return repr(a)
+    args_s = ', '.join(repr2(a) for a in args)
+    kwargs_s = ', '.join(f'{k} = {repr2(v)}' for k, v in kwargs.items())
     if args_s and kwargs_s:
         return f'{args_s}, {kwargs_s}'
     return args_s or kwargs_s

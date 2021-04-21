@@ -129,12 +129,16 @@ PythonTensorImpl* getPythonImpl(at::Tensor tensor) {
 at::Tensor addKey(const py::object& tensor) {
   return at::detail::make_tensor<PythonTensorImpl>(tensor);
 }
+bool hasKey(at::Tensor tensor) {
+  return isPythonTensor(tensor);
+}
 
 py::object removeKey(at::Tensor tensor) {
   assert(isPythonTensor(tensor));
   return getPythonImpl(tensor)->value_;
 }
 
+PyObject* torch_module;
 void initFx(PyObject* module) {
   static std::array<PyMethodDef, 2> PatchMethods = {{
       {"patch_function", patch_function, METH_VARARGS, "Save"},
@@ -158,31 +162,33 @@ void initFx(PyObject* module) {
 
   auto m = py::handle(module).cast<py::module>();
   auto key = m.def_submodule("key");
-  key.def("addKey", &addKey, py::return_value_policy::copy);
+  key.def("addKey", &addKey, py::return_value_policy::copy); // not sure if needed - cargo cult
   key.def("removeKey", &removeKey);
+  key.def("hasKey", &hasKey);
 }
 
 
 
-PyObject* pyIdentity(py::object x) {
-  return x.ptr();
+py::object pyIdentity(py::object x) {
+  return x;
 }
 template<class T>
-py::tuple vectorToPyTuple(const std::vector<T> &data, std::function<PyObject*(T)> converter) {
+py::tuple vectorToPyTuple(const std::vector<T> &data, std::function<py::object(T)> converter) {
 	PyObject* tuple = PyTuple_New( data.size() );
 	if (!tuple) throw std::runtime_error("Unable to allocate memory for Python tuple");
 	for (unsigned int i = 0; i < data.size(); i++) {
-		PyObject *num = converter(data[i]);
+		PyObject *num = converter(data[i]).ptr();
 		if (!num) {
 			Py_DECREF(tuple);
 			throw std::runtime_error("Unable to allocate memory for Python tuple");
 		}
+    Py_INCREF(num); // todo: dunno?? Need it to fix segfaults, but probably not right
 		PyTuple_SET_ITEM(tuple, i, num);
 	}
-        return py::cast<py::tuple>(tuple);
+  return py::cast<py::tuple>(tuple);
 }
 void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  std::cout << "python fallback" << std::endl;
+  // std::cout << "python fallback" << std::endl;
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
@@ -211,40 +217,70 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     torch::jit::push(stack, v);
   }
   op.callBoxed(stack);
-  auto realOut = torch::jit::pop(stack);
-
-  py::tuple py_types = py::cast<py::tuple>(vectorToPyTuple<py::object>(pyArgs, [](py::object x) -> PyObject* { return PyObject_Type(x.ptr()); }));
+  std::vector<c10::IValue> realOuts = torch::jit::pop(*stack, num_returns);
+  py::tuple py_types = py::cast<py::tuple>(vectorToPyTuple<py::object>(pyArgs, [](py::object x) -> py::object { return py::reinterpret_borrow<py::object>(PyObject_Type(x.ptr())); }));
 
   py::dict kwargs;
-  kwargs["val"] = torch::jit::toPyObject(realOut);
+  std::vector<py::object> t;
+  for (auto x: realOuts) {
+    t.push_back(torch::jit::toPyObject(x));
+  }
+  kwargs["val"] = vectorToPyTuple<py::object>(t, pyIdentity);
+
 
   std::string func_name = op.operator_name().name;
   std::string delimiter = "aten::";
   func_name = func_name.substr(func_name.find(delimiter) + delimiter.size());
   py::object torch_api_function =
       PyObject_FastGetAttrString(THPVariableClass, (char*)func_name.c_str());
-  if (torch_api_function == nullptr) {
+  // if (torch_api_function == nullptr) {
     torch_api_function = py::str(op.operator_name().name);
-  }
+  // }
   auto pyTupleArgs = vectorToPyTuple<py::object>(pyArgs, pyIdentity);
 
   auto out = PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), pyTupleArgs.ptr(), kwargs.ptr(), 0);
   if (out == nullptr) {
     throw std::runtime_error("call failed");
   }
+  py::list outs = py::cast<py::list>(out);
   torch::jit::drop(stack, num_arguments);
-
-  auto ret_type = op.schema().returns()[0].type();
-  if (ret_type->kind() == c10::TensorType::Kind) {
-    torch::jit::push(stack, addKey(py::cast<py::object>(out)));
-  } else {
-    auto ivalue_out = torch::jit::toIValue(out, ret_type);
-    torch::jit::push(stack, ivalue_out);
-  }
+  std::vector<c10::IValue> ret_ivalues;
+  for (int idx = 0; idx < outs.size(); idx++) {
+    auto ret_type = op.schema().returns()[idx].type();
+    if (ret_type->kind() == c10::TensorType::Kind) {
+      torch::jit::push(stack, addKey(py::cast<py::object>(outs[idx])));
+    } else {
+      auto ivalue_out = torch::jit::toIValue(outs[idx], ret_type);
+      torch::jit::push(stack, ivalue_out);
+    }
+}
   return;
 }
 TORCH_LIBRARY_IMPL(_, PythonKey, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonFallBack>());
+}
+
+c10::intrusive_ptr<c10::TensorImpl> PythonTensorImpl::shallow_copy_and_detach(
+    c10::VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  auto impl = c10::make_intrusive<PythonTensorImpl>(value_);
+  copy_tensor_metadata(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/version_counter,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  impl->set_version_counter(version_counter);
+  impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  return impl;
+}
+
+c10::intrusive_ptr<c10::TensorImpl> PythonTensorImpl::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  auto impl = c10::make_intrusive<PythonTensorImpl>(value_);
+  impl->set_version_counter(version_counter);
+  impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  return impl;
 }
 } // namespace fx
 } // namespace torch

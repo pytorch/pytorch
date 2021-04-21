@@ -10,6 +10,7 @@ import torch
 import torch._C._fx  # type: ignore[import]
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 
+import torch._C.key as key
 import sys
 from .node import Argument, map_aggregate
 from .graph import Graph
@@ -188,6 +189,10 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(a, (torch.Tensor, ScriptObject)):
+            # import pdb; pdb.set_trace()
+            if key.hasKey(a):
+                return super().create_arg(key.removeKey(a).proxy)
+
             qualname : Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
@@ -280,9 +285,11 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
-        if not self.is_leaf_module(m, module_qualified_name):
-            return forward(*args, **kwargs)
-        return self.create_proxy('call_module', module_qualified_name, args, kwargs)
+        # if not self.is_leaf_module(m, module_qualified_name):
+        # import pdb; pdb.set_trace()
+        out = forward(*args, **kwargs)
+        return out
+        # return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
     def create_args_for_root(self, root_fn, is_module, concrete_args=None):
         """
@@ -386,16 +393,16 @@ class Tracer(TracerBase):
 
         # Method dispatch on parameters is not recorded unless it's directly used.
         # Thus, we need to insert a proxy when __getattr__ requests a parameter.
-        @functools.wraps(_orig_module_getattr)
-        def module_getattr_wrapper(mod, attr):
-            attr_val = _orig_module_getattr(mod, attr)
-            if isinstance(attr_val, torch.nn.Parameter):
-                for n, p in self.root.named_parameters():
-                    if attr_val is p:
-                        if n not in parameter_proxy_cache:
-                            parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
-                        return parameter_proxy_cache[n]
-            return attr_val
+        # @functools.wraps(_orig_module_getattr)
+        # def module_getattr_wrapper(mod, attr):
+        #     attr_val = _orig_module_getattr(mod, attr)
+        #     if isinstance(attr_val, torch.nn.Parameter):
+        #         for n, p in self.root.named_parameters():
+        #             if attr_val is p:
+        #                 if n not in parameter_proxy_cache:
+        #                     parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
+        #                 return parameter_proxy_cache[n]
+        #     return attr_val
 
         @functools.wraps(_orig_module_call)
         def module_call_wrapper(mod, *args, **kwargs):
@@ -409,7 +416,7 @@ class Tracer(TracerBase):
         with _CPatchManager(self):
             with _Patcher() as patcher:
                 # allow duplicate patches to support the case of nested calls
-                patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
+                # patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
                 patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
                 _patch_wrapped_functions(patcher)
                 _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)

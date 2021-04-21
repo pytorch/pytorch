@@ -2,11 +2,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch._C.key as key
+import torch.fx as fx
+# import torch.autograd.functional
+from types import FunctionType, CodeType
 
 HANDLED_FUNCTIONS = {}
-class PythonTensor(torch.Tensor):
-    def __init__(self, shape):
-        self.value = torch.empty(shape)
+class PythonTensor(object):
+    def __init__(self, out, proxy):
+        if isinstance(out, torch.Tensor):
+            self.value = torch.empty_like(out)
+        else:
+            self.value = torch.empty(out)
+        self.proxy = proxy
 
     def __repr__(self):
         return f"PythonTensor({tuple(self.value.shape)})"
@@ -15,36 +22,65 @@ class PythonTensor(torch.Tensor):
         return self.value
 
     def __torch_function__(self, func, types, args=(), kwargs={}):
-        print("torch_function: ", func)
-        out = kwargs['val']
-        if isinstance(out, torch.Tensor):
-            return PythonTensor(out.shape)
-        else:
-            return out
+        namespace, func_name = func.split("::")
+        func = getattr(getattr(torch.ops, namespace), func_name)
+        outs = kwargs['val']
+        rets = []
+        proxy_args = [i.proxy if isinstance(i, PythonTensor) else i for i in args]
+        out_proxy = func(*proxy_args)
+        if len(outs) == 1 and isinstance(outs[0], torch.Tensor):
+            return [PythonTensor(outs[0], out_proxy)]
+        for idx, out in enumerate(outs):
+            if isinstance(out, torch.Tensor):
+                rets.append(PythonTensor(out, out_proxy[idx]))
+            else:
+                rets.append(out)
+        return rets
 
 import torchvision.models as models
-x = PythonTensor((5))
 
-class Foo(nn.Module):
-    def __init__(self):
+
+class ModuleBackward(nn.Module):
+    def __init__(self, mod):
         super().__init__()
-        self.conv = nn.Linear(3, 3)
+        self.mod = mod
 
     def forward(self, x):
-        return F.linear(x, torch.ones(3, 3))
+        x_grad = key.addKey(PythonTensor((1, 3, 224, 224), x))
+        x_grad.requires_grad = True
+        out = self.mod(x_grad).sum()
+        out.backward()
+        return key.removeKey(x_grad.grad).proxy
 
-model = Foo()
-def f(x):
-    out = torch.dot(x, torch.ones(5))
-    out.backward()
-    return out
-    # out = (x*2).sum()
-    # out.backward()
-grad_x = key.addKey(x)
-grad_x.requires_grad = True
-f(grad_x)
-# out = torch.vmap(f)(grad_x)
-# print(torch.vmap(f)(key.addKey(x)))
-# print(torch.jit.trace(torch.vmap(f),(x)))
-# print(key.removeKey(out))
-# import pdb; pdb.set_trace()
+def grad(f, inps):
+    def f_grad(args):
+        for idx in range(len(inps)):
+            args[idx] = key.addKey(PythonTensor(inps[idx].shape, args[idx]))
+            args[idx].requires_grad = True
+        out = f(*args)
+        out.backward()
+        return [key.removeKey(args[idx].grad).proxy for idx in range(len(inps))]
+    if len(inps) == 1:
+        def f_out(x):
+            return f_grad([x])
+    elif len(inps) == 2:
+        def f_out(a, b):
+            return f_grad([a, b])
+    return f_out
+
+def f(a, b):
+    c = a*b
+    return torch.dot(torch.sin(c), a)
+inps = (torch.randn(3), torch.randn(3))
+grad_f = fx.symbolic_trace(grad(f, inps))
+grad_f = torch.jit.trace(grad_f, inps)
+
+grads = grad_f(*inps)
+for grad in grads:
+    print(grad)
+for inp in inps:
+    inp.requires_grad = True
+print()
+f(*inps).backward()
+for inp in inps:
+    print(inp.grad)
