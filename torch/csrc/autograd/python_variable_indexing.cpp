@@ -92,7 +92,7 @@ static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value
   if (THPVariable_Check(value)) {
     return THPVariable_Unpack(value);
   }
-  at::AutoNonVariableTypeMode guard;  // TODO: remove
+  at::AutoDispatchBelowAutograd guard;  // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     return at::indexing::scalarToTensor(Scalar(THPUtils_unpackLong(value)), options, device);
