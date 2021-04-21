@@ -2,22 +2,12 @@ import torch
 import copy
 from torch.fx import GraphModule  # type: ignore
 from torch.fx.graph import Graph
-from typing import Union, Dict, Any, List
+from typing import Union, Dict, Any, List, Set
 
-class ObservedGraphModule(GraphModule):
-
-    def get_preserved_attr_names(self) -> List[str]:
-        return ['_activation_post_process_map',
-                '_activation_post_process_indexes',
-                '_patterns',
-                '_qconfig_map',
-                '_prepare_custom_config_dict',
-                '_node_name_to_scope']
-
-    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
-        preserved_attrs = dict()
-        for attr in self.get_preserved_attr_names():
-            preserved_attrs[attr] = getattr(root, attr)
+class FusedGraphModule(GraphModule):
+    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
+        self.preserved_attr_names = preserved_attr_names
+        preserved_attrs = {attr: getattr(root, attr) for attr in self.preserved_attr_names if hasattr(root, attr)}
         super().__init__(root, graph)
         for attr in preserved_attrs:
             setattr(self, attr, preserved_attrs[attr])
@@ -28,22 +18,45 @@ class ObservedGraphModule(GraphModule):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return ObservedGraphModule(fake_mod, self.graph)
+        return FusedGraphModule(fake_mod, self.graph, self.preserved_attr_names)
+
+class ObservedGraphModule(GraphModule):
+
+    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
+        self.preserved_attr_names = set([
+            '_activation_post_process_map',
+            '_activation_post_process_indexes',
+            '_patterns',
+            '_qconfig_map',
+            '_prepare_custom_config_dict',
+            '_node_name_to_scope']).union(preserved_attr_names)
+        preserved_attrs = {attr: getattr(root, attr) for attr in self.preserved_attr_names if hasattr(root, attr)}
+        super().__init__(root, graph)
+        for attr in preserved_attrs:
+            setattr(self, attr, preserved_attrs[attr])
+
+    # GraphModule does not copy attributes which are not in the __dict__
+    # of vanilla nn.Module.  So, we override __deepcopy__ in order
+    # to copy the quantization specific attributes correctly.
+    def __deepcopy__(self, memo):
+        fake_mod = torch.nn.Module()
+        fake_mod.__dict__ = copy.deepcopy(self.__dict__)
+        return ObservedGraphModule(fake_mod, self.graph, self.preserved_attr_names)
 
 def is_observed_module(module: Any) -> bool:
     return isinstance(module, ObservedGraphModule)
 
 class ObservedStandaloneGraphModule(ObservedGraphModule):
-    def get_preserved_attr_names(self) -> List[str] :
-        return super().get_preserved_attr_names() + [
+    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
+        preserved_attr_names = preserved_attr_names.union(set([
             "_standalone_module_input_quantized_idxs",
-            "_standalone_module_output_quantized_idxs"
-        ]
+            "_standalone_module_output_quantized_idxs"]))
+        super().__init__(root, graph, preserved_attr_names)
 
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return ObservedStandaloneGraphModule(fake_mod, self.graph)
+        return ObservedStandaloneGraphModule(fake_mod, self.graph, self.preserved_attr_names)
 
 def is_observed_standalone_module(module: Any) -> bool:
     return isinstance(module, ObservedStandaloneGraphModule)
@@ -62,8 +75,12 @@ class QuantizedGraphModule(GraphModule):
     so that we can serialize and deserialize quantized graph module with
     torch.save(m.state_dict()) and m.load_state_dict(state_dict)
     """
-    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
+    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
+        self.preserved_attr_names = preserved_attr_names
+        preserved_attrs = {attr: getattr(root, attr) for attr in self.preserved_attr_names if hasattr(root, attr)}
         super().__init__(root, graph)
+        for attr in preserved_attrs:
+            setattr(self, attr, preserved_attrs[attr])
         self._register_state_dict_hook(_save_packed_weight)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
@@ -79,3 +96,9 @@ class QuantizedGraphModule(GraphModule):
             state_dict.pop(attr_name)
 
         super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+
+
+    def __deepcopy__(self, memo):
+        fake_mod = torch.nn.Module()
+        fake_mod.__dict__ = copy.deepcopy(self.__dict__)
+        return ObservedStandaloneGraphModule(fake_mod, self.graph, self.preserved_attr_names)

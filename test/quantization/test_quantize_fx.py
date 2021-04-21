@@ -2155,6 +2155,25 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(dequant, 1)
         self.assertEqual(quant, 1)
 
+    def test_deepcopy_preserve_attributes(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = 3
+
+            def forward(self, x):
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig}, prepare_custom_config_dict={"preserved_attributes": ["attr"]})
+        self.assertTrue(hasattr(m, "attr"))
+        m2 = copy.deepcopy(m)
+        self.assertTrue(hasattr(m2, "attr"))
+        m = convert_fx(m, convert_custom_config_dict={"preserved_attributes": ["attr"]})
+        self.assertTrue(hasattr(m, "attr"))
+        m2 = copy.deepcopy(m)
+        self.assertTrue(hasattr(m2, "attr"))
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
