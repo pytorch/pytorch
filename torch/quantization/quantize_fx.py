@@ -8,7 +8,7 @@ from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule
 from torch.nn.intrinsic import _FusedModule
-from typing import Dict, Any, List, Callable, Tuple, Optional
+from typing import Dict, Any, List, Callable, Tuple, Optional, Set
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
     if not isinstance(model, GraphModule):
@@ -235,8 +235,10 @@ def fuse_fx(model: torch.nn.Module,
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     assert not model.training, 'fuse_fx only works on models in eval mode'
-    preserved_attributes = set(fuse_custom_config_dict.get("preserved_attributes", []))
     graph_module = torch.fx.symbolic_trace(model)  # type: ignore
+    preservd_attributes: Set[str] = set()
+    if fuse_custom_config_dict:
+        preserved_attributes = set(fuse_custom_config_dict.get("preserved_attributes", []))
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
     return _fuse_fx(graph_module, fuse_custom_config_dict)
