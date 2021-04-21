@@ -100,7 +100,6 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9), sparse.values())
 
-    @onlyCPU
     @dtypes(torch.double)
     def test_dense_convert(self, device, dtype):
         size = (5, 5)

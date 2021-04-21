@@ -51,15 +51,18 @@ Tensor sparse_csr_tensor(
       options.layout() == kSparseCsr,
       "expected sparse CSR layout, but got layout ",
       options.layout());
-
-  AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
-    auto crow_indices_accessor = crow_indices.accessor<index_t, 1>();
-    TORCH_CHECK(
-        crow_indices_accessor[crow_indices.numel() - 1] <= col_indices.numel(),
-        "last value of crow_indices should be less than length of col_indices.");
-    TORCH_CHECK(
-        crow_indices_accessor[0] == 0, "0th value of crow_indices must be 0.");
-  });
+  if (crow_indices.is_cpu()) {
+    AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
+      auto crow_indices_accessor = crow_indices.accessor<index_t, 1>();
+      TORCH_CHECK(
+          crow_indices_accessor[crow_indices.numel() - 1] <= col_indices.numel(),
+          "last value of crow_indices should be less than length of col_indices.");
+      TORCH_CHECK(
+          crow_indices_accessor[0] == 0, "0th value of crow_indices must be 0.");
+    });
+  } else {
+    //@aocsa, TODO: cuda case
+  }
 
   TORCH_CHECK(
       crow_indices.dim() == 1,
@@ -81,8 +84,7 @@ Tensor sparse_csr_tensor(
 
   SparseCsrTensor self = new_csr_tensor(options);
   get_sparse_csr_impl(self)->resize_and_clear_(values.numel(), size);
-  get_sparse_csr_impl(self)->set_member_tensors(
-      crow_indices, col_indices, values);
+  get_sparse_csr_impl(self)->set_member_tensors(crow_indices, col_indices, values);
   return self;
 }
 
@@ -96,18 +98,18 @@ Tensor sparse_csr_tensor(
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
   TORCH_CHECK(
       options.layout() == kSparseCsr,
       "expected sparse CSR layout, but got layout ",
       options.layout());
   TORCH_CHECK(crow_indices.numel() >= 1, "expected crow_indices.numel() >= 1, but got ",
               crow_indices.numel());
-  std::array<int64_t, 2> size;
 
+  std::array<int64_t, 2> size;
+  auto host_col_indices = crow_indices.is_cpu() ? col_indices : col_indices.to(kCPU);
   if (col_indices.numel() > 0) {
     size[0] = crow_indices.numel() - 1;
-    Tensor max_col_indices = std::get<0>(col_indices.max(0, false));
+    Tensor max_col_indices = std::get<0>(host_col_indices.max(0, false));
     size[1] = *max_col_indices.data_ptr<int64_t>() + 1;
   } else {
     size[0] = 0;
