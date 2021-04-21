@@ -177,7 +177,7 @@ class OpInfo(object):
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
                  variant_test_name='',  # additional string to include in the test name
                  supports_autograd=True,  # support for autograd
-                 check_gradgrad=True, # support second order gradients
+                 check_gradgrad=True,  # support second order gradients
                  supports_inplace_autograd=None,  # whether the operation supports inplace autograd
                                                   # defaults to supports_autograd's value
                  supports_complex_autograd=None,  # whether the operation supports complex autograd
@@ -923,7 +923,6 @@ def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
                     args=(make_tensor(t2_size, device, dtype, requires_grad=requires_grad, noncontiguous=False), p, cm)))
 
     return samples
-
 
 def sample_inputs_comparison_ops(self, device, dtype, requires_grad, **kwargs):
     test_cases = (
@@ -3327,8 +3326,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            check_gradgrad=False,
            skips=(
-                # jit consistency always checks gradgrad
-                SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cpu'),),
+               # jit consistency always checks gradgrad
+               SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda'),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cpu'),),
            sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
