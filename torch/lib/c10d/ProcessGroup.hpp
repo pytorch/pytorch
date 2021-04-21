@@ -20,7 +20,7 @@
 
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 constexpr auto kProcessGroupDefaultTimeout =
-    std::chrono::milliseconds(10 * 1000);
+    std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
 
