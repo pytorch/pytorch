@@ -31,15 +31,23 @@ class DynamicLayerStackHolder : public c10::DebugInfoBase {
 thread_local std::shared_ptr<DynamicLayerStackHolder> kDynamicLayerStack;
 
 static std::vector<DynamicLayer>& dynamicLayerStackAccessor() {
-  if (kDynamicLayerStack == nullptr) {
-    kDynamicLayerStack = std::make_shared<DynamicLayerStackHolder>();
-    c10::ThreadLocalDebugInfo::_push(
-        // TODO: this isn't a PRODUCER_INFO, but there's nothing else we can use
-        c10::DebugInfoKind::PRODUCER_INFO,
-        kDynamicLayerStack);
+  if (kDynamicLayerStack != nullptr) {
+    // TODO: can figure out how to memoize this. std::call_once with thread_local?
+    return kDynamicLayerStack->dynamicLayerStack;
   }
+  if (ThreadLocalDebugInfo::current() != nullptr) {
+    // TODO: this is going to break if someone else uses PRODUCER_INFO
+    kDynamicLayerStack = std::static_pointer_cast<DynamicLayerStackHolder>(
+        ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PRODUCER_INFO));
+    TORCH_INTERNAL_ASSERT(kDynamicLayerStack != nullptr);
+    return kDynamicLayerStack->dynamicLayerStack;
+  }
+  kDynamicLayerStack = std::make_shared<DynamicLayerStackHolder>();
+  c10::ThreadLocalDebugInfo::_push(
+      // TODO: this isn't a PRODUCER_INFO, but there's nothing else we can use
+      c10::DebugInfoKind::PRODUCER_INFO,
+      kDynamicLayerStack);
   TORCH_INTERNAL_ASSERT(kDynamicLayerStack != nullptr);
-  // TODO: can figure out how to memoize this. std::call_once with thread_local?
   return kDynamicLayerStack->dynamicLayerStack;
 }
 
@@ -111,17 +119,17 @@ DynamicLayer popDynamicLayerAndDeleteMetadata() {
   auto level = result.layerId();
 
   // TODO: is this lock safe? No one else should be writing to the same bucket
-  if (c10::show_dispatch_trace_enabled()) {
-    std::cout << "deleting metadata" << std::endl;
-  }
+  // if (c10::show_dispatch_trace_enabled()) {
+  //   std::cout << "deleting metadata" << std::endl;
+  // }
   auto& data = getGlobalDynmetaData();
   auto it = data.find(level);
   if (it == data.end()) {
     return result;
   }
-  if (c10::show_dispatch_trace_enabled()) {
-    std::cout << "deleted metadata for level " << level << std::endl;
-  }
+  // if (c10::show_dispatch_trace_enabled()) {
+  //   std::cout << "deleted metadata for level " << level << std::endl;
+  // }
   // invalidate the thing
   *(it->second) = false;
   data.erase(level);
@@ -215,9 +223,9 @@ static void sanityCheckStack(torch::jit::Stack* stack) {
 
 void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
-  if (c10::show_dispatch_trace_enabled()) {
-    std::cout << "DLS size: " << dynamicLayerStack.size() << std::endl;
-  }
+  // if (c10::show_dispatch_trace_enabled()) {
+  //   std::cout << "DLS size: " << dynamicLayerStack.size() << std::endl;
+  // }
   if (dynamicLayerStack.size() == 0) {
     sanityCheckStack(stack);
     c10::impl::ExcludeDispatchKeyGuard guard(all_dynlayer_keyset);
@@ -276,11 +284,10 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
     if (!maybe_tensor_wrapper) {
       return tensor;
     }
-    if (maybe_tensor_wrapper->level().value() == cur_level) {
+    auto tensor_wrapper_level = maybe_tensor_wrapper->level().value();
+    TORCH_INTERNAL_ASSERT(tensor_wrapper_level <= cur_level);
+    if (tensor_wrapper_level == cur_level) {
       return maybe_tensor_wrapper->value();
-    }
-    if (c10::show_dispatch_trace_enabled()) {
-      std::cout << "unwrap " << cur_level << std::endl;
     }
     return tensor;
   };
@@ -291,9 +298,9 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
     if (cur_level == 1) {
       return tensor;
     }
-    if (c10::show_dispatch_trace_enabled()) {
-      std::cout << "wrap " << cur_level << std::endl;
-    }
+    // if (c10::show_dispatch_trace_enabled()) {
+    //   std::cout << "wrap " << cur_level << std::endl;
+    // }
     return makeTensorWrapper(tensor, cur_level);
   };
 
