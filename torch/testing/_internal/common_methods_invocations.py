@@ -4583,14 +4583,15 @@ op_db: List[OpInfo] = [
            ],),
     OpInfo('einsum',
            # we need this lambda because SampleInput expects tensor input as the first argument
+           # TODO(@heitorschueroff) update SampleInput to handle such cases
            op=lambda tensors, equation: torch.einsum(equation, tensors),
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
            supports_out=False,
            sample_inputs_func=sample_inputs_einsum,
            # test does not work with passing lambda for op
-           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-                  SkipInfo('TestCommon', 'test_fx'))),
+           # there's a test `test_einsum` in `test_jit.py` to handle this case
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
