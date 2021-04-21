@@ -5734,6 +5734,16 @@ def exclude_tensor_method(name, test_name):
         'test_where_scalar',
         'test_where_scalar_broadcast_mask',
         'test_where_scalar_broadcast_non_mask',
+        'test_var_mean_keepdim_dim_1d',
+        'test_var_mean_keepdim_dim',
+        'test_var_mean_dim_1d',
+        'test_var_mean_dim',
+        'test_var_mean',
+        'test_std_mean_keepdim_dim_1d',
+        'test_std_mean_keepdim_dim',
+        'test_std_mean_dim_1d',
+        'test_std_mean_dim',
+        'test_std_mean',
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {
