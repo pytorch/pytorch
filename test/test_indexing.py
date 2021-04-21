@@ -737,9 +737,27 @@ class TestIndexing(TestCase):
         self.assertEqual(a[0], 11)
         self.assertEqual(a[1], 12)
         self.assertEqual(a[2], 1)
-        self.assertEqual(a[-100], 1)
+        self.assertEqual(a[-3], 1)
         self.assertEqual(a[-2], 13)
         self.assertEqual(a[-1], 14)
+
+        a = torch.ones((2, N), dtype=dt, device=device)
+        indices0 = torch.LongTensor([0, 1, 0, -1])
+        indices1 = torch.LongTensor([0, 1, -2, -1])
+        values = torch.tensor([10, 11, 12, 13], dtype=dt, device=device)
+
+        a.index_put_((indices0, indices1), values, accumulate=True)
+
+        self.assertEqual(a[0, 0], 11)
+        self.assertEqual(a[0, 1], 1)
+        self.assertEqual(a[1, 0], 1)
+        self.assertEqual(a[1, 1], 12)
+        self.assertEqual(a[:, 2], torch.ones(2, dtype=torch.int8))
+        self.assertEqual(a[:, -3], torch.ones(2, dtype=torch.int8))
+        self.assertEqual(a[0, -2], 13)
+        self.assertEqual(a[1, -2], 1)
+        self.assertEqual(a[-1, -1], 14)
+        self.assertEqual(a[0, -1], 1)
 
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)

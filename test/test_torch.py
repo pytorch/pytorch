@@ -3740,6 +3740,8 @@ class TestTorchDeviceType(TestCase):
                     src.grad.data.zero_()
                     res = torch.gather(src, dim, idx)
                     res.backward(weight)
+                    print(src.grad, grad)
+                    print((src.grad - grad).abs().max())
                     self.assertEqual(src.grad, grad, atol=0, rtol=0)
             else:
                 expected = torch.zeros_like(src, device=device)
