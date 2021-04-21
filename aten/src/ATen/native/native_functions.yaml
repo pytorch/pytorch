@@ -4014,7 +4014,6 @@
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
 
-# Alias for clone
 - func: positive(Tensor self) -> Tensor
   variants: function, method
 

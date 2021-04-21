@@ -6688,23 +6688,22 @@ add_docstr(torch.positive,
            r"""
 positive(input) -> Tensor
 
-Returns a new tensor with the positive of the elements of :attr:`input`.
+Returns :attr:`input`.
 
 .. math::
-    \text{out} = +1 \times \text{input}
+    \text{out} = \text{input}
 
-``torch.positive(input)`` is equivalent to ``torch.clone(input)``.
-This function does not raise an error for boolean inputs.
+:attr:`input` should have a numeric data type.
 """ + r"""
 Args:
     {input}
 
 Example::
 
-    >>> a = torch.randn(5)
-    >>> a
+    >>> t = torch.randn(5)
+    >>> t
     tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
-    >>> torch.positive(a)
+    >>> torch.positive(t)
     tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
 """.format(**common_args))
 
