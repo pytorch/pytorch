@@ -229,11 +229,11 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
       {
       // Sort the inputs into sorted with the corresponding indices
       auto range = at::arange(num_indices, linearIndex.options());
-      int64_t nbits = std::min<int64_t>(1, std::ceil(std::log2(largestIndex(self) / sliceSize)));
+      int64_t nbits = std::max<int64_t>(0, std::ceil(std::log2(double(largestIndex(self)) / sliceSize))) + 1;
       cuda::cub::sort_pairs(
         linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
         range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
-        num_indices, false/*, 0, nbits*/);
+        num_indices, false, 0, nbits);
       }
 
       TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());

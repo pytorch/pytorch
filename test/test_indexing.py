@@ -729,8 +729,8 @@ class TestIndexing(TestCase):
         N = (1 << 31) + 5
         dt = torch.int8
         a = torch.ones(N, dtype=dt, device=device)
-        indices = torch.LongTensor([0, 1, -2, -1])
-        values = torch.tensor([10, 11, 12, 13], dtype=dt, device=device)
+        indices = torch.LongTensor([-2, 0, -2, -1, 0, -1, 1])
+        values = torch.tensor([6, 5, 6, 6, 5, 7, 11], dtype=dt, device=device)
 
         a.index_put_((indices, ), values, accumulate=True)
 
@@ -742,9 +742,9 @@ class TestIndexing(TestCase):
         self.assertEqual(a[-1], 14)
 
         a = torch.ones((2, N), dtype=dt, device=device)
-        indices0 = torch.LongTensor([0, 1, 0, -1])
-        indices1 = torch.LongTensor([0, 1, -2, -1])
-        values = torch.tensor([10, 11, 12, 13], dtype=dt, device=device)
+        indices0 = torch.LongTensor([0, -1, 0, 1])
+        indices1 = torch.LongTensor([-2, -1, 0, 1])
+        values = torch.tensor([12, 13, 10, 11], dtype=dt, device=device)
 
         a.index_put_((indices0, indices1), values, accumulate=True)
 
@@ -758,6 +758,25 @@ class TestIndexing(TestCase):
         self.assertEqual(a[1, -2], 1)
         self.assertEqual(a[-1, -1], 14)
         self.assertEqual(a[0, -1], 1)
+
+    def test_index_put_accumulate_duplicate_indices(self, device):
+        for i in range(1, 512):
+            # generate indices by random walk, this will create indices with
+            # lots of duplicates
+            delta = torch.empty(i, dtype=torch.double, device=device).uniform_(-1, 1)
+            indices = delta.cumsum(0).long()
+
+            input = torch.randn(indices.abs().max() + 1, device=device)
+            values = torch.randn(indices.size(0), device=device)
+            output = input.index_put((indices,), values, accumulate=True)
+
+            input_list = input.tolist()
+            indices_list = indices.tolist()
+            values_list = values.tolist()
+            for i, v in zip(indices_list, values_list):
+                input_list[i] += v
+
+            self.assertEqual(output, input_list)
 
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
