@@ -28,7 +28,6 @@ not limited to:
 - Make classes of operators share the same shape function (e.g. pointwise,
 broadcast two inputs)
 - Refactor APIs
-- Only iteratively optimize shape function while a change has been made
 - Add decent coverage of common ops
 - Add shape analysis pass on Graph that handles Ifs and Loops
 - Allow concurrent reads to the operator map
@@ -103,22 +102,24 @@ struct SymbolicShapeAnalyzer {
   }
 
   c10::SymbolicShape run() {
-    // TODO: only run while the last iteration has made a change
-    size_t num_optimization_iters = 6;
-    for (size_t i = 0; i < num_optimization_iters; i++) {
+    bool made_change = true;
+    while (made_change) {
+      made_change = false;
       // XXX: we cannot substitute symbolic dims before passes like constant
       // propagation, or we might inadvertently use them in arithmetic or
       // other operators
       substituteInputTensorProperties(/*substitute_symbolic_dims*/ false);
-      LowerSimpleTuples(graph_);
-      RemoveListMutation(graph_);
-      UnrollConstantLoops(graph_);
-      ConstantPropagation(graph_);
-      PeepholeOptimizeNonTensor(graph_);
-      PeepholeOptimizeListIdioms(graph_, /*refine_list_len*/ true);
-      RefineIntegerValues(graph_);
-      ConstantPropagation(graph_);
-      EliminateCommonSubexpression(graph_);
+      // TODO: lower simple tuples ?
+      made_change |= RemoveListMutation(graph_);
+      made_change |= UnrollConstantLoops(graph_);
+      made_change |= ConstantPropagation(graph_);
+      made_change |= PeepholeOptimizeNonTensor(graph_);
+      made_change |=
+          PeepholeOptimizeListIdioms(graph_, /*refine_list_len*/ true);
+      made_change |= RefineIntegerValues(graph_);
+      made_change |= ConstantPropagation(graph_);
+      made_change |= EliminateCommonSubexpression(graph_);
+      EliminateDeadCode(graph_);
     }
     substituteInputTensorProperties(/*substitute_symbolic_dims*/ true);
     // XXX: do not run any passes after we have substituted in symbolic
