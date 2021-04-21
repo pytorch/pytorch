@@ -31,7 +31,8 @@ MobileDebugTable::MobileDebugTable(
         // byte_offset, debug_handle (=source range tag), source range
         if (tup_elems.size() == 3) {
           int64_t debug_handle = tup_elems[kSourceRangeTagIndex].toInt();
-          auto source_range = deserializer.deserialize(tup_elems[kSourceRangeIndex]);
+          auto source_range =
+              deserializer.deserialize(tup_elems[kSourceRangeIndex]);
           source_range_map_.emplace(debug_handle, std::move(source_range));
         }
       }
