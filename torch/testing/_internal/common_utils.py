@@ -1049,13 +1049,13 @@ class TestCase(expecttest.TestCase):
 
         set_rng_seed(SEED)
 
-    def genSparseCSRTensor(self, size, nnz, device, dtype, index_dtype):
+    def genSparseCSRTensor(self, size, nnz, device, *, dtype, index_dtype):
         sparse_dim = 2
         assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
 
         def random_sparse(m, n, nnz_per_row):
-            rows = torch.arange(m, dtype=index_dtype).repeat(nnz_per_row)
-            cols = torch.randint(0, n, size=[nnz_per_row * m], dtype=index_dtype)
+            rows = torch.arange(m, dtype=index_dtype, device=device).repeat(nnz_per_row)
+            cols = torch.randint(0, n, size=[nnz_per_row * m], dtype=index_dtype, device=device)
             return rows, cols
 
         def coo_to_csr(indices, dim):
@@ -1509,10 +1509,10 @@ class TestCase(expecttest.TestCase):
                 torch.set_warn_always(prev)
             if len(ws) == 0:
                 self.fail('no warning caught')
-            for w in ws:
-                self.assertTrue(type(w.message) is category)
-                self.assertTrue(re.match(pattern, str(w.message)),
-                                f'{pattern}, {w.message}')
+            self.assertTrue(any([type(w.message) is category for w in ws]))
+            self.assertTrue(
+                any([re.match(pattern, str(w.message)) for w in ws]),
+                f'{pattern}, {[w.message for w in ws if type(w.message) is category]}')
 
     def assertExpected(self, s, subname=None):
         r"""
