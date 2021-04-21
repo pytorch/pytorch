@@ -351,7 +351,7 @@ def generate_tests(test_cls, constructor_arg_db):
         torch.nn.quantized._ConvNd,  # base class in __all__ for some reason
         # TODO: Remove this from this list once the ASan issue is fixed.
         # See https://github.com/pytorch/pytorch/issues/55396
-        torch.nn.EmbeddingBag
+        torch.nn.quantized.EmbeddingBag
     }
     # no need to support kwargs for these modules even though
     # they have parameters / buffers because they are passed in
