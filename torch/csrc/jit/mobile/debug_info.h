@@ -31,7 +31,7 @@ class MobileDebugTable {
       const std::string& top_module_type_name = "ModuleTypeUnknown") const;
 
  private:
-  ska::flat_hash_map<int64_t, DelegateDebugInfoType> callstack_ptr_map_;
+  ska::flat_hash_map<int64_t, DebugInfoPair> callstack_ptr_map_;
 };
 
 } // namespace jit
