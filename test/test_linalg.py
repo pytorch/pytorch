@@ -3816,7 +3816,7 @@ class TestLinalg(TestCase):
 
         if self.device_type != 'cpu':
             x_cpu = x.expand(3).cpu()
-            check(x_cpu, y.to(x.dtype), 'Expected all tensors to be on the same device')
+            check(x_cpu, y.to(x.dtype), 'tensors to be on the same device')
 
     @onlyOnCPUAndCUDA
     def test_vdot_invalid_args(self, device):
@@ -5129,13 +5129,13 @@ class TestLinalg(TestCase):
             # device of out and input should match
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty_like(reflectors).to(wrong_device)
-            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "to be on the same device"):
                 torch.linalg.householder_product(reflectors, tau, out=out)
 
             # device of tau and input should match
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             tau = tau.to(wrong_device)
-            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "to be on the same device"):
                 torch.linalg.householder_product(reflectors, tau)
 
     @precisionOverride({torch.complex64: 5e-6})
@@ -6146,24 +6146,21 @@ else:
 
             b = torch.randn(3, 1, device=b_device)
             A = torch.randn(3, 3, device=A_device)
+            err_str = "to be on the same device"
 
-            # solve and cholesky_solve goes through generic backend dispatch and hit kernel specific device check first
-            # triangular_solve goes through specific backend dispatch (CPU/CUDA) and hit auto-generated device check first
-            generic_backend_dispatch_err_str = "Expected b and A to be on the same device"
-            specific_backend_dispatch_err_str = "Expected all tensors to be on the same device"
-            with self.assertRaisesRegex(RuntimeError, generic_backend_dispatch_err_str):
+            with self.assertRaisesRegex(RuntimeError, err_str):
                 torch.solve(b, A)
 
-            with self.assertRaisesRegex(RuntimeError, generic_backend_dispatch_err_str):
+            with self.assertRaisesRegex(RuntimeError, err_str):
                 torch.cholesky_solve(b, A)
 
-            with self.assertRaisesRegex(RuntimeError, specific_backend_dispatch_err_str):
+            with self.assertRaisesRegex(RuntimeError, err_str):
                 torch.triangular_solve(b, A)
 
             # b and A have to be modified to match accepted inputs sizes for lu_solve
             b = b.unsqueeze(0)
             A = A.unsqueeze(0)
-            with self.assertRaisesRegex(RuntimeError, generic_backend_dispatch_err_str):
+            with self.assertRaisesRegex(RuntimeError, err_str):
                 torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=A_device).int())
 
             # This checks if a suitable error message is thrown
@@ -6953,7 +6950,7 @@ else:
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty(0, device=wrong_device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "to be on the same device"):
                 torch.cholesky_inverse(a, out=out)
 
         # cholesky_inverse raises an error for invalid inputs on CPU

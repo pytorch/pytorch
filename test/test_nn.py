@@ -7207,7 +7207,6 @@ class TestNN(NNTestCase):
                 model(input.to('cuda:0'))
 
             # input and hiddens are not at the same device
-            # TODO: check why the device check is not cuaght at dispatch time
             with self.assertRaisesRegex(RuntimeError,
                                         r"Input and hidden tensors are not at the same device"):
                 if mode == 'LSTM':
