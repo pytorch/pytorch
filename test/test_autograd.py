@@ -776,7 +776,7 @@ class TestAutograd(TestCase):
         z.sum().backward()
 
         self.assertEqual(counter[0], 1, msg='bw_hook not called')
-        self.assertEqual(x.grad, torch.ones(5, 5, dtype=torch.float) * 2, atol=0.01, rtol=0)
+        self.assertEqual(x.grad, torch.ones(5, 5, dtype=torch.float) * 2, atol=1e-4, rtol=0)
 
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
@@ -1016,17 +1016,17 @@ class TestAutograd(TestCase):
         reset_grad()
         torch.autograd.backward(fn(), gradient, inputs=[x])
         self.assertEqual(x.grad, x_grad_expected)
-        self.assertEqual(y.grad, torch.zeros(2, 2, dtype=torch.double))
+        self.assertEqual(y.grad, torch.zeros(2, 2), exact_dtype=False)
 
         reset_grad()
         torch.autograd.backward(fn(), gradient, inputs=[y])
         self.assertEqual(y.grad, y_grad_expected)
-        self.assertEqual(x.grad, torch.zeros(2, 2, dtype=torch.double))
+        self.assertEqual(x.grad, torch.zeros(2, 2), exact_dtype=False)
 
         reset_grad()
         torch.autograd.backward(fn(), gradient, inputs=y)
         self.assertEqual(y.grad, y_grad_expected)
-        self.assertEqual(x.grad, torch.zeros(2, 2, dtype=torch.double))
+        self.assertEqual(x.grad, torch.zeros(2, 2), exact_dtype=False)
 
         reset_grad()
         self.assertRaisesRegex(RuntimeError, 'cannot be empty',
