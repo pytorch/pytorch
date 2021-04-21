@@ -137,9 +137,10 @@ class TCPStore(Store):
         self,
         host_name: str,
         port: int,
-        world_size: int,
-        is_master: bool,
-        timeout: timedelta,
+        world_size: int = ...,
+        is_master: bool = ...,
+        timeout: timedelta = ...,
+        wait_for_workers: bool = ...
     ): ...
 
 class PrefixStore(Store):
@@ -375,9 +376,6 @@ def _broadcast_coalesced(
     src: int,
 ): ...
 def _test_python_store(store: Store): ...
-def _verify_replicas_within_process(
-    replicas: List[List[Tensor]], expect_sparse_gradient: List[List[bool]]
-): ...
 def _verify_model_across_ranks(
     process_group: ProcessGroup, replicas: List[List[Tensor]]
 ): ...

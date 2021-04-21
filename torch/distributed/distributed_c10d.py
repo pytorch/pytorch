@@ -1463,8 +1463,8 @@ def _object_to_tensor(obj):
     f = io.BytesIO()
     _pickler(f).dump(obj)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
-    byte_tensor = torch.ByteTensor(byte_storage)
-    local_size = torch.LongTensor([byte_tensor.numel()])
+    byte_tensor = torch.tensor(byte_storage, dtype=torch.uint8)
+    local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long)
     return byte_tensor, local_size
 
 
@@ -1556,7 +1556,9 @@ def all_gather_object(object_list, obj, group=None):
     all_gather(output_tensors, input_tensor, group=group)
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.ByteTensor)  # type:ignore[call-overload]
+        tensor = tensor.type(torch.uint8)  # type:ignore[call-overload]
+        if tensor.device != torch.device("cpu"):
+            tensor = tensor.cpu()
         tensor_size = object_size_list[i]
         object_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1656,7 +1658,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     if my_rank != dst:
         return
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.ByteTensor)  # type: ignore[call-overload]
+        tensor = tensor.type(torch.uint8)  # type: ignore[call-overload]
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1718,7 +1720,7 @@ def broadcast_object_list(object_list, src=0, group=None):
         tensor_list, size_list = zip(*[_object_to_tensor(obj) for obj in object_list])
         object_sizes_tensor = torch.cat(size_list)
     else:
-        object_sizes_tensor = torch.LongTensor(len(object_list))
+        object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long)
 
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
@@ -1738,7 +1740,10 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank == src:
         object_tensor = torch.cat(tensor_list)
     else:
-        object_tensor = torch.ByteTensor(torch.sum(object_sizes_tensor).item())
+        object_tensor = torch.empty(
+            torch.sum(object_sizes_tensor).int().item(),  # type: ignore[arg-type]
+            dtype=torch.uint8
+        )
 
     if is_nccl_backend:
         object_tensor = object_tensor.to(current_device)
@@ -1748,7 +1753,9 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank != src:
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
-            obj_view = obj_view.type(torch.ByteTensor)  # type: ignore[call-overload]
+            obj_view = obj_view.type(torch.uint8)  # type: ignore[call-overload]
+            if obj_view.device != torch.device("cpu"):
+                obj_view = obj_view.cpu()
             offset += obj_size
             object_list[i] = _tensor_to_object(obj_view, obj_size)
 
@@ -1821,7 +1828,6 @@ def scatter_object_list(
         )
         tensor_list, tensor_sizes = list(tensor_list), list(tensor_sizes)
 
-    obj_tensor_size = torch.LongTensor([0])
     # Src rank broadcasts the maximum tensor size. This is because all ranks are
     # expected to call into scatter() with equal-sized tensors.
     if my_rank == src:
@@ -1829,11 +1835,11 @@ def scatter_object_list(
         for tensor in tensor_list:
             tensor.resize_(max_tensor_size)
     else:
-        max_tensor_size = torch.LongTensor([0])
+        max_tensor_size = torch.tensor([0], dtype=torch.long)
     broadcast(max_tensor_size, src=src, group=group)
 
     # Scatter actual serialized objects
-    output_tensor = torch.ByteTensor(max_tensor_size.item())
+    output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8)
     scatter(
         output_tensor,
         scatter_list=None if my_rank != src else tensor_list,
@@ -1842,6 +1848,7 @@ def scatter_object_list(
     )
 
     # Scatter per-object sizes to trim tensors when deserializing back to object
+    obj_tensor_size = torch.tensor([0], dtype=torch.long)
     scatter(
         obj_tensor_size,
         scatter_list=None if my_rank != src else tensor_sizes,
@@ -2487,9 +2494,11 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     barrier within that timeout. Specifically, for non-zero ranks, will block
     until a send/recv is processed from rank 0. Rank 0 will block until all send
     /recv from other ranks are processed, and will report failures for ranks
-    that failed to respond in time.
+    that failed to respond in time. Note that if one rank does not reach the
+    monitored_barrier (for example due to a hang), all other ranks would fail
+    in monitored_barrier.
 
-    This collective will block the process corresponding to rank 0 until the
+    This collective will block all processes/ranks in the group, until the
     whole group exits the function successfully, making it useful for debugging
     and synchronizing. However, it can have a performance impact and should only
     be used for debugging or scenarios that require full synhcronization points
@@ -2569,13 +2578,30 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
             set to all ranks. Default is ``None``.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
-            This is only applicable for the ``gloo`` backend.
+            This is applicable for the ``gloo`` backend. For ``nccl``, this is
+            applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
+            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1. When
+            ``NCCL_BLOCKING_WAIT`` is set, this is the duration for which the
+            process will block and wait for collectives to complete before
+            throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
+            this is the duration after which collectives will be aborted
+            asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
+            will provide errors to the user which can be caught and handled,
+            but due to its blocking nature, it has a performance overhead. On
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has very little
+            performance overhead, but crashes the process on errors. This is
+            done since CUDA execution is async and it is no longer safe to
+            continue executing user code since failed async NCCL operations
+            might result in subsequent CUDA operations running on corrupted
+            data. Only one of these two environment variables should be set.
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values are ``gloo`` and ``nccl``.
             By default uses the same backend as the global group. This field
             should be given as a lowercase string (e.g., ``"gloo"``), which can
             also be accessed via :class:`Backend` attributes (e.g.,
-            ``Backend.GLOO``).
+            ``Backend.GLOO``). If ``None`` is passed in, the backend
+            corresponding to the default process group will be used. Default is
+            ``None``.
         pg_options (ProcessGroupOptions, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e. for the ``nccl``

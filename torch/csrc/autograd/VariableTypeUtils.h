@@ -139,6 +139,13 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_differentiable,
         bool is_fw_differentiable, std::function<Tensor(const Tensor&)> view_func=nullptr,
         CreationMeta creation_meta=CreationMeta::DEFAULT, bool allow_tensor_metadata_change=true) {
+  // Note [View of inference tensor]
+  // For inference tensor this code can only be hit outside InferenceMode
+  // since InplaceOrView is in the default_included_set.
+  // If Inplace and View were separate dispatch keys we can just put Inplace
+  // in the default_included_set, so that view ops on inference tensor doesn't
+  // have to go through as_view even outside InferenceMode.
+  if (base.unsafeGetTensorImpl()->is_inference_tensor()) return tensor;
   if (!isForwardADEnabled()) {
     // Fast codepath for backward only code
     // It is useful as it avoids the creation of the temporary c10<optional> which makes
@@ -203,6 +210,8 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
 // See NOTE [ Autograd View Variables ] for details.
 inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& tensors, bool is_bw_differentiable,
                                    bool is_fw_differentiable, CreationMeta creation_meta=CreationMeta::DEFAULT) {
+  // See Note [View of inference tensor]
+  if (base.unsafeGetTensorImpl()->is_inference_tensor()) return tensors;
   c10::optional<ViewInfo> new_bw_info = c10::nullopt;
   c10::optional<ViewInfo> new_fw_info = c10::nullopt;
 

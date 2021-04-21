@@ -23,6 +23,15 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  # Used so that only cuda specific versions of tests are generated
+  # mainly used so that we're not spending extra cycles testing cpu
+  # devices on expensive gpu machines
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
+elif [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="xla"
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
@@ -106,7 +115,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
-if [ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
+# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
+# CIRCLE_PULL_REQUEST comes from CircleCI
+# GITHUB_HEAD_REF comes from Github Actions
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
+if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
 fi

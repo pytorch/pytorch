@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/InferenceMode.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <stdexcept>
 
 namespace torch {
 namespace jit {
@@ -511,6 +512,19 @@ StaticModule::StaticModule(
     : opts_(opts),
       graph_(std::move(graph_and_schema.first)),
       schema_(std::move(graph_and_schema.second)) {
+  // check opt flags
+  if (opts.optimize_graph_output_memory) {
+    if (!(opts_.optimize_memory && opts_.enable_out_variant)) {
+      throw std::runtime_error(
+          "When optimize_graph_output_memory is true, optimize_memory and enable_out_variant must be set to true");
+    }
+  }
+  if (opts_.optimize_memory) {
+    if (!opts_.enable_out_variant) {
+      throw std::runtime_error(
+          "When optimize_memory is true, enable_out_variant must be set to true");
+    }
+  }
   // map Value* to IValue (from inputs or prim::Constant) or null
   std::unordered_map<Value*, IValue*> value_to_ivalue;
   // map Value* to its SSA definition IR
@@ -580,9 +594,13 @@ StaticModule::StaticModule(
   external_values_ = lm.second;
   if (opts_.optimize_memory) {
     auto values = GetMemoryPlanningCandidates(graph_);
-    if (!opts_.enable_out_variant) {
-      values.first = {};
-    }
+    // Note (penguin): since it does not make sense to have optimize_memory
+    // enabled but enable_out_variant disabled, we check the flag dependence
+    // during initialization of StaticModule so that the following condition
+    // would not be true. This would make the code easier to understand
+    // if (!opts_.enable_out_variant) {
+    //   values.first = {};
+    // }
     value_to_same_storage_values_ =
         GenerateSameStorageValues(lm, values, alias_db);
   }
@@ -694,7 +712,7 @@ c10::IValue StaticRuntime::operator()(
   // autograd. Enabling this is a significant win on dispatcher
   // overhead because it saves a round of dispatch for at least some
   // functions, such as resize_ and resize_as_.
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  c10::InferenceMode mode;
 
   if (planner_) {
     planner_->allocate();
@@ -725,12 +743,17 @@ c10::IValue StaticRuntime::operator()(
   }
 
   if (static_module_.opts().cleanup_activations) {
+    // MemoryPlanner is created after the first invocation of `run()`. This is
+    // done intentionally because MemoryPlanner uses `TensorStorageImpl`
+    // object sizes of the previous `run()` for memory planning of subsequent
+    // runs
     if (!planner_) {
       planner_ = std::make_unique<MemoryPlanner>(
           this,
           static_module_.values_share_same_storage(),
           static_module_.external_values(),
-          static_module_.opts().enable_out_variant);
+          static_module_.opts().enable_out_variant,
+          static_module_.opts().optimize_graph_output_memory);
     }
     planner_->deallocate();
     // clean up owning refs of input tensors
@@ -839,9 +862,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
 
-  // See comment on above use of AutoNonVariableTypeMode for
+  // See comment on above use of InferenceMode for
   // explanation.
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  c10::InferenceMode mode;
 
   IndividualMetrics results;
   results.time_per_node.resize(nodes_.size(), 0);
@@ -892,7 +915,8 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
             this,
             static_module_.values_share_same_storage(),
             static_module_.external_values(),
-            static_module_.opts().enable_out_variant);
+            static_module_.opts().enable_out_variant,
+            static_module_.opts().optimize_graph_output_memory);
       }
       planner_->deallocate();
       // clean up owning refs of input tensors
@@ -969,7 +993,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
         // check for intermediates
         if (!ival->isNone()) {
           TORCH_CHECK(
-              ival->isTensor() || canOptimizeConstruct(pnode.node()),
+              ival->isTensor() || isOptimizableContainerType(pnode.node()),
               error_msg);
           if (ival->isTensor()) {
             const auto& t = ival->toTensor();
@@ -989,55 +1013,14 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   }
 }
 
-MemoryPlanner::MemoryPlanner(
-    StaticRuntime* runtime,
+static void assign_storage_to_managed_tensors(
+    const StaticRuntime* runtime,
+    const std::unordered_set<const Value*>& managed_tensor_values,
     const std::unordered_map<const Value*, std::vector<const Value*>>&
         value_to_same_storage_values,
-    const std::unordered_set<const Value*>& external_values,
-    bool out_variants) {
-  // collect register indices of outputs of ops with out variant
-  std::unordered_set<const Value*> managed_values;
-  std::unordered_set<IValue*> unmanaged_ivalues;
-  for (ProcessedNode& pnode : runtime->nodes()) {
-    if (canReuseInputsOutputs(pnode.node())) {
-      for (auto i = 0; i < pnode.outputs().size(); ++i) {
-        // Types are stored in the underlying TorchScript IR
-        const Value* out_v = pnode.node()->outputs()[i];
-        IValue& out = pnode.Output(i);
-        const auto& type = out_v->type();
-        if (out_variants && !external_values.count(out_v)) {
-          if (type->cast<TensorType>()) {
-            managed_values.insert(out_v);
-          } else if (canOptimizeConstruct(pnode.node())) {
-            // We "leak" containers of this type
-          } else {
-            unmanaged_ivalues.insert(&out);
-          }
-        } else {
-          unmanaged_ivalues.insert(&out);
-        }
-      }
-    } else {
-      for (auto i = 0; i < pnode.outputs().size(); ++i) {
-        unmanaged_ivalues.insert(&pnode.Output(i));
-      }
-    }
-  }
-
-  // remove model outputs from managed_values and unmanaged_ivalues
-  for (const Value* output : runtime->graph().outputs()) {
-    managed_values.erase(output);
-  }
-  for (IValue* output : runtime->outputs()) {
-    unmanaged_ivalues.erase(output);
-  }
-
-  // unmanaged_ivalues => unmanaged_ivalues_
-  for (IValue* out : unmanaged_ivalues) {
-    unmanaged_ivalues_.emplace_back(out);
-  }
-
-  // map Value to index to managed_storage_, where multiple values can
+    std::vector<std::pair<size_t, std::vector<c10::StorageImpl*>>>&
+        managed_storage) {
+  // map Value to index to managed_storage, where multiple values can
   // map to the same index (i.e., sharing the same storage)
   std::unordered_map<const Value*, size_t> value_to_storage_idx;
   // the StorageImpls of Tensor views should not be managed
@@ -1048,7 +1031,7 @@ MemoryPlanner::MemoryPlanner(
     for (auto i = 0; i < pnode.outputs().size(); ++i) {
       const auto& ival = pnode.outputs()[i];
       const auto* val = pnode.node()->outputs()[i];
-      if (managed_values.count(val)) {
+      if (managed_tensor_values.count(val)) {
         TORCH_CHECK(ival.isTensor());
         auto* impl = ival.toTensor().storage().unsafeGetStorageImpl();
 
@@ -1058,22 +1041,91 @@ MemoryPlanner::MemoryPlanner(
         }
 
         if (value_to_storage_idx.count(val)) {
-          managed_storage_[value_to_storage_idx.at(val)].second.emplace_back(
+          managed_storage[value_to_storage_idx.at(val)].second.emplace_back(
               impl);
         } else {
           auto p =
               std::make_pair<size_t, std::vector<c10::StorageImpl*>>(0, {impl});
-          managed_storage_.emplace_back(std::move(p));
+          managed_storage.emplace_back(std::move(p));
           // first of a group, update the value_to_storage_idx map with the
           // index
           if (value_to_same_storage_values.count(val)) {
+            auto storage_idx = managed_storage.size() - 1;
             for (const auto* v : value_to_same_storage_values.at(val)) {
-              value_to_storage_idx[v] = managed_storage_.size() - 1;
+              value_to_storage_idx[v] = storage_idx;
             }
           }
         }
       }
     }
+  }
+}
+
+MemoryPlanner::MemoryPlanner(
+    StaticRuntime* runtime,
+    const std::unordered_map<const Value*, std::vector<const Value*>>&
+        value_to_same_storage_values,
+    const std::unordered_set<const Value*>& external_values,
+    bool enable_out_variant,
+    bool manage_graph_output_memory) {
+  // collect register indices of outputs of ops with out variant
+  std::unordered_set<const Value*> managed_tensor_values;
+  std::unordered_set<const Value*> leaked_values;
+  if (enable_out_variant) {
+    for (ProcessedNode& pnode : runtime->nodes()) {
+      if (canReuseInputsOutputs(pnode.node())) {
+        for (auto i = 0; i < pnode.outputs().size(); ++i) {
+          const Value* out_v = pnode.node()->outputs()[i];
+          if (external_values.count(out_v)) {
+            continue;
+          }
+          // Types are stored in the underlying TorchScript IR
+          const auto& type = out_v->type();
+          if (type->cast<TensorType>()) {
+            managed_tensor_values.insert(out_v);
+          } else if (isOptimizableContainerType(pnode.node())) {
+            // We "leak" certain container types because their allocations take
+            // a long time
+            leaked_values.insert(out_v);
+          }
+        }
+      }
+    }
+  }
+
+  // collect unmanaged output ivalues
+  std::unordered_set<IValue*> unmanaged_ivalues;
+  for (ProcessedNode& pnode : runtime->nodes()) {
+    for (auto i = 0; i < pnode.outputs().size(); ++i) {
+      // Types are stored in the underlying TorchScript IR
+      const Value* out_v = pnode.node()->outputs()[i];
+      if (managed_tensor_values.count(out_v) || leaked_values.count(out_v)) {
+        continue;
+      }
+      IValue& out = pnode.Output(i);
+      unmanaged_ivalues.insert(&out);
+    }
+  }
+  // since runtime->outputs() escape from run(), remove them from
+  // managed_tensor_values and from unmanaged_ivalues
+  for (const Value* output : runtime->graph().outputs()) {
+    managed_tensor_values.erase(output);
+  }
+  for (IValue* output : runtime->outputs()) {
+    unmanaged_ivalues.erase(output);
+  }
+
+  // copy to unmanaged_ivalues_
+  for (IValue* out : unmanaged_ivalues) {
+    unmanaged_ivalues_.emplace_back(out);
+  }
+
+  if (enable_out_variant) {
+    ::torch::jit::assign_storage_to_managed_tensors(
+        runtime,
+        managed_tensor_values,
+        value_to_same_storage_values,
+        managed_tensor_storage_);
   }
 }
 
@@ -1099,7 +1151,7 @@ void MemoryPlanner::allocate() {
   uint8_t* start = static_cast<uint8_t*>(buffer_.get());
 
   reused_tensors_ = 0;
-  for (const auto& ms : managed_storage_) {
+  for (const auto& ms : managed_tensor_storage_) {
     auto tensor_size = ms.first;
     if (tensor_size == 0) {
       continue;
@@ -1125,7 +1177,7 @@ void MemoryPlanner::deallocate() {
 
   // free memory used by outputs of ops in out variants
   // but keep the TensorImpl and StorageImpl around
-  for (auto& ms : managed_storage_) {
+  for (auto& ms : managed_tensor_storage_) {
     const auto& impls = ms.second;
     size_t max = 0;
     for (auto& impl : impls) {
@@ -1133,9 +1185,17 @@ void MemoryPlanner::deallocate() {
       impl->reset();
       max = std::max(max, current_size);
     }
+    // Static runtime does not know the size of tensors statically, so we use
+    // the tensor size from the previous run to allocate tensors for the next
+    // run (following C2 tradition), exploiting the fact that tensor storage
+    // size does not have to match that of real tensor size. The following logic
+    // records the tensor storage size for the next run.
     ms.first = max;
     managed_bytes_ += max;
   }
+
+  // for unmanaged ivalues (either tensor or non-tensor), we reset the *iv so
+  // that the objects pointed to by *iv may be reclaimed by reference counting
   for (auto& iv : unmanaged_ivalues_) {
     *iv = IValue();
   }
@@ -1145,12 +1205,12 @@ void MemoryPlanner::deallocate() {
 ProcessedNode::ProcessedNode(
     Node* node,
     std::vector<const IValue*>&& inputs,
-    bool enable_out_variants)
+    bool enable_out_variant)
     : node_(node), inputs_(std::move(inputs)) {
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
 
-  if (enable_out_variants && canRunOutOfPlace(node)) {
+  if (enable_out_variant && canRunOutOfPlace(node)) {
     fn_ = getOutOfPlaceOperation(node);
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
