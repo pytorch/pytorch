@@ -76,12 +76,10 @@ TEST_F(Kernel, InliningIntermediates) {
       // aten_mul only has one use, inlined completely
       torch::jit::testing::FileCheck().check_not("aten_mul")->run(oss.str());
 
-      // aten_sub should be removed in cuda, exist in cpu
-      // 5 uses: allocate, initialize, free and two reads
+      // aten_sub should be removed by the CUDA backend by metavar rewriting
+      // and by the CPU backend by horizontal fusion.
       size_t num_out1_uses = use_cuda ? 0 : 5;
-      torch::jit::testing::FileCheck()
-          .check_count("aten_sub", num_out1_uses, /*exactly*/ true)
-          ->run(oss.str());
+      torch::jit::testing::FileCheck().check_not("aten_sub")->run(oss.str());
     }
   }
 }
