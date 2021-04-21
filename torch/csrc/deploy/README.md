@@ -8,3 +8,15 @@ This is an internal library used behind the scenes to enable multiple python int
 a single deploy runtime.  libinterpreter.so is DLOPENed multiple times by the deploy library.
 Each copy of libinterpreter exposes a simple interpreter interface but hides its python and other
 internal symbols, preventing the different python instances from seeing each other.
+
+# cpython build
+Torch Deploy builds cpython from source as part of the embedded python interpreter.  Cpython has a flexible build system that builds successfully with or without a variety of dependencies installed - if missing, the resulting cpython build simply omits optional functionality, meaning some stdlib modules/libs are not present.
+
+Currently, the torch deploy build setup assumes the full cpython build is present.  This matters becuase there is a [hardcoded list of python stdlib modules](https://github.com/pytorch/pytorch/blob/master/torch/csrc/deploy/interpreter/interpreter_impl.cpp#L35) that are explicitly loaded from the embedded binary at runtime.
+
+### rebuilding cpython after installing missing dependencies
+Becuase cpython builds successfully when optional dependencies are missing, the cmake wrapper currently doesn't know if you need to rebuild cpython after adding missing dependencies (or whether dependencies were missing in the first place).
+
+To be safe, install the [complete list of dependencies for cpython](https://devguide.python.org/setup/#install-dependencies) for your platform, before trying to build torch with USE_DEPLOY=1.  
+
+If you already built cpython without all the dependencies and want to fix it, just blow away the cpython folder under torch/csrc/deploy/third_party, install the missing system dependencies, and re-attempt the pytorch build command.
