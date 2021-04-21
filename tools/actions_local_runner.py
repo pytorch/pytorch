@@ -9,8 +9,7 @@ import asyncio
 from typing import List, Dict, Any, Optional
 
 
-REPO_ROOT = os.path.dirname(os.path.dirname(__file__))
-
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 class col:
     HEADER = "\033[95m"
