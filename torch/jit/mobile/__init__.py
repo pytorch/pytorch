@@ -74,4 +74,4 @@ def _export_operator_list(module: LiteScriptModule):
         in this mobile module.
     """
     # TODO fix mypy here
-    return torch._C._export_operator_list(module._c)  # type: ignore
+    return torch._C._export_operator_list(module._c)  # type: ignore[attr-defined]

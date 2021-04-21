@@ -1,8 +1,8 @@
 import sys
 
 import torch
-from torch._C import _add_docstr, _special  # type: ignore
-from torch._torch_docs import common_args  # type: ignore
+from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
+from torch._torch_docs import common_args
 
 Tensor = torch.Tensor
 

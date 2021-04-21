@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from .graph import Graph
 
 BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor]
-base_types = BaseArgumentTypes.__args__  # type: ignore
+base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]
 
@@ -127,7 +127,7 @@ class Node:
         # The public API for this is `all_input_nodes`, this private attribute
         # should not be accessed directly.
         self._input_nodes : Dict[Node, None] = {}
-        self.__update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore
+        self.__update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore[arg-type]
 
         # All of the nodes that use the value produced by this Node
         # Note one user may correspond to several uses, e.g. the node fo ``x + x``
@@ -233,7 +233,7 @@ class Node:
         """
         # DO NOT CALL `__update_args_kwargs` directly. The correct way to
         # set `args` is via direct assignment, i.e. `node.args = new_args`
-        self.__update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore
+        self.__update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore[arg-type]
 
     @property
     def kwargs(self) -> Dict[str, Argument]:
@@ -256,7 +256,7 @@ class Node:
         """
         # DO NOT CALL `__update_args_kwargs` directly. The correct way to
         # set `args` is via direct assignment, i.e. `node.kwargs = new_kwargs`
-        self.__update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
+        self.__update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore[arg-type]
 
     @property
     def all_input_nodes(self) -> List['Node']:

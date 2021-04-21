@@ -127,7 +127,7 @@ class _LSTMSingleLayer(torch.nn.Module):
         result = []
         for xx in x:
             hidden = self.cell(xx, hidden)
-            result.append(hidden[0])  # type: ignore
+            result.append(hidden[0])  # type: ignore[index]
         result_tensor = torch.stack(result, 0)
         return result_tensor, hidden
 
@@ -178,11 +178,11 @@ class _LSTMLayer(torch.nn.Module):
             result_bw = result_bw.flip(0)
 
             result = torch.cat([result_fw, result_bw], result_fw.dim() - 1)
-            h = torch.stack([hidden_fw[0], hidden_bw[0]], 0)  # type: ignore
-            c = torch.stack([hidden_fw[1], hidden_bw[1]], 0)  # type: ignore
+            h = torch.stack([hidden_fw[0], hidden_bw[0]], 0)  # type: ignore[list-item]
+            c = torch.stack([hidden_fw[1], hidden_bw[1]], 0)  # type: ignore[list-item]
         else:
             result = result_fw
-            h, c = hidden_fw  # type: ignore
+            h, c = hidden_fw  # type: ignore[assignment]
 
         if self.batch_first:
             result.transpose_(0, 1)

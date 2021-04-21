@@ -1,7 +1,7 @@
 import importlib
 from abc import ABC, abstractmethod
-from pickle import _getattribute, _Pickler  # type: ignore
-from pickle import whichmodule as _pickle_whichmodule  # type: ignore
+from pickle import _getattribute, _Pickler  # type: ignore[attr-defined]
+from pickle import whichmodule as _pickle_whichmodule  # type: ignore[attr-defined]
 from types import ModuleType
 from typing import Any, List, Optional, Tuple
 
