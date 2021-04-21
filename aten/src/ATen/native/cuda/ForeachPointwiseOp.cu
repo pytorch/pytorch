@@ -109,6 +109,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, Tensor
         return at::native::foreach_tensor_##NAME##_scalar_slow(input, tensors1, tensors2, scalar);                                    \
     }                                                                                                                                 \
                                                                                                                                       \
+    OptionalDeviceGuard guard(device_of(tensors1[0]));                      \
     return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalar);                                                               \
 }                                                                                                                                     \
                                                                                                                                       \
@@ -119,6 +120,7 @@ void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1,
         return at::native::foreach_tensor_##NAME##_scalar_slow_(input, tensors1, tensors2, scalar);                                   \
     }                                                                                                                                 \
                                                                                                                                       \
+    OptionalDeviceGuard guard(device_of(tensors1[0]));                      \
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalar);                                                                     \
 }
 
@@ -131,6 +133,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_cuda(TensorList input, Te
         return at::native::foreach_tensor_##NAME##_scalarlist_slow(input, tensors1, tensors2, scalars);                                                  \
     }                                                                                                                                                    \
                                                                                                                                                          \
+    OptionalDeviceGuard guard(device_of(tensors1[0]));                      \
     return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalars);                                                                                 \
 }                                                                                                                                                        \
                                                                                                                                                          \
@@ -141,6 +144,7 @@ void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tenso
         return at::native::foreach_tensor_##NAME##_scalarlist_slow_(input, tensors1, tensors2, scalars);                                                 \
     }                                                                                                                                                    \
                                                                                                                                                          \
+    OptionalDeviceGuard guard(device_of(tensors1[0]));                      \
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalars);                                                                                       \
 }
 
@@ -156,6 +160,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList
         return at::native::foreach_tensor_##NAME##_slow(tensors1, tensors2);                               \
     }                                                                                                      \
                                                                                                            \
+    OptionalDeviceGuard guard(device_of(tensors1[0]));                      \
     std::vector<std::vector<at::Tensor>> tensor_lists;                                                     \
     std::vector<at::Tensor> vec_res;                                                                       \
     vec_res.reserve(tensors1.size());                                                                      \

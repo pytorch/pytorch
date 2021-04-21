@@ -136,6 +136,8 @@ std::vector<Tensor> foreach_tensor_##op_name##_cuda(TensorList tensors) { \
     if (!can_use_fast_route(tensors)) {                                   \
         return at::native::foreach_tensor_##op_name##_slow(tensors);      \
     }                                                                     \
+                                                                          \
+    OptionalDeviceGuard guard(device_of(tensors[0]));                      \
     return function<functor_name>(tensors);                               \
 }                                                                         \
 void foreach_tensor_##op_name##_cuda_(TensorList tensors) {               \
@@ -144,6 +146,7 @@ void foreach_tensor_##op_name##_cuda_(TensorList tensors) {               \
         return at::native::foreach_tensor_##op_name##_slow_(tensors);     \
     }                                                                     \
                                                                           \
+    OptionalDeviceGuard guard(device_of(tensors[0]));                      \
     function##_<functor_name>(tensors);                                   \
 }
 
@@ -220,6 +223,7 @@ std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
         return at::native::foreach_tensor_neg_slow(tensors);
     }
 
+    OptionalDeviceGuard guard(device_of(tensors[0]));
     return all_types_half_complex_bfloat16<std::negate>(tensors);
 }
 
@@ -234,6 +238,7 @@ void foreach_tensor_neg_cuda_(TensorList tensors) {
         return at::native::foreach_tensor_neg_slow_(tensors);
     }
 
+    OptionalDeviceGuard guard(device_of(tensors[0]));
     all_types_half_complex_bfloat16_<std::negate>(tensors);
 }
 
@@ -258,6 +263,7 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
         return at::native::foreach_tensor_abs_slow(tensors);
     }
 
+    OptionalDeviceGuard guard(device_of(tensors[0]));
     return all_types_complex_bfloat16_half_bool<Abs>(tensors);
 }
 
@@ -274,6 +280,7 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
         return at::native::foreach_tensor_abs_slow_(tensors);
     }
 
+    OptionalDeviceGuard guard(device_of(tensors[0]));
     all_types_complex_bfloat16_half_bool_<Abs>(tensors);
 }
 
@@ -284,6 +291,7 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
         return at::native::foreach_tensor_zero_slow_(tensors);
     }
 
+    OptionalDeviceGuard guard(device_of(tensors[0]));
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
 

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <ATen/Tensor.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/core/List.h>
 #include <c10/core/TensorOptions.h>
 
 /*
@@ -55,6 +58,46 @@ check_tensor_options_and_extract_memory_format(
     return memory_format;
   } else {
     return options.memory_format_opt();
+  }
+}
+
+inline void check_or_update_common_device(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom c) {
+  if (!tensor.defined()) {
+    return;
+  }
+
+  if (tensor.is_cpu() && tensor.dim() == 0) {
+    // CPU 0-dimenstion tensor is not considered as common device
+    return;
+  }
+
+  if (!common_device.has_value()) {
+    common_device = tensor.device();
+    return;
+  }
+
+  TORCH_CHECK(
+    common_device == tensor.device(),
+    "Expected all tensors to be on the same device, but "
+    "found at least two devices, ", common_device.value(), " and ", tensor.device(), "! "
+    "(when checking arugment for ", c, ")");
+}
+
+inline void check_or_update_common_device(optional<Device>& common_device, const optional<at::Tensor>& tensor, at::CheckedFrom c) {
+  if (tensor.has_value()) {
+    check_or_update_common_device(common_device, tensor.value(), c);
+  }
+}
+
+inline void check_or_update_common_device(optional<Device>& common_device, at::TensorList tensors, at::CheckedFrom c) {
+  for (const auto& tensor : tensors) {
+    check_or_update_common_device(common_device, tensor, c);
+  }
+}
+
+inline void check_or_update_common_device(optional<Device>& common_device, const List<optional<at::Tensor>>& tensors, at::CheckedFrom c) {
+  for (const auto& tensor : tensors) {
+    check_or_update_common_device(common_device, tensor, c);
   }
 }
 } // namespace impl

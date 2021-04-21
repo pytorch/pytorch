@@ -380,6 +380,8 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
     }
   }
 
+  OptionalDeviceGuard device_guard(device_of(self));
+
   if (accumulate && self.device().type() == DeviceType::CUDA) {
       TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ",
       value.device(), " for value tensor");

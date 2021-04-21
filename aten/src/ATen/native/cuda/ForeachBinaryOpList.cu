@@ -56,6 +56,7 @@ void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList t
         return at::native::foreach_tensor_##NAME##_list_kernel_slow_(tensors1, tensors2);                   \
     }                                                                                                       \
                                                                                                             \
+    OptionalDeviceGuard guard(device_of(tensors1[0]));                                                           \
     foreach_tensor_list_op_<OP>(tensors1, tensors2);                                                        \
 }                                                                                                           \
                                                                                                             \
@@ -65,6 +66,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1
         return at::native::foreach_tensor_##NAME##_list_kernel_slow(tensors1, tensors2);                    \
     }                                                                                                       \
                                                                                                             \
+    OptionalDeviceGuard guard(device_of(tensors1[0]));                                                           \
     return foreach_tensor_list_op<OP>(tensors1, tensors2);                                                  \
 }
 
@@ -75,6 +77,7 @@ void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList t
         return at::native::foreach_tensor_##NAME##_list_kernel_slow_(tensors1, tensors2, alpha);                        \
     }                                                                                                                   \
                                                                                                                         \
+    OptionalDeviceGuard guard(device_of(tensors1[0]));                                                           \
     foreach_tensor_list_op_<OP>(tensors1, tensors2, alpha);                                                             \
 }                                                                                                                       \
                                                                                                                         \
@@ -84,6 +87,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1
         return at::native::foreach_tensor_##NAME##_list_kernel_slow(tensors1, tensors2, alpha);                         \
     }                                                                                                                   \
                                                                                                                         \
+    OptionalDeviceGuard guard(device_of(tensors1[0]));                                                           \
     return foreach_tensor_list_op<OP>(tensors1, tensors2, alpha);                                                       \
 }
 

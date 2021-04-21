@@ -896,11 +896,7 @@ class TestBinaryUfuncs(TestCase):
                 a = torch.tensor(a, device=devices[0])
                 b = torch.tensor(b, device=devices[1])
 
-                if op in (operator.floordiv, torch.floor_divide):
-                    with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-                        do_test(op, a, b)
-                else:
-                    do_test(op, a, b)
+                do_test(op, a, b)
 
     # This test ensures that a scalar Tensor can be safely used
     # in a binary operation in conjunction with a Tensor on all

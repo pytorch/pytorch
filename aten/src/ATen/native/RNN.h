@@ -34,9 +34,12 @@ inline void check_attributes(const Tensor& input, const TensorList& params, cons
   auto check_tensors = [&](const std::string& name, const Tensor& t) {
     if (!t.defined()) return;
     auto t_device = t.device();
-    TORCH_CHECK(input_device == t_device,
-             "Input and ", name, " tensors are not at the same device, found input tensor at ",
-             input_device, " and ", name, " tensor at ", t_device);
+    if (input_device != t_device) {
+      TORCH_CHECK(false,
+              "Input and ", name, " tensors are not at the same device, found input tensor at ",
+              input_device, " and ", name, " tensor at ", t_device);
+    }
+
     if (check_dtype) {
       auto t_dtype = t.scalar_type();
       TORCH_CHECK(input_dtype == t_dtype,
