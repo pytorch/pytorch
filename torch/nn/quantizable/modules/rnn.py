@@ -29,16 +29,14 @@ class LSTMCell(torch.nn.Module):
     """
     _FLOAT_MODULE = torch.nn.LSTMCell
 
-    def __init__(self, input_dim: int, hidden_dim: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(self, input_dim: int, hidden_dim: int, bias: bool = True):
         super().__init__()
         self.input_size = input_dim
         self.hidden_size = hidden_dim
         self.bias = bias
 
-        self.igates = torch.nn.Linear(input_dim, 4 * hidden_dim, bias=bias, **factory_kwargs)
-        self.hgates = torch.nn.Linear(hidden_dim, 4 * hidden_dim, bias=bias, **factory_kwargs)
+        self.igates = torch.nn.Linear(input_dim, 4 * hidden_dim, bias=bias)
+        self.hgates = torch.nn.Linear(hidden_dim, 4 * hidden_dim, bias=bias)
         self.gates = torch.nn.quantized.FloatFunctional()
 
         self.fgate_cx = torch.nn.quantized.FloatFunctional()
@@ -121,17 +119,15 @@ class _LSTMSingleLayer(torch.nn.Module):
     The difference between a layer and a cell is that the layer can process a
     sequence, while the cell only expects an instantaneous value.
     """
-    def __init__(self, input_dim: int, hidden_dim: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(self, input_dim: int, hidden_dim: int, bias: bool = True):
         super().__init__()
-        self.cell = LSTMCell(input_dim, hidden_dim, bias=bias, **factory_kwargs)
+        self.cell = LSTMCell(input_dim, hidden_dim, bias=bias)
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
         result = []
         for xx in x:
             hidden = self.cell(xx, hidden)
-            result.append(hidden[0])  # type: ignore
+            result.append(hidden[0])  # type: ignore[index]
         result_tensor = torch.stack(result, 0)
         return result_tensor, hidden
 
@@ -146,15 +142,13 @@ class _LSTMSingleLayer(torch.nn.Module):
 class _LSTMLayer(torch.nn.Module):
     r"""A single bi-directional LSTM layer."""
     def __init__(self, input_dim: int, hidden_dim: int, bias: bool = True,
-                 batch_first: bool = False, bidirectional: bool = False,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+                 batch_first: bool = False, bidirectional: bool = False):
         super().__init__()
         self.batch_first = batch_first
         self.bidirectional = bidirectional
-        self.layer_fw = _LSTMSingleLayer(input_dim, hidden_dim, bias=bias, **factory_kwargs)
+        self.layer_fw = _LSTMSingleLayer(input_dim, hidden_dim, bias=bias)
         if self.bidirectional:
-            self.layer_bw = _LSTMSingleLayer(input_dim, hidden_dim, bias=bias, **factory_kwargs)
+            self.layer_bw = _LSTMSingleLayer(input_dim, hidden_dim, bias=bias)
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
         if self.batch_first:
@@ -184,11 +178,11 @@ class _LSTMLayer(torch.nn.Module):
             result_bw = result_bw.flip(0)
 
             result = torch.cat([result_fw, result_bw], result_fw.dim() - 1)
-            h = torch.stack([hidden_fw[0], hidden_bw[0]], 0)  # type: ignore
-            c = torch.stack([hidden_fw[1], hidden_bw[1]], 0)  # type: ignore
+            h = torch.stack([hidden_fw[0], hidden_bw[0]], 0)  # type: ignore[list-item]
+            c = torch.stack([hidden_fw[1], hidden_bw[1]], 0)  # type: ignore[list-item]
         else:
             result = result_fw
-            h, c = hidden_fw  # type: ignore
+            h, c = hidden_fw  # type: ignore[assignment]
 
         if self.batch_first:
             result.transpose_(0, 1)
@@ -299,9 +293,7 @@ class LSTM(torch.nn.Module):
     def __init__(self, input_size: int, hidden_size: int,
                  num_layers: int = 1, bias: bool = True,
                  batch_first: bool = False, dropout: float = 0.,
-                 bidirectional: bool = False,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+                 bidirectional: bool = False):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -330,12 +322,11 @@ class LSTM(torch.nn.Module):
 
         layers = [_LSTMLayer(self.input_size, self.hidden_size,
                              self.bias, batch_first=False,
-                             bidirectional=self.bidirectional, **factory_kwargs)]
+                             bidirectional=self.bidirectional)]
         for layer in range(1, num_layers):
             layers.append(_LSTMLayer(self.hidden_size, self.hidden_size,
                                      self.bias, batch_first=False,
-                                     bidirectional=self.bidirectional,
-                                     **factory_kwargs))
+                                     bidirectional=self.bidirectional))
         self.layers = torch.nn.ModuleList(layers)
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
