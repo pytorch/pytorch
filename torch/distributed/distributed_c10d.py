@@ -500,14 +500,15 @@ def init_process_group(backend,
                 "are ignored since they are assigned by the "
                 "MPI runtime.".format(world_size, rank))
 
-        _update_default_pg(_new_process_group_helper(
+        default_pg = _new_process_group_helper(
             -1,
             -1,
             [],
             Backend.MPI,
             None,
             group_name=group_name,
-            timeout=timeout))
+            timeout=timeout)
+        _update_default_pg(default_pg)
     else:
         # backward compatible API
         if store is None:
@@ -517,7 +518,7 @@ def init_process_group(backend,
             store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
-        _update_default_pg(_new_process_group_helper(
+        default_pg = _new_process_group_helper(
             world_size,
             rank,
             [],
@@ -525,10 +526,11 @@ def init_process_group(backend,
             store,
             pg_options=pg_options,
             group_name=group_name,
-            timeout=timeout))
+            timeout=timeout)
+        _update_default_pg(default_pg)
 
-    _pg_group_ranks[GroupMember.WORLD] = {i: i for i in range(GroupMember.WORLD.size())}  # type: ignore
-    _backend = _pg_map[GroupMember.WORLD][0]  # type: ignore
+    _pg_group_ranks[GroupMember.WORLD] = {i: i for i in range(GroupMember.WORLD.size())}  # type: ignore[attr-defined, index]
+    _backend = _pg_map[GroupMember.WORLD][0]  # type: ignore[index]
     _default_pg_init_method = init_method
 
     # barrier at the end to ensure that once we return from this method, all
@@ -541,6 +543,9 @@ def init_process_group(backend,
         # Use store based barrier here since barrier() used a bunch of
         # default devices and messes up NCCL internal state.
         _store_based_barrier(rank, store, timeout)
+        # Set sequence numbers for gloo and nccl process groups.
+        if get_backend(default_pg) in [Backend.GLOO, Backend.NCCL]:
+            default_pg._set_sequence_number_for_group()
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -1463,8 +1468,8 @@ def _object_to_tensor(obj):
     f = io.BytesIO()
     _pickler(f).dump(obj)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
-    byte_tensor = torch.ByteTensor(byte_storage)
-    local_size = torch.LongTensor([byte_tensor.numel()])
+    byte_tensor = torch.tensor(byte_storage, dtype=torch.uint8)
+    local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long)
     return byte_tensor, local_size
 
 
@@ -1542,7 +1547,7 @@ def all_gather_object(object_list, obj, group=None):
     ]
     # Allgather tensor sizes
     all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())  # type: ignore
+    max_object_size = int(max(object_size_list).item())  # type: ignore[type-var]
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     coalesced_output_tensor = torch.empty(
@@ -1556,7 +1561,9 @@ def all_gather_object(object_list, obj, group=None):
     all_gather(output_tensors, input_tensor, group=group)
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.ByteTensor)  # type:ignore[call-overload]
+        tensor = tensor.type(torch.uint8)  # type:ignore[call-overload]
+        if tensor.device != torch.device("cpu"):
+            tensor = tensor.cpu()
         tensor_size = object_size_list[i]
         object_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1633,7 +1640,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # gather, since each rank needs to broadcast a tensor of the same (maximal)
     # size.
     all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())  # type: ignore
+    max_object_size = int(max(object_size_list).item())  # type: ignore[type-var]
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     # Avoid populating output tensors if the result won't be gathered on this rank.
@@ -1656,7 +1663,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     if my_rank != dst:
         return
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.ByteTensor)  # type: ignore[call-overload]
+        tensor = tensor.type(torch.uint8)  # type: ignore[call-overload]
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1718,7 +1725,7 @@ def broadcast_object_list(object_list, src=0, group=None):
         tensor_list, size_list = zip(*[_object_to_tensor(obj) for obj in object_list])
         object_sizes_tensor = torch.cat(size_list)
     else:
-        object_sizes_tensor = torch.LongTensor(len(object_list))
+        object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long)
 
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
@@ -1738,7 +1745,10 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank == src:
         object_tensor = torch.cat(tensor_list)
     else:
-        object_tensor = torch.ByteTensor(torch.sum(object_sizes_tensor).item())
+        object_tensor = torch.empty(
+            torch.sum(object_sizes_tensor).int().item(),  # type: ignore[arg-type]
+            dtype=torch.uint8
+        )
 
     if is_nccl_backend:
         object_tensor = object_tensor.to(current_device)
@@ -1748,7 +1758,9 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank != src:
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
-            obj_view = obj_view.type(torch.ByteTensor)  # type: ignore[call-overload]
+            obj_view = obj_view.type(torch.uint8)  # type: ignore[call-overload]
+            if obj_view.device != torch.device("cpu"):
+                obj_view = obj_view.cpu()
             offset += obj_size
             object_list[i] = _tensor_to_object(obj_view, obj_size)
 
@@ -1821,7 +1833,6 @@ def scatter_object_list(
         )
         tensor_list, tensor_sizes = list(tensor_list), list(tensor_sizes)
 
-    obj_tensor_size = torch.LongTensor([0])
     # Src rank broadcasts the maximum tensor size. This is because all ranks are
     # expected to call into scatter() with equal-sized tensors.
     if my_rank == src:
@@ -1829,11 +1840,11 @@ def scatter_object_list(
         for tensor in tensor_list:
             tensor.resize_(max_tensor_size)
     else:
-        max_tensor_size = torch.LongTensor([0])
+        max_tensor_size = torch.tensor([0], dtype=torch.long)
     broadcast(max_tensor_size, src=src, group=group)
 
     # Scatter actual serialized objects
-    output_tensor = torch.ByteTensor(max_tensor_size.item())
+    output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8)
     scatter(
         output_tensor,
         scatter_list=None if my_rank != src else tensor_list,
@@ -1842,6 +1853,7 @@ def scatter_object_list(
     )
 
     # Scatter per-object sizes to trim tensors when deserializing back to object
+    obj_tensor_size = torch.tensor([0], dtype=torch.long)
     scatter(
         obj_tensor_size,
         scatter_list=None if my_rank != src else tensor_sizes,
@@ -2665,5 +2677,11 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         # Use store based barrier here since barrier() used a bunch of
         # default devices and messes up NCCL internal state.
         _store_based_barrier(global_rank, default_store, timeout)
+        # Set sequence numbers for gloo and nccl process groups.
+        if pg != GroupMember.NON_GROUP_MEMBER and get_backend(pg) in [
+            Backend.GLOO,
+            Backend.NCCL,
+        ]:
+            pg._set_sequence_number_for_group()
 
     return pg

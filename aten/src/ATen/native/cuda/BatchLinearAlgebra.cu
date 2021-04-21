@@ -1192,7 +1192,41 @@ void magmaGels<c10::complex<double>>(
       reinterpret_cast<magmaDoubleComplex*>(hwork), lwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
-#endif
+
+namespace {
+
+/*
+  MAGMA can return errors both as a return value and in the info argument.
+  The return value and info should always be identical.
+  In general, the meaning is as given in this table.
+  Predefined error codes are large negative numbers. Using the symbolic
+  constants below is preferred, but the numeric values can be found in
+  include/magma_types.h.
+
+  Info                       |  Description
+  -----------                |  -----------
+  info = 0 (MAGMA_SUCCESS)   |  Successful exit
+  info < 0, but small        |  For info = -i, the i-th argument had an illegal value
+  info > 0                   |  Function-specific error such as singular matrix
+  MAGMA_ERR_DEVICE_ALLOC     |  Could not allocate GPU device memory
+  MAGMA_ERR_HOST_ALLOC       |  Could not allocate CPU host memory
+  MAGMA_ERR_ILLEGAL_VALUE    |  An argument had an illegal value (deprecated; instead it should return -i to say the i-th argument was bad)
+  MAGMA_ERR_INVALID_PTR      |  Can't free pointer
+  MAGMA_ERR_NOT_IMPLEMENTED  |  Function or option not implemented
+  MAGMA_ERR_NOT_SUPPORTED    |  Function or option not supported on the current architecture
+*/
+void checkMagmaInternalError(magma_int_t info, const std::string& magma_function_name) {
+  // if info > 0 the error is function-specific, do nothing in this case
+  TORCH_CHECK(info >= 0,
+      "MAGMA error: ",
+      magma_strerror(info),
+      ", info = ", info,
+      ", when calling ", magma_function_name);
+}
+
+} // anonymous namespace
+
+#endif // USE_MAGMA
 
 #define ALLOCATE_ARRAY(name, type, size) \
   auto storage_##name = pin_memory<type>(size); \
@@ -1948,14 +1982,14 @@ REGISTER_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, int64_t n_columns) {
   // TODO: It is possible to implement efficient batched orgqr for small tau (tau.size(-1) <= 32)
   // using MAGMA, however it fails on Windows because of some illegal memory reads inside MAGMA.
   // See discussions in https://github.com/pytorch/pytorch/pull/51348 for comparison of cuSOLVER-MAGMA
   // and Windows failure.
   // For reference here is the MAGMA-based implementation: https://gist.github.com/IvanYashchuk/2db50002c9d3c1462ff769e6410ad983
   #if defined(USE_CUSOLVER)
-    return orgqr_helper_cuda_lib(result, tau, infos, n_columns); // cusolver
+    return orgqr_helper_cusolver(result, tau, n_columns); // cusolver
   #else
     TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
       "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
@@ -1968,7 +2002,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int6
 
 template <typename scalar_t>
 static void apply_qr(Tensor& Q, Tensor& R, int64_t q_size_minus_2, int64_t r_size_minus_1, int64_t n_columns,
-                     bool compute_q, std::vector<int64_t>& infos) {
+                     bool compute_q) {
 #ifndef USE_MAGMA
 AT_ERROR("qr: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1996,10 +2030,7 @@ AT_ERROR("qr: MAGMA library not found in "
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* r_working_ptr = &r_data[i * r_matrix_stride];
     magmaGeqrf<scalar_t>(m, n, r_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/true);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
+    checkMagmaInternalError(info, "geqrf");
   }
   if (!compute_q) {
     // this is for mode='r'
@@ -2017,15 +2048,10 @@ AT_ERROR("qr: MAGMA library not found in "
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* q_working_ptr = &q_data[i * q_matrix_stride];
     magmaGeqrf<scalar_t>(m, n, q_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/false);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
+    checkMagmaInternalError(info, "geqrf");
+
     magmaOrgqr<scalar_t>(m, n_columns, k, q_working_ptr, m, tau_data, work_data, nb, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
+    checkMagmaInternalError(info, "orgqr");
   }
 #endif
 }
@@ -2033,7 +2059,6 @@ AT_ERROR("qr: MAGMA library not found in "
 std::tuple<Tensor,Tensor> _linalg_qr_helper_cuda(const Tensor& self, std::string mode) {
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = _parse_qr_mode(mode);
-  std::vector<int64_t> infos(batchCount(self), 0);
 
   // Setup input geometry and inputs for apply_qr
   std::vector<int64_t> q_sizes, q_strides;
@@ -2066,13 +2091,8 @@ std::tuple<Tensor,Tensor> _linalg_qr_helper_cuda(const Tensor& self, std::string
   int64_t n = r_working_copy.size(-1);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cuda", [&]{
-    apply_qr<scalar_t>(q_working_copy, r_working_copy, m, n, n_columns_q, compute_q, infos);
+    apply_qr<scalar_t>(q_working_copy, r_working_copy, m, n, n_columns_q, compute_q);
   });
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "qr_cuda");
-  } else {
-    singleCheckErrors(infos[0], "qr_cuda");
-  }
 
   if (compute_q) {
     q_working_copy = q_working_copy.narrow(-1, 0, n_columns_q);
@@ -2647,6 +2667,11 @@ TORCH_CHECK(false, "torch.linalg.lstsq: MAGMA library not found in "
     auto trans = MagmaNoTrans;
     auto m = magma_int_cast(a.size(-2), "m");
     auto n = magma_int_cast(a.size(-1), "n");
+
+    TORCH_CHECK(
+      m >= n,
+      "torch.linalg.lstsq: only overdetermined systems (input.size(-2) >= input.size(-1)) are allowed on CUDA");
+
     auto nrhs = magma_int_cast(b.size(-1), "nrhs");
     auto ldda = std::max<magma_int_t>(1, m);
     auto lddb = std::max<magma_int_t>(1, std::max(m, n));
