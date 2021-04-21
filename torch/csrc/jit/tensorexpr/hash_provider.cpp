@@ -154,11 +154,7 @@ void HashProvider::visit(const Load* v) {
     ind->accept(this);
     indices_hash = hash_combine(indices_hash, hashOf(ind));
   }
-  v->mask()->accept(this);
-  putHash(
-      v,
-      hash_combine(
-          "load", hashOf(v->base_handle()), indices_hash, hashOf(v->mask())));
+  putHash(v, hash_combine("load", hashOf(v->base_handle()), indices_hash));
 }
 
 void HashProvider::visit(const Store* v) {
@@ -170,15 +166,10 @@ void HashProvider::visit(const Store* v) {
     indices_hash = hash_combine(indices_hash, hashOf(ind));
   }
   v->value()->accept(this);
-  v->mask()->accept(this);
   putHash(
       v,
       hash_combine(
-          "store",
-          hashOf(v->base_handle()),
-          indices_hash,
-          hashOf(v->value()),
-          hashOf(v->mask())));
+          "store", hashOf(v->base_handle()), indices_hash, hashOf(v->value())));
 }
 
 void HashProvider::visit(const Block* v) {

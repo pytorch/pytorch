@@ -15,15 +15,27 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/utils/memory.h>
-#include <exception>
-#include <iostream>
 #include <memory>
 #include <unordered_map>
-#include <utility>
 #include <vector>
+
+/*
+XXX: this is stil in prototype phase and has much work left to do, including but
+not limited to:
+- Bind shape functions for operators in C+
+- Make classes of operators share the same shape function (e.g. pointwise,
+broadcast two inputs)
+- Refactor APIs
+- Only iteratively optimize shape function while a change has been made
+- Add decent coverage of common ops
+- Add shape analysis pass on Graph that handles Ifs and Loops
+- Allow concurrent reads to the operator map
+- Successive applications of same inputs to same shape function (e.g. series of
+pointwise ops)
+- Better support for Symbolic Shapes (additional optimizations, etc)
+- Supporting returning partially evaluated shape compute graph
+*/
 
 namespace torch {
 namespace jit {
@@ -53,7 +65,7 @@ void replaceWithIValue(Value* v, IValue val) {
 // Tensors. We can substitute in properties like `len(x)` and `x[1]`
 // if they are statically on the input Tensors. We can also use
 // assertions like `assert len(x) == 4` in order to refine the input
-// length and unroll loops over its elements. We iterativley optimize and
+// length and unroll loops over its elements. We iteratively optimize and
 // substitute in properties until we are unable to make any further
 // optimizations. Finally, we try to extract Tensor properties from the output.
 // For instance `return [1, 2, inp[2] + 1, inp[3]]` we know that the ouptut
@@ -62,8 +74,8 @@ void replaceWithIValue(Value* v, IValue val) {
 // infer that the 4th dimension will have the same symbolic shape as inp[3]
 
 struct SymbolicShapeAnalyzer {
-  SymbolicShapeAnalyzer(std::shared_ptr<Graph> graph, Node* n)
-      : graph_(graph->copy()), node_(n) {
+  SymbolicShapeAnalyzer(Node* n, std::shared_ptr<Graph> shape_compute_graph)
+      : graph_(shape_compute_graph->copy()), node_(n) {
     for (size_t i = 0; i < node_->inputs().size(); i++) {
       auto type = node_->input(i)->type();
       if (auto tt = type->castRaw<TensorType>()) {
@@ -73,7 +85,10 @@ struct SymbolicShapeAnalyzer {
               graph_->inputs().at(i), *tt->sizes().concrete_sizes());
           continue;
         }
-        tensor_indices.push_back(i);
+        // we can't optimize a tensor without fixed rank
+        if (symbolic_shapes.rank()) {
+          node_input_tensor_indices.push_back(i);
+        }
       } else if (
           type->cast<ListType>() &&
           type->cast<ListType>()->getElementType()->cast<TensorType>()) {
@@ -88,7 +103,8 @@ struct SymbolicShapeAnalyzer {
 
   c10::SymbolicShape run() {
     // TODO: only run while the last iteration has made a change
-    for (size_t i = 0; i < 6; i++) {
+    size_t num_optimization_iters = 6;
+    for (size_t i = 0; i < num_optimization_iters; i++) {
       // XXX: we cannot substitute symbolic dims before passes like constant
       // propagation, or we might inadvertently use them in arithmetic or
       // other operators
@@ -111,36 +127,48 @@ struct SymbolicShapeAnalyzer {
 
  private:
   void substituteInputTensorProperties(bool substitute_symbolic_dims) {
+    // here we iteratively substitute properties of the node's input tensors
+    // into the shape compute graph. in addition to direct constants we can
+    // substituted, like len(inp) or inp[0] if the tensor has fixed dimension
+    // and static first dimension value, respectively, we also try resolve
+    // symbolic shapes of the same symbolic value to the same Value *
+    // in the shape compute graph. for the shape logic:
+    // dim1 = inp1[0], dim2 = inp2[0]
+    // return dim1 if dim2 == 1 else dim2
+    // if we see that inp1[0] and inp2[0] both have the same symbolic shape
+    // value on the Tensor input properties, than it is a valid transformation
+    // to replace dim2 with dim1 or vice versa. to do this we collect
+    // all Value * for a particular symbolic dimension value and then
+    // Value * with their dominator of the same symbolic dimension value
+    // in the example above, this allows us to infer that the output
+    // will be the symbolic dimension value of dim1
+
     std::unordered_map<int64_t, std::vector<Value*>> symbolic_shape_map;
 
-    for (auto tensor_index : tensor_indices) {
+    for (auto tensor_index : node_input_tensor_indices) {
       auto tensor_value = node_->inputs().at(tensor_index);
-      auto shape = tensor_value->type()->expect<TensorType>()->symbolic_sizes();
-      if (!shape.rank().has_value()) {
-        return;
-      }
+      auto tensor_shape =
+          tensor_value->type()->expect<TensorType>()->symbolic_sizes();
+      TORCH_INTERNAL_ASSERT(tensor_shape.rank().has_value());
 
       for (const auto& use : graph_->inputs().at(tensor_index)->uses()) {
         // TODO: either decompose composite ops like slice or add handling here
         switch (use.user->kind()) {
           case aten::len: {
-            size_t len = shape.rank().value();
+            size_t len = tensor_shape.rank().value();
             replaceWithIValue(use.user->output(), static_cast<int64_t>(len));
           } break;
           case aten::__getitem__: {
             auto index = constant_as<int64_t>(use.user->inputs().at(1));
             if (index) {
-              auto norm_index = normIndex(*index, *shape.rank());
+              auto norm_index = normIndex(*index, *tensor_shape.rank());
               if (norm_index &&
-                  (shape[*norm_index].is_static() ||
+                  (tensor_shape[*norm_index].is_static() ||
                    substitute_symbolic_dims)) {
                 replaceWithIValue(
-                    use.user->output(), shape[*norm_index].value());
+                    use.user->output(), tensor_shape[*norm_index].value());
               } else if (norm_index) {
-                int64_t symbolic_index = shape[*norm_index].value();
-                if (!symbolic_shape_map.count(symbolic_index)) {
-                  symbolic_shape_map[symbolic_index] = {};
-                }
+                int64_t symbolic_index = tensor_shape[*norm_index].value();
                 symbolic_shape_map[symbolic_index].push_back(
                     use.user->output());
               }
@@ -207,22 +235,27 @@ struct SymbolicShapeAnalyzer {
     return c10::SymbolicShape(output_shape);
   }
 
-  std::vector<int64_t> tensor_indices;
+  // node input indices that are TensorType and we need to iteratively
+  // substitute properties of. We only substitute properties
+  // of TensorTypes with a fixed dimension but not a complete shape,
+  // because a complete shape we can completely replace with a constant
+  // and non-fixed dimensions we cannot reason about at all
+  // TODO: might be cleaner to store as a pair of index -> symbolic shape
+  // but there were weird lifetime issues
+  std::vector<int64_t> node_input_tensor_indices;
   std::shared_ptr<Graph> graph_;
   Node* node_;
 };
 
 void PropagateShapesWithShapeFunction(
     Node* n,
-    const std::shared_ptr<Graph>& graph) {
-  c10::SymbolicShape out = SymbolicShapeAnalyzer(graph, n).run();
+    std::shared_ptr<Graph>& shape_compute_graph) {
+  c10::SymbolicShape out = SymbolicShapeAnalyzer(n, shape_compute_graph).run();
   n->output()->setType(
       n->output()->type()->expect<TensorType>()->withSymbolicShapes(out));
 }
 
-void RegisterOperatorShapeFunction(
-    Node* n,
-    const std::shared_ptr<Graph>& graph) {
+void RegisterOperatorShapeFunction(Node* n, std::shared_ptr<Graph>& graph) {
   std::lock_guard<std::mutex> guard(lock);
   if (!n->maybeSchema()) {
     return;

@@ -229,7 +229,7 @@ bool UnrollLoops(Block* block, bool constant_only) {
       if (node->inputs().at(0)->node()->kind() != prim::Constant) {
         continue;
       }
-    } else if (isSmallBlock(node->blocks().at(0))) {
+    } else if (!isSmallBlock(node->blocks().at(0))) {
       continue;
     }
 
