@@ -55,12 +55,16 @@ quick_checks:
 flake8:
 	@python tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
+		--file-filter '.py' \
+		$(CHANGED_ONLY) \
 		--job 'flake8-py3' \
 		--step 'Run flake8'
 
 mypy:
 	@python tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
+		--file-filter '.py' \
+		$(CHANGED_ONLY) \
 		--job 'mypy' \
 		--step 'Run mypy'
 
@@ -78,7 +82,9 @@ toc:
 	@python tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--job 'toc' \
-		--step 'Regenerate ToCs' \
-		--step "Assert that regenerating the ToCs didn't change them"
+		--step "Regenerate ToCs and check that they didn't change"
 
 lint: flake8 mypy quick_checks cmakelint generate-gha-workflows
+
+quicklint: CHANGED_ONLY=--changed-only
+quicklint: mypy flake8 mypy quick_checks cmakelint generate-gha-workflows
