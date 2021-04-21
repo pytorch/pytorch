@@ -131,7 +131,7 @@ def serialize_leaf_module(
 ) -> Dict:
     parameters: Dict[str, Any] = {}
 
-    for p_name, p_value in node.attrs_for_lowering.items():  # type: ignore
+    for p_name, p_value in node.attrs_for_lowering.items():  # type: ignore[attr-defined]
         if isinstance(p_value, torch.Tensor):
             weights_metadata[f"{name_prefix}.{p_name}"] = serialize_weight(p_value)
             weights[f"{name_prefix}.{p_name}"] = p_value
