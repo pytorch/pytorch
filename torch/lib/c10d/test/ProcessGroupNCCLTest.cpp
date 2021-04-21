@@ -387,6 +387,31 @@ void testReduceScatter(const std::string& path, int rank, int size) {
   }
 }
 
+void testSequenceNumInit(const std::string& path, int /* unused */, int /* unused */) {
+  // Note: ProcessGroupNCCLTest doesn't support multiprocess testing. So we
+  // simulate world_size > 1 here via threads.
+  const int worldSize = 4;
+  std::mutex m;
+  std::unordered_set<uint64_t> nums;
+  auto runTest = [&](int i) {
+    NCCLTest test(path, worldSize);
+    test.initialize(i, worldSize);
+    test.getProcessGroup().setSequenceNumberForGroup();
+    std::lock_guard<std::mutex> lock(m);
+    auto seqNum = test.getProcessGroup().getSequenceNumberForGroup();
+    nums.insert(seqNum);
+  };
+  std::vector<std::thread> threads;
+  threads.reserve(worldSize);
+  for (int r = 0; r < worldSize; ++r) {
+    threads.emplace_back(std::thread([=]() { runTest(r); }));
+  }
+  for (auto& t : threads) {
+    t.join();
+  }
+  EXPECT_EQ(nums.size(), 1);
+}
+
 class ProcessGroupNCCLTest: public ::testing::Test {
  protected:
   void SetUp() override {
@@ -467,6 +492,16 @@ TEST_F(ProcessGroupNCCLTest, testReduceScatter) {
   {
     TemporaryFile file;
     testReduceScatter(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testSequenceNumInit) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testSequenceNumInit(file.path, rank_, size_);
   }
 }
 

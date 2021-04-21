@@ -48,6 +48,7 @@ set(C10D_SRCS
   ParamCommsUtils.cpp
   PrefixStore.cpp
   ProcessGroup.cpp
+  sequence_num.cpp
   Store.cpp
   TCPStore.cpp
   Utils.cpp
@@ -129,6 +130,7 @@ copy_header(Store.hpp)
 copy_header(TCPStore.hpp)
 copy_header(Types.hpp)
 copy_header(Utils.hpp)
+copy_header(sequence_num.hpp)
 if(USE_GLOO)
   copy_header(ProcessGroupGloo.hpp)
   copy_header(GlooDeviceFactory.hpp)
