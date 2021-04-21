@@ -762,7 +762,7 @@ class TestIndexing(TestCase):
     def test_index_put_accumulate_duplicate_indices(self, device):
         for i in range(1, 512):
             # generate indices by random walk, this will create indices with
-            # lots of duplicates
+            # lots of duplicates interleaved with eath other
             delta = torch.empty(i, dtype=torch.double, device=device).uniform_(-1, 1)
             indices = delta.cumsum(0).long()
 
