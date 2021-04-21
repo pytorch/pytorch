@@ -98,9 +98,9 @@ TORCH_IMPL_FUNC(mv_out)(const Tensor &self, const Tensor &vec,  const Tensor& re
   //to avoid this, supply correctly sized self, its contents doesn't matter because beta is 0
   if (result.dim() > 1 || (result.numel() != self.size(0) || result.numel() !=1)) {
     Tensor self_addmv = at::empty({self.size(0)}, self.options());
-    at::addmv_out(const_cast<Tensor&>(result), self_addmv, self, vec, 0, 1);
+    at::cpu::addmv_out(const_cast<Tensor&>(result), self_addmv, self, vec, 0, 1);
   }
-  at::addmv_out(const_cast<Tensor&>(result), result, self, vec, 0, 1);
+  at::cpu::addmv_out(const_cast<Tensor&>(result), result, self, vec, 0, 1);
 }
 
 inline void dot_check(const Tensor& self, const Tensor& other) {
