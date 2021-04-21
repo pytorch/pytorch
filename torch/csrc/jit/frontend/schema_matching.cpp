@@ -33,14 +33,14 @@ static inline Value* maybeUseIntOrFloatAsList(
   auto list_type = arg_type->cast<ListType>();
 
   if (list_type && list_type->getElementType() == v_type && arg.N()) {
-      if (value->type()->kind() == OptionalType::Kind) {
-        // If value is of optionalType, reset the type of the value to be
-        // of type `int` or `float`
-        value->setType(v_type);
-      }
-      std::vector<Value*> repeated(*arg.N(), value);
-      value =
-          graph.insertNode(graph.createList(value->type(), repeated))->output();
+    if (value->type()->kind() == OptionalType::Kind) {
+      // If value is of optionalType, reset the type of the value to be
+      // of type `int` or `float`
+      value->setType(v_type);
+    }
+    std::vector<Value*> repeated(*arg.N(), value);
+    value =
+        graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
   return value;
 }
