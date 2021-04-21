@@ -141,8 +141,8 @@ bool _is_same_size_as_sparse_csr(
   return self.sizes().equals(src.sizes());
 }
 
-SparseCsrTensor& resize_as_sparse_csr_(
-    SparseCsrTensor& self,
+const SparseCsrTensor& resize_as_sparse_csr_(
+    const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
   TORCH_CHECK(
       src.is_sparse_csr() && self.is_sparse_csr(),

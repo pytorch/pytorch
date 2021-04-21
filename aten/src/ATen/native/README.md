@@ -379,6 +379,19 @@ Currently ops have this field set to True should match `MANUAL_CATCHALL` in tool
 (It can be a superset of `MANUAL_CATCHALL` but we don't have a use case for it).
 This field should only be used rarely.
 
+### `use_const_ref_for_mutable_tensors`
+
+```
+use_const_ref_for_mutable_tensors: True
+```
+
+With this flag set, we will generate arguments for Tensors whose underlying data may change as
+`const Tensor&` (or similar), just like we would for other Tensors. Previously, we generated these
+as `Tensor &`, which 1) allowed changing which `TensorImpl` the `Tensor` itself referred to and 2)
+was not necessary to allow the underlying data to change. (This was like using `T * const` when we
+wanted `const T*`.)
+
+
 ## Writing an implementation in C++
 
 Implementations of native functions go in an appropriate C++ file in the
