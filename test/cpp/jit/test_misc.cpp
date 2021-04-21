@@ -31,6 +31,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/insert_guards.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
@@ -2037,6 +2038,63 @@ def c(x):
   // callstack entries for them.
   ASSERT_TRUE(callstack_objects.count("a1") && callstack_objects.count("a2"));
   ASSERT_TRUE(callstack_objects.at("a1") == callstack_objects.at("a2"));
+}
+
+TEST(InlinedCallStackTest, BlockAnnotation) {
+  Module a("A");
+  a.define(R"(
+    def forward(self, x, y, z: int):
+      if (z == 1):
+        return x + y
+      else:
+        return x * y
+  )");
+  Module b("B");
+  b.define(R"(
+    def forward(self, x):
+      return x + 2
+  )");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"(
+    def forward(self, x, y, z: int):
+      return self.A0.forward(x, y, z) + self.B0.forward(x)
+  )");
+
+  auto graph = c.get_method("forward").graph();
+  torch::jit::Inline(*graph);
+  std::stringstream add_ss, mul_ss;
+  for (Node* n : graph->nodes()) {
+    if (n->kind() == prim::If) {
+      for (Block* block : n->blocks()) {
+        for (Node* if_node : block->nodes()) {
+          if (if_node->kind() == aten::add) {
+            for (const auto e : if_node->callstack().value()->vec()) {
+              add_ss << std::get<1>(e);
+            }
+            add_ss << if_node->sourceRange();
+          }
+          if (if_node->kind() == aten::mul) {
+            for (const auto e : if_node->callstack().value()->vec()) {
+              mul_ss << std::get<1>(e);
+            }
+            mul_ss << if_node->sourceRange();
+          }
+        }
+      }
+    }
+  }
+  ASSERT_NE(add_ss.str().find("line 3"), std::string::npos);
+  ASSERT_NE(add_ss.str().find("line 4"), std::string::npos);
+  ASSERT_NE(
+      add_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
+  ASSERT_NE(add_ss.str().find("return x + y"), std::string::npos);
+  ASSERT_NE(mul_ss.str().find("line 3"), std::string::npos);
+  ASSERT_NE(mul_ss.str().find("line 6"), std::string::npos);
+  ASSERT_NE(
+      mul_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
+  ASSERT_NE(add_ss.str().find("return x * y"), std::string::npos);
 }
 
 TEST(AutogradSymbolsTest, Basic) {
