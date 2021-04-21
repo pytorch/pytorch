@@ -13,7 +13,9 @@
 namespace torch {
 namespace jit {
 
-// Refine from IntType -> int value, or ListType -> len of list
+// Refine from Value of type List -> len of list
+// If a refinement mapping of List Value * -> len is present in a block
+// the list is guaranteed to be that length
 // TODO: vector may be faster
 using ListRefinement = std::unordered_map<Value*, int64_t>;
 
@@ -23,22 +25,27 @@ intersectRefinements(const ListRefinement& ref1, const ListRefinement& ref2);
 TORCH_API ListRefinement
 unionRefinements(const ListRefinement& ref1, const ListRefinement& ref2);
 
-struct BoolRefinements {
-  BoolRefinements(ListRefinement true_refine, ListRefinement false_refine)
+// Represents the refinement information that can be carried on a boolean
+struct BooleanRefinementMapping {
+  BooleanRefinementMapping(
+      ListRefinement true_refine,
+      ListRefinement false_refine)
       : true_refine_(std::move(true_refine)),
         false_refine_(std::move(false_refine)){};
-  BoolRefinements() = default; // empty
+  BooleanRefinementMapping() = default; // empty
 
-  static BoolRefinements FalseRefinements(ListRefinement false_refine) {
-    return BoolRefinements({}, std::move(false_refine));
+  static BooleanRefinementMapping FalseRefinements(
+      ListRefinement false_refine) {
+    return BooleanRefinementMapping({}, std::move(false_refine));
   }
 
-  static BoolRefinements TrueRefinements(ListRefinement true_refine) {
-    return BoolRefinements(std::move(true_refine), {});
+  static BooleanRefinementMapping TrueRefinements(ListRefinement true_refine) {
+    return BooleanRefinementMapping(std::move(true_refine), {});
   }
 
-  BoolRefinements intersectBoolRefinements(BoolRefinements& other) {
-    return BoolRefinements(
+  BooleanRefinementMapping intersectBooleanRefinementMapping(
+      BooleanRefinementMapping& other) {
+    return BooleanRefinementMapping(
         intersectRefinements(true_refine_, other.true_refine()),
         intersectRefinements(false_refine_, other.false_refine()));
   }
@@ -62,7 +69,7 @@ TORCH_API void joinIfRefinements(
     ListRefinement& curr_block_refinements,
     ListRefinement& true_block_refinements,
     ListRefinement& false_block_refinements,
-    std::unordered_map<Value*, BoolRefinements>& info);
+    std::unordered_map<Value*, BooleanRefinementMapping>& info);
 
 } // namespace jit
 } // namespace torch
