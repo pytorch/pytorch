@@ -55,7 +55,7 @@ struct TORCH_CUDA_CPP_API CUDAFuture final : at::ivalue::Future {
   // that the parent future didn't use. This field is set to the value provided
   // in the constructor and will be "inherited" by all child futures.
   // FIXME Remove the c10::optional once the TensorPipe agent can provide this.
-  c10::optional<std::vector<c10::DeviceIndex>> devices_;
+  const c10::optional<std::vector<c10::DeviceIndex>> devices_;
 };
 
 } // namespace cuda
