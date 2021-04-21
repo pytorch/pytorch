@@ -12,7 +12,7 @@ import warnings
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_SCIPY, slowTest, torch_to_numpy_dtype_dict,
-    IS_WINDOWS)
+    IS_WINDOWS, make_tensor)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyOnCPUAndCUDA, onlyCUDA, expectedAlertNondeterministic, largeTensorTest,
@@ -2149,10 +2149,11 @@ class TestReductions(TestCase):
                 (0, 10, 30),
                 # keepdim
                 (False, True),
-            )
+            ),
+            [None, -100, True],  # Negative correction
         ]
 
-        tensor = torch.rand(_size, device=device, dtype=dtype)
+        tensor = make_tensor(_size, device=device, dtype=dtype)
         array = tensor.cpu().numpy()
 
         for dim, correction, keepdim in test_args:
@@ -2177,10 +2178,11 @@ class TestReductions(TestCase):
                 (0, 10, 30),
                 # keepdim
                 (False, True),
-            )
+            ),
+            [None, -100, True],  # Negative correction
         ]
 
-        tensor = torch.rand(_size, device=device, dtype=dtype)
+        tensor = make_tensor(_size, device=device, dtype=dtype)
         array = tensor.cpu().numpy()
 
         for dim, correction, keepdim in test_args:
@@ -2201,10 +2203,11 @@ class TestReductions(TestCase):
                 (0, 10, 30),
                 # keepdim
                 (False, True),
-            )
+            ),
+            [None, -100, True],  # Negative correction
         ]
 
-        tensor = torch.rand(_size, device=device, dtype=dtype)
+        tensor = make_tensor(_size, device=device, dtype=dtype)
 
         for dim, correction, keepdim in test_args:
             kwargs = dict(dim=dim, correction=correction, keepdim=keepdim)
@@ -2231,10 +2234,11 @@ class TestReductions(TestCase):
                 (0, 10, 30),
                 # keepdim
                 (False, True),
-            )
+            ),
+            [None, -100, True],  # Negative correction
         ]
 
-        tensor = torch.rand(_size, device=device, dtype=dtype)
+        tensor = make_tensor(_size, device=device, dtype=dtype)
 
         for dim, correction, keepdim in test_args:
             kwargs = dict(dim=dim, correction=correction, keepdim=keepdim)
