@@ -37,7 +37,7 @@ def main(argv: List[str]) -> None:
 
     work_orders = tuple(
         WorkOrder(label, autolabels, timer_args, timeout=TIMEOUT, retries=RETRIES)
-        for label, autolabels, timer_args in benchmarks[:10] * REPEATS
+        for label, autolabels, timer_args in benchmarks * REPEATS
     )
 
     keys = tuple({str(work_order): None for work_order in work_orders}.keys())
