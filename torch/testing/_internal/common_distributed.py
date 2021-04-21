@@ -387,14 +387,14 @@ class MultiProcessTestCase(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.skip_return_code_checks = []  # type: ignore
-        self.processes = []  # type: ignore
+        self.skip_return_code_checks = []  # type: ignore[var-annotated]
+        self.processes = []  # type: ignore[var-annotated]
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         global TEST_SKIPS
         self.old_test_skips = TEST_SKIPS.copy()
         # pid to pipe consisting of error message from process.
-        self.pid_to_pipe = {}  # type: ignore
+        self.pid_to_pipe = {}  # type: ignore[var-annotated]
 
     def tearDown(self) -> None:
         super().tearDown()
