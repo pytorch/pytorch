@@ -203,7 +203,6 @@ class TestGradients(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg):
             self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
-
     # Method gradgrad (and grad, see above) tests are disabled since they're
     #   costly and redundant with function gradgrad (and grad) tests
     # @_gradcheck_ops(op_db)
