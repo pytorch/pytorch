@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 r"""Functional interface"""
 from typing import Callable, List, Optional, Tuple
 import math
@@ -2072,9 +2073,10 @@ def embedding_bag(
         include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
             The last element is the size of the input, or the ending index position of the last bag (sequence).
 
-        padding_idx (int, optional): If given, indicates which indices in :attr:`input` represent padding. When
-                                     a :attr:`padding_idx` is encountered in :attr:`input` during a reduction,
-                                     it is skipped. This allows each bag to be a different logical size.
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
+                                     gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
+                                     during training, i.e. it remains as a fixed “pad”. Note that the embedding
+                                     vector at :attr:`padding_idx` is excluded from the reduction.
 
     Shape:
         - :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
