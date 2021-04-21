@@ -386,7 +386,7 @@ class LSTM(RNNBase):
     @torch.jit.export
     def forward_packed(
         self, input: PackedSequence, hx: Optional[Tuple[Tensor, Tensor]] = None
-    ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:  # noqa
+    ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
@@ -614,7 +614,7 @@ class GRU(RNNBase):
     @torch.jit.export
     def forward_packed(
         self, input: PackedSequence, hx: Optional[Tensor] = None
-    ) -> Tuple[PackedSequence, Tensor]:  # noqa
+    ) -> Tuple[PackedSequence, Tensor]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)

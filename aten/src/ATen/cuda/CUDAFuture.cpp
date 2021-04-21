@@ -38,6 +38,7 @@ std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
       std::vector<at::Tensor> tensors =
           value.toPyObjectHolder()->extractTensors();
       std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+      data_ptrs.reserve(tensors.size());
       for (const at::Tensor& tensor : tensors) {
         data_ptrs.emplace_back(tensor.storage().data_ptr());
       }
@@ -63,13 +64,13 @@ std::vector<c10::DeviceIndex> getDevicesOfDataPtrs(
       isCudaDeviceUsed[data_ptr.device().index()] = true;
     }
   }
-  std::vector<c10::DeviceIndex> device_indices;
+  std::vector<c10::DeviceIndex> deviceIndices;
   for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
     if (isCudaDeviceUsed[idx]) {
-      device_indices.push_back(idx);
+      deviceIndices.push_back(idx);
     }
   }
-  return device_indices;
+  return deviceIndices;
 }
 
 std::string formatSetOfDevices(const std::vector<c10::DeviceIndex>& devices) {
@@ -77,16 +78,25 @@ std::string formatSetOfDevices(const std::vector<c10::DeviceIndex>& devices) {
     return "(none)";
   }
   std::ostringstream oss;
-  oss << "cuda:" << devices[0];
+  oss << "cuda:" << static_cast<int64_t>(devices[0]);
   for (size_t idx = 1; idx < devices.size(); idx++) {
     if (idx == devices.size() - 1) {
       oss << " and ";
     } else {
       oss << ", ";
     }
-    oss << "cuda:" << devices[idx];
+    oss << "cuda:" << static_cast<int64_t>(devices[idx]);
   }
   return oss.str();
+}
+
+// We need devices to be sorted in order to use set_difference.
+c10::optional<std::vector<c10::DeviceIndex>> sortDevices(
+    c10::optional<std::vector<c10::DeviceIndex>> devices) {
+  if (devices.has_value()) {
+    std::sort(devices->begin(), devices->end());
+  }
+  return devices;
 }
 
 } // namespace
@@ -94,17 +104,13 @@ std::string formatSetOfDevices(const std::vector<c10::DeviceIndex>& devices) {
 CUDAFuture::CUDAFuture(
     at::TypePtr type,
     c10::optional<std::vector<c10::DeviceIndex>> devices)
-    : at::ivalue::Future(std::move(type)), devices_(std::move(devices)) {
+    : at::ivalue::Future(std::move(type)),
+      devices_(sortDevices(std::move(devices))) {
   // Use current device to initialize currentDevice_. This is necessary
   // because preMarkCompletedHook won't be called when the Future contains
   // an error. Uninitialized currentDevice_ could lead to crash when used
   // in CUDAGuard.
   currentDevice_ = c10::cuda::current_device();
-
-  // Needs to be sorted in order to use set_difference on it.
-  if (devices_.has_value()) {
-    std::sort(devices_->begin(), devices_->end());
-  }
 }
 
 c10::intrusive_ptr<ivalue::Future> CUDAFuture::createInstance(
@@ -139,9 +145,9 @@ void CUDAFuture::preMarkCompletedHook(
         std::back_inserter(excessDevices));
     TORCH_CHECK_VALUE(
         excessDevices.empty(),
-        "The result contained tensors residing on devices ",
+        "The result contained tensors residing on device(s) ",
         formatSetOfDevices(excessDevices),
-        " which are not among the expected devices ",
+        " which are not among the expected device(s) ",
         formatSetOfDevices(*devices_));
   }
 
