@@ -13,10 +13,11 @@ from unittest import TestCase
 
 from torch.distributed.elastic.rendezvous.utils import (
     _PeriodicTimer,
+    _delay,
     _matches_machine_hostname,
     _parse_rendezvous_config,
-    parse_rendezvous_endpoint,
     _try_parse_port,
+    parse_rendezvous_endpoint,
 )
 
 
@@ -241,6 +242,17 @@ class UtilsTest(TestCase):
         for host in hosts:
             with self.subTest(host=host):
                 self.assertFalse(_matches_machine_hostname(host))
+
+    def test_delay_suspends_thread(self) -> None:
+        for seconds in 0.2, (0.2, 0.4):
+            with self.subTest(seconds=seconds):
+                time1 = time.monotonic()
+
+                _delay(seconds)  # type: ignore[arg-type]
+
+                time2 = time.monotonic()
+
+                self.assertGreaterEqual(time2 - time1, 0.2)
 
 
 class PeriodicTimerTest(TestCase):
