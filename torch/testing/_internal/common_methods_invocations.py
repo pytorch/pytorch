@@ -2457,13 +2457,14 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
                                        requires_grad=requires_grad)))
 
     if dtype.is_floating_point:
-        t = make_tensor((S,), device, dtype,
-                        requires_grad=requires_grad)
+        if op_info.op != torch.special.i0e:
+            t = make_tensor((S,), device, dtype,
+                            requires_grad=requires_grad)
 
-        with torch.no_grad():
-            t[torch.randn_like(t) > 0] = 0
+            with torch.no_grad():
+                t[torch.randn_like(t) > 0] = 0
 
-        samples += (SampleInput(t),)  # type: ignore
+            samples += (SampleInput(t),)  # type: ignore
 
     return samples
 
@@ -3500,7 +3501,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('special.i1',
                    aten_name='special_i1',
                    ref=np_unary_ufunc_integer_promotion_wrapper_with_astype(scipy.special.i1),
-                   decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                   decorators=(precisionOverride({torch.bfloat16: 2.0,
                                                   torch.float16: 3e-1}),),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
