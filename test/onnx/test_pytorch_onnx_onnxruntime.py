@@ -8437,6 +8437,24 @@ class TestONNXRuntime(unittest.TestCase):
         index = torch.tensor([0, 2, 1])
         self.run_test(M(2, index, updates), (x,))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_index_add_dim_size_differ(self):
+        class M(torch.nn.Module):
+            def __init__(self, dim, index, updates):
+                super(M, self).__init__()
+                self.dim = dim
+                self.index = index
+                self.updates = updates
+
+            def forward(self, x):
+                x.index_add_(self.dim, self.index, self.updates)
+                return x
+
+        x = torch.ones(5, 4, 3)
+        updates = torch.tensor([[[1, 5, 7], [2, 4, 5], [5, 5, 6]]], dtype=torch.float)
+        index = torch.tensor([0, 2, 1])
+        self.run_test(M(1, index, updates), (x,))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
               **extra_kwargs):
