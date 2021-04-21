@@ -245,29 +245,59 @@ class _RendezvousState:
         self.last_keep_alives = {}
 
 
-class _RendezvousStateHolder:
+class _RendezvousStateHolder(ABC):
     """Holds the rendezvous state synced with other nodes."""
+
+    state: _RendezvousState
+
+    def __init__(self) -> None:
+        self.state = _RendezvousState()
+
+    @abstractmethod
+    def sync(self) -> None:
+        """Gets or sets the latest rendezvous state."""
+
+    @abstractmethod
+    def mark_dirty(self) -> None:
+        """Marks the local rendezvous state as dirty."""
+
+
+class _RendezvousStateHolderImpl(_RendezvousStateHolder):
+    """Represents the default implementation of ``RendezvousStateHolder``.
+
+    Args:
+        backend:
+            The rendezvous backend to use.
+        settings:
+            The rendezvous settings.
+        cache_duration:
+            The amount of time, in seconds, to cache the last rendezvous state
+            before requesting it from the backend again.
+    """
 
     backend: RendezvousBackend
     settings: RendezvousSettings
     cache_duration: int
-    state: _RendezvousState
+
     _token: Token
     _dirty: bool
     _last_sync_time: float
 
     def __init__(
-        self, backend: RendezvousBackend, settings: RendezvousSettings, cache_duration: int = 0
+        self, backend: RendezvousBackend, settings: RendezvousSettings, cache_duration: int = 1
     ) -> None:
+        super().__init__()
+
         self.backend = backend
         self.settings = settings
         self.cache_duration = cache_duration
-        self.state = _RendezvousState()
+
         self._token = None
         self._dirty = False
         self._last_sync_time = 0.0
 
     def sync(self) -> None:
+        """See base class."""
         if self._dirty:
             state_bits = pickle.dumps(self.state)
 
@@ -328,6 +358,13 @@ class _RendezvousStateHolder:
                 pass
 
     def mark_dirty(self) -> None:
+        """See base class.
+
+        If the local rendezvous state is dirty, the next sync call will try to
+        write the changes back to the backend. However this attempt might fail
+        if another node which had the same state also made changes, and synced
+        them before us.
+        """
         self._dirty = True
 
 

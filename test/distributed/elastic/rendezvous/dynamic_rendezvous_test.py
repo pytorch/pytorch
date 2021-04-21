@@ -24,7 +24,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     _NodeDesc,
     _NodeDescGenerator,
     _RendezvousState,
-    _RendezvousStateHolder,
+    _RendezvousStateHolderImpl,
     create_handler,
 )
 
@@ -247,8 +247,8 @@ class RendezvousStateHolderTest(TestCase):
 
         return state
 
-    def _create_state_holder(self) -> _RendezvousStateHolder:
-        return _RendezvousStateHolder(self._backend, self._settings, self._cache_duration)
+    def _create_state_holder(self) -> _RendezvousStateHolderImpl:
+        return _RendezvousStateHolderImpl(self._backend, self._settings, self._cache_duration)
 
     def test_init_initializes_state_holder(self) -> None:
         state_holder = self._create_state_holder()
