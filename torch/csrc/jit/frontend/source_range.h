@@ -208,7 +208,7 @@ struct TaggedRange {
 };
 using SourceRangeRecords = std::vector<TaggedRange>;
 using SourceRangeTagMap =
-    std::unordered_map<SourceRange, int32_t, SourceRangeHasher>;
+    std::unordered_map<SourceRange, int64_t, SourceRangeHasher>;
 
 } // namespace jit
 } // namespace torch
