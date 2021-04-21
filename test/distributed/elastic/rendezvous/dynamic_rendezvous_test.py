@@ -204,8 +204,8 @@ class RendezvousStateHolderTest(TestCase):
             "torch.distributed.elastic.rendezvous.dynamic_rendezvous.datetime"
         )
 
-        datetime_mock = self._datetime_patch.start()
-        datetime_mock.utcnow.return_value = self._now
+        mock_datetime = self._datetime_patch.start()
+        mock_datetime.utcnow.return_value = self._now
 
     def tearDown(self) -> None:
         self._datetime_patch.stop()
@@ -338,18 +338,21 @@ class RendezvousStateHolderTest(TestCase):
         with mock.patch(
             "torch.distributed.elastic.rendezvous.dynamic_rendezvous.time"
         ) as mock_time:
-            for cache_duration in [1, 10]:
+            for cache_duration in [1, 5, 10]:
                 with self.subTest(cache_duration=cache_duration):
                     self._cache_duration = cache_duration
 
                     state_holder = self._create_state_holder()
 
-                    mock_time.monotonic.return_value = 2
+                    mock_time.monotonic.return_value = 5
 
                     state_holder.sync()
                     state_holder.sync()
 
-                    mock_time.monotonic.return_value = 2 + cache_duration - 0.1
+                    self.assertEqual(self._backend.get_state_call_count, 1)
+                    self.assertEqual(self._backend.set_state_call_count, 0)
+
+                    mock_time.monotonic.return_value = 5 + self._cache_duration
 
                     state_holder.sync()
                     state_holder.sync()
@@ -371,12 +374,17 @@ class RendezvousStateHolderTest(TestCase):
 
             state_holder = self._create_state_holder()
 
-            mock_time.monotonic.return_value = 2
+            mock_time.monotonic.return_value = 5
 
             state_holder.sync()
+            state_holder.sync()
 
-            mock_time.monotonic.return_value = 3
+            self.assertEqual(self._backend.get_state_call_count, 1)
+            self.assertEqual(self._backend.set_state_call_count, 0)
 
+            mock_time.monotonic.return_value = 5 + self._cache_duration + 0.01
+
+            state_holder.sync()
             state_holder.sync()
 
             self.assertEqual(self._backend.get_state_call_count, 2)

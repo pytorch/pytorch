@@ -294,7 +294,7 @@ class _RendezvousStateHolderImpl(_RendezvousStateHolder):
 
         self._token = None
         self._dirty = False
-        self._last_sync_time = 0.0
+        self._last_sync_time = -1
 
     def sync(self) -> None:
         """See base class."""
@@ -306,7 +306,7 @@ class _RendezvousStateHolderImpl(_RendezvousStateHolder):
             if self.cache_duration > 0:
                 # Avoid overloading the backend if we are asked to retrieve the
                 # state repeatedly. Try to serve the cached state.
-                if self._last_sync_time > max(time.monotonic() - self.cache_duration, 0):
+                if self._last_sync_time >= max(time.monotonic() - self.cache_duration, 0):
                     return
 
             response = self.backend.get_state()
