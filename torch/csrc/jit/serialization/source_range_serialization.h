@@ -17,6 +17,9 @@ namespace jit {
 
 class Pickler;
 class SourceRangeSerializer;
+static constexpr size_t kByteOffsetIndex = 0;
+static constexpr size_t kSourceRangeIndex = 1;
+static constexpr size_t kSourceRangeTagIndex = 2;
 
 class SourceRangePickler {
  public:
