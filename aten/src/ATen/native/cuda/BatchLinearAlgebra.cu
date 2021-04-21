@@ -1731,14 +1731,27 @@ static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 }
 
 // This is a type dispatching helper function for 'apply_cholesky_inverse'
-Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) {
-  // This function calculates the inverse matrix in-place
-  // result should be in column major order and contain matrices to invert
-  // the content of result is overwritten by 'apply_cholesky_inverse'
+Tensor& cholesky_inverse_kernel_impl_magma(Tensor &result, Tensor& infos, bool upper) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_inverse_out_cuda", [&]{
     apply_cholesky_inverse<scalar_t>(result, infos, upper);
   });
   return result;
+}
+
+Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) {
+  // This function calculates the inverse matrix in-place
+  // result should be in column major order and contain matrices to invert
+  // the content of result is overwritten by 'apply_cholesky_inverse'
+#ifdef USE_CUSOLVER
+  if (batchCount(result) == 1 || !use_magma_) {
+    return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
+  } else {
+    return cholesky_inverse_kernel_impl_magma(result, infos, upper);
+  }
+#else
+  return cholesky_inverse_kernel_impl_magma(result, infos, upper);
+#endif
+
 }
 
 REGISTER_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
@@ -1935,14 +1948,14 @@ REGISTER_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, int64_t n_columns) {
   // TODO: It is possible to implement efficient batched orgqr for small tau (tau.size(-1) <= 32)
   // using MAGMA, however it fails on Windows because of some illegal memory reads inside MAGMA.
   // See discussions in https://github.com/pytorch/pytorch/pull/51348 for comparison of cuSOLVER-MAGMA
   // and Windows failure.
   // For reference here is the MAGMA-based implementation: https://gist.github.com/IvanYashchuk/2db50002c9d3c1462ff769e6410ad983
   #if defined(USE_CUSOLVER)
-    return orgqr_helper_cuda_lib(result, tau, infos, n_columns); // cusolver
+    return orgqr_helper_cusolver(result, tau, n_columns); // cusolver
   #else
     TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
       "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");

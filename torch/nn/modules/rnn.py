@@ -38,7 +38,9 @@ class RNNBase(Module):
 
     def __init__(self, mode: str, input_size: int, hidden_size: int,
                  num_layers: int = 1, bias: bool = True, batch_first: bool = False,
-                 dropout: float = 0., bidirectional: bool = False, proj_size: int = 0) -> None:
+                 dropout: float = 0., bidirectional: bool = False, proj_size: int = 0,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -84,12 +86,12 @@ class RNNBase(Module):
                 real_hidden_size = proj_size if proj_size > 0 else hidden_size
                 layer_input_size = input_size if layer == 0 else real_hidden_size * num_directions
 
-                w_ih = Parameter(torch.empty(gate_size, layer_input_size))
-                w_hh = Parameter(torch.empty(gate_size, real_hidden_size))
-                b_ih = Parameter(torch.empty(gate_size))
+                w_ih = Parameter(torch.empty((gate_size, layer_input_size), **factory_kwargs))
+                w_hh = Parameter(torch.empty((gate_size, real_hidden_size), **factory_kwargs))
+                b_ih = Parameter(torch.empty(gate_size, **factory_kwargs))
                 # Second bias vector included for CuDNN compatibility. Only one
                 # bias vector is needed in standard definition.
-                b_hh = Parameter(torch.empty(gate_size))
+                b_hh = Parameter(torch.empty(gate_size, **factory_kwargs))
                 layer_params: Tuple[Tensor, ...] = ()
                 if self.proj_size == 0:
                     if bias:
@@ -97,7 +99,7 @@ class RNNBase(Module):
                     else:
                         layer_params = (w_ih, w_hh)
                 else:
-                    w_hr = Parameter(torch.empty(proj_size, hidden_size))
+                    w_hr = Parameter(torch.empty((proj_size, hidden_size), **factory_kwargs))
                     if bias:
                         layer_params = (w_ih, w_hh, b_ih, b_hh, w_hr)
                     else:
@@ -118,6 +120,7 @@ class RNNBase(Module):
 
         self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
         self.flatten_parameters()
+
         self.reset_parameters()
 
     def __setattr__(self, attr, value):
@@ -845,19 +848,22 @@ class RNNCellBase(Module):
     # WARNING: bias_ih and bias_hh purposely not defined here.
     # See https://github.com/pytorch/pytorch/issues/39670
 
-    def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int) -> None:
+    def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(RNNCellBase, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
-        self.weight_ih = Parameter(torch.empty(num_chunks * hidden_size, input_size))
-        self.weight_hh = Parameter(torch.empty(num_chunks * hidden_size, hidden_size))
+        self.weight_ih = Parameter(torch.empty((num_chunks * hidden_size, input_size), **factory_kwargs))
+        self.weight_hh = Parameter(torch.empty((num_chunks * hidden_size, hidden_size), **factory_kwargs))
         if bias:
-            self.bias_ih = Parameter(torch.empty(num_chunks * hidden_size))
-            self.bias_hh = Parameter(torch.empty(num_chunks * hidden_size))
+            self.bias_ih = Parameter(torch.empty(num_chunks * hidden_size, **factory_kwargs))
+            self.bias_hh = Parameter(torch.empty(num_chunks * hidden_size, **factory_kwargs))
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
+
         self.reset_parameters()
 
     def extra_repr(self) -> str:
@@ -934,8 +940,10 @@ class RNNCell(RNNCellBase):
     __constants__ = ['input_size', 'hidden_size', 'bias', 'nonlinearity']
     nonlinearity: str
 
-    def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh") -> None:
-        super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1)
+    def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1, **factory_kwargs)
         self.nonlinearity = nonlinearity
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
@@ -1022,8 +1030,10 @@ class LSTMCell(RNNCellBase):
         >>> output = torch.stack(output, dim=0)
     """
 
-    def __init__(self, input_size: int, hidden_size: int, bias: bool = True) -> None:
-        super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4)
+    def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         if hx is None:
@@ -1098,8 +1108,10 @@ class GRUCell(RNNCellBase):
                 output.append(hx)
     """
 
-    def __init__(self, input_size: int, hidden_size: int, bias: bool = True) -> None:
-        super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3)
+    def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         if hx is None:
