@@ -1125,7 +1125,7 @@ def script(obj, optimize=None, _frames_up: int = 0, _rcb=None):
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
-    elif inspect.isfunction(obj):
+    elif inspect.isfunction(obj) or inspect.ismethod(obj):
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):
