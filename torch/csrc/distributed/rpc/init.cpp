@@ -28,8 +28,12 @@ namespace {
 
 // from https://github.com/pybind/pybind11/issues/1446#issuecomment-406341510
 template <typename T> void destroy_without_gil(T *ptr) {
+  if (Py_IsInitialized() && PyGILState_Check()) {
     pybind11::gil_scoped_release nogil;
     delete ptr;
+  } else {
+    delete ptr;
+  }
 }
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
