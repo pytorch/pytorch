@@ -11,7 +11,7 @@ from execution.runner import Runner
 from execution.work import WorkOrder
 
 
-REPEATS = 1  # 5
+REPEATS = 5
 TIMEOUT = 300  # Seconds
 RETRIES = 20
 
