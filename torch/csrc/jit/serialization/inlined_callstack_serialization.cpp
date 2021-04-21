@@ -48,6 +48,9 @@ c10::IValue InlinedCallStackSerializer::serialize_module_instance_info(
   std::vector<c10::IValue> elements;
   // Module instance info is serialized as
   // {type name, instance name}
+  // Note that the same module instance will appear in many callstacks.
+  // So it makes sense to cache these and use cached value.
+  // TODO: Add caching for moudle instance info serialization.
   if (m_val.class_type()) {
     elements = {
         m_val.class_type()->name()->qualifiedName(), m_val.instance_name()};
@@ -58,7 +61,7 @@ c10::IValue InlinedCallStackSerializer::serialize_module_instance_info(
 }
 
 std::vector<char> InlinedCallStackPickler::pickle(
-    const std::unordered_map<int64_t, DelegateDebugInfoType>& callstack_ptrs,
+    const std::unordered_map<int64_t, DebugInfoPair>& callstack_ptrs,
     const SourceRangeTagMap& source_range_tags) {
   std::vector<c10::IValue> ivalues;
   for (const auto& it : callstack_ptrs) {
@@ -192,14 +195,13 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
   return ModuleInstanceInfo(type_ptr, instance_name);
 }
 
-ska::flat_hash_map<int64_t, DelegateDebugInfoType> InlinedCallStackUnpickler::
-    unpickle(
-        at::DataPtr&& data,
-        size_t size,
-        const ska::flat_hash_map<int64_t, SourceRange>& source_range_map,
-        const std::shared_ptr<CompilationUnit>& cu) {
+ska::flat_hash_map<int64_t, DebugInfoPair> InlinedCallStackUnpickler::unpickle(
+    at::DataPtr&& data,
+    size_t size,
+    const ska::flat_hash_map<int64_t, SourceRange>& source_range_map,
+    const std::shared_ptr<CompilationUnit>& cu) {
   auto ival = jit::unpickle(reinterpret_cast<const char*>(data.get()), size);
-  ska::flat_hash_map<int64_t, DelegateDebugInfoType> callstack_ptrs;
+  ska::flat_hash_map<int64_t, DebugInfoPair> callstack_ptrs;
   auto& ivalues = ival.toTuple()->elements();
   for (auto& val : ivalues) {
     const auto tup_elems = val.toTuple()->elements();

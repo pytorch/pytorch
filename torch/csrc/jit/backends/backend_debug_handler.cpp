@@ -23,8 +23,8 @@ DebugHandleType BackendDebugHandleManager::
   return debug_handle;
 }
 
-std::unordered_map<DebugHandleType, DelegateDebugInfoType>
-BackendDebugHandleManager::getCallStackPtrMap() {
+std::unordered_map<DebugHandleType, DebugInfoPair> BackendDebugHandleManager::
+    getCallStackPtrMap() {
   // Note that this is return by copy and since
   // InlinedCallStackPtrs are intrusive ptr it will result in
   // bump of refcount. Not performant, but this is not intented

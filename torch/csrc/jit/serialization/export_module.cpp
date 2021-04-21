@@ -323,7 +323,7 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
   if (map) {
     const auto& map_val = map.value();
     // This map is map of debug handle-to-delegateDebugInfoType
-    // DelegateDebugInfoType = <source range, inlined_cs_ptr>
+    // DebugInfoPair = <source range, inlined_cs_ptr>
     for (const auto& it : map_val) {
       sr_records.emplace_back(
           std::numeric_limits<size_t>::max(), it.second.first);
