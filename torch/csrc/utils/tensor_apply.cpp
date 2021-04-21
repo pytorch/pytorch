@@ -55,7 +55,7 @@ static void recursive_apply(IntArrayRef sizes, ScalarType scalarType, int64_t di
   }
 }
 
-Tensor & apply_(Tensor & self, PyObject* fn) {
+const Tensor & apply_(const Tensor & self, PyObject* fn) {
   if (self.is_meta()) {
     return self;  // Just skip
   }
@@ -67,7 +67,7 @@ Tensor & apply_(Tensor & self, PyObject* fn) {
   return self;
 }
 
-Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
+const Tensor & map_(const Tensor & self, const Tensor & other_, PyObject* fn) {
   if (!other_.options().type_equal(self.options())) {
     throw TypeError("map_: expected %s for 'other' (got %s)",
         self.toString().c_str(), other_.toString().c_str());
@@ -84,7 +84,7 @@ Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
   return self;
 }
 
-Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn) {
+const Tensor & map2_(const Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn) {
   if (!x_.options().type_equal(self.options())) {
     throw TypeError("map2_: expected %s for argument 'x' (got %s)",
         self.toString().c_str(), x_.toString().c_str());
