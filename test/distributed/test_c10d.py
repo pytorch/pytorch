@@ -4821,7 +4821,7 @@ class CommTest(MultiProcessTestCase):
         # Test runs with world size of 2 in CI, but can be configured via
         # DEV_WORLD_SIZE env var for dev purposes. Would like to use
         # torch.cuda.device_count() here, but runs into CUDA re-init in forked
-        # subprocess error. TODO: enable these tests in CI for a large world
+        # subprocess error. TODO: enable these tests in CI for a larger world
         # size.
         return int(os.environ.get("DEV_WORLD_SIZE", 2))
 
