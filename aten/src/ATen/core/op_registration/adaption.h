@@ -38,7 +38,7 @@
 namespace c10 {
 namespace impl {
 
-c10::optional<MemoryFormat>
+TORCH_API c10::optional<MemoryFormat>
 check_tensor_options_and_extract_memory_format(
     const TensorOptions& options,
     c10::optional<MemoryFormat> memory_format);
