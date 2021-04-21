@@ -237,6 +237,6 @@ class BatchSampler(Sampler[List[int]]):
         # implementation below.
         # Somewhat related: see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
         if self.drop_last:
-            return len(self.sampler) // self.batch_size  # type: ignore
+            return len(self.sampler) // self.batch_size  # type: ignore[arg-type]
         else:
-            return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore
+            return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]
