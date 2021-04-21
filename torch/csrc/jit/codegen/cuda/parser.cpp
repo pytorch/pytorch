@@ -443,6 +443,25 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
+          "aten::softplus(Tensor self, Scalar beta, Scalar threshold) -> Tensor");
+      registerParseRule(
+          ptr_op,
+          [](const Node* node,
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
+            auto operand = value_map[node->inputs()[0]->unique()];
+            auto beta = value_map[node->inputs()[1]->unique()];
+            auto threshold = value_map[node->inputs()[2]->unique()];
+            auto op_beta = mul(operand, beta);
+            auto maybe_result = div(
+                unaryOp(UnaryOpType::Log1p, unaryOp(UnaryOpType::Exp, op_beta)),
+                beta);
+            auto out = where(gt(op_beta, threshold), operand, maybe_result);
+            value_map.emplace(node->output()->unique(), out);
+          });
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
           "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor");
       registerParseRule(
           ptr_op,

@@ -3,10 +3,10 @@ import os
 import random
 
 import torch
+from torch.nn import functional
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 from torch.testing import FileCheck
 
@@ -2107,6 +2107,32 @@ class TestCudaFuser(JitTestCase):
         # If replay() updated RNG state correctly, graph_out should now equal eager_out
         self.assertEqual(graph_out, eager_out)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_softplus_fuser(self):
+        def shifted_softplus(x: torch.Tensor, shift: float):
+            return functional.softplus(x) - shift
+
+        jitted = torch.jit.script(shifted_softplus)
+        inp = torch.randn(4, 2, dtype=torch.float32, device="cuda").requires_grad_()
+        inp_ref = inp.detach().clone().requires_grad_()
+        grad = torch.randn(4, 2, dtype=torch.float32, device="cuda")
+
+        aten_o = shifted_softplus(inp_ref, 0.693147)
+        aten_o.backward(grad)
+        aten_grad = inp_ref.grad
+
+        for i in range(3):
+            jit_o = jitted(inp, 0.693147)
+            inp.grad = None         # avoid accumulation on grad
+            jit_o.backward(grad)
+            jit_grad = inp.grad
+
+        assert torch.allclose(jit_o, aten_o)
+        assert torch.allclose(jit_grad, aten_grad)
+        self.assertGraphContains(jitted.graph_for(inp, 0.693147), FUSION_GROUP, True)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -2153,7 +2179,6 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_nvfuser_enabled())
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
-
 
 if __name__ == '__main__':
     run_tests()

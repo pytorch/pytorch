@@ -439,6 +439,19 @@ TensorView* lt(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(lt, v1, v2);
 }
 
+// gt
+Val* gt(Val* v1, Val* v2) {
+  return binaryOp(BinaryOpType::GT, v1, v2);
+}
+TensorView* gt(TensorView* v1, Val* v2) {
+  return arithOpOverloads(gt, v1, v2);
+}
+TensorView* gt(Val* v1, TensorView* v2) {
+  return arithOpOverloads(gt, v1, v2);
+}
+TensorView* gt(TensorView* v1, TensorView* v2) {
+  return arithOpOverloads(gt, v1, v2);
+}
 // eq
 Val* eq(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Eq, v1, v2);

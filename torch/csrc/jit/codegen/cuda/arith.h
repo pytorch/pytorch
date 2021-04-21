@@ -133,6 +133,11 @@ TORCH_CUDA_CU_API Val* lt(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* lt(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* lt(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* lt(TensorView* v1, TensorView* v2);
+// gt
+TORCH_CUDA_CU_API Val* gt(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* gt(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* gt(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* gt(TensorView* v1, TensorView* v2);
 // eq
 TORCH_CUDA_CU_API Val* eq(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* eq(TensorView* v1, Val* v2);
