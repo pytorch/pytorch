@@ -236,7 +236,7 @@ def fuse_fx(model: torch.nn.Module,
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     assert not model.training, 'fuse_fx only works on models in eval mode'
     graph_module = torch.fx.symbolic_trace(model)
-    preservd_attributes: Set[str] = set()
+    preserved_attributes: Set[str] = set()
     if fuse_custom_config_dict:
         preserved_attributes = set(fuse_custom_config_dict.get("preserved_attributes", []))
     for attr_name in preserved_attributes:
