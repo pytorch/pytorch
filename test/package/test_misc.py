@@ -90,6 +90,18 @@ class TestMisc(PackageTestCase):
             import_exclude,
         )
 
+    def test_file_structure_has_file(self):
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
+            import package_a.subpackage
+
+            obj = package_a.subpackage.PackageASubpackageObject()
+            he.save_pickle("obj", "obj.pkl", obj)
+
+            export_file_structure = he.file_structure()
+            self.assertTrue(export_file_structure.has_file("package_a/subpackage.py"))
+            self.assertFalse(export_file_structure.has_file("package_a/subpackage"))
+
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_custom_requires(self):
         buffer = BytesIO()
