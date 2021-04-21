@@ -15,20 +15,34 @@ static inline TypePtr unwrapOptional(TypePtr opt_type) {
   return opt_type;
 }
 
-static inline bool isIntOrFloatUsedAsList(
-    const Value* value,
-    const Argument& arg) {
+static inline Value* maybeUseIntOrFloatAsList(
+    Value* value,
+    const Argument& arg,
+    Graph& graph) {
   // Look for int[N] or float[N]
   auto v_type = value->type();
   // Check if value is optional Type of Int or Float
   if (value->type()->kind() == OptionalType::Kind) {
     v_type = unwrapOptional(value->type());
+    // Return value if the type is not `int` or `float`
+    if (v_type != FloatType::get() && v_type != IntType::get()) {
+      return value;
+    }
   }
-  if (v_type != FloatType::get() && v_type != IntType::get())
-    return false;
   auto arg_type = unwrapOptional(arg.type());
   auto list_type = arg_type->cast<ListType>();
-  return list_type && list_type->getElementType() == v_type && arg.N();
+
+  if (list_type && list_type->getElementType() == v_type && arg.N()) {
+      if (value->type()->kind() == OptionalType::Kind) {
+        // If value is of optionalType, reset the type of the value to be
+        // of type `int` or `float`
+        value->setType(v_type);
+      }
+      std::vector<Value*> repeated(*arg.N(), value);
+      value =
+          graph.insertNode(graph.createList(value->type(), repeated))->output();
+  }
+  return value;
 }
 
 /// Returns true if `type` is a Tuple in which all the elements have the
@@ -151,16 +165,7 @@ static Value* tryMatchArgument(
   // Some functions that take lists of integers or floats for fixed size arrays
   // also allow single ints/floats to be passed in their place. The single
   // int/float is then repeated to the length of the list
-  if (isIntOrFloatUsedAsList(value, arg)) {
-    if (value->type()->kind() == OptionalType::Kind) {
-      // If value is of optionalType, reset the type of the value to be
-      // of type `int` or `float`
-      value->setType(unwrapOptional(value->type()));
-    }
-    std::vector<Value*> repeated(*arg.N(), value);
-    value =
-        graph.insertNode(graph.createList(value->type(), repeated))->output();
-  }
+  value = maybeUseIntOrFloatAsList(value, arg, graph);
 
   // Resolve VarType variables
   const MatchTypeReturn matched =
