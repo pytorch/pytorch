@@ -18,7 +18,7 @@ int64_t BackendDebugHandleManager::getNextDebugHandleForInlinedCallStackPtr(
   return debug_handle;
 }
 
-std::unordered_map<int64_t, DelegateDebugInfoType> BackendDebugHandleManager::
+std::unordered_map<int64_t, DebugInfoPair> BackendDebugHandleManager::
     getCallStackPtrMap() {
   // Note that this is return by copy and since
   // InlinedCallStackPtrs are intrusive ptr it will result in
