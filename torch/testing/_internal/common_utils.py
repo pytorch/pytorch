@@ -200,7 +200,7 @@ def wait_for_process(p):
         else:
             p.kill()
             raise
-    except:  # noqa E722, copied from python core library
+    except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
     finally:
@@ -1469,10 +1469,10 @@ class TestCase(expecttest.TestCase):
                 torch.set_warn_always(prev)
             if len(ws) == 0:
                 self.fail('no warning caught')
-            for w in ws:
-                self.assertTrue(type(w.message) is category)
-                self.assertTrue(re.match(pattern, str(w.message)),
-                                f'{pattern}, {w.message}')
+            self.assertTrue(any([type(w.message) is category for w in ws]))
+            self.assertTrue(
+                any([re.match(pattern, str(w.message)) for w in ws]),
+                f'{pattern}, {[w.message for w in ws if type(w.message) is category]}')
 
     def assertExpected(self, s, subname=None):
         r"""
