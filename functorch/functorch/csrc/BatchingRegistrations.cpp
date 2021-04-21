@@ -1487,8 +1487,8 @@ TORCH_LIBRARY_IMPL(aten, BatchedOutOfTree, m) {
   // Tensor wrapper, it only has one dispatch key (Batched) on it. The resolution
   // here is to just directly call the underlying implementation.
   m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
-  m.impl("_add_batch_dim", native::_add_batch_dim);
-  m.impl("_remove_batch_dim", native::_remove_batch_dim);
+  // m.impl("_add_batch_dim", native::_add_batch_dim);
+  // m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
   m.impl("max_pool2d", at::native::max_pool2d); // composite
   m.impl("max_pool2d_with_indices", max_pool2d_with_indices_batching_rule);
