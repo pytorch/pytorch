@@ -65,9 +65,8 @@ void MPSImageWrapper::copyDataFromHost(const float* inputData) {
 
 void MPSImageWrapper::copyDataToHost(float* hostData) {
   TORCH_CHECK(_image);
-  if(_image.isTemporaryImage){
-    synchronize();
-  }
+  synchronize();
+  TORCH_CHECK(_image && !_image.isTemporaryImage);
   copyToHost(hostData, _image);
 }
 
@@ -75,8 +74,9 @@ MPSImage* MPSImageWrapper::image() const {
   return _image;
 }
 
-void MPSImageWrapper::setCommandBuffer(MetalCommandBuffer* cb) {
-  _commandBuffer = cb;
+void MPSImageWrapper::setCommandBuffer(MetalCommandBuffer* commandBuffer) {
+  TORCH_CHECK(commandBuffer && commandBuffer.valid);
+  _commandBuffer = commandBuffer;
   [_commandBuffer addSubscriber:_delegate];
 }
 MetalCommandBuffer* MPSImageWrapper::commandBuffer() const {
@@ -95,7 +95,6 @@ void MPSImageWrapper::allocateTextureStorage(IntArrayRef sizes) {
 void MPSImageWrapper::allocateTemporaryTextureStorage(
     IntArrayRef sizes,
     MetalCommandBuffer* commandBuffer) {
-  TORCH_CHECK(commandBuffer)
   setCommandBuffer(commandBuffer);
   _textureSizes = computeTextureSize(sizes);
   _image = createTemporaryImage(commandBuffer, _textureSizes);
@@ -111,6 +110,9 @@ void MPSImageWrapper::copyFromTexture(MPSImage* image) {
 
 void MPSImageWrapper::setTexture(MPSImage* image) {
   TORCH_CHECK(image);
+  if(image.isTemporaryImage) {
+    TORCH_CHECK(_commandBuffer && _commandBuffer.valid);
+  }
   _image = image;
 }
 
@@ -124,8 +126,9 @@ void MPSImageWrapper::prepare() {
 }
 
 void MPSImageWrapper::synchronize() {
-  TORCH_CHECK(commandBuffer());
-  [commandBuffer() commit];
+  if(_commandBuffer && _commandBuffer.valid) {
+    [_commandBuffer commit];
+  }
 }
 
 void MPSImageWrapper::release() {
