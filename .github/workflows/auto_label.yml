@@ -12,6 +12,12 @@ jobs:
     steps:
     - name: Retrieve information
       id: vars
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        ISSUE_TITLE: ${{ github.event.issue.title }}
+        ISSUE_NUMBER: ${{ github.event.issue.number }}
       run: |
         set -eux
         if [[ "$EVENT_NAME" == "pull_request_target" ]]; then
@@ -23,13 +29,13 @@ jobs:
         fi
         echo ::set-output name=TITLE::"${TITLE}"
         echo ::set-output name=ISSUE_NUMBER::"${ISSUE_NUMBER}"
-      env:
-        EVENT_NAME: ${{ github.event_name }}
-        PR_TITLE: ${{ github.event.pull_request.title }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        ISSUE_TITLE: ${{ github.event.issue.title }}
-        ISSUE_NUMBER: ${{ github.event.issue.number }}
     - name: Auto-label ROCm
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TITLE: ${{ steps.vars.outputs.TITLE }}
+        ISSUE_NUMBER: ${{ steps.vars.outputs.ISSUE_NUMBER }}
+        OWNER: ${{ github.repository_owner }}
+        REPO: ${{ github.event.repository.name }}
       run: |
         set -eux
         if [[ "${TITLE,,}" == *rocm* ]]; then
@@ -39,9 +45,3 @@ jobs:
             "https://api.github.com/repos/${OWNER}/${REPO}/issues/${ISSUE_NUMBER}/labels" \
             -d '{"labels":["module: rocm"]}'
         fi
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        TITLE: ${{ steps.vars.outputs.TITLE }}
-        ISSUE_NUMBER: ${{ steps.vars.outputs.ISSUE_NUMBER }}
-        OWNER: ${{ github.repository_owner }}
-        REPO: ${{ github.event.repository.name }}
