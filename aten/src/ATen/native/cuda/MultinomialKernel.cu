@@ -1,11 +1,12 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
-#include <ATen/native/UnaryOps.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/UnaryOps.h>
+#include <ATen/native/cuda/LaunchUtils.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #include <THC/THCReduceApplyUtils.cuh>
@@ -24,9 +25,7 @@ namespace {
 
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(1024)
-#endif
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
 __global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
   extern __shared__  unsigned char my_smem[];
   scalar_t *smem = reinterpret_cast<scalar_t *>(my_smem);
@@ -163,17 +162,15 @@ sampleMultinomialWithReplacement(PhiloxCudaState philox_args,
 }
 
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(1024)
-#endif
-__global__ void
-sampleMultinomialOnce(int64_t* dest,
-                      int64_t distributions,
-                      int categories,
-                      scalar_t* sampled,
-                      scalar_t* dist,
-                      int stride_dist,        // dist->stride(0)
-                      int stride_categories   // dist->stride(1)
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void sampleMultinomialOnce(
+    int64_t* dest,
+    int64_t distributions,
+    int categories,
+    scalar_t* sampled,
+    scalar_t* dist,
+    int stride_dist, // dist->stride(0)
+    int stride_categories // dist->stride(1)
 ) {
   extern __shared__  unsigned char my_smem[];
   __shared__ bool found;
