@@ -50,6 +50,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         prop_shapes_on_graph([1, 6, 5], [1, 7, 1, 5])
         FileCheck().check("1, 7, 6, 5").run(foo.graph)
 
+        # None implicitly creates a new symbolic symbol
         prop_shapes_on_graph([None, None], [None, None, None])
         output_shape = foo.graph.findNode("aten::mul").output().type().symbolic_sizes()
         inp0_shape = inputs[0].type().symbolic_sizes()
