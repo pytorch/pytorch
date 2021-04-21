@@ -47,6 +47,7 @@ namespace test_run_through_type {
         }
     };
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TEST(CompileTimeFunctionPointerTest, runFunctionThroughType) {
         Executor<Add> executor;
         EXPECT_EQ(3, executor.execute(1, 2));
@@ -59,6 +60,7 @@ namespace test_run_through_value {
         return Func::func_ptr()(a, b);
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TEST(CompileTimeFunctionPointerTest, runFunctionThroughValue) {
         EXPECT_EQ(3, execute(TORCH_FN(add), 1, 2));
     }

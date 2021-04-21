@@ -143,7 +143,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     }
   }
   if (THPVariable_Check(obj)) {
-    auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
+    const auto& var = THPVariable_Unpack(obj);
     return var.scalar_type();
   }
   if (THPUtils_checkString(obj)) {
@@ -213,7 +213,8 @@ Tensor internal_new_from_data(
 
   if (THPVariable_Check(data)) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from a variable");
-    auto var = reinterpret_cast<THPVariable*>(data)->cdata;
+    // TODO: use MaybeOwned
+    auto var = THPVariable_Unpack(data);
     if (copy_variables) {
       var = var.detach();
     }
@@ -471,11 +472,6 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
   if (isSparse(dispatchKeyToBackend(dispatch_key))) {
     return legacy_sparse_tensor_ctor(dispatch_key, scalar_type, args, kwargs);
   }
-
-  TORCH_WARN_ONCE(
-      "Legacy tensor constructor is deprecated. "
-      "Use: torch.tensor(...) for creating tensors from tensor-like objects; "
-      "or torch.empty(...) for creating an uninitialized tensor with specific sizes.");
 
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
