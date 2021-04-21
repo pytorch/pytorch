@@ -248,7 +248,7 @@ def restore_rng_states(device: torch.device, rng_states: Deque[RNGStates],) -> G
 
 class Checkpoint(torch.autograd.Function):
     @staticmethod
-    # type: ignore
+    # type: ignore[override]
     def forward(
         ctx: Context,
         phony: Tensor,
@@ -291,7 +291,7 @@ class Checkpoint(torch.autograd.Function):
 
 class Recompute(torch.autograd.Function):
     @staticmethod
-    # type: ignore
+    # type: ignore[override]
     def forward(
         ctx: Context,
         phony: Tensor,
