@@ -1055,7 +1055,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     //
     // The correct fix is to stop allocating tensors that are not variables,
     // but to conveniently do this c10d must depend on torch not ATen
-    at::AutoNonVariableTypeMode _no_grad(true);
+    at::AutoDispatchBelowAutograd _no_grad(true);
     auto input = tensors[0];
 
     // Perform local reduction if we have multiple inputs.
