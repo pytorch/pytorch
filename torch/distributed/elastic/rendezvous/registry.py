@@ -10,6 +10,12 @@ from .dynamic_rendezvous import create_handler
 
 
 def _create_etcd_handler(params: RendezvousParameters) -> RendezvousHandler:
+    from . import static_tcp_rendezvous
+
+    return static_tcp_rendezvous.create_rdzv_handler(params)
+
+
+def _create_static_handler(params: RendezvousParameters) -> RendezvousHandler:
     from . import etcd_rendezvous
 
     return etcd_rendezvous.create_rdzv_handler(params)
@@ -38,6 +44,7 @@ def _register_default_handlers() -> None:
     handler_registry.register("etcd", _create_etcd_handler)
     handler_registry.register("c10d-experimental", _create_c10d_handler)
     handler_registry.register("etcd-experimental", _create_expr_etcd_handler)
+    handler_registry.register("static", _create_static_handler)
 
 
 # The legacy function kept for backwards compatibility.
