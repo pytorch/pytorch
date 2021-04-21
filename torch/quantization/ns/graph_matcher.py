@@ -1,269 +1,51 @@
 import enum
-import operator
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
-import torch.nn.qat as nnqat
-import torch.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.qat as nniqat
-import torch.nn.intrinsic as nni
 toq = torch.ops.quantized
 
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
 from .utils import getattr_from_fqn
-from .ns_types import NSSubgraph
+from .ns_types import NSSubgraph, NSNodeTargetType
+from .mappings import (
+    FUNS_UNMATCHABLE,
+    MODS_UNMATCHABLE,
+    METHS_UNMATCHABLE,
+)
+from .pattern_utils import (
+    get_base_name_to_sets_of_related_ops,
+    get_type_a_related_to_b,
+    get_reversed_fusions,
+    end_node_matches_reversed_fusion,
+)
 
-from typing import Dict, Tuple, List, Optional, Set, Callable, Any, Union
+from typing import Dict, Tuple, List, Optional, Set, Callable, Any
 
 def _get_output_nodes(g: Graph) -> List[Node]:
     return [n for n in g.nodes if n.op == 'output']
-
-def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
-    base_name_to_sets_of_related_ops: Dict[str, Set[Callable]] = {
-        # conv modules
-        'torch.nn.Conv1d': set([
-            nn.Conv1d,
-            nnq.Conv1d,
-            nniqat.ConvBn1d,
-            nniq.ConvReLU1d,
-            nni.ConvReLU1d,
-        ]),
-        'torch.nn.Conv2d': set([
-            nn.Conv2d,
-            nnq.Conv2d,
-            nnqat.Conv2d,
-            nniqat.ConvBn2d,
-            nniq.ConvReLU2d,
-            nni.ConvReLU2d,
-        ]),
-        'torch.nn.Conv3d': set([
-            nn.Conv3d,
-            nnq.Conv3d,
-            nnqat.Conv3d,
-            nniqat.ConvBn3d,
-            nniq.ConvReLU3d,
-            nni.ConvReLU3d,
-        ]),
-        # conv functionals
-        'torch.nn.functional.conv1d': set([
-            F.conv1d,
-            toq.conv1d,
-            toq.conv1d_relu,
-        ]),
-        'torch.nn.functional.conv2d': set([
-            F.conv2d,
-            toq.conv2d,
-            toq.conv2d_relu,
-        ]),
-        'torch.nn.functional.conv3d': set([
-            F.conv3d,
-            toq.conv3d,
-            toq.conv3d_relu,
-        ]),
-        # linear modules
-        'torch.nn.Linear': set([
-            nn.Linear,
-            nnq.Linear,
-            nni.LinearReLU,
-            nniq.LinearReLU,
-            nnqat.Linear,
-            nnqd.Linear,
-        ]),
-        # linear functionals
-        'torch.nn.functional.linear': set([
-            F.linear,
-            toq.linear,
-            toq.linear_relu,
-        ]),
-        # LSTM
-        'torch.nn.LSTM': set([
-            nn.LSTM,
-            nnqd.LSTM,
-        ]),
-        # add
-        'torch.add': set([
-            torch.add,
-            toq.add,
-            operator.add,  # x + y
-        ]),
-        # cat
-        'torch.cat': set([
-            torch.cat,
-            toq.cat,
-        ]),
-        # mul
-        'torch.mul': set([
-            torch.mul,
-            toq.mul,
-        ]),
-        # relu
-        'torch.relu': set([
-            F.relu,
-        ]),
-        # maxpool2d
-        'torch.nn.MaxPool2d': set([
-            nn.MaxPool2d,
-        ]),
-    }
-    return base_name_to_sets_of_related_ops
-
-def get_type_a_related_to_b(
-    base_name_to_sets_of_related_ops: Dict[str, Set[Callable]],
-) -> Set[Tuple[Callable, Callable]]:
-    # TODO(future PR): allow customizations
-    # TODO(future PR): reuse existing quantization mappings
-    # TODO(future PR): add the rest of modules and ops here
-    type_a_related_to_b: Set[Tuple[Callable, Callable]] = set()
-
-    for base_name, s in base_name_to_sets_of_related_ops.items():
-        s_list = list(s)
-        # add every bidirectional pair
-        for idx_0 in range(0, len(s_list) - 1):
-            for idx_1 in range(idx_0 + 1, len(s_list)):
-                type_a_related_to_b.add((s_list[idx_0], s_list[idx_1]))
-                type_a_related_to_b.add((s_list[idx_1], s_list[idx_0]))
-
-    return type_a_related_to_b
 
 def get_non_matchable_functions() -> Set[Callable]:
     """
     `call_function` nodes pointing to these functions are non-matchable.
     """
     # TODO(future PR): allow customizations
-    return set([
-        torch.quantize_per_tensor,
-    ])
+    return FUNS_UNMATCHABLE
 
 def get_non_matchable_modules() -> Set[Callable]:
     """
     `call_module` nodes pointing to instances of these types are non-matchable.
     """
     # TODO(future PR): allow customizations
-    return set([
-        torch.quantization.ObserverBase,
-        torch.quantization.FakeQuantizeBase,
-    ])
+    return MODS_UNMATCHABLE
 
-NSFusionElType = Union[
-    Callable,  # call_function or call_module type, example: F.linear or nn.Conv2d
-    str,  # call_method name, example: "dequantize"
-    Tuple[str, Any],  # call_method name and first argument, example: ("to", torch.float16)
-]
-NSFusionType = Union[
-    Tuple[NSFusionElType, NSFusionElType],
-    Tuple[NSFusionElType, NSFusionElType, NSFusionElType, NSFusionElType],
-]
-
-def get_reversed_fusions() -> Set[Tuple[NSFusionType, int]]:
+def get_non_matchable_methods() -> Set[str]:
     """
-    Set of potential fusions, in reverse order.  The order is reversed
-    to match how fusion patterns are defined in quantization code.
+    `call_method` nodes pointing to these targets are non-matchable.
 
-    Fusion format:
-    ((fusion_op_0, fusion_op_1), base_op_idx)
-
-    Where base_op_idx is the idx of the op we should use to match other related
-    ops. Note: base_op_idx is specified in non-reverse order, i.e. a base_op_idx
-    of 0 represents the first op in regular (non-reverse) order, 1 represents the
-    second op, etc.
     """
-    # TODO(future PR): remove the custom syntax for defining fusion patterns
-    # and reuse either quantization's syntax or something else.
-    return set([
-        # linear functionals
-        ((F.relu, F.linear), 0),
-        # conv functionals
-        ((F.relu, F.conv1d), 0),
-        ((F.relu, F.conv2d), 0),
-        ((F.relu, F.conv3d), 0),
-        # conv modules
-        ((nn.ReLU, nn.Conv1d), 0),
-        ((nn.ReLU, nn.Conv2d), 0),
-        ((nn.ReLU, nn.Conv3d), 0),
-        # linear modules
-        ((nn.ReLU, nn.Linear), 0),
-        # linear-relu fp16 emulation:
-        # fp16_to_fp32 -> linear -> relu -> fp32_to_fp16
-        ((("to", torch.float16), F.relu, F.linear, "dequantize"), 1),
-    ])
-
-# TODO(future PR): we should see if we can reuse quantization's fusion
-# patterns here.
-def end_node_matches_reversed_fusion(
-    end_node: Node,
-    reversed_fusion: NSFusionType,
-    gm: GraphModule,
-) -> bool:
-    """
-    Returns true if a pattern ending with `end_node` matches
-    the fusion pattern.
-    """
-    cur_node = end_node
-    for fusion_idx in range(len(reversed_fusion)):
-        cur_fusion_el = reversed_fusion[fusion_idx]
-
-        if cur_node.op == 'call_function':
-            fusion_el_is_fun = (not isinstance(cur_fusion_el, str)) and \
-                (not isinstance(cur_fusion_el, type))
-            if fusion_el_is_fun:
-                if cur_node.target != cur_fusion_el:
-                    return False
-                if len(cur_node.args) > 0 and isinstance(cur_node.args[0], Node):
-                    cur_node = cur_node.args[0]
-                else:
-                    return False
-            else:
-                return False
-
-        elif cur_node.op == 'call_module':
-            fusion_el_is_mod = isinstance(cur_fusion_el, type)
-            if fusion_el_is_mod:
-                assert isinstance(cur_node.target, str)
-                target_mod = getattr_from_fqn(gm, cur_node.target)
-                if not isinstance(cur_fusion_el, type):
-                    return False
-                if not isinstance(target_mod, cur_fusion_el):
-                    return False
-                if len(cur_node.args) > 0 and isinstance(cur_node.args[0], Node):
-                    cur_node = cur_node.args[0]
-                else:
-                    return False
-            else:
-                return False
-
-        elif cur_node.op == 'call_method':
-            fusion_el_is_meth_with_second_arg = \
-                isinstance(cur_fusion_el, tuple) and len(cur_fusion_el) == 2
-            fusion_el_is_meth_without_args = isinstance(cur_fusion_el, str)
-            if fusion_el_is_meth_without_args or fusion_el_is_meth_with_second_arg:
-                if fusion_el_is_meth_without_args:
-                    if cur_node.target != cur_fusion_el:
-                        return False
-                else:
-                    assert isinstance(cur_fusion_el, tuple)
-                    if cur_node.target != cur_fusion_el[0]:
-                        return False
-                    elif len(cur_node.args) < 2:
-                        return False
-                    elif cur_node.args[1] != cur_fusion_el[1]:
-                        return False
-
-                if len(cur_node.args) > 0 and isinstance(cur_node.args[0], Node):
-                    cur_node = cur_node.args[0]
-                else:
-                    return False
-            else:
-                return False
-        else:
-            return False
-
-    return True
-
+    # TODO(future PR): allow customizations
+    return METHS_UNMATCHABLE
 
 class _NSGraphMatchableSubgraphsIterator:
     """
@@ -278,10 +60,12 @@ class _NSGraphMatchableSubgraphsIterator:
         gm: GraphModule,
         non_matchable_functions: Set[Callable],
         non_matchable_modules: Set[Callable],
+        non_matchable_methods: Set[str],
     ):
         self.gm: GraphModule = gm
         self.non_matchable_functions: Set[Callable] = non_matchable_functions
         self.non_matchable_modules: Set[Callable] = non_matchable_modules
+        self.non_matchable_methods: Set[str] = non_matchable_methods
         self.seen_nodes: Set[Node] = set()
         self.stack: List[Node] = []
         for start_node in _get_output_nodes(self.gm.graph):
@@ -368,11 +152,12 @@ class _NSGraphMatchableSubgraphsIterator:
             return not (node.target in self.non_matchable_functions)
         elif node.op == 'call_module':
             assert isinstance(node.target, str)
-            # target_mod = getattr(self.gm, node.target)
             target_mod = getattr_from_fqn(self.gm, node.target)
             return not \
                 any(isinstance(target_mod, t)  # type: ignore
                     for t in self.non_matchable_modules)
+        elif node.op == 'call_method':
+            return not (node.target in self.non_matchable_methods)
         else:
             return False
 
@@ -386,34 +171,18 @@ class SubgraphTypeRelationship(enum.Enum):
     # same type
     # example: F.linear and F.linear, or nn.Conv2d and nn.Conv2d
     EQUAL = enum.auto()
-    # same type, and signature is the same for fp32 vs int8
-    # TODO(future PR): probably remove this and enable matching of
-    # nodes with equal types.
-    EQUAL_AND_SIGNATURE_SAME_ACROSS_DTYPES = enum.auto()
     # same subgraph_relationship set, but not the same type
     # example: F.linear and toq.linear
     RELATED_BUT_NOT_EQUAL = enum.auto()
     # not related
     NOT_RELATED = enum.auto()
 
-# TODO(future PR): full coverage
-def get_functions_signature_same_across_dtypes() -> Set[Callable]:
-    return set([
-        F.relu,
-    ])
-
-# TODO(future PR): full coverage
-def get_module_types_signature_same_across_dtypes() -> Set[Callable]:
-    return set([
-        nn.MaxPool2d,
-    ])
-
 def _get_subgraph_relationship_type(
     subgraph_a: NSSubgraph,
     subgraph_b: NSSubgraph,
     gm_a: GraphModule,
     gm_b: GraphModule,
-    type_a_related_to_b: Set[Tuple[Callable, Callable]],
+    type_a_related_to_b: Set[Tuple[NSNodeTargetType, NSNodeTargetType]],
 ) -> SubgraphTypeRelationship:
     node_a = subgraph_a.base_op_node
     node_b = subgraph_b.base_op_node
@@ -433,16 +202,10 @@ def _get_subgraph_relationship_type(
             elif (not node_a_has_prev) and node_b_has_prev:
                 return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
             elif (not node_a_has_prev) and (not node_b_has_prev):
-                if node_a.target in get_functions_signature_same_across_dtypes():
-                    return SubgraphTypeRelationship.EQUAL_AND_SIGNATURE_SAME_ACROSS_DTYPES
-                else:
-                    return SubgraphTypeRelationship.EQUAL
+                return SubgraphTypeRelationship.EQUAL
             else:
                 # TODO(future PR): check for matches start_op_node and base_op_node
-                if node_a.target in get_functions_signature_same_across_dtypes():
-                    return SubgraphTypeRelationship.EQUAL_AND_SIGNATURE_SAME_ACROSS_DTYPES
-                else:
-                    return SubgraphTypeRelationship.EQUAL
+                return SubgraphTypeRelationship.EQUAL
 
         key = (node_a.target, node_b.target)
         if key in type_a_related_to_b:
@@ -460,11 +223,19 @@ def _get_subgraph_relationship_type(
         mod_b = getattr_from_fqn(gm_b, node_b.target)
         # modules with equivalent types always match (i.e. nn.Conv2d and nn.Conv2d)
         if type(mod_a) == type(mod_b):
-            if type(mod_a) in get_module_types_signature_same_across_dtypes():
-                return SubgraphTypeRelationship.EQUAL_AND_SIGNATURE_SAME_ACROSS_DTYPES
-            else:
-                return SubgraphTypeRelationship.EQUAL
+            return SubgraphTypeRelationship.EQUAL
         key = (type(mod_a), type(mod_b))
+        if key in type_a_related_to_b:
+            return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
+        else:
+            return SubgraphTypeRelationship.NOT_RELATED
+    elif node_a.op == 'call_method':
+        assert (subgraph_a.base_op_node == subgraph_a.start_node and
+                subgraph_b.base_op_node == subgraph_b.start_node), \
+            "Matching call_method patterns where base_op_node != start_node is not supported yet"
+        if node_a.target == node_b.target:
+            return SubgraphTypeRelationship.EQUAL
+        key = (node_a.target, node_b.target)
         if key in type_a_related_to_b:
             return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
         else:
@@ -474,7 +245,7 @@ def _get_subgraph_relationship_type(
 def _get_name_for_subgraph(
     subgraph_a: NSSubgraph,
     gm_a: GraphModule,
-    base_name_to_sets_of_related_ops: Dict[str, Set[Callable]],
+    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]],
     existing_names: Set[str],
 ) -> str:
     """
@@ -523,8 +294,8 @@ def _get_name_for_subgraph(
     existing_names.add(proposed_name)
     return proposed_name
 
-def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[Callable]:
-    if node.op == 'call_function':
+def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[NSNodeTargetType]:
+    if node.op in ('call_function', 'call_method'):
         return node.target  # type: ignore
     elif node.op == 'call_module':
         assert isinstance(node.target, str)
@@ -601,10 +372,13 @@ def get_matching_subgraph_pairs(
     """
     non_matchable_functions = get_non_matchable_functions()
     non_matchable_modules = get_non_matchable_modules()
+    non_matchable_methods = get_non_matchable_methods()
     graph_a_iterator = _NSGraphMatchableSubgraphsIterator(
-        gm_a, non_matchable_functions, non_matchable_modules)
+        gm_a, non_matchable_functions, non_matchable_modules,
+        non_matchable_methods)
     graph_b_iterator = _NSGraphMatchableSubgraphsIterator(
-        gm_b, non_matchable_functions, non_matchable_modules)
+        gm_b, non_matchable_functions, non_matchable_modules,
+        non_matchable_methods)
     results = {}
     base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
@@ -646,10 +420,6 @@ def get_matching_subgraph_pairs(
 ({cur_subgraph_a}, {type_start_a}) and
 ({cur_subgraph_b}, {type_start_b}) are not related"""
                 raise GraphMatchingException(msg)
-            elif subgraph_relationship == SubgraphTypeRelationship.EQUAL:
-                # For now, skip nodes with equal types. In the future, this can
-                # be made configurable.
-                continue
             key_name_a = _get_name_for_subgraph(
                 cur_subgraph_a, gm_a, base_name_to_sets_of_related_ops,
                 existing_names_a)

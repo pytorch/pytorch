@@ -29,6 +29,7 @@ except ImportError:
 
 
 TESTS = [
+    'test_import_time',
     'test_public_bindings',
     'test_type_hints',
     'test_autograd',
@@ -108,6 +109,7 @@ TESTS = [
     'test_tensorexpr_pybind',
     'test_openmp',
     'test_profiler',
+    "distributed/test_launcher",
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
