@@ -2503,7 +2503,18 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad):
     return tuple(sample_inputs)
 
 
-def sample_inputs_complex_polar(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_polar(op_info, device, dtype, requires_grad, **kwargs):
+    def _make_tensor_helper(shape, low=low, high=high, ):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        SampleInput(_make_tensor_helper((S, S), low=0), args=(_make_tensor_helper((S, S)),)),
+        SampleInput(_make_tensor_helper((), low=0), args=(_make_tensor_helper(()),)),
+    )
+
+    return samples
+
+def sample_inputs_complex(op_info, device, dtype, requires_grad, **kwargs):
     def _make_tensor_helper(shape):
         return make_tensor(shape, device, dtype, requires_grad=requires_grad)
 
@@ -3382,16 +3393,15 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('view_as_complex',
            dtypes=floating_types_and(torch.half),
-           sample_inputs_func=sample_inputs_view_as_complex,
            supports_out=False,
            skips=(
-                # "sum_cpu" not implemented for 'ComplexHalf'
-                SkipInfo('TestOpInfo', 'test_supported_backward',
-                         dtypes=(torch.half,), device_type='cpu'),
-           )),
+               # "sum_cpu/sum_cuda" not implemented for 'ComplexHalf'
+               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.half,)),
+           ),
+           sample_inputs_func=sample_inputs_view_as_complex),
     OpInfo('complex',
            dtypes=floating_types(),
-           sample_inputs_func=sample_inputs_complex_polar,
+           sample_inputs_func=sample_inputs_complex,
            ),
     OpInfo('copysign',
            dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -4603,7 +4613,7 @@ op_db: List[OpInfo] = [
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('polar',
            dtypes=floating_types(),
-           sample_inputs_func=sample_inputs_complex_polar),
+           sample_inputs_func=sample_inputs_polar),
     # To test reference numerics against multiple values of argument `n`,
     # we make multiple OpInfo entries with each entry corresponding to different value of n (currently 0 to 4).
     # We run the op tests from test_ops.py only for `n=0` to avoid redundancy in testing.
@@ -5708,22 +5718,6 @@ EXCLUDE_GRADCHECK: Dict[str, Any] = {
 EXCLUDE_GRADGRADCHECK: Dict[str, Any] = {
 }
 EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
-    # *det methods uses svd in backward when matrix is not invertible. However,
-    # svd backward is unstable unless the matrix has positive distinct singular
-    # values. Generated random matrices satisfy this with high probability, but
-    # we can't rely on it. So only test gradgrad on invertible test cases and
-    # _distinct_singular_values.
-    'test_det',
-    'test_det_1x1',
-    'test_det_symmetric',
-    'test_det_symmetric_psd',
-    'test_det_dim2_null',
-    'test_det_rank1',
-    'test_det_rank2',
-    'test_det_batched',
-    'test_det_batched_1x1',
-    'test_det_batched_symmetric',
-    'test_det_batched_symmetric_psd',
     # `other` expand_as(self, other) is not used in autograd.
     'test_expand_as',
     'test_cdist',
@@ -5739,16 +5733,6 @@ def exclude_tensor_method(name, test_name):
         'test_where_scalar',
         'test_where_scalar_broadcast_mask',
         'test_where_scalar_broadcast_non_mask',
-        'test_var_mean_keepdim_dim_1d',
-        'test_var_mean_keepdim_dim',
-        'test_var_mean_dim_1d',
-        'test_var_mean_dim',
-        'test_var_mean',
-        'test_std_mean_keepdim_dim_1d',
-        'test_std_mean_keepdim_dim',
-        'test_std_mean_dim_1d',
-        'test_std_mean_dim',
-        'test_std_mean',
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {
