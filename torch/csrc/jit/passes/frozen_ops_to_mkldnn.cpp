@@ -25,8 +25,8 @@
 #include <ATen/native/ConvUtils.h>
 #include <algorithm>
 #include <memory>
-#include "ATen/core/stack.h"
-#include "jit/runtime/operator.h"
+#include <ATen/core/stack.h>
+#include <jit/runtime/operator.h>
 #include <c10/core/Layout.h>
 #include <c10/util/StringUtil.h>
 
