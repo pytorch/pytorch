@@ -204,6 +204,12 @@ void Logger::set_runtime_stats_and_log() {
     ddp_logging_data_->rebuilt_bucket_sizes = get_bucket_sizes();
   }
 
+  // reset perforamnce stats for current iteration.
+  ddp_logging_data_->forward_compute_time = 0;
+  ddp_logging_data_->backward_comm_time = 0;
+  ddp_logging_data_->backward_compute_time = 0;
+  ddp_logging_data_->backward_compute_comm_overlap_time = 0;
+
   if (reducer_->replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
     // Cuda time stats are only collected for single process single

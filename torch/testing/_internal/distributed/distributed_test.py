@@ -3628,7 +3628,7 @@ class DistributedTest:
                 # the run time stats for this idx-th iteration will not
                 # be zeros.
                 ddp_logging_data = model_DDP.get_ddp_logging_data()
-                if (idx > 0 and (idx < 10 or idx % 2 != 0)):
+                if (idx > 0 and (idx < 10 or idx % 2 == 0)):
                     self.assertGreaterEqual(ddp_logging_data.forward_compute_time, 1)
                     self.assertGreaterEqual(ddp_logging_data.backward_compute_time, 1)
                     self.assertGreaterEqual(ddp_logging_data.backward_comm_time, 1)
@@ -3638,11 +3638,12 @@ class DistributedTest:
                     self.assertGreaterEqual(
                         ddp_logging_data.backward_comm_time,
                         ddp_logging_data.backward_compute_comm_overlap_time)
-                else:
-                    self.assertGreaterEqual(ddp_logging_data.forward_compute_time, 0)
-                    self.assertGreaterEqual(ddp_logging_data.backward_compute_comm_overlap_time, 0)
-                    self.assertGreaterEqual(ddp_logging_data.backward_compute_time, 0)
-                    self.assertGreaterEqual(ddp_logging_data.backward_comm_time, 0)
+                    self.assertEqual(ddp_logging_data.iteration, idx)
+                elif idx > 0:
+                    # if the idx-th iteration is not sampled to set runtime stats,
+                    # ddp_logging_data.iteration will not be updated to current
+                    # iteration.
+                    self.assertNotEqual(ddp_logging_data.iteration, idx)
 
                 # Shuffle the input so that DDP input is different
                 input = input[torch.randperm(batch_size)]
