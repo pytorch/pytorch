@@ -20,7 +20,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
-import torch._C._fx  # type: ignore
+import torch._C._fx
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -2320,7 +2320,8 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot'}
+        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot',
+                           'polygamma'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)

@@ -1460,6 +1460,10 @@ class TestNN(NNTestCase):
         module_list.extend(s.modules())
         check()
 
+        # verify the right exception is thrown when trying to "forward" through a ModuleList
+        self.assertRaises(NotImplementedError, module_list)
+        self.assertRaises(NotImplementedError, module_list, torch.rand(1, 3))
+
     def test_ModuleDict(self):
         modules = OrderedDict([
             ('act', nn.ReLU()),
@@ -1552,6 +1556,10 @@ class TestNN(NNTestCase):
         self.assertEqual(len(module_dict), 0)
         modules.clear()
         check()
+
+        # verify the right exception is thrown when trying to "forward" through a ModuleDict
+        self.assertRaises(NotImplementedError, module_dict)
+        self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
     def test_ParameterList(self):
         def make_param():
@@ -12827,7 +12835,8 @@ class TestNNDeviceType(NNTestCase):
         helper(1, 100000, 32, 32, ks=4)
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
-    @onlyCUDA
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_max_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None):
