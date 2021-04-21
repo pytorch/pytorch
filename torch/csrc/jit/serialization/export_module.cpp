@@ -24,6 +24,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -294,6 +295,7 @@ void setstateTuple(
     const Module& module,
     const IValue& ivalue,
     std::vector<c10::IValue>& elements,
+    std::unordered_set<std::string>& qn_cache,
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
     bool save_mobile_debug_info) {
   if (!ivalue.isObject())
@@ -302,10 +304,15 @@ void setstateTuple(
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
+    const auto qn = setstate.qualname().qualifiedName();
+    if (qn_cache.find(qn) != qn_cache.end()) {
+      return;
+    }
     if (setstate.isGraphFunction()) {
       auto func_tuple =
           getFunctionTuple(module, setstate, save_mobile_debug_info);
       elements.push_back(func_tuple.first);
+      qn_cache.emplace(qn);
       if (save_mobile_debug_info) {
         debug_info_elements->push_back(func_tuple.second.value());
       }
@@ -316,6 +323,7 @@ void setstateTuple(
           module,
           obj->getSlot(i),
           elements,
+          qn_cache,
           debug_info_elements,
           save_mobile_debug_info);
     }
@@ -329,11 +337,17 @@ void moduleMethodsTuple(
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
     bool save_mobile_debug_info) {
   auto methods = module.get_methods();
+  std::unordered_set<std::string> qn_cache;
   // top level methods
   for (const auto& method : methods) {
+    const auto qn = method.function().qualname().qualifiedName();
+    if (qn_cache.find(qn) != qn_cache.end()) {
+      continue;
+    }
     auto func_tuple =
         getFunctionTuple(module, method.function(), save_mobile_debug_info);
     elements.push_back(func_tuple.first);
+    qn_cache.emplace(qn);
     if (save_mobile_debug_info) {
       debug_info_elements->push_back(func_tuple.second.value());
     }
@@ -344,6 +358,7 @@ void moduleMethodsTuple(
       module,
       module._ivalue(),
       elements,
+      qn_cache,
       debug_info_elements,
       save_mobile_debug_info);
 }
@@ -643,26 +658,5 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   return std::vector<std::string>(names.begin(), names.end());
 }
 
-namespace mobile {
-
-std::set<std::string> _export_operator_list(
-    torch::jit::mobile::Module& module) {
-  std::set<std::string> operator_list;
-  for (Method func : module.get_methods()) {
-    const Function& function = func.function();
-    const std::shared_ptr<Code> cptr = function.get_code();
-    // op_names below isn't a list of unique operator names. In fact
-    // it can contain the same operator name many many times, so we need
-    // to de-dup the list by adding all the operator names into
-    // an std::set<std::string>.
-    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
-    for (auto& op_name : op_names) {
-      operator_list.insert(toString(op_name));
-    }
-  }
-  return operator_list;
-}
-
-} // namespace mobile
 } // namespace jit
 } // namespace torch

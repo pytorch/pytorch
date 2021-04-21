@@ -15,8 +15,8 @@ bool insertableTensor(const at::Tensor& ten) {
 
 bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
-      ivalue.isDouble() || ivalue.isString() || ivalue.isDevice() ||
-      ivalue.isEnum()) {
+      ivalue.isDouble() || ivalue.isComplexDouble() || ivalue.isString() ||
+      ivalue.isDevice() || ivalue.isEnum()) {
     return true;
   }
   if (ivalue.isTensor()) {
@@ -84,6 +84,9 @@ c10::optional<Value*> tryInsertConstant(
   } else if (val.isDouble()) {
     n->f_(attr::value, val.toDouble());
     n->output()->setType(FloatType::get());
+  } else if (val.isComplexDouble()) {
+    n->c_(attr::value, val.toComplexDouble());
+    n->output()->setType(ComplexType::get());
   } else if (val.isBool()) {
     n->i_(attr::value, val.toBool());
     n->output()->setType(BoolType::get());
@@ -153,6 +156,10 @@ c10::optional<IValue> toIValue(const Value* v) {
       type->isSubtypeOf(NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::f) {
     return node->f(attr::value);
+  } else if (
+      type->isSubtypeOf(NumberType::get()) &&
+      node->kindOf(attr::value) == AttributeKind::c) {
+    return node->c(attr::value);
   } else if (
       type->cast<ListType>() &&
       node->kindOf(attr::value) == AttributeKind::ival) {

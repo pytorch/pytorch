@@ -1,9 +1,10 @@
-from pickle import Pickler, _Pickler, _getattribute, _extension_registry, _compat_pickle  # type: ignore
-from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError
-from types import FunctionType
+"""isort:skip_file"""
+from pickle import EXT1, EXT2, EXT4, GLOBAL, STACK_GLOBAL, Pickler, PicklingError
+from pickle import _compat_pickle, _extension_registry, _getattribute, _Pickler  # type: ignore
 from struct import pack
+from types import FunctionType
 
-from .importer import Importer, sys_importer, ObjMismatchError, ObjNotFoundError
+from .importer import Importer, ObjMismatchError, ObjNotFoundError, sys_importer
 
 
 class PackagePickler(_Pickler):
@@ -12,6 +13,7 @@ class PackagePickler(_Pickler):
     This behaves the same as a normal pickler, except it uses an `Importer`
     to find objects and modules to save.
     """
+
     dispatch = _Pickler.dispatch.copy()
 
     def __init__(self, importer: Importer, *args, **kwargs):
@@ -39,14 +41,14 @@ class PackagePickler(_Pickler):
             code = _extension_registry.get((module_name, name))
             if code:
                 assert code > 0
-                if code <= 0xff:
+                if code <= 0xFF:
                     write(EXT1 + pack("<B", code))
-                elif code <= 0xffff:
+                elif code <= 0xFFFF:
                     write(EXT2 + pack("<H", code))
                 else:
                     write(EXT4 + pack("<i", code))
                 return
-        lastname = name.rpartition('.')[2]
+        lastname = name.rpartition(".")[2]
         if parent is module:
             name = lastname
         # Non-ASCII identifiers are supported only with protocols >= 3.
@@ -57,8 +59,13 @@ class PackagePickler(_Pickler):
         elif parent is not module:
             self.save_reduce(getattr, (parent, lastname))
         elif self.proto >= 3:
-            write(GLOBAL + bytes(module_name, "utf-8") + b'\n' +
-                  bytes(name, "utf-8") + b'\n')
+            write(
+                GLOBAL
+                + bytes(module_name, "utf-8")
+                + b"\n"
+                + bytes(name, "utf-8")
+                + b"\n"
+            )
         else:
             if self.fix_imports:
                 r_name_mapping = _compat_pickle.REVERSE_NAME_MAPPING
@@ -68,15 +75,23 @@ class PackagePickler(_Pickler):
                 elif module_name in r_import_mapping:
                     module_name = r_import_mapping[module_name]
             try:
-                write(GLOBAL + bytes(module_name, "ascii") + b'\n' +
-                      bytes(name, "ascii") + b'\n')
+                write(
+                    GLOBAL
+                    + bytes(module_name, "ascii")
+                    + b"\n"
+                    + bytes(name, "ascii")
+                    + b"\n"
+                )
             except UnicodeEncodeError:
                 raise PicklingError(
                     "can't pickle global identifier '%s.%s' using "
-                    "pickle protocol %i" % (module, name, self.proto)) from None
+                    "pickle protocol %i" % (module, name, self.proto)
+                ) from None
 
         self.memoize(obj)
+
     dispatch[FunctionType] = save_global
+
 
 def create_pickler(data_buf, importer):
     if importer is sys_importer:

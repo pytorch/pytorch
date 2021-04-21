@@ -105,3 +105,34 @@ class TestSlice(JitTestCase):
             return x[slice(1000)]
 
         self.checkScript(fn, (range(10),))
+
+    def test_slice_dynamic_index(self):
+        def t(x):
+            slice1 = x[0:1]
+            zero = 0
+            one = zero + 1
+            slice2 = x[zero:one]
+            return slice1 + slice2
+
+        self.checkScript(t, (torch.zeros(3, 2, 3),))
+
+    def test_tuple_slicing(self):
+        def tuple_slice(a):
+            if bool(a):
+                b = (1, 2, 3, 4)
+            else:
+                b = (4, 3, 2, 1)
+            c = b[-4:4]
+            e = c[1:-1]
+            return e
+
+        self.checkScript(tuple_slice, (torch.tensor([1]),), optimize=True)
+        scripted_fn = torch.jit.script(tuple_slice)
+        self.assertEqual(scripted_fn(torch.tensor(1)), (2, 3))
+        tuple_graph = scripted_fn.graph
+        slices = tuple_graph.findAllNodes("prim::TupleConstruct")
+        num_outputs = set(len(x.output().type().elements()) for x in slices)
+        # there should be only one tupleSlice with length of 2
+        self.assertTrue(num_outputs == {2})
+        self.run_pass('lower_all_tuples', tuple_graph)
+        self.assertTrue('Tuple' not in str(tuple_graph))

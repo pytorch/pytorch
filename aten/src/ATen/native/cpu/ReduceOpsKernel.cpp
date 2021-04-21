@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -25,7 +26,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
     const func_t& f,
     scalar_t init_val) {
   if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
+    at::native::resize_output(result, self.sizes());
   }
   if (self.numel() == 0) {
     return;
@@ -36,6 +37,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
     return;
   }
 
+  // TODO This probably should be using at::native::make_reduction
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
@@ -187,7 +189,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
 
 static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
-    Scalar p) {
+    const Scalar& p) {
   float val;
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();
@@ -375,7 +377,7 @@ static void max_values_kernel_impl(TensorIterator& iter) {
 }
 
 static void argmax_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(1), "argmax_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmax_cpu", [&] {
     binary_kernel_reduce(
       iter,
       ArgMaxOps<scalar_t>{},
@@ -384,7 +386,7 @@ static void argmax_kernel_impl(TensorIterator &iter) {
 }
 
 static void argmin_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(1), "argmin_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmin_cpu", [&] {
     binary_kernel_reduce(
       iter,
       ArgMinOps<scalar_t>{},

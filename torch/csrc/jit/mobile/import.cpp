@@ -3,6 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -615,6 +616,7 @@ mobile::Module _load_for_mobile_impl(
   if (observer) {
     observer->onEnterLoadModel(instance_key);
   }
+  const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
   try {
@@ -624,6 +626,7 @@ mobile::Module _load_for_mobile_impl(
     if (result.metadata().find("model_name") == result.metadata().end()) {
       copied_metadata["model_name"] = result.name();
     }
+    copied_metadata["model_size"] = c10::guts::to_string(model_size);
     if (observer) {
       observer->onExitLoadModel(instance_key, copied_metadata);
     }
@@ -675,5 +678,26 @@ void _load_extra_only_for_mobile(
   deserializer.deserialize_only_extra(device, extra_files);
 }
 
+namespace mobile {
+
+std::set<std::string> _export_operator_list(
+    torch::jit::mobile::Module& module) {
+  std::set<std::string> operator_list;
+  for (Method func : module.get_methods()) {
+    const Function& function = func.function();
+    const std::shared_ptr<Code> cptr = function.get_code();
+    // op_names below isn't a list of unique operator names. In fact
+    // it can contain the same operator name many many times, so we need
+    // to de-dup the list by adding all the operator names into
+    // an std::set<std::string>.
+    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    for (auto& op_name : op_names) {
+      operator_list.insert(toString(op_name));
+    }
+  }
+  return operator_list;
+}
+
+} // namespace mobile
 } // namespace jit
 } // namespace torch

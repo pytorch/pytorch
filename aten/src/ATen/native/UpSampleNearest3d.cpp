@@ -91,7 +91,7 @@ Tensor upsample_nearest3d_cpu(
   return at::upsample_nearest3d(input, osize, scale_d, scale_h, scale_w);
 }
 
-// when structured kernels can handle QuantizedCPU, update these overloads to be DefaultBackend
+// when structured kernels can handle QuantizedCPU, update these overloads to be CompositeExplicitAutograd
 Tensor upsample_nearest3d_backward_cpu(
     const Tensor& grad_output,
     c10::optional<IntArrayRef> output_size,

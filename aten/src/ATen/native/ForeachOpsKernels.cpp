@@ -5,7 +5,7 @@
 namespace at { namespace native {
 
 #define FOREACH_BINARY_OP_SCALAR(OP)                                                                      \
-void foreach_tensor_##OP##_scalar_kernel_slow_(TensorList tensors, Scalar scalar) {                       \
+void foreach_tensor_##OP##_scalar_kernel_slow_(TensorList tensors, const Scalar& scalar) {                       \
   check_foreach_api_restrictions(tensors);                                                                \
                                                                                                           \
   for (auto& t: tensors) {                                                                                \
@@ -13,7 +13,7 @@ void foreach_tensor_##OP##_scalar_kernel_slow_(TensorList tensors, Scalar scalar
   }                                                                                                       \
 }                                                                                                         \
                                                                                                           \
-std::vector<Tensor> foreach_tensor_##OP##_scalar_kernel_slow(TensorList tensors, Scalar scalar) {         \
+std::vector<Tensor> foreach_tensor_##OP##_scalar_kernel_slow(TensorList tensors, const Scalar& scalar) {         \
   check_foreach_api_restrictions(tensors);                                                                \
                                                                                                           \
   std::vector<Tensor> result;                                                                             \
@@ -67,7 +67,7 @@ void foreach_tensor_##OP##_list_kernel_slow_(TensorList tensors1, TensorList ten
 }
 
 #define FOREACH_BINARY_OP_LIST_ALPHA(OP)                                                                                \
-std::vector<Tensor> foreach_tensor_##OP##_list_kernel_slow(TensorList tensors1, TensorList tensors2, Scalar alpha) {    \
+std::vector<Tensor> foreach_tensor_##OP##_list_kernel_slow(TensorList tensors1, TensorList tensors2, const Scalar& alpha) {    \
   check_foreach_api_restrictions(tensors1, tensors2);                                                                   \
                                                                                                                         \
   std::vector<Tensor> result;                                                                                           \
@@ -79,7 +79,7 @@ std::vector<Tensor> foreach_tensor_##OP##_list_kernel_slow(TensorList tensors1, 
   return result;                                                                                                        \
 }                                                                                                                       \
                                                                                                                         \
-void foreach_tensor_##OP##_list_kernel_slow_(TensorList tensors1, TensorList tensors2, Scalar alpha) {                  \
+void foreach_tensor_##OP##_list_kernel_slow_(TensorList tensors1, TensorList tensors2, const Scalar& alpha) {                  \
   check_foreach_api_restrictions(tensors1, tensors2);                                                                   \
                                                                                                                         \
   for (const auto i : c10::irange(tensors1.size())) {                                                                   \
@@ -109,7 +109,7 @@ void foreach_tensor_##OP##_slow_(TensorList tensors) {                     \
 }
 
 #define FOREACH_POINTWISE_OP_SCALAR(OP)                                                                                              \
-std::vector<Tensor> foreach_tensor_##OP##_scalar_slow(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {   \
+std::vector<Tensor> foreach_tensor_##OP##_scalar_slow(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {   \
   check_foreach_api_restrictions(input, tensors1, tensors2);                                                                         \
                                                                                                                                      \
   std::vector<Tensor> result;                                                                                                        \
@@ -120,7 +120,7 @@ std::vector<Tensor> foreach_tensor_##OP##_scalar_slow(TensorList input, TensorLi
   return result;                                                                                                                     \
 }                                                                                                                                    \
                                                                                                                                      \
-void foreach_tensor_##OP##_scalar_slow_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {                 \
+void foreach_tensor_##OP##_scalar_slow_(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {                 \
   check_foreach_api_restrictions(input, tensors1, tensors2);                                                                         \
                                                                                                                                      \
   for(const auto i : c10::irange(input.size())) {                                                                                    \

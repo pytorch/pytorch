@@ -3,6 +3,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/function.h>
 #include <iostream>
@@ -852,10 +853,17 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
     ss << name()->qualifiedName();
   } else {
     ss << "Tuple[";
-    for(size_t i = 0; i < elements().size(); ++i) {
-      if(i > 0)
-        ss << ", ";
-      ss << elements()[i]->annotation_str(printer);
+    if (elements().size() == 0) {
+      // `typing.Tuple` special-cases the annotation syntax for empty tuple
+      // with `typing.Tuple[()]`. See
+      // https://docs.python.org/3/library/typing.html#typing.Tuple
+      ss << "()";
+    } else {
+      for (size_t i = 0; i < elements().size(); ++i) {
+        if (i > 0)
+          ss << ", ";
+        ss << elements()[i]->annotation_str(printer);
+      }
     }
     ss << "]";
   }
@@ -1107,7 +1115,7 @@ torch::jit::Function* ClassType::findForwardHook(const std::string& name) const 
 std::string getSchemaInputTypesString(const FunctionSchema& schema) {
   std::stringstream input_types;
   const std::vector<Argument>& forward_args = schema.arguments();
-  for (int i = 1; i < forward_args.size(); ++i) {
+  for (const auto i : c10::irange(1, forward_args.size())) {
     input_types << forward_args[i].type()->annotation_str();
     if (forward_args.size() - 1 != i) {
       input_types << ", ";
@@ -1173,6 +1181,13 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   return return_string;
 }
 
+bool ClassType::isUnresolvedClassAttribute(const std::string& name) const {
+  return std::find(
+      unresolved_class_attributes_.begin(),
+      unresolved_class_attributes_.end(),
+      name) != unresolved_class_attributes_.end();
+}
+
 void checkForwardHookInputArguments(
     const FunctionSchema& forward_schema,
     const FunctionSchema& hook_schema,
@@ -1213,7 +1228,7 @@ void checkForwardHookInputArguments(
         hook_err_msg
     );
 
-    for (int i = 1; i < forward_args.size(); ++i) {
+    for (const auto i : c10::irange(1, forward_args.size())) {
       if (*forward_args[i].type() != *input_tuple_types[i - 1]) {
         TORCH_CHECK(
             false,
@@ -1313,7 +1328,7 @@ void ClassType::checkForwardPreHookSchema(
       pre_hook_err_msg
   );
   // check that contained types match forward types
-  for (int i = 1; i < forward_args.size(); ++i) {
+  for (const auto i : c10::irange(1, forward_args.size())) {
     if (*forward_args[i].type() != *return_tuple_types[i - 1]) {
       TORCH_CHECK(
           false,
@@ -1574,20 +1589,27 @@ ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
-    std::string doc_string) {
-  return ClassTypePtr(
-      new ClassType(std::move(qualifiedName), std::move(cu), is_module, std::move(doc_string)));
+    std::string doc_string,
+    std::vector<std::string> unresolved_class_attributes) {
+  return ClassTypePtr(new ClassType(
+      std::move(qualifiedName),
+      std::move(cu),
+      is_module,
+      std::move(doc_string),
+      std::move(unresolved_class_attributes)));
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module = false,
-    std::string doc_string = "")
+    bool is_module,
+    std::string doc_string,
+    std::vector<std::string> unresolved_class_attributes)
     : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)),
       isModule_(is_module),
-      doc_string_(std::move(doc_string)) {}
+      doc_string_(std::move(doc_string)),
+      unresolved_class_attributes_(std::move(unresolved_class_attributes)) {}
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;

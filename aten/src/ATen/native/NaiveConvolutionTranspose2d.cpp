@@ -5,6 +5,8 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/im2col.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 
@@ -253,7 +255,7 @@ void slow_conv_transpose2d_out_cpu_template(
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
       input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
         // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           // Helpers
           Tensor input_n;
           Tensor output_n;
@@ -448,12 +450,14 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
         Tensor grad_output_n = Tensor();
 
         // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           // Matrix mulitply per sample:
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
-          if (kernel_height != 1 || kernel_width != 1) {
+          if (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+              stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+              dilation_height != 1 || dilation_width != 1) {
             // Extract columns:
             im2col<scalar_t>(
                   grad_output_n.data_ptr<scalar_t>(),
@@ -481,8 +485,12 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
-              grad_columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+          auto gemm_in_ptr =
+              (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+               stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+               dilation_height != 1 || dilation_width != 1)
+              ? grad_columns.data_ptr<scalar_t>()
+              : grad_output_n.data_ptr<scalar_t>();
           cpublas::gemm(
               cpublas::NoTranspose,
               cpublas::NoTranspose,
@@ -639,7 +647,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
         scalar_t scale = static_cast<scalar_t>(scale_);
 
         // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           // Matrix mulitply per output:
           grad_output_n = grad_output.select(0, elt);
 
@@ -648,7 +656,9 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
             // Matrix mulitply per output:
             input_n = input.select(0, elt);
 
-            if (kernel_height != 1 || kernel_width != 1) {
+            if (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+                stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+                dilation_height != 1 || dilation_width != 1) {
               // Extract columns:
               im2col<scalar_t>(
                   grad_output_n.data_ptr<scalar_t>(),
@@ -676,8 +686,12 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
-                columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+            auto gemm_in_ptr =
+                (kernel_height != 1 || kernel_width != 1 ||
+                 stride_height != 1 || stride_width != 1 || pad_height != 0 ||
+                 pad_width != 0 || dilation_height != 1 || dilation_width != 1)
+                ? columns.data_ptr<scalar_t>()
+                : grad_output_n.data_ptr<scalar_t>();
             cpublas::gemm(
                 cpublas::Transpose,
                 cpublas::NoTranspose,
@@ -728,16 +742,17 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
 } // namespace
 
-Tensor& slow_conv_transpose2d_out_cpu(
-    Tensor& output,
-    const Tensor& input,
+Tensor& slow_conv_transpose2d_out_cpu(const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
-    IntArrayRef dilation) {
+    IntArrayRef dilation,
+    Tensor& output) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor ones = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
@@ -760,12 +775,14 @@ Tensor& slow_conv_transpose2d_out_cpu(
 Tensor slow_conv_transpose2d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor ones = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -786,11 +803,7 @@ Tensor slow_conv_transpose2d_cpu(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias,
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -799,7 +812,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(
     IntArrayRef output_padding,
     IntArrayRef dilation,
     const Tensor& columns,
-    const Tensor& ones) {
+    const Tensor& ones,
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias) {
   if (grad_input.defined()) {
     slow_conv_transpose2d_backward_out_cpu_template(
         input,

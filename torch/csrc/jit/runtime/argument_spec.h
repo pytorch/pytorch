@@ -34,6 +34,7 @@ struct ArgumentInfo {
     return requires_grad_;
   }
   int dim() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return dim_;
   }
   at::ScalarType type() const {
@@ -101,6 +102,7 @@ struct ArgumentSpec {
     if ((arg.defined_ = t->defined())) {
       arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
       arg.dim_ = t->dim();
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       arg.device_ = t->is_cuda() ? t->get_device() : -1;
       arg.type_ = static_cast<unsigned>(t->scalar_type());
     }
@@ -108,6 +110,7 @@ struct ArgumentSpec {
   }
 
   void combineHash(const ArgumentInfo& arg) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ArgumentInfo::plain_data_type arg_data;
     std::memcpy(&arg_data, &arg, sizeof(ArgumentInfo));
     hash_code = c10::hash_combine(hash_code, arg_data);
@@ -255,6 +258,7 @@ struct CompleteArgumentSpec {
         pod.defined = t.defined();
         if (pod.defined) {
           pod.type = static_cast<int>(t.scalar_type());
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           pod.device = (!t.is_cuda()) ? -1 : t.get_device();
           pod.requires_grad = with_grad && t.requires_grad();
           total_dims += t.ndimension();
@@ -367,6 +371,7 @@ struct CompleteArgumentInfo {
   int sizes_strides_offset(int j) const {
     if (j == 0)
       return 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 2 * pod(j - 1).total_dims;
   }
   const CompleteArgumentInfoPOD& pod(int j) const {

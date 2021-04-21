@@ -32,9 +32,9 @@ c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
     {"CUDA", c10::DispatchKey::CUDA},
     {"XLA", c10::DispatchKey::XLA},
     {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
-    {"Math", c10::DispatchKey::Math},
+    {"CompositeImplicitAutograd", c10::DispatchKey::CompositeImplicitAutograd},
     {"Autograd", c10::DispatchKey::Autograd},
-    {"DefaultBackend", c10::DispatchKey::DefaultBackend},
+    {"CompositeExplicitAutograd", c10::DispatchKey::CompositeExplicitAutograd},
     {"AutogradCPU", c10::DispatchKey::AutogradCPU},
     {"", c10::DispatchKey::Undefined},
   };

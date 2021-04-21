@@ -8,7 +8,7 @@
 
 namespace at { namespace native {
 
-void addcmul_cuda_kernel(TensorIterator& iter, Scalar value) {
+void addcmul_cuda_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "addcmul_cuda", [&]() {
     auto alpha = value.to<scalar_t>();
     gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
@@ -17,7 +17,7 @@ void addcmul_cuda_kernel(TensorIterator& iter, Scalar value) {
   });
 }
 
-void addcdiv_cuda_kernel(TensorIterator& iter, Scalar value) {
+void addcdiv_cuda_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "addcdiv_cuda", [&]() {
     auto alpha = value.to<scalar_t>();
     gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
@@ -26,7 +26,7 @@ void addcdiv_cuda_kernel(TensorIterator& iter, Scalar value) {
   });
 }
 
-void smooth_l1_backward_cuda_kernel(TensorIterator& iter, Scalar norm, double beta) {
+void smooth_l1_backward_cuda_kernel(TensorIterator& iter, const Scalar& norm, double beta) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "smooth_l1_backward_cuda", [&iter, &norm, beta] {
       auto norm_val = norm.to<scalar_t>();
       scalar_t beta_val(beta);
@@ -42,7 +42,7 @@ void smooth_l1_backward_cuda_kernel(TensorIterator& iter, Scalar norm, double be
   });
 }
 
-void huber_backward_cuda_kernel(TensorIterator& iter, Scalar norm, double delta) {
+void huber_backward_cuda_kernel(TensorIterator& iter, const Scalar& norm, double delta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "huber_backward_cuda", [&iter, &norm, delta] {
     auto norm_val = norm.to<scalar_t>();
     scalar_t delta_val(delta);
@@ -59,7 +59,7 @@ void huber_backward_cuda_kernel(TensorIterator& iter, Scalar norm, double delta)
   });
 }
 
-void mse_backward_cuda_kernel(TensorIterator& iter, Scalar value) {
+void mse_backward_cuda_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "mse_backward_cuda", [&]() {
     auto alpha = value.to<scalar_t>();
     gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {

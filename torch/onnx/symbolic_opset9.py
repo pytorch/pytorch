@@ -67,6 +67,8 @@ def _shape_as_tensor(g, input):
 
 
 def _reshape_from_tensor(g, input, shape):
+    if (isinstance(shape, list)):
+        shape = g.op("Concat", *shape, axis_i=0)
     return g.op('Reshape', input, shape)
 
 
@@ -113,14 +115,14 @@ def div(g, self, other, *args):
 
 @parse_args('v', 'v', 's')
 def _div_rounding_mode(g, self, other, rounding_mode):
-    if rounding_mode == 'true':
+    if rounding_mode is None:
         return true_divide(g, self, other)
     elif rounding_mode == 'floor':
         return _floor_divide(g, self, other)
     elif rounding_mode == 'trunc':
         return _trunc_divide(g, self, other)
     else:
-        raise RuntimeError(f'Unsupported rounding mode: "{rounding_mode}". Expected "true", "floor" or "trunc"')
+        raise RuntimeError(f'Unsupported rounding mode: "{rounding_mode}". Expected None, "floor" or "trunc"')
 
 
 def _trunc_divide(g, self, other):
@@ -471,11 +473,20 @@ def expand_as(g, self, other):
     return g.op("Expand", self, shape)
 
 
+@parse_args('v', 'v', 'i', 'b', 'v')
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
+    if scale_grad_by_freq and sym_help._training_mode:
+        raise RuntimeError('Unsupported: ONNX export of embedding with scale_grad_by_freq=True '
+                           'for training mode. ONNX does not support scaling the gradients.')
+    if padding_idx >= 0 and sym_help._training_mode:
+        warnings.warn('Warning: ONNX export of embedding with padding_idx >= 0 '
+                      'for training mode. '
+                      'ONNX does not support not updating the embedding vector at padding_idx during training.')
+
     return g.op("Gather", weight, indices)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i', 'i')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
@@ -484,7 +495,8 @@ def embedding_bag(g,
                   mode,
                   sparse,
                   per_sample_weights,
-                  include_last_offset):
+                  include_last_offset,
+                  padding_idx):
     if not sym_help._is_none(per_sample_weights):
         return sym_help._onnx_unsupported('embedding_bag  with per_sample_weights')
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
@@ -497,7 +509,8 @@ def embedding_bag(g,
                     scale_grad_by_freq_i=scale_grad_by_freq,
                     mode_i=mode,
                     sparse_i=sparse,
-                    include_last_offset_i=include_last_offset)
+                    include_last_offset_i=include_last_offset,
+                    padding_idx_i=padding_idx)
     else:
         return sym_help._onnx_unsupported('embedding_bag')
 
@@ -1771,13 +1784,13 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
 
 def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
     fill_value = sym_help._maybe_get_const(fill_value, 'f')
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    dtype = 6 if dtype is None else dtype
     if sym_help._is_value(fill_value):
-        dtype = 6 if dtype is None else dtype
         tmp = zeros_like(g, input, dtype, layout, device)
+        fill_value = g.op("Cast", fill_value, to_i=sym_help.scalar_type_to_onnx[dtype])
         return add(g, tmp, fill_value, g.op("Constant", value_t=torch.tensor(1)))
     else:
-        dtype = sym_help._get_const(dtype, 'i', 'dtype')
-        dtype = 6 if dtype is None else dtype
         shape = g.op("Shape", input)
         return g.op("ConstantOfShape", shape,
                     value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
@@ -1856,6 +1869,12 @@ def hardswish(g, self):
                                           g.op('Constant', value_t=torch.tensor(6, dtype=torch.float)))
     hardtanh_ = g.op("Div", hardtanh_, g.op('Constant', value_t=torch.tensor(6, dtype=torch.float)))
     return g.op("Mul", self, hardtanh_)
+
+
+@parse_args('v')
+def hardsigmoid(g, self):
+    return g.op('HardSigmoid', self, alpha_f=1 / 6)
+
 
 def alias(g, self):
     return self
@@ -1987,13 +2006,17 @@ def repeat_interleave(g, self, repeats, dim=None):
         if not sym_help._is_tensor(repeats):
             repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
         if input_sizes[dim] == 0:
-            raise NotImplementedError("Unsupported repeat_interleave along dimension with unknown input size")
+            return sym_help._onnx_opset_unsupported_detailed('repeat_interleave', 9, 11,
+                                                             'Unsupported along dimension with unknown input size')
         else:
             reps = input_sizes[dim]
             repeats = expand(g, repeats, g.op("Constant", value_t=torch.tensor([reps])), None)
 
     # Cases where repeats is a 1 dim Tensor
     elif repeats_dim == 1:
+        if input_sizes[dim] == 0:
+            return sym_help._onnx_opset_unsupported_detailed('repeat_interleave', 9, 11,
+                                                             'Unsupported along dimension with unknown input size')
         assert repeats_sizes[0] == input_sizes[dim], "repeats must have the same size as input along dim"
         reps = repeats_sizes[0]
     else:
@@ -2446,7 +2469,7 @@ def scatter_add(g, self, dim, index, src):
 
 def log2(g, self):
     _ln2 = 0.693147180559945309
-    return g.op('Div', log(g, self), g.op('Constant', value_t=torch.Tensor([_ln2])))
+    return g.op('Div', log(g, self), g.op('Constant', value_t=torch.tensor([_ln2])))
 
 
 def prim_shape(g, self):
@@ -2454,6 +2477,13 @@ def prim_shape(g, self):
 
 def prim_max(g, self, other):
     return g.op('Max', self, other)
+
+def prim_min(g, self, other=None):
+    if not other:
+        if (sym_help._is_packed_list(self)):
+            self = stack(g, self, g.op("Constant", value_t=torch.tensor([0])))
+        return min(g, self)
+    return min(g, self, other)
 
 def prim_data(g, self):
     return self
@@ -2990,3 +3020,42 @@ def __range_length(g, lo, hi, step):
     sub = g.op("Sub", hi, lo)
     div = g.op("Ceil", true_divide(g, sub, step))
     return g.op("Cast", div, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+
+
+def linear(g, input, weight, bias):
+    rank = sym_help._get_tensor_rank(input)
+    weight = t(g, weight)
+    if rank == 2 and not bias.node().mustBeNone():
+        alpha = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        beta = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        output = addmm(g, bias, input, weight, alpha, beta)
+    else:
+        output = matmul(g, input, weight)
+        if not bias.node().mustBeNone():
+            output = add(g, bias, output)
+
+    return output
+
+
+@parse_args('v', 'b', 'i', 'v', 'v', 'v', 'v')
+def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device=None, pin_memory=None, requires_grad=False):
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+        if sym_help._dtype_is_fp(dtype) is False:
+            dtype = torch.float
+        dtype = sym_help.scalar_type_to_pytorch_type.index(dtype)
+
+    n_array = arange(g, window_length, 4, None, None, None)
+    output = g.op('Cast', n_array, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    output = mul(g, g.op('Constant', value_t=torch.tensor(math.pi, dtype=torch.float)), output)
+
+    if periodic is False:
+        window_length = sub(g, window_length, g.op("Constant", value_t=torch.tensor(1, dtype=torch.int)))
+    output = div(g, output, window_length)
+    output = g.op("Cast", square(g, sin(g, output)), to_i=sym_help.scalar_type_to_onnx[dtype])
+
+    return output
+
+
+def mv(g, self, vec):
+    return matmul(g, self, vec)

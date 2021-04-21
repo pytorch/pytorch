@@ -5,6 +5,8 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/fake_quant_affine.h>
 
+#include <c10/util/irange.h>
+
 // FakeQuantize Op for PerChannelAffine quantization scheme.
 namespace at {
 namespace native {
@@ -243,10 +245,10 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   // Create a collection of axes that include all but the channel axis for
   // reduction when summing over the dScale and dZeroPoint tensors.
   int64_t* axis_for_reduction = (int64_t*) calloc(numElements, sizeof(int64_t));
-  for (int i = 0; i < axis; ++i) {
+  for (const auto i : c10::irange(axis)) {
     axis_for_reduction[i] = i;
   }
-  for (int i = axis; i < numElements; ++i) {
+  for (const auto i : c10::irange(axis, numElements)) {
     axis_for_reduction[i] = i + 1;
   }
 

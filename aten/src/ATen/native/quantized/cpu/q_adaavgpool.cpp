@@ -354,9 +354,9 @@ Tensor adaptive_avg_pool2d_quantized_cpu(
 }
 
 Tensor& adaptive_avg_pool3d_out_quantized_cpu(
-    at::Tensor& output,
     const at::Tensor& input,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    at::Tensor& output) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
     TORCH_WARN("Quantized Adaptive Average Pool 3D is not implemented for ",
@@ -374,7 +374,7 @@ Tensor adaptive_avg_pool3d_quantized_cpu(
     const at::Tensor& input,
     IntArrayRef output_size) {
   Tensor output;
-  return adaptive_avg_pool3d_out_quantized_cpu(output, input, output_size);
+  return at::native::adaptive_avg_pool3d_out_quantized_cpu(input, output_size, output);
 }
 
 } // namespace native

@@ -66,6 +66,11 @@ function get_bazel() {
   chmod +x tools/bazel
 }
 
+function install_monkeytype {
+  # Install MonkeyType
+  pip_install MonkeyType
+}
+
 TORCHVISION_COMMIT=8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db
 
 function install_torchvision() {
