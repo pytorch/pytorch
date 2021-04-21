@@ -576,6 +576,25 @@ void moveWeightsToMKLDNN(Node* n) {
   }
 }
 
+static void hartanh_node_creator(
+    Node* body_node,
+    double min_val,
+    double max_val) {
+  WithInsertPoint insert_guard{body_node};
+  auto out_node = body_node->owningGraph()->create(
+      {prim::MKLDNNHardTanh}, {body_node->input(0)}, 1);
+  // N.B. we can't use `insert` as it calls `getOperation` (via
+  // `emitBuiltinCall`) which uses `min_val` and `max_val` attrs which we
+  // haven't set yet.
+  body_node->owningGraph()->insertNode(out_node);
+  auto out_val = out_node->output();
+  out_node->f_(attr::min_val, min_val);
+  out_node->f_(attr::max_val, max_val);
+  out_val->copyMetadata(body_node->output());
+  body_node->output()->replaceAllUsesWith(out_val);
+  body_node->destroy();
+}
+
 void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
   auto graph = subgraph_node->owningGraph();
   Value* none_value = nullptr;
@@ -640,37 +659,16 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     }
 
     if (body_node->kind() == aten::relu6) {
-      WithInsertPoint insert_guard{body_node};
-      auto out_node = body_node->owningGraph()->create(
-          {prim::MKLDNNHardTanh}, {body_node->input(0)}, 1);
-      out_node->f_(attr::min_val, 0.);
-      out_node->f_(attr::max_val, 6.);
-      body_node->owningGraph()->insertNode(out_node);
-      auto out_val = out_node->output();
-      out_val->copyMetadata(body_node->output());
-      body_node->output()->replaceAllUsesWith(out_val);
-      body_node->destroy();
+      hartanh_node_creator(body_node, 0., 6.);
       continue;
     }
 
     if (body_node->kind() == aten::hardtanh) {
-      WithInsertPoint insert_guard{body_node};
-      // N.B. we can't use `insert` as it calls `getOperation` (via
-      // `emitBuiltinCall`) which uses `min_val` and `max_val` attrs which we
-      // haven't set yet.
-      auto out_node = body_node->owningGraph()->create(
-          {prim::MKLDNNHardTanh}, {body_node->input(0)}, 1);
       auto min_val =
           constant_as<double>(body_node->namedInput("min_val")).value();
       auto max_val =
           constant_as<double>(body_node->namedInput("max_val")).value();
-      out_node->f_(attr::min_val, min_val);
-      out_node->f_(attr::max_val, max_val);
-      body_node->owningGraph()->insertNode(out_node);
-      auto out_val = out_node->output();
-      out_val->copyMetadata(body_node->output());
-      body_node->output()->replaceAllUsesWith(out_val);
-      body_node->destroy();
+      hartanh_node_creator(body_node, min_val, max_val);
       continue;
     }
 
