@@ -293,7 +293,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
-def einsum(equation, *operands):
+def einsum(*args):
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
@@ -397,6 +397,44 @@ def einsum(equation, *operands):
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
     """
+    if len(args) == 0:
+        raise ValueError('einsum(): no input operands were provided')
+
+    equation = None
+    operands = None
+
+    # subslist input format, convert to string equation input format
+    if isinstance(args[0], torch.Tensor):
+        def convert_subscript(subscript):
+            if subscript == Ellipsis:
+                return '...'
+            elif subscript >= 0 and subscript < 26:
+                return chr(ord('a') + subscript)
+            else:
+                raise ValueError('einsum(): subscript must be in range [0, 26) but got ', subscript)
+
+        out_subscripts = None
+        if isinstance(args[-2], Sequence):
+            out_subscripts = args[-1]
+            args = args[:-1]
+
+        equation = ''
+        operands = args[::2]
+
+        for subscripts in args[1::2]:
+            for s in subscripts:
+                equation += convert_subscript(s)
+            equation += ','
+        equation = equation[:-1]
+
+        if out_subscripts is not None:
+            equation += '->'
+            for s in out_subscripts:
+                equation += convert_subscript(s)
+    else:
+        equation = args[0]
+        operands = args[1:]
+
     if has_torch_function(operands):
         return handle_torch_function(einsum, operands, equation, *operands)
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
