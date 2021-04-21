@@ -6,6 +6,12 @@ on:
     - master
   pull_request:
 
+# note [local lint]
+# LOCAL_FILES in the jobs below is intended to be filled by local (i.e. on a
+# developer's machine) job in tools/actions_local_runner.py to pass only the
+# changed files to whatever tool is consuming the files. This helps speed up
+# local lints while keeping the linting code unified between local / CI.
+
 jobs:
   quick-checks:
     runs-on: ubuntu-18.04
@@ -128,15 +134,15 @@ jobs:
         uses: actions/checkout@v2
       - name: Install markdown-toc
         run: npm install -g markdown-toc
-      - name: Regenerate ToCs
+      - name: Regenerate ToCs and check that they didn't change
         run: |
           set -eux
           export PATH=~/.npm-global/bin:"$PATH"
           for FILE in $(git grep -Il '<!-- toc -->' -- '**.md'); do
             markdown-toc --bullets='-' -i "$FILE"
           done
-      - name: Assert that regenerating the ToCs didn't change them
-        run: .github/scripts/report_git_status.sh
+
+          .github/scripts/report_git_status.sh
 
   flake8-py3:
     runs-on: ubuntu-18.04
@@ -164,9 +170,13 @@ jobs:
           pip install -r requirements-flake8.txt
           flake8 --version
       - name: Run flake8
+        env:
+          # See note [local lint]
+          LOCAL_FILES: ""
         run: |
           set -eux
-          flake8 | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
+          # shellcheck disable=SC2086
+          flake8 $LOCAL_FILES | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
       - name: Translate annotations
         if: github.event_name == 'pull_request'
         env:
@@ -342,6 +352,10 @@ jobs:
           time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
           time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
       - name: Run mypy
+        env:
+          # See note [local lint]
+          LOCAL_FILES: ""
         run: |
           set -eux
-          for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+          # shellcheck disable=SC2086
+          for CONFIG in mypy*.ini; do mypy --config="$CONFIG" $LOCAL_FILES; done

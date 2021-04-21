@@ -364,7 +364,11 @@ command runs tests such as `TestNN.test_BCELoss` and
 You can run the same linting steps that are used in CI locally via `make`:
 
 ```bash
+# Lint all files
 make lint -j 6  # run lint (using 6 parallel jobs)
+
+# Lint only the files you have changed
+make quicklint -j 6
 ```
 
 These jobs may require extra dependencies that aren't dependencies of PyTorch

@@ -1,10 +1,12 @@
-#!/bin/python3
+#!/usr/bin/env python3
 
 import subprocess
+import sys
 import os
 import argparse
 import yaml
 import asyncio
+from typing import List, Dict, Any, Optional
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -21,23 +23,71 @@ class col:
     UNDERLINE = "\033[4m"
 
 
-def color(the_color, text):
+def color(the_color: str, text: str) -> str:
     return col.BOLD + the_color + str(text) + col.RESET
 
 
-def cprint(the_color, text):
-    print(color(the_color, text))
+def cprint(the_color: str, text: str) -> None:
+    if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+        print(color(the_color, text))
+    else:
+        print(text)
 
 
-async def run_step(step, job_name):
+def git(args: List[str]) -> List[str]:
+    p = subprocess.run(
+        ["git"] + args,
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    lines = p.stdout.decode().strip().split("\n")
+    return [line.strip() for line in lines]
+
+
+def find_changed_files(merge_base: str = "origin/master") -> List[str]:
+    untracked = []
+
+    for line in git(["status", "--porcelain"]):
+        # Untracked files start with ??, so grab all of those
+        if line.startswith("?? "):
+            untracked.append(line.replace("?? ", ""))
+
+    # Modified, unstaged
+    modified = git(["diff", "--name-only"])
+
+    # Modified, staged
+    cached = git(["diff", "--cached", "--name-only"])
+
+    # Committed
+    diff_with_origin = git(["diff", "--name-only", "--merge-base", merge_base, "HEAD"])
+
+    # De-duplicate
+    all_files = set(untracked + cached + modified + diff_with_origin)
+    return [x.strip() for x in all_files if x.strip() != ""]
+
+
+async def run_step(step: Dict[str, Any], job_name: str, files: Optional[List[str]]) -> bool:
     env = os.environ.copy()
     env["GITHUB_WORKSPACE"] = "/tmp"
+    if files is None:
+        env["LOCAL_FILES"] = ""
+    else:
+        env["LOCAL_FILES"] = " ".join(files)
     script = step["run"]
 
+    PASS = "\U00002705"
+    FAIL = "\U0000274C"
     # We don't need to print the commands for local running
     # TODO: Either lint that GHA scripts only use 'set -eux' or make this more
     # resilient
     script = script.replace("set -eux", "set -eu")
+    name = f'{job_name}: {step["name"]}'
+
+    def header(passed: bool) -> None:
+        icon = PASS if passed else FAIL
+        cprint(col.BLUE, f"{icon} {name}")
 
     try:
         proc = await asyncio.create_subprocess_shell(
@@ -49,27 +99,31 @@ async def run_step(step, job_name):
             stderr=subprocess.PIPE,
         )
 
-        stdout, stderr = await proc.communicate()
-        cprint(col.BLUE, f'{job_name}: {step["name"]}')
-    except Exception as e:
-        cprint(col.BLUE, f'{job_name}: {step["name"]}')
-        print(e)
+        stdout_bytes, stderr_bytes = await proc.communicate()
 
-    stdout = stdout.decode().strip()
-    stderr = stderr.decode().strip()
+        header(passed=proc.returncode == 0)
+    except Exception as e:
+        header(passed=False)
+        print(e)
+        return False
+
+    stdout = stdout_bytes.decode().strip()
+    stderr = stderr_bytes.decode().strip()
 
     if stderr != "":
         print(stderr)
     if stdout != "":
         print(stdout)
 
+    return proc.returncode == 0
 
-async def run_steps(steps, job_name):
-    coros = [run_step(step, job_name) for step in steps]
+
+async def run_steps(steps: List[Dict[str, Any]], job_name: str, files: Optional[List[str]]) -> None:
+    coros = [run_step(step, job_name, files) for step in steps]
     await asyncio.gather(*coros)
 
 
-def grab_specific_steps(steps_to_grab, job):
+def grab_specific_steps(steps_to_grab: List[str], job: Dict[str, Any]) -> List[Dict[str, Any]]:
     relevant_steps = []
     for step in steps_to_grab:
         for actual_step in job["steps"]:
@@ -83,7 +137,7 @@ def grab_specific_steps(steps_to_grab, job):
     return relevant_steps
 
 
-def grab_all_steps_after(last_step, job):
+def grab_all_steps_after(last_step: str, job: Dict[str, Any]) -> List[Dict[str, Any]]:
     relevant_steps = []
 
     found = False
@@ -96,17 +150,28 @@ def grab_all_steps_after(last_step, job):
     return relevant_steps
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Pull shell scripts out of GitHub actions and run them"
     )
     parser.add_argument("--file", help="YAML file with actions", required=True)
+    parser.add_argument("--file-filter", help="only pass through files with this extension", default='')
+    parser.add_argument("--changed-only", help="only run on changed files", action='store_true', default=False)
     parser.add_argument("--job", help="job name", required=True)
     parser.add_argument("--step", action="append", help="steps to run (in order)")
     parser.add_argument(
         "--all-steps-after", help="include every step after this one (non inclusive)"
     )
     args = parser.parse_args()
+
+    changed_files = None
+    if args.changed_only:
+        changed_files = []
+        for f in find_changed_files():
+            for file_filter in args.file_filter:
+                if f.endswith(file_filter):
+                    changed_files.append(f)
+                    break
 
     if args.step is None and args.all_steps_after is None:
         raise RuntimeError("1+ --steps or --all-steps-after must be provided")
@@ -129,8 +194,7 @@ def main():
     else:
         relevant_steps = grab_all_steps_after(args.all_steps_after, job)
 
-    # pprint.pprint(relevant_steps)
-    asyncio.run(run_steps(relevant_steps, args.job))
+    asyncio.run(run_steps(relevant_steps, args.job, changed_files))  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":
