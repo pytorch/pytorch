@@ -2,9 +2,11 @@ from tools.codegen.model import (Argument, Arguments, BaseTy, BaseType,
                                  FunctionSchema, ListType, NativeFunction,
                                  OptionalType, Return, SelfArgument,
                                  TensorOptionsArguments, Type, assert_never)
-from tools.codegen.api.types import (ArgName, BaseCType, Binding,
-                                     ConstRefCType, CType, MutRefCType,
-                                     OptionalCType, SpecialArgName)
+from tools.codegen.api.types import (ArgName, BaseCType, Binding, ConstRefCType, NamedCType, CType,
+                                     MutRefCType, ArrayCType, ListCType, VectorCType, ArrayRefCType,
+                                     OptionalCType, TupleCType, SpecialArgName, boolT, scalarT,
+                                     tensorListT, dimnameListT, tensorT, voidT,
+                                     BaseTypeToCppMapping, intArrayRefT, tensorOptionsT)
 from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
@@ -37,40 +39,28 @@ def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False)
 # Translation of "value types" in JIT schema to C++ API type.  Value
 # types look the same no matter if they are argument types or return
 # types.  Returns None if the type in question is not a value type.
-def valuetype_type(t: Type, *, binds: ArgName) -> Optional[CType]:
+def valuetype_type(t: Type, *, binds: ArgName) -> Optional[NamedCType]:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:
             return None
-        elif t.name == BaseTy.int:
-            return BaseCType('int64_t', binds)
-        elif t.name == BaseTy.float:
-            return BaseCType('double', binds)
-        elif t.name == BaseTy.str:
-            return BaseCType('std::string', binds)
-        elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
-                        BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
-                        BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
-                        BaseTy.Dimname, BaseTy.Stream, BaseTy.ConstQuantizerPtr]:
-            # These C++ names line up with their schema names
-            return BaseCType(t.name.name, binds)
-        else:
-            raise AssertionError(f"unsupported type: {t}")
+        # All other BaseType currently map directly to BaseCppTypes.
+        return NamedCType(binds, BaseCType(BaseTypeToCppMapping[t.name]))
     elif isinstance(t, OptionalType):
         elem = valuetype_type(t.elem, binds=binds)
         if elem is None:
             return None
-        return OptionalCType(elem)
+        return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         if str(t.elem) == 'bool':
             assert t.size is not None
-            return BaseCType(f"std::array<bool,{t.size}>", binds)
+            return NamedCType(binds, ArrayCType(BaseCType(boolT), t.size))
         else:
             return None
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 # Translation of types occuring in JIT arguments to a C++ argument type.
-def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     # If it's a value type, do the value type translation
     r = valuetype_type(t, binds=binds)
     if r is not None:
@@ -79,85 +69,82 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
-                return MutRefCType(BaseCType('Tensor', binds))
+                return NamedCType(binds, MutRefCType(BaseCType(tensorT)))
             else:
-                return ConstRefCType(BaseCType('Tensor', binds))
+                return NamedCType(binds, ConstRefCType(BaseCType(tensorT)))
         elif t.name == BaseTy.Scalar:
-            return ConstRefCType(BaseCType('Scalar', binds))
+            return NamedCType(binds, ConstRefCType(BaseCType(scalarT)))
         else:
             raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
             if mutable:
-                return MutRefCType(BaseCType('Tensor', binds))  # TODO: fix this discrepancy
+                return NamedCType(binds, MutRefCType(BaseCType(tensorT)))  # TODO: fix this discrepancy
             else:
-                return ConstRefCType(OptionalCType(BaseCType('Tensor', binds)))
+                return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(tensorT))))
         elif str(t.elem) == 'Scalar':
-            return ConstRefCType(OptionalCType(BaseCType('Scalar', binds)))
+            return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
-        return OptionalCType(elem)
+        return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         # TODO: remove these special cases, ArrayRef fallthrough works fine
-        # NB: CType throws away ArrayRef structure because it is not currently
-        # relevant in translation.  When it becomes relevant, need to add back
         if str(t.elem) == 'int':
-            return BaseCType("IntArrayRef", binds)
+            return NamedCType(binds, BaseCType(intArrayRefT))
         elif str(t.elem) == 'Tensor':
-            return BaseCType("TensorList", binds)
+            return NamedCType(binds, BaseCType(tensorListT))
         elif str(t.elem) == 'Scalar':
-            return BaseCType("ArrayRef<Scalar>", binds)
+            return NamedCType(binds, ArrayRefCType(BaseCType(scalarT)))
         elif str(t.elem) == 'Dimname':
-            return BaseCType("DimnameList", binds)
+            return NamedCType(binds, BaseCType(dimnameListT))
         elif str(t.elem) == 'Tensor?':
-            return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
+            return NamedCType(binds, ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
-        # TODO: explicitly qualify namespace here
-        return BaseCType(f"ArrayRef<{elem.cpp_type()}>", binds)
+        return NamedCType(binds, ArrayRefCType(elem.type))
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 # Translate a JIT argument into its C++ type
-def argument_type(a: Argument, *, binds: ArgName) -> CType:
+def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
     return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
 # Translation of a (non-multi) return type from JIT to C++
-# NB: if need translations on return types, make this return CType too.  Need to
-# take care; ArgName is misnomer now, and inputs are permitted to conflict with outputs
-# so need to make sure you don't have trouble
-def returntype_type(t: Type, *, mutable: bool) -> str:
+# N.B: returntype_type returns a CType, not a NamedCType.
+# This is mostly because of the mismatch between return types and return names.
+# e.g. a function with a return type of 'void' has 0 return names,
+# and a function with a return type of 'std::tuple' has >1 return name.
+def returntype_type(t: Type, *, mutable: bool) -> CType:
     # placeholder is ignored
     r = valuetype_type(t, binds="__placeholder__")
     if r is not None:
-        return r.cpp_type()
+        return r.type
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
-                return 'Tensor &'
+                return MutRefCType(BaseCType(tensorT))
             else:
-                return 'Tensor'
+                return BaseCType(tensorT)
         elif t.name == BaseTy.Scalar:
-            return 'Scalar'
+            return BaseCType(scalarT)
     elif isinstance(t, ListType):
         elem = returntype_type(t.elem, mutable=mutable)
         assert t.size is None, f"fixed size list returns not supported: {t}"
-        return f"std::vector<{elem}>"
+        return VectorCType(elem)
 
     raise AssertionError(f"unrecognized return type {t}")
 
 # Translation of a single return to its C++ type
-def return_type(r: Return) -> str:
+def return_type(r: Return) -> CType:
     return returntype_type(r.type, mutable=r.is_write)
 
 # Translation of a full (possibly multi) return from JIT to its C++ type
-def returns_type(rs: Sequence[Return]) -> str:
+def returns_type(rs: Sequence[Return]) -> CType:
     if len(rs) == 0:
-        return 'void'
+        return BaseCType(voidT)
     elif len(rs) == 1:
         return return_type(rs[0])
     else:
-        args = ','.join(map(return_type, rs))
-        return f'std::tuple<{args}>'
+        return TupleCType([return_type(r) for r in rs])
 
 def return_names(f: NativeFunction) -> Sequence[str]:
     returns: List[str] = []
@@ -260,7 +247,7 @@ def argument(
         if a.name not in cpp_no_default_args and a.default is not None:
             default = default_expr(a.default, a.type)
         return [Binding(
-            ctype=argument_type(a, binds=binds),
+            nctype=argument_type(a, binds=binds),
             name=a.name,
             default=default,
             argument=a,
@@ -278,7 +265,7 @@ def argument(
             elif a.dtype.default == "long":
                 default = 'at::kLong'  # TODO: this is wrong
             return [Binding(
-                ctype=BaseCType('TensorOptions', 'options'),
+                nctype=NamedCType('options', BaseCType(tensorOptionsT)),
                 name='options',
                 default=default,
                 argument=a,

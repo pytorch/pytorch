@@ -199,6 +199,10 @@ def get_default_compare_output_module_list() -> Set[Callable]:
     )
     return copy.deepcopy(NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST)
 
+def get_default_float_to_quantized_operator_mappings(
+) -> Dict[Union[Callable, str], Callable]:
+    return copy.deepcopy(DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS)
+
 # TODO: merge with get_static_quant_module_class
 def get_quantized_operator(float_op: Union[Callable, str]) -> Callable:
     ''' Get the quantized operator corresponding to the float operator

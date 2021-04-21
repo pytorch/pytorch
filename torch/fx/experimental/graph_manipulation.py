@@ -57,18 +57,13 @@ def get_size_of_all_nodes(
 
 
 def get_shape_and_dtype(node: Node) -> Any:
-    shape = node.meta.get('shape')
+    tensor_meta = node.meta.get('tensor_meta')
 
-    # Shape could be torch.Size([]) which would be true for `if not shape`
-    if shape is None:
-        raise RuntimeError("Node has no shape attr")
+    if not tensor_meta:
+        raise RuntimeError(f'Node {node} has no tensor metadata associated with it! '
+                           f'Check that shape propagation has run.')
 
-    dtype = node.meta.get('dtype')
-    if not dtype:
-        raise RuntimeError("Node has no dtype attr")
-
-    return shape, dtype
-
+    return tensor_meta.shape, tensor_meta.dtype
 
 def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
     """Given a node with node.dtype and node.shape, return its total size and its output size.
@@ -204,18 +199,22 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
 
     def get_node_info(node):
         shape, dtype = get_shape_and_dtype(node)
+        tensor_meta = node.meta.get('tensor_meta')
+        if not tensor_meta:
+            raise RuntimeError(f'Node {node} has no tensor metadata! Ensure shape '
+                               f'propagation has been run!')
         node_rep = {
             "shape": serialize_shape(shape),
             "dtype": str(dtype),
-            "is_quantized": node.meta["is_quantized"],
+            "is_quantized": tensor_meta.is_quantized,
         }
 
-        if node.meta["is_quantized"]:
-            node_rep["qscheme"] = str(node.meta["qscheme"])
+        if tensor_meta.is_quantized:
+            node_rep["qscheme"] = str(tensor_meta.qscheme)
 
-            if node.meta["qscheme"] in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
-                node_rep["q_scale"] = node.meta["q_scale"]
-                node_rep["q_zero_point"] = node.meta["q_zero_point"]
+            if tensor_meta.qscheme in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
+                node_rep["q_scale"] = tensor_meta.q_scale
+                node_rep["q_zero_point"] = tensor_meta.q_zero_point
 
         return node_rep
 
