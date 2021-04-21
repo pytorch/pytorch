@@ -21,7 +21,7 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
   thd.name = thread_local_storage_key;
   NSMutableDictionary* dict = [thd threadDictionary];
   MetalCommandBuffer* cb = dict[thread_local_storage_key];
-  if (!cb) {
+  if (!cb || !cb.valid) {
     cb = [MetalCommandBuffer newBuffer];
     // The command buffer should only be retained by the thread-local storage.
     dict[thread_local_storage_key] = cb;
@@ -30,7 +30,7 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
 }
 
 - (BOOL)valid {
-  return _buffer != nil;
+  return _buffer != nil && _buffer.status == 0;
 }
 
 - (void)addSubscriber:(id<PTMetalCommandBuffer>)subscriber {
