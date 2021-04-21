@@ -346,24 +346,26 @@ added if applicable), so that it's still available for other backends to use.
 If you implemented a native function in C++ and want to find out which dispatch keyword
 should be used in native_functions.yaml, please [follow steps in dispatch keywords](#choosing-the-right-dispatch-keyword)
 
-### `device_guard`
+### `device_check_and_guard`
 
 ```
-device_guard: False
+device_check_and_guard: False
 ```
 
-By default, ATen code generation will generate a DeviceGuard invocation,
-which will ensure that kernel code will run with the current device set
+By default, ATen code generation will infer common device and
+generate a DeviceGuard invocation, which will ensure that input tenros are all on
+the common device and kernel code will run with the current device set
 to match the device of the first Tensor argument (or first tensor of
 the first Tensor[] argument, if the function takes a list of tensors).
 For the most part, this means kernel authors do not have to worry about
 setting devices.
 
 However, in some cases, setting the device is unnecessary, because,
-e.g., you call a function already manages device guard setting, or
+e.g., the function allows tensors on different devices,
+you call a function already manages device guard setting, or
 you're a function that simply does not interact with any devices. In
 that case, code generation of the device guard can be disabled by adding
-`device_guard: False` to your function definition.
+`device_check_and_guard: False` to your function definition.
 
 ### `manual_kernel_registration`
 

@@ -2173,7 +2173,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                               lambda: self.assertEqual(x, xv, rtol=4))
 
             self.assertRaisesRegex(TypeError, "takes from 3 to 4 positional arguments",
-                                   lambda: self.assertEqual(x, xv, "", 1.0))  # type: ignore
+                                   lambda: self.assertEqual(x, xv, "", 1.0))  # type: ignore[misc]
 
         def test_new(self) -> None:
             x = torch.autograd.Variable(torch.tensor([]))
@@ -5736,7 +5736,7 @@ class TestTorchDeviceType(TestCase):
     @deviceCountAtLeast(2)
     @onlyCUDA
     def test_device_guard(self, devices):
-        # verify that all operators with `device_guard: False` behave properly with multiple devices.
+        # verify that all operators with `device_check_and_guard: False` behave properly with multiple devices.
         # TODO: if we had operator introspection we could figure out this set of operators automatically...
         x = torch.randn((1, 2, 3), device=devices[1])
         y = torch.zeros((1, 3, 2), device=devices[1])
