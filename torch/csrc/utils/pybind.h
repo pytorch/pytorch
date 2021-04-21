@@ -24,7 +24,7 @@ PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
 
 namespace pybind11 { namespace detail {
 
-// torch.autograd.Variable <-> at::Tensor conversions (without unwrapping)
+// torch.Tensor <-> at::Tensor conversions (without unwrapping)
 template <>
 struct type_caster<at::Tensor> {
  public:
@@ -34,7 +34,7 @@ struct type_caster<at::Tensor> {
   bool load(handle src, bool) {
     PyObject* obj = src.ptr();
     if (THPVariable_Check(obj)) {
-      value = reinterpret_cast<THPVariable*>(obj)->cdata;
+      value = THPVariable_Unpack(obj);
       return true;
     }
     return false;
@@ -42,7 +42,7 @@ struct type_caster<at::Tensor> {
 
   static handle
   cast(const at::Tensor& src, return_value_policy /* policy */, handle /* parent */) {
-    return handle(THPVariable_Wrap(torch::autograd::Variable(src)));
+    return handle(THPVariable_Wrap(src));
   }
 };
 
