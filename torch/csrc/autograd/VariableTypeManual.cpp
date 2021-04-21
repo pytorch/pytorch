@@ -90,7 +90,7 @@ Tensor _fw_primal(const Tensor & self, int64_t level) {
     grad_fn->set_next_edges(collect_next_edges( self ));
   }
   auto tmp = ([&]() {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd non_var_type_mode(true);
     return self_.alias();
   })();
   std::function<at::Tensor(const at::Tensor&)> func=nullptr;
@@ -131,7 +131,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     grad_fn->src_device = src.device();
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd non_var_type_mode(true);
     at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
   rebase_history(self , std::move(grad_fn));
@@ -166,7 +166,7 @@ Tensor& resize_(
     AT_ERROR("cannot resize variables that require grad");
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd non_var_type_mode(true);
     at::redispatch::resize_(ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
   }
 
@@ -188,7 +188,7 @@ Tensor& resize_as_(
     AT_ERROR("cannot resize variables that require grad");
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd non_var_type_mode(true);
     at::redispatch::resize_as_(ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
   }
 
