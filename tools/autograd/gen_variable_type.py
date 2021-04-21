@@ -371,8 +371,9 @@ def gen_variable_type_shard(
             type_definitions.append(METHOD_DEFINITION.substitute(
                 return_type=cpp.returns_type(f.func.returns).cpp_type(),
                 type_wrapper_name=type_wrapper_name(f),
-                type_definition_body=emit_body(fn), formals=formals,
-                ))
+                type_definition_body=emit_body(fn),
+                formals=formals,
+            ))
             wrapper_registrations.append(gen_wrapper_registration(f))
 
         # See Note [Manual Backend kernels]
