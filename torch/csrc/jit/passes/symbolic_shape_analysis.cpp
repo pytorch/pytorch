@@ -19,8 +19,8 @@
 #include <vector>
 
 /*
-XXX: this is stil in prototype phase and has much work left to do, including but
-not limited to:
+XXX: this is still in prototype phase and has much work left to do, including
+but not limited to:
 - Bind shape functions for operators in C+
 - Make classes of operators share the same shape function (e.g. pointwise,
 broadcast two inputs)
@@ -129,13 +129,21 @@ struct SymbolicShapeAnalyzer {
     // or first dimension, we also try to resolve symbolic shapes of the same
     // symbolic value to the same Value * in the shape compute graph.
     // for the shape logic:
-    // dim1 = inp1[0], dim2 = inp2[0]; return dim1 if dim2 == 1 else dim2
+    // dim1 = inp1[0];
+    // dim2 = inp2[0];
+    // return dim1 if dim2 == 1 else dim2;
     // if we see that inp1[0] and inp2[0] both have the same symbolic shape
     // value, then it is a valid transformation to replace dim2 with dim1 or
     // vice versa. to do this we collect  all Value * for a particular symbolic
     // dimension value and then Value * with their dominator of the same
     // symbolic dimension value in the example above, this allows us to infer
     // that the output will be the symbolic dimension value of dim1
+    // if `substitute_symbolic_dims` is true, then we insert list accesses
+    // which resolve to symbolic dimension values as constants in the graph
+    // because symbolic dimensions are represented as negative numbers and
+    // are not real values, this is only safe to do if you are not running
+    // any further optimizations. representing them as constants in the graph
+    // makes extracting output shapes with symbolic dimensions possible.
 
     std::unordered_map<int64_t, std::vector<Value*>> symbolic_shape_map;
 
@@ -154,18 +162,20 @@ struct SymbolicShapeAnalyzer {
           } break;
           case aten::__getitem__: {
             auto index = constant_as<int64_t>(use.user->inputs().at(1));
-            if (index) {
-              auto norm_index = normIndex(*index, *tensor_shape.rank());
-              if (norm_index &&
-                  (tensor_shape[*norm_index].is_static() ||
-                   substitute_symbolic_dims)) {
-                replaceWithIValue(
-                    use.user->output(), tensor_shape[*norm_index].value());
-              } else if (norm_index) {
-                int64_t symbolic_index = tensor_shape[*norm_index].value();
-                symbolic_shape_map[symbolic_index].push_back(
-                    use.user->output());
-              }
+            if (!index) {
+              continue;
+            }
+            auto norm_index = normIndex(*index, *tensor_shape.rank());
+            if (!norm_index) {
+              continue;
+            }
+            if (tensor_shape[*norm_index].is_static() ||
+                substitute_symbolic_dims) {
+              replaceWithIValue(
+                  use.user->output(), tensor_shape[*norm_index].value());
+            } else {
+              int64_t symbolic_index = tensor_shape[*norm_index].value();
+              symbolic_shape_map[symbolic_index].push_back(use.user->output());
             }
           }
         }
@@ -188,7 +198,21 @@ struct SymbolicShapeAnalyzer {
   }
 
   void mergeSymbolicShapeSets(const std::vector<Value*>& symbolic_set) {
-    // resolve all symbolic values to values which they are dominated by
+    // `symbolic_set` represents a set of Value * which are all equal
+    // to each other. Here, we optimize the graph by replacing values
+    // in the set with other dominating values.
+    // in the following example, where a, b and c are all in the same
+    // symbolic set:
+    // if cond:
+    //    a = li[0]
+    //    b = li[1]
+    //    return [a, b]
+    // else:
+    //    c = li[0]
+    //    return [c, c]
+    // we can replace `b` with `a` because it is dominated by `a`,
+    // but we cannot replace `c` with another dominating value
+
     // there are ways to compute this more efficiently but typically number of
     // Values for each symbolic set is low and this is cheap to run
     for (size_t i = 0; i < symbolic_set.size(); ++i) {
