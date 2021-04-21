@@ -3417,6 +3417,46 @@ torch.cuda.synchronize()
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_record_stream(self):
+        # Makes sure graph capture defers attempting to reclaim allocations used across streams. See
+        # "Q. Why skip process_events if a capture might be underway?" in c10/cuda/CUDACachingAllocator.cpp
+        potential_problem = torch.zeros((3,), device="cuda")
+        a = torch.zeros((3,), device="cuda")
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        s2 = torch.cuda.Stream()
+        g = torch.cuda._Graph()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(s0):
+            potential_problem.record_stream(s0)
+            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
+            potential_problem.fill_(1.)
+        del potential_problem
+
+        with torch.cuda.stream(s1):
+            g.capture_begin()
+            # potential_problem's allocation should still be outstanding. if DeviceCachingAllocator::malloc
+            # mistakenly calls process_events, it will trigger cudaEventQueries on potential_problem's end-of-life
+            # event, which will cause the capture to error.
+            b = a.clone()
+
+            # Let's also see what happens if we record_stream on a tensor during capture.
+            s2.wait_stream(s1)
+            with torch.cuda.stream(s2):
+                b.fill_(1.)
+                b.record_stream(s2)  # dummy record_stream
+                del b
+            s1.wait_stream(s2)
+            g.capture_end()
+        torch.cuda.synchronize()
+
+        # dummy allocation triggers process_events, Hopefully successfully processes b's end-of-life event.
+        c = torch.zeros((3,), device="cuda")
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
         mean, invstd = torch.batch_norm_gather_stats(
