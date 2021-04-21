@@ -269,15 +269,17 @@ struct Value {
   TORCH_API void replaceAllUsesAfterNodeWith(const Node* node, Value* newValue);
 
   // Replaces all uses of this value with 'newValue' that are dominated by
-  // 'node'. replaceAllUsesAfterNodeWith does not check domination, so in the
-  // following example:
-  // x = op(...) if cond:
+  // 'node'. Given:
+  // x = op(...).
+  // if cond:
   //    z = foo(..)
   //    bar(x)
   // else:
   //    print(x)
-  // x.replaceAllUsesAfterNodeWith(foo, z) would replace print(x) with print(z)
-  // which would produce invalid IR
+  // x.replaceAllUsesDominatedByNodeWith(foo, z) would replace bar(x)
+  // but not print(x) because print is not dominated by foo.
+  // replaceAllUsesAfterNode does not check domination, so in this example
+  // it would produce invalid IR.
   TORCH_API void replaceAllUsesDominatedByNodeWith(
       const Node* node,
       Value* newValue);
