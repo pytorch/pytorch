@@ -81,9 +81,9 @@ jobs:
             --tty \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -v "${GITHUB_WORKSPACE}../custom-op-build:/var/lib/jenkins/custom-op-build" \
-            -v "${GITHUB_WORKSPACE}../custom-backend-build:/var/lib/jenkins/custom-backend-build" \
-            -v "${GITHUB_WORKSPACE}../jit-hook-build:/var/lib/jenkins/jit-hook-build" \
+            -v "${GITHUB_WORKSPACE}/../custom-op-build:/var/lib/jenkins/custom-op-build" \
+            -v "${GITHUB_WORKSPACE}/../custom-backend-build:/var/lib/jenkins/custom-backend-build" \
+            -v "${GITHUB_WORKSPACE}/../jit-hook-build:/var/lib/jenkins/jit-hook-build" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins ../ && .jenkins/pytorch/build.sh'
@@ -178,9 +178,9 @@ jobs:
             --tty \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -v "${GITHUB_WORKSPACE}../custom-op-build:/var/lib/jenkins/custom-op-build" \
-            -v "${GITHUB_WORKSPACE}../custom-backend-build:/var/lib/jenkins/custom-backend-build" \
-            -v "${GITHUB_WORKSPACE}../jit-hook-build:/var/lib/jenkins/jit-hook-build" \
+            -v "${GITHUB_WORKSPACE}/../custom-op-build:/var/lib/jenkins/custom-op-build" \
+            -v "${GITHUB_WORKSPACE}/../custom-backend-build:/var/lib/jenkins/custom-backend-build" \
+            -v "${GITHUB_WORKSPACE}/../jit-hook-build:/var/lib/jenkins/jit-hook-build" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins ../ && pip install dist/*.whl && .jenkins/pytorch/test.sh'
