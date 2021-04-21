@@ -43,7 +43,7 @@ class Shape {
 
   int64 rank() const { return dimensions_.size(); }
 
-  bool IsArray() const { return false; }
+  bool IsArray() const { return primitive_util::IsArrayType(element_type()); }
 
   bool IsTuple() const { return element_type_ == PrimitiveType::TUPLE; }
 
@@ -57,9 +57,7 @@ class Shape {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 
-  void DeleteDimension(int64 dim_to_delete) {
-    LTC_LOG(FATAL) << "Not implemented yet.";
-  }
+  void DeleteDimension(int64 dim_to_delete);
 
   PrimitiveType element_type() const { return element_type_; }
   void set_element_type(PrimitiveType value) { element_type_ = value; }

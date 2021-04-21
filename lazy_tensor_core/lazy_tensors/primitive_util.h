@@ -126,6 +126,9 @@ inline bool IsIntegralType(PrimitiveType type) {
   return IsUnsignedIntegralType(type) || IsSignedIntegralType(type);
 }
 
+// Returns true if values of the given primitive type are held in array shapes.
+bool IsArrayType(PrimitiveType primitive_type);
+
 inline int BitWidth(PrimitiveType type) {
   LTC_LOG(FATAL) << "Not implemented yet.";
 }
