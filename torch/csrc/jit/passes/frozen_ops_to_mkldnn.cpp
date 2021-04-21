@@ -441,7 +441,7 @@ jit::RegisterOperators reg_fut_ops({
           Tensor weight = pop(stack).toTensor();
           Tensor input = pop(stack).toTensor();
 
-          at::AutoNonVariableTypeMode non_var_type_mode(true);
+          at::AutoDispatchBelowAutograd non_var_type_mode(true);
           // aten::convolution takes care of 0 dim case before calls into
           // backends
           if (input.size(0) == 0) {
