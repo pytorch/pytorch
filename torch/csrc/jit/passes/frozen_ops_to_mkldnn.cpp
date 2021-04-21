@@ -351,6 +351,15 @@ Operation BroadOp(const Node* node) {
   };
 }
 
+static std::function<void(at::Tensor output, at::Tensor input)> hardtanh_helper(
+    const Node* n) {
+  auto min_val = n->f(attr::min_val);
+  auto max_val = n->f(attr::max_val);
+  return [min_val, max_val](at::Tensor output, at::Tensor input) {
+    at::cpu::hardtanh_out(output, input, min_val, max_val);
+  };
+}
+
 // any op added to this registry needs to meet
 // the precondition: `aten_op(0) == 0`
 const RegisterOperators MKLDNNHardSwishOpReg({
@@ -373,13 +382,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardTanh_(Tensor(a!) self) -> Tensor(a!)",
         [](const Node* n) -> Operation {
-          auto min_val = n->f(attr::min_val);
-          auto max_val = n->f(attr::max_val);
-          auto aten_op = [min_val, max_val](
-                             at::Tensor output, at::Tensor input) {
-            at::cpu::hardtanh_out(output, input, min_val, max_val);
-          };
-          return createUnaryOp(aten_op, true);
+          return createUnaryOp(hardtanh_helper(n), true);
         },
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
@@ -401,13 +404,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardTanh(Tensor self) -> Tensor",
         [](const Node* n) -> Operation {
-          auto min_val = n->f(attr::min_val);
-          auto max_val = n->f(attr::max_val);
-          auto aten_op = [min_val, max_val](
-                             at::Tensor output, at::Tensor input) {
-            at::cpu::hardtanh_out(output, input, min_val, max_val);
-          };
-          return createUnaryOp(aten_op, false);
+          return createUnaryOp(hardtanh_helper(n), false);
         },
         AliasAnalysisKind::FROM_SCHEMA),
 });
