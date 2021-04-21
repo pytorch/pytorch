@@ -3,11 +3,6 @@
 #include <ATen/native/metal/MetalPrepackOpContext.h>
 #include <c10/util/accumulate.h>
 
-
-#if (C10_IOS || TARGET_OS_MAC)
-#import <ATen/native/metal/ops/MetalConvolution.h>
-#endif
-
 namespace at {
 namespace native {
 namespace metal {
@@ -92,23 +87,8 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
       output_max);
 }
 
-Tensor conv2d_prepack_run(
-    const Tensor& input,
-    const c10::intrusive_ptr<Conv2dOpContext>& op_context) {
-#if (C10_IOS || TARGET_OS_MAC)
-  return prepack::conv2d(input, *op_context);
-#else
-  TORCH_CHECK(false, "conv2d_prepack_run can only be invoked on iOS and MacOS");
-  return input;
-#endif
-}
-
 TORCH_LIBRARY_IMPL(metal_prepack, CPU, m) {
   m.impl("conv2d_prepack", TORCH_FN(conv2d_prepack));
-}
-
-TORCH_LIBRARY_IMPL(metal_prepack, Metal, m) {
-  m.impl("conv2d_run", conv2d_prepack_run);
 }
 
 } // namespace metal

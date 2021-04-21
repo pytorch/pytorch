@@ -911,12 +911,12 @@ class TensorExprFuser {
       "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
     };
-    static const OperatorSet cuda_only_operator_set{
-      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
-    };
     static const OperatorSet cpu_only_operator_set{
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
+    };
+    static const OperatorSet pow{
+      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
     };
     // clang-format on
 
@@ -965,13 +965,16 @@ class TensorExprFuser {
       }
     }
 
-    // Operator is only supported on CUDA.
-    if (node->isMemberOf(cuda_only_operator_set)) {
-      auto device = tensorexpr::pickDeviceType(node->inputs());
-      if (!device) {
-        device = tensorexpr::pickDeviceType(node->outputs());
+    // aten::pow has special rules to avoid complicated integer cases.  We
+    // expect the first arg to be a floating point tensor, and if that's the
+    // case the type of the scalar exponent doesn't matter.
+    if (node->isMemberOf(pow)) {
+      auto const& tt = node->input(0)->type()->cast<TensorType>();
+      if (!tt) {
+        return false;
       }
-      if (!device || device->is_cpu()) {
+      auto const& st = tt->scalarType();
+      if (!st || !isFloatingType(*st)) {
         return false;
       }
     }
@@ -1015,6 +1018,7 @@ class TensorExprFuser {
         }
       }
     }
+
     if (node->kind() == aten::conv2d) {
       if (!tensorexpr::conv2dIsSupported(node)) {
         GRAPH_DEBUG("Params of conv2d are not supported");

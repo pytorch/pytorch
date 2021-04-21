@@ -5,6 +5,55 @@
 
 
 namespace at {
+namespace meta {
+TORCH_META_FUNC(adaptive_max_pool2d) (const Tensor& input, IntArrayRef output_size) {
+  for (int64_t i = 0; i < input.ndimension(); i++) {
+    TORCH_CHECK(
+        input.size(i) > 0,
+        "adaptive_max_pool2d: expected input to have non-empty spatial dimensions, "
+        "but input has sizes ",
+        input.sizes(),
+        " with dimension ",
+        i,
+        " being "
+        "empty");
+  }
+
+  TORCH_CHECK(
+      (input.ndimension() == 3 || input.ndimension() == 4),
+      "non-empty 3D or 4D (batch mode) tensor expected for input");
+
+  TORCH_CHECK(
+      output_size.size() == 2,
+      "adaptive_max_pool2d: internal error: output_size.size() must be 2");
+
+  int dimH = 1;
+  int64_t sizeB = 1;
+  int64_t sizeD = 0;
+
+  if (input.ndimension() == 4) {
+    sizeB = input.size(0);
+    dimH++;
+  }
+
+  sizeD = input.size(dimH - 1);
+
+  int64_t osizeH = output_size[0];
+  int64_t osizeW = output_size[1];
+
+  /* resize output */
+  if (input.ndimension() == 3) {
+    set_output(0, {sizeD, osizeH, osizeW}, input.options());
+    /* indices will contain i,j locations for each output point */
+    set_output(1, {sizeD, osizeH, osizeW}, input.options().dtype(kLong));
+  } else {
+    set_output(0, {sizeB, sizeD, osizeH, osizeW}, input.options());
+    /* indices will contain i,j locations for each output point */
+    set_output(1, {sizeB, sizeD, osizeH, osizeW}, input.options().dtype(kLong));
+  }
+}
+} // namespace meta
+
 namespace native {
 
 namespace {
@@ -113,102 +162,6 @@ static void adaptive_max_pool2d_out_frame(
                                                      istrideH, istrideW);
     }
   });
-}
-
-void adaptive_max_pool2d_out_cpu_template(
-          Tensor& output,
-          Tensor& indices,
-          const Tensor& input,
-          IntArrayRef output_size)
-{
-  int dimW = 2;
-  int dimH = 1;
-  int64_t sizeB = 1;
-  int64_t sizeD = 0;
-  int64_t isizeH = 0;
-  int64_t isizeW = 0;
-
-  int64_t istrideD = 0;
-  int64_t istrideH = 0;
-  int64_t istrideW = 0;
-  int64_t istrideB = 0;
-
-  for (int64_t i = 0; i < input.ndimension(); i++) {
-    TORCH_CHECK(input.size(i) > 0,
-      "adaptive_max_pool2d: expected input to have non-empty spatial dimensions, "
-      "but input has sizes ", input.sizes(), " with dimension ", i, " being "
-      "empty");
-  }
-
-  TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
-
-  TORCH_CHECK(output_size.size() == 2,
-    "adaptive_max_pool2d: internal error: output_size.size() must be 2");
-
-  if (input.ndimension() == 4)
-  {
-    istrideB = input.stride(0);
-    sizeB = input.size(0);
-    dimW++;
-    dimH++;
-  }
-
-  /* sizes */
-  sizeD  = input.size(dimH-1);
-  isizeH = input.size(dimH);
-  isizeW = input.size(dimW);
-  /* strides */
-  istrideD = input.stride(dimH-1);
-  istrideH = input.stride(dimH);
-  istrideW = input.stride(dimW);
-
-  int64_t osizeH = output_size[0];
-  int64_t osizeW = output_size[1];
-
-  /* resize output */
-  if (input.ndimension() == 3)
-  {
-    output.resize_({sizeD, osizeH, osizeW});
-    /* indices will contain i,j locations for each output point */
-    indices.resize_({sizeD, osizeH, osizeW});
-
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      auto indices_data = indices.data_ptr<int64_t>();
-
-      adaptive_max_pool2d_single_out_frame<scalar_t>(input_data, output_data,
-                                                     indices_data,
-                                                     sizeD,
-                                                     isizeH, isizeW,
-                                                     osizeH, osizeW,
-                                                     istrideD,
-                                                     istrideH, istrideW);
-      }
-    );
-  }
-  else
-  {
-    output.resize_({sizeB, sizeD, osizeH, osizeW});
-    /* indices will contain i,j locations for each output point */
-    indices.resize_({sizeB, sizeD, osizeH, osizeW});
-
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      auto indices_data = indices.data_ptr<int64_t>();
-
-      adaptive_max_pool2d_out_frame<scalar_t>(input_data, output_data,
-                                              indices_data,
-                                              sizeB, sizeD,
-                                              isizeH, isizeW,
-                                              osizeH, osizeW,
-                                              istrideB, istrideD,
-                                              istrideH, istrideW);
-      }
-    );
-  }
 }
 
 template <typename scalar_t>
@@ -346,31 +299,83 @@ Tensor& adaptive_max_pool2d_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> adaptive_max_pool2d_out_cpu(const Tensor& input,
-  IntArrayRef output_size,
-  Tensor& output,
-  Tensor& indices)
-{
-  adaptive_max_pool2d_out_cpu_template(
-    output,
-    indices,
-    input,
-    output_size);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
-}
+TORCH_IMPL_FUNC(adaptive_max_pool2d_out_cpu)
+(const Tensor& input, IntArrayRef output_size, const Tensor& output, const Tensor& indices) {
+  int dimW = 2;
+  int dimH = 1;
+  int64_t sizeB = 1;
+  int64_t sizeD = 0;
+  int64_t isizeH = 0;
+  int64_t isizeW = 0;
 
-std::tuple<Tensor, Tensor> adaptive_max_pool2d_cpu(
-  const Tensor& input,
-  IntArrayRef output_size)
-{
-  Tensor output = at::empty({0}, input.options());
-  Tensor indices = at::empty({0}, input.options().dtype(kLong));
-  adaptive_max_pool2d_out_cpu_template(
-    output,
-    indices,
-    input,
-    output_size);
-  return std::tuple<Tensor, Tensor>(output, indices);
+  int64_t istrideD = 0;
+  int64_t istrideH = 0;
+  int64_t istrideW = 0;
+  int64_t istrideB = 0;
+
+  if (input.ndimension() == 4) {
+    istrideB = input.stride(0);
+    sizeB = input.size(0);
+    dimW++;
+    dimH++;
+  }
+
+  /* sizes */
+  sizeD = input.size(dimH - 1);
+  isizeH = input.size(dimH);
+  isizeW = input.size(dimW);
+  /* strides */
+  istrideD = input.stride(dimH - 1);
+  istrideH = input.stride(dimH);
+  istrideW = input.stride(dimW);
+
+  int64_t osizeH = output_size[0];
+  int64_t osizeW = output_size[1];
+
+  /* resize output */
+  if (input.ndimension() == 3) {
+    AT_DISPATCH_FLOATING_TYPES(
+        input.scalar_type(), "adaptive_max_pool2d_cpu", [&] {
+          auto input_data = input.data_ptr<scalar_t>();
+          auto output_data = output.data_ptr<scalar_t>();
+          auto indices_data = indices.data_ptr<int64_t>();
+
+          adaptive_max_pool2d_single_out_frame<scalar_t>(
+              input_data,
+              output_data,
+              indices_data,
+              sizeD,
+              isizeH,
+              isizeW,
+              osizeH,
+              osizeW,
+              istrideD,
+              istrideH,
+              istrideW);
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(
+        input.scalar_type(), "adaptive_max_pool2d_cpu", [&] {
+          auto input_data = input.data_ptr<scalar_t>();
+          auto output_data = output.data_ptr<scalar_t>();
+          auto indices_data = indices.data_ptr<int64_t>();
+
+          adaptive_max_pool2d_out_frame<scalar_t>(
+              input_data,
+              output_data,
+              indices_data,
+              sizeB,
+              sizeD,
+              isizeH,
+              isizeW,
+              osizeH,
+              osizeW,
+              istrideB,
+              istrideD,
+              istrideH,
+              istrideW);
+        });
+  }
 }
 
 Tensor& adaptive_max_pool2d_backward_out_cpu(const Tensor& gradOutput_,

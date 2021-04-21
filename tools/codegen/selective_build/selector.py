@@ -200,9 +200,9 @@ class SelectiveBuilder:
         ret['operators'] = operators
 
         if self._debug_info is not None:
-            ret['debug_info'] = self._debug_info
+            ret['debug_info'] = sorted(self._debug_info)
 
-        ret['kernel_metadata'] = {k: list(v) for (k, v) in self.kernel_metadata.items()}
+        ret['kernel_metadata'] = {k: sorted(list(v)) for (k, v) in self.kernel_metadata.items()}
 
         return ret
 
