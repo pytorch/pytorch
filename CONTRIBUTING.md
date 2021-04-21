@@ -249,7 +249,7 @@ into the repo directory.
         * [cpu](aten/src/ATen/native/cpu) - Not actually CPU
           implementations of operators, but specifically implementations
           which are compiled with processor-specific instructions, like
-          AVX. See the [README](aten/src/ATen/native/cpu/README.md) for more
+          AVX or AVX512. See the [README](aten/src/ATen/native/cpu/README.md) for more
           details.
         * [cuda](aten/src/ATen/native/cuda) - CUDA implementations of
           operators.
