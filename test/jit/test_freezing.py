@@ -1817,7 +1817,7 @@ class TestFrozenOptimizations(JitTestCase):
             else:
                 scripted_mod = torch.jit.script(mod_eager)
 
-            frozen_mod = torch.jit.freeze(scripted_mod)
+            frozen_mod = torch.jit.freeze(scripted_mod, optimize_numerics=False)
             FileCheck().check("aten::relu").run(frozen_mod.graph)
             self.run_pass("fuse_frozen_conv_add_relu", frozen_mod.graph)
             if add_z:
