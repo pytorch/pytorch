@@ -21,7 +21,9 @@ void OptimizeFrozenGraph(
       FoldFrozenConvAddOrSub(graph);
       FoldFrozenConvMulOrDiv(graph);
     }
+#ifdef USE_CUDA
     FuseFrozenConvAddRelu(graph);
+#endif
   }
 }
 
