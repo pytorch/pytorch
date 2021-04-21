@@ -1785,7 +1785,10 @@ void fuseAllLoops(Stmt* st) {
     if (!loopBoundsAllEqual(loopsToFuse)) {
       return;
     }
-    auto fusedLoop = LoopNest::fuseLoops(loopsToFuse);
+    For* fusedLoop;
+    if (!LoopNest::fuseLoops(loopsToFuse, &fusedLoop)) {
+      return;
+    }
     fuseAllLoops(fusedLoop->body());
   }
 }
