@@ -24,6 +24,9 @@ bool test_div();
 bool test_div_broadcast();
 bool test_div_broadcast2();
 bool test_t();
+bool test_transpose();
+bool test_transpose2();
+bool test_transpose3();
 bool test_view();
 bool test_view2();
 bool test_view3();
@@ -43,5 +46,8 @@ bool test_upsampling_nearest2d_vec();
 bool test_adaptive_avg_pool2d();
 bool test_hardtanh_();
 bool test_reshape();
+bool test_mean_dim();
+bool test_mean_dim2();
+bool test_mean_dim3();
 
 #endif
