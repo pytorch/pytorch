@@ -165,7 +165,7 @@ IMPLEMENTATION_TEMPLATE = CT("""\
 C10_NOINLINE void implementation_${key}() { // ${name}
     ${initialization}
     run_op = [=] {
-        at::AutoNonVariableTypeMode guard;
+        at::AutoDispatchBelowAutograd guard;
         ${statements}
         auto the_result = ${invocation};
         ${assignments}
