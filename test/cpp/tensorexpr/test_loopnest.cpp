@@ -4517,7 +4517,7 @@ TEST(LoopNest, fuseLoopsNested2DInner) {
   //     }
   //   }
   BufHandle a_buf("A", {20, 100}, kInt);
-  BufHandle b_buf("B", {2, 100}, kInt);
+  BufHandle b_buf("B", {20, 100}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle n("n", kInt);
@@ -4832,6 +4832,53 @@ TEST(LoopNest, fuseLoopsWithNonOverlapping2DBufferAccesses) {
   ASSERT_EQ(fused_loop, forI);
 }
 
+TEST(LoopNest, fuseLoopsWithReductions) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = 0
+  //     for (int j = 0; j < 100; j++) {
+  //       A[i] = A[i] + B[i,j];
+  //     }
+  //   }
+  //   for (int m = 0; m < 20; m++) {
+  //     C[m] = A[m];
+  //   }
+  BufHandle a_buf("A", {20}, kInt);
+  BufHandle b_buf("B", {20, 100}, kInt);
+  BufHandle c_buf("C", {20}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle m("m", kInt);
+  auto initA = Store::make(a_buf, {i}, 0);
+  auto sumA = Store::make(
+      a_buf, {i}, Add::make(Load::make(a_buf, {i}), Load::make(b_buf, {i, j})));
+  auto forJ = For::make(j, 0, 100, sumA);
+  auto forI = For::make(i, 0, 20, Block::make({initA, forJ}));
+  auto forM =
+      For::make(m, 0, 20, Store::make(c_buf, {m}, Load::make(a_buf, {m})));
+  auto par = Block::make({forI, forM});
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: A[i] =
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i] = (A[i]) +
+# CHECK-NOT: for (
+# CHECK: C[i] = A[i]
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The fused loop must be the same as the first loop.
+  ASSERT_EQ(fused_loop, forI);
+}
+
 TEST(LoopNest, fuseLoopsThatViolateDependencies1) {
   KernelScope kernel_scope;
 
@@ -5001,10 +5048,10 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
   BufHandle b_buf("B", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
-  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(
       k,
-      10,
+      0,
       100,
       Store::make(
           b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
@@ -5029,11 +5076,11 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
   VarHandle k("k", kInt);
   auto forK = For::make(
       k,
-      10,
+      0,
       100,
       Store::make(
           b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
-  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto par = Block::make({forK, forJ});
   For* fused_loop;
   ASSERT_FALSE(LoopNest::fuseLoops({forK, forJ}, &fused_loop));
