@@ -547,6 +547,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
+    # Force -Werror on several files
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/mkldnn/Pooling.cpp PROPERTIES COMPILE_FLAGS "-Werror")
   endif()
   # Disable certain warnings for GCC-9.X
   if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
@@ -594,6 +596,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
+
     # Disable legacy import of building without Caffe2 support
     if(BUILD_CAFFE2)
       list(APPEND TORCH_SRCS
@@ -967,9 +970,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
       ${TORCH_ROOT}/aten/src
       ${CMAKE_CURRENT_BINARY_DIR}/aten/src
+
       ${CMAKE_BINARY_DIR}/aten/src)
-    target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
-  endif()
+      target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
+      endif()
 
   set(ATen_CPU_INCLUDE
     ${TORCH_ROOT}/aten/src
@@ -977,11 +981,30 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
     ${CMAKE_BINARY_DIR}/aten/src)
 
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/RNN.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    endif()
+
 if(USE_TBB)
   list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
   target_link_libraries(torch_cpu PUBLIC tbb)
 endif()
 
+
+if(LINUX)
+  find_library(BREAKPAD_LIB breakpad_client)
+  find_path(BREAKPAD_INCLUDE_DIR breakpad)
+  if(BREAKPAD_LIB_FOUND AND BREAKPAD_INCLUDE_DIR_FOUND)
+    target_link_libraries(torch_cpu PRIVATE ${BREAKPAD_LIB})
+    add_compile_definitions(ADD_BREAKPAD_SIGNAL_HANDLER)
+    target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
+  else()
+    message(STATUS "breakpad library not found")
+  endif()
+endif()
 
   target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
@@ -1728,7 +1751,9 @@ if(BUILD_PYTHON)
   # ---[ Python.
   if(BUILD_CAFFE2)
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
-  target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
+  if(USE_NUMPY)
+    target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
+  endif()
   if(NOT MSVC)
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
   endif()
@@ -1759,7 +1784,9 @@ if(BUILD_PYTHON)
 
   if(USE_CUDA)
     add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
-    target_compile_options(caffe2_pybind11_state_gpu PRIVATE "-DUSE_NUMPY")
+    if(USE_NUMPY)
+      target_compile_options(caffe2_pybind11_state_gpu PRIVATE "-DUSE_NUMPY")
+    endif()
     if(NOT MSVC)
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
     endif()
@@ -1788,7 +1815,9 @@ if(BUILD_PYTHON)
 
   if(USE_ROCM)
     add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
-    target_compile_options(caffe2_pybind11_state_hip PRIVATE "-DUSE_NUMPY")
+    if(USE_NUMPY)
+      target_compile_options(caffe2_pybind11_state_hip PRIVATE "-DUSE_NUMPY")
+    endif()
     if(NOT MSVC)
       target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
     endif()
