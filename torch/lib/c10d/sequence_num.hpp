@@ -6,6 +6,10 @@
 namespace c10d {
 const int kUnsetSeqNum = 0;
 
+namespace {
+  constexpr int kByteOffset = 8;
+}
+
 // Converts from int to char vec to write in store
 template <typename T>
 inline std::vector<T> toVec(uint64_t num, int numBytes) {
@@ -13,7 +17,7 @@ inline std::vector<T> toVec(uint64_t num, int numBytes) {
   // Read off bytes from right to left, pushing them into
   // char array.
   for (int i = 0; i < numBytes; ++i) {
-    uint8_t x = (num >> (8 * i)) & 0xff;
+    uint8_t x = (num >> (kByteOffset * i)) & 0xff;
     values.push_back(static_cast<T>(x));
   }
   return values;
@@ -26,7 +30,7 @@ inline uint64_t fromVec(const std::vector<T>& values) {
   // Set each byte at the correct location on num
   for (int i = 0; i < values.size(); ++i) {
     uint8_t x = static_cast<uint8_t>(values[i]);
-    num |= (static_cast<int64_t>(x) << (8 * i));
+    num |= (static_cast<int64_t>(x) << (kByteOffset * i));
   }
   return num;
 }
