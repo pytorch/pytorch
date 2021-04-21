@@ -612,7 +612,8 @@ class TestCommon(JitCommonTestCase):
         final_ptrs = _extract_data_ptrs(out)
 
         self.assertEqual(expected, out)
-        self.assertEqual(original_strides, final_strides)
+        for original_stride, final_stride in zip(original_strides, final_strides):
+            self.assertEqual(original_stride, final_stride)
         self.assertEqual(original_ptrs, final_ptrs)
 
         # Case 2: out= with the correct dtype and device, but the wrong shape

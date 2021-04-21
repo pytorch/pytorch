@@ -4918,11 +4918,16 @@ class TestLinalg(TestCase):
         if torch._C.has_lapack:
             # lu
             A_LU, pivots = fn(torch.lu, (0, 5, 5))
-            self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
+            self.assertEqual((0, 5, 5), A_LU.shape)
+            self.assertEqual((0, 5), pivots.shape)
+
             A_LU, pivots = fn(torch.lu, (0, 0, 0))
-            self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
+            self.assertEqual((0, 0, 0), A_LU.shape)
+            self.assertEqual((0, 0), pivots.shape)
+
             A_LU, pivots = fn(torch.lu, (2, 0, 0))
-            self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
+            self.assertEqual((2, 0, 0), A_LU.shape)
+            self.assertEqual((2, 0), pivots.shape)
 
     @skipCUDAIfRocm
     @dtypesIfCUDA(torch.cfloat, torch.cdouble,
@@ -7575,17 +7580,25 @@ else:
 
         # eig, symeig
         evalues, evectors = fn(torch.eig, (0, 0), True)
-        self.assertEqual([(0, 2), (0, 0)], [evalues.shape, evectors.shape])
+        self.assertEqual((0, 2), evalues.shape)
+        self.assertEqual((0, 0), evectors.shape)
+
         evalues, evectors = fn(torch.symeig, (0, 0), True)
-        self.assertEqual([(0,), (0, 0)], [evalues.shape, evectors.shape])
+        self.assertEqual((0,), evalues.shape)
+        self.assertEqual((0, 0), evectors.shape)
 
         # qr
         q, r = fn(torch.qr, (3, 0), True)
-        self.assertEqual([(3, 0), (0, 0)], [q.shape, r.shape])
+        self.assertEqual((3, 0), q.shape)
+        self.assertEqual((0, 0), r.shape)
+
         q, r = fn(torch.qr, (0, 3), True)
-        self.assertEqual([(0, 0), (0, 3)], [q.shape, r.shape])
+        self.assertEqual((0, 0), q.shape)
+        self.assertEqual((0, 3), r.shape)
+
         q, r = fn(torch.qr, (3, 0), False)
-        self.assertEqual([(3, 3), (3, 0)], [q.shape, r.shape])
+        self.assertEqual((3, 3), q.shape)
+        self.assertEqual((3, 0), r.shape)
 
         # lstsq
         self.assertRaises(RuntimeError, lambda: torch.lstsq(torch.randn(0, 0), torch.randn(0, 0)))
