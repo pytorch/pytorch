@@ -76,12 +76,11 @@ class TORCH_API BackendDebugHandleManager {
   int64_t getNextDebugHandleForInlinedCallStackPtr(
       const SourceRange& range,
       const InlinedCallStackPtr& cs_ptr);
-  std::unordered_map<int64_t, DelegateDebugInfoType> getCallStackPtrMap();
+  std::unordered_map<int64_t, DebugInfoPair> getCallStackPtrMap();
 
  private:
   static std::atomic<int64_t> unique_debug_handle_;
-  std::unordered_map<int64_t, DelegateDebugInfoType>
-      handles_to_inlined_callstack_ptrs_;
+  std::unordered_map<int64_t, DebugInfoPair> handles_to_inlined_callstack_ptrs_;
 };
 
 } // namespace jit

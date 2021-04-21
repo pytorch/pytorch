@@ -93,7 +93,7 @@ void slot_named_params_recurse(
   }
 }
 
-std::string getTopeModuleTypeName(const Module& m) {
+std::string getTopModuleTypeName(const Module& m) {
   std::string name;
   if (m._ivalue()->type() && m._ivalue()->type()->name()) {
     name = m._ivalue()->type()->name().value().name();
@@ -128,7 +128,7 @@ std::string Module::get_forward_method_debug_info(size_t pc) const {
   auto debug_handle = find_method("forward")->get_debug_handle(pc);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   return getDebugTable().getModuleHierarchyInfo(
-      debug_handle, getTopeModuleTypeName(*this));
+      debug_handle, getTopModuleTypeName(*this));
 #else
   return "";
 #endif
@@ -186,7 +186,7 @@ void Method::run(Stack& stack) const {
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     auto debug_string = owner_->getDebugTable().getSourceDebugString(
-        function_->getExceptionDebugHandle(), getTopeModuleTypeName(*owner_));
+        function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
     error.add_context(debug_string);
 #endif
     if (observer) {
@@ -208,7 +208,7 @@ void Method::run(Stack& stack) const {
     } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
       auto debug_string = owner_->getDebugTable().getSourceDebugString(
-          function_->getExceptionDebugHandle(), getTopeModuleTypeName(*owner_));
+          function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
       error.add_context(debug_string);
 #endif
       if (observer) {
