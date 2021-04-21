@@ -4278,8 +4278,6 @@ class DistributedTest:
                     loss = net(inp).sum()
                     loss.backward()
 
-                torch.cuda.synchronize(device=self.rank)
-
             all_reduce_event_name = f"{dist.get_backend()}:all_reduce"
             events = get_profiling_event(all_reduce_event_name, prof)
             event_count = sum(e.count for e in events)
