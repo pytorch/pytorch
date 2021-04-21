@@ -6,6 +6,7 @@ Gradcheck mechanics
 This note presents an overview of how the :meth:`~torch.autograd.gradcheck` and :meth:`~torch.autograd.gradgradcheck` functions work.
 
 It will cover both forward and backward mode AD for both real and complex-valued functions as well as higher-order derivatives.
+This note also covers both the default behavior of gradcheck as well as the case where :code:`fast_mode=True` argument is passed (referred to as fast gradcheck below).
 
 .. contents:: :local:
     :depth: 2
@@ -35,16 +36,16 @@ Both :math:`W` and :math:`CW` need to be propagated because in general, despite 
 To avoid having to propagate both values, for backward mode AD, we always work under the assumption that the function whose derivative is being calculated is either a real-valued function or is part of a bigger real-valued function. This assumption means that all the intermediary gradients we compute during the backward pass are also associated with real-valued functions.
 In practice, this assumption is not restrictive when doing optimization as such problem require real-valued objectives (as there is no natural ordering of the complex numbers).
 
-Under this assumption, we can show that :math:`W = CW^*` (we use :math:`*` to denote complex conjugation here) and so only one of the two values actually need to be "backwarded through the graph" as the other one can easily be recovered.
+Under this assumption, using :math:`W` and :math:`CW` definitions, we can show that :math:`W = CW^*` (we use :math:`*` to denote complex conjugation here) and so only one of the two values actually need to be "backwarded through the graph" as the other one can easily be recovered.
 To simplify internal computations, PyTorch uses :math:`2 * CW` as the value it backwards and returns when the user asks for gradients.
 Similarly to the real case, when the output is actually in :math:`\mathcal{R}^M`, backward mode AD does not compute :math:`2 * CW` but only :math:`v^T (2 * CW)` for a given vector :math:`v \in \mathcal{R}^M`.
 
-For forward mode AD, we use a similar logic, in this case, assuming that the function is part of a larger function whose input is in :math:`\mathcal{R}`. Under this assumption, we can make similar claim that every intermediary result corresponds to a function whose input is in :math:`\mathcal{R}` and in this case, we can show that :math:`W = CW` for the intermediary functions.
-To make sure the forward and backward mode compute the same quantities, the forward mode also computes :math:`2 * CW`.
+For forward mode AD, we use a similar logic, in this case, assuming that the function is part of a larger function whose input is in :math:`\mathcal{R}`. Under this assumption, we can make a similar claim that every intermediary result corresponds to a function whose input is in :math:`\mathcal{R}` and in this case, using :math:`W` and :math:`CW` definitions, we can show that :math:`W = CW` for the intermediary functions.
+To make sure the forward and backward mode compute the same quantities in the elementary case of a one dimensional function, the forward mode also computes :math:`2 * CW`.
 Similarly to the real case, when the input is actually in :math:`\mathcal{R}^N`, forward mode AD does not compute :math:`2 * CW` but only :math:`(2 * CW) u` for a given vector :math:`u \in \mathcal{R}^N`.
 
 
-Current backward mode gradcheck behavior
+Default backward mode gradcheck behavior
 ----------------------------------------
 
 Functions in :math:`\mathcal{R}^N \to \mathcal{R}^M`
@@ -54,8 +55,8 @@ To test a function :math:`f: \mathcal{R}^N \to \mathcal{R}^M, x \to y`, we recon
 The analytical version uses our backward mode AD while the numerical version uses finite difference.
 The two reconstructed Jacobian matrices are then compared elementwise for equality.
 
-Slow real input numerical evaluation
-""""""""""""""""""""""""""""""""""""
+Default real input numerical evaluation
+"""""""""""""""""""""""""""""""""""""""
 
 If we consider the elementary case of a one-dimensional function (:math:`N = M = 1`), then we can use the basic finite difference formula from `the wikipedia article <https://en.wikipedia.org/wiki/Finite_difference>`_. We use the "central difference" for better numerical properties:
 
@@ -67,10 +68,10 @@ In that case, the above formula can be re-used as-is and approximates the full J
 
 It is more computationally expensive to handle the case with multiple inputs (:math:`N \gt 1`). In this scenario, we loop over all the inputs one after the other and apply the :math:`eps` perturbation for each element of :math:`x` one after the other. This allows us to reconstruct the :math:`J_f` matrix column by column.
 
-Slow real input analytical evaluation
-"""""""""""""""""""""""""""""""""""""
+Default real input analytical evaluation
+""""""""""""""""""""""""""""""""""""""""
 
-For the analytical evaluate, we use the fact, as described above, that backward mode AD computes :math:`v^T J_f`.
+For the analytical evaluation, we use the fact, as described above, that backward mode AD computes :math:`v^T J_f`.
 For functions with a single output, we simply use :math:`v = 1` to recover the full Jacobian matrix with a single backward pass.
 
 For functions with more than one output, we resort to a for-loop which iterates over the outputs where each :math:`v` is a one-hot vector corresponding to each output one after the other. This allows to reconstruct the :math:`J_f` matrix row by row.
@@ -80,8 +81,8 @@ Functions in :math:`\mathcal{C}^N \to \mathcal{R}^M`
 
 To test a function :math:`g: \mathcal{C}^N \to \mathcal{R}^M, z \to y` with :math:`z = a + i b`, we reconstruct the (complex-valued) matrix that contains :math:`2 * CW`.
 
-Slow complex input numerical evaluation
-"""""""""""""""""""""""""""""""""""""""
+Default complex input numerical evaluation
+""""""""""""""""""""""""""""""""""""""""""
 
 Consider the elementary case where :math:`N = M = 1` first. We know from (chapter 3 of) `this research paper <https://arxiv.org/pdf/1701.00392.pdf>`_) that:
 
@@ -112,15 +113,16 @@ Note that the code, as of time of writing, computes this value in a slightly con
     # Since grad_out is always 1, and W and CW are complex conjugate of each other, the last line ends up computing exactly `conj_w_d + w_d.conj() = conj_w_d + conj_w_d = 2 * conj_w_d`.
 
 
-Slow complex input analytical evaluation
-""""""""""""""""""""""""""""""""""""""""
+Default complex input analytical evaluation
+"""""""""""""""""""""""""""""""""""""""""""
 
 Since backward mode AD computes exactly twice the :math:`CW` derivative already, we simply use the same trick as for the real-to-real case here and reconstruct the matrix row by row when there are multiple real outputs.
 
 Functions with outputs in :math:`\mathcal{C}^M`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In this case, the assumption we have about the computation of the :math:`CW` does not hold (output is not real) and so we cannot compute it directly to compare it.
+In this case, the user-provided function does not follow the assumption from the autograd that the function we compute backward AD for is real-valued.
+This means that using autograd directly on this function is not well defined.
 To solve this, we will replace the test of the function :math:`h: \mathcal{P}^N \to \mathcal{C}^M` (where :math:`\mathcal{P}` can be either :math:`\mathcal{R}` or :math:`\mathcal{C}`), with two functions :math:`hr` and :math:`hi` such that: :math:`hr(q) = real(f(q))` and :math:`hi(q) = imag(f(q))` where :math:`q \in \mathcal{P}`.
 We then do a basic gradcheck for both :math:`hr` and :math:`hi` using either the real-to-real or complex-to-real case described above, depending on :math:`\mathcal{P}`.
 
@@ -134,7 +136,7 @@ Fast backward mode gradcheck
 
 While the above formulation of gradcheck is great, both, to ensure correctness and debuggability, it is very slow because it reconstructs the full Jacobian matrices.
 This section presents a way to perform gradcheck in a faster way without affecting its correctness.
-The debuggability can be recovered by adding special code logic when we detect an error. In that case, we can run the slow code that reconstruct the full matrix to give full details to the user.
+The debuggability can be recovered by adding special code logic when we detect an error. In that case, we can run the slow code that reconstructs the full matrix to give full details to the user.
 
 The high level strategy here is to find a scalar quantity that can be computed efficiently by both the numerical and analytical methods and that represents the full matrix computed by the slow gradcheck well enough to ensure that it will catch any discrepancy in the Jacobians.
 
@@ -166,9 +168,9 @@ We first consider how to compute :math:`s` with a numerical method. To do so, ke
 
 .. math::
     \begin{aligned}
-        s &= 2 * v^T (real(CW) ur + i * imag(CW) ui)
-          &= 2 * v^T (\frac{1}{2} * \frac{\partial y}{\partial a} ur + i * \frac{1}{2} * \frac{\partial y}{\partial b} ui)
-          &= v^T (\frac{\partial y}{\partial a} ur + i * \frac{\partial y}{\partial b} ui)
+        s &= 2 * v^T (real(CW) ur + i * imag(CW) ui) \\
+          &= 2 * v^T (\frac{1}{2} * \frac{\partial y}{\partial a} ur + i * \frac{1}{2} * \frac{\partial y}{\partial b} ui) \\
+          &= v^T (\frac{\partial y}{\partial a} ur + i * \frac{\partial y}{\partial b} ui) \\
           &= v^T ((\frac{\partial y}{\partial a} ur) + i * (\frac{\partial y}{\partial b} ui))
     \end{aligned}
 
@@ -182,8 +184,8 @@ For the analytical case, things are simpler and we rewrite the formula as:
 
 .. math::
     \begin{aligned}
-        s &= 2 * v^T (real(CW) ur + i * imag(CW) ui)
-          &= v^T real(2 * CW) ur + i * v^T imag(2 * CW) ui)
+        s &= 2 * v^T (real(CW) ur + i * imag(CW) ui) \\
+          &= v^T real(2 * CW) ur + i * v^T imag(2 * CW) ui) \\
           &= real(v^T (2 * CW)) ur + i * imag(v^T (2 * CW)) ui
     \end{aligned}
 
@@ -197,7 +199,7 @@ The problem is that when doing the numerical evaluation, considering :math:`u' =
 
 .. math::
     \begin{aligned}
-        2*CW u' &= (dy/da + i dy/db)(ur' + i ui')
+        2*CW u' &= (dy/da + i dy/db)(ur' + i ui') \\
                 &= dy/da ur' + i dy/da ui' + i dy/db ur' - dy/db ui'
     \end{aligned}
 
