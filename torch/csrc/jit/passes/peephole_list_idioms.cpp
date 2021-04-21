@@ -22,12 +22,23 @@ c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   }
 }
 
-// Refine from Value -> len of list
+// Refine from Value of type List -> len of list
+// If a refinement mapping of List Value * -> len is present in a block
+// the list is guaranteed to be that length
 // TODO: vector may be faster
 using ListRefinement = std::unordered_map<Value*, int64_t>;
 
 // The intersection of the refinements is the Value* which are in both
 // refinements and are refined to the same length
+// in an example like:
+// if cond:
+//    x = len(a) == 4 and len(b) == 5
+// else:
+//    x = len(a) == 4
+// For the x output of the node we take the intersection between
+// the refinements stored on each block output, which will result
+// in only the refinement of len(a) == 4
+
 ListRefinement intersectRefinements(
     const ListRefinement& ref1,
     const ListRefinement& ref2) {
@@ -44,36 +55,45 @@ ListRefinement intersectRefinements(
 // To union, just take all refinements from both inputs. We do not need to worry
 // about len refinements disagreeing because a path like `if len(x) == 4 and
 // len(x) == 5` will never be taken
+// in an example like:
+// if len(a) == 5:
+//     x = len(b) == 4
+// else:
+//     x = False
+// For the output x Value, if is true then the refinements present in the true
+// block must also be true, so we take the union of `len(a) == 5` and len(b) ==
+// 4` and assign them to true refinements of the output x value. This is a very
+// common pattern in desugaring of `and` or `or` boolean expressions
+
 ListRefinement unionRefinements(
     const ListRefinement& ref1,
     const ListRefinement& ref2) {
-  ListRefinement out;
-  for (const auto& pair : ref1) {
-    out[pair.first] = pair.second;
-  }
-  for (const auto& pair : ref2) {
-    out[pair.first] = pair.second;
-  }
+  ListRefinement out = ref1;
+  out.insert(ref2.begin(), ref2.end());
   return out;
 }
 
 // Represents the refinement information that can be carried on a boolean
-struct BoolRefinements {
-  BoolRefinements(ListRefinement true_refine, ListRefinement false_refine)
+struct BooleanRefinementMapping {
+  BooleanRefinementMapping(
+      ListRefinement true_refine,
+      ListRefinement false_refine)
       : true_refine_(std::move(true_refine)),
         false_refine_(std::move(false_refine)){};
-  BoolRefinements() = default; // empty
+  BooleanRefinementMapping() = default; // empty
 
-  static BoolRefinements FalseRefinements(ListRefinement false_refine) {
-    return BoolRefinements({}, std::move(false_refine));
+  static BooleanRefinementMapping FalseRefinements(
+      ListRefinement false_refine) {
+    return BooleanRefinementMapping({}, std::move(false_refine));
   }
 
-  static BoolRefinements TrueRefinements(ListRefinement true_refine) {
-    return BoolRefinements(std::move(true_refine), {});
+  static BooleanRefinementMapping TrueRefinements(ListRefinement true_refine) {
+    return BooleanRefinementMapping(std::move(true_refine), {});
   }
 
-  BoolRefinements intersectBoolRefinements(BoolRefinements& other) {
-    return BoolRefinements(
+  BooleanRefinementMapping intersectBooleanRefinementMapping(
+      BooleanRefinementMapping& other) {
+    return BooleanRefinementMapping(
         intersectRefinements(true_refine_, other.true_refine()),
         intersectRefinements(false_refine_, other.false_refine()));
   }
@@ -154,7 +174,7 @@ struct ListLenRefiner {
         continue;
       }
 
-      auto first_input = n->inputs().at(0);
+      auto first_input = n->input(0);
       if (first_input->type()->cast<ListType>() &&
           !mutated_lists_.count(first_input)) {
         if (!li_with_len_use.count(first_input)) {
@@ -173,27 +193,27 @@ struct ListLenRefiner {
           n->matches("aten::ne(int a, int b) -> bool")) {
         // check for one input constant and the other coming from len(li)
         for (size_t const_index : {0, 1}) {
-          auto ival = constant_as<int64_t>(n->inputs().at(const_index));
+          auto ival = constant_as<int64_t>(n->input(const_index));
           if (!ival) {
             continue;
           }
-          auto li_len = n->inputs().at(const_index - 1);
+          auto li_len = n->input(const_index - 1);
           if (!li_len->node()->matches("aten::len.t(t[] a) -> int") ||
               !lists_to_refine_.count(li_len->node()->input())) {
             continue;
           }
           ListRefinement refine;
           refine[li_len->node()->input()] = *ival;
-          info_[n->output()] = n->kind() == aten::eq
-              ? BoolRefinements::TrueRefinements(std::move(refine))
-              : BoolRefinements::FalseRefinements(std::move(refine));
+          boolean_value_refinements_[n->output()] = n->kind() == aten::eq
+              ? BooleanRefinementMapping::TrueRefinements(std::move(refine))
+              : BooleanRefinementMapping::FalseRefinements(std::move(refine));
         }
       }
       if (n->kind() == prim::RaiseException) {
         throwing_blocks_.insert(b);
       }
       if (n->kind() == aten::len) {
-        if (auto maybe_len = tryFindRefinement(n->inputs().at(0))) {
+        if (auto maybe_len = tryFindRefinement(n->input(0))) {
           changed_ = true;
           WithInsertPoint guard(n);
           n->output()->replaceAllUsesWith(
@@ -203,14 +223,17 @@ struct ListLenRefiner {
 
       if (n->kind() == prim::If) {
         IfView if_n(n);
-        bool has_cond_ref = info_.count(if_n.cond()) != 0;
+        bool has_cond_ref = boolean_value_refinements_.count(if_n.cond()) != 0;
         ListRefinement empty;
         auto true_block_refinements = RefineListLens(
             if_n.thenBlock(),
-            has_cond_ref ? info_[if_n.cond()].true_refine() : empty);
+            has_cond_ref ? boolean_value_refinements_[if_n.cond()].true_refine()
+                         : empty);
         auto false_block_refinements = RefineListLens(
             if_n.elseBlock(),
-            has_cond_ref ? info_[if_n.cond()].false_refine() : empty);
+            has_cond_ref
+                ? boolean_value_refinements_[if_n.cond()].false_refine()
+                : empty);
         bool true_block_throws = throwing_blocks_.count(if_n.thenBlock());
         bool false_block_throws = throwing_blocks_.count(if_n.elseBlock());
 
@@ -234,19 +257,15 @@ struct ListLenRefiner {
           Block* non_throwing_block =
               true_block_throws ? n->blocks().at(1) : n->blocks().at(0);
           for (size_t i = 0; i < if_n.outputs().size(); ++i) {
-            if (info_.count(non_throwing_block->outputs().at(i))) {
-              info_[n->outputs().at(i)] =
-                  info_[non_throwing_block->outputs().at(i)];
+            if (boolean_value_refinements_.count(
+                    non_throwing_block->outputs().at(i))) {
+              boolean_value_refinements_[n->outputs().at(i)] =
+                  boolean_value_refinements_[non_throwing_block->outputs().at(
+                      i)];
             }
           }
           continue;
         }
-
-        // if either block has a constant bool output, e.g. `true` on the
-        // truee block, then for the `false` value we can take the false
-        // refinements from the other block and from the other block value bc
-        // if the output is false it had to have come from the false block.
-        // Otherwise, just take intersection of refinements
 
         for (size_t i = 0; i < if_n.outputs().size(); ++i) {
           if (!(if_n.outputs().at(i)->type() == BoolType::get())) {
@@ -255,32 +274,65 @@ struct ListLenRefiner {
           Value* true_v = if_n.thenOutputs().at(i);
           Value* false_v = if_n.elseOutputs().at(i);
 
-          if (!info_.count(true_v) && !info_.count(false_v)) {
+          if (!boolean_value_refinements_.count(true_v) &&
+              !boolean_value_refinements_.count(false_v) &&
+              !constant_as<bool>(true_v) && !constant_as<bool>(false_v)) {
             continue;
           }
 
-          BoolRefinements out;
+          // if either block has a constant bool output, e.g. `true` on the
+          // true block, then for the `false` value we can take the false
+          // refinements present on the false block and from the other block
+          // output value bc if the output is false it had to have come from the
+          // false block. if len(a) == 5:
+          //     x = len(b) == 4
+          // else:
+          //     x = False
+          // if x is true, then we know both len(a) == 5 and len(b) == 4
+          //
+          // if neither block has a constant bool value, we just take the
+          // intersection of the refinements from boolean outputs.
+          // if cond:
+          //    x = len(a) == 4 and len(b) == 5
+          // else:
+          //    x = len(a) == 4
+          // here, we know if x is true, then len(a) == 4, but not len(b)
+          // == 5, because that refinement is not present in the true block.
+          // TODO: could also take intersection of refinements present in
+          // both blocks, but it's not a real use case.
+
+          // boolean_value_refinements_[value] is safe to access because
+          // BooleanRefinementMapping has a default constructor
+
+          BooleanRefinementMapping out;
           if (auto maybe_bool = constant_as<bool>(true_v)) {
             if (*maybe_bool) {
-              out = BoolRefinements::FalseRefinements(unionRefinements(
-                  info_[false_v].false_refine(), false_block_refinements));
+              out = BooleanRefinementMapping::FalseRefinements(unionRefinements(
+                  boolean_value_refinements_[false_v].false_refine(),
+                  false_block_refinements));
             } else {
-              out = BoolRefinements::TrueRefinements(unionRefinements(
-                  info_[false_v].true_refine(), false_block_refinements));
+              out = BooleanRefinementMapping::TrueRefinements(unionRefinements(
+                  boolean_value_refinements_[false_v].true_refine(),
+                  false_block_refinements));
             }
           } else if (auto maybe_bool = constant_as<bool>(false_v)) {
             if (*maybe_bool) {
-              out = BoolRefinements::FalseRefinements(unionRefinements(
-                  info_[true_v].false_refine(), true_block_refinements));
+              out = BooleanRefinementMapping::FalseRefinements(unionRefinements(
+                  boolean_value_refinements_[true_v].false_refine(),
+                  true_block_refinements));
             } else {
-              out = BoolRefinements::TrueRefinements(unionRefinements(
-                  info_[true_v].true_refine(), true_block_refinements));
+              out = BooleanRefinementMapping::TrueRefinements(unionRefinements(
+                  boolean_value_refinements_[true_v].true_refine(),
+                  true_block_refinements));
             }
           }
-          if (info_.count(true_v) && info_.count(false_v)) {
-            out = info_[true_v].intersectBoolRefinements(info_[false_v]);
+          if (boolean_value_refinements_.count(true_v) &&
+              boolean_value_refinements_.count(false_v)) {
+            out = boolean_value_refinements_[true_v]
+                      .intersectBooleanRefinementMapping(
+                          boolean_value_refinements_[false_v]);
           }
-          info_[if_n.outputs().at(i)] = out;
+          boolean_value_refinements_[if_n.outputs().at(i)] = out;
         }
       }
     }
@@ -305,7 +357,8 @@ struct ListLenRefiner {
   // A stack of active refinements, one for each block
   std::vector<ListRefinement*> active_refinements_;
   // A map from Boolean Value * -> associated refinements
-  std::unordered_map<Value*, BoolRefinements> info_;
+  std::unordered_map<Value*, BooleanRefinementMapping>
+      boolean_value_refinements_;
   std::unordered_set<Block*> throwing_blocks_;
   bool changed_ = false;
 };
@@ -360,11 +413,11 @@ struct PeepholeOptimizeListIdiomsImpl {
 
       // only optimizing list ops
       if (node->inputs().size() == 0 ||
-          !node->inputs().at(0)->type()->cast<ListType>()) {
+          !node->input(0)->type()->cast<ListType>()) {
         continue;
       }
 
-      auto first_input = node->inputs().at(0);
+      auto first_input = node->input(0);
 
       // only optimizing ops with unmutated lists
       if (mutated_lists_.count(first_input)) {
@@ -381,11 +434,11 @@ struct PeepholeOptimizeListIdiomsImpl {
       } else if (node->kind() == aten::__getitem__) {
         auto list_creation_node = first_input->node();
         if (list_creation_node->kind() == prim::ListConstruct) {
-          if (auto index = toIValue(node->inputs().at(1))) {
+          if (auto index = toIValue(node->input(1))) {
             size_t list_size = list_creation_node->inputs().size();
             if (auto norm_index = normalizeIndex(index->toInt(), list_size)) {
               node->output()->replaceAllUsesWith(
-                  list_creation_node->inputs().at(*norm_index));
+                  list_creation_node->input(*norm_index));
               changed = true;
             }
           }
@@ -398,8 +451,7 @@ struct PeepholeOptimizeListIdiomsImpl {
             continue;
           }
           for (size_t i = 0; i < node->outputs().size(); ++i) {
-            node->output(i)->replaceAllUsesWith(
-                list_creation_node->inputs().at(i));
+            node->output(i)->replaceAllUsesWith(list_creation_node->input(i));
             changed = true;
           }
         }
@@ -407,7 +459,7 @@ struct PeepholeOptimizeListIdiomsImpl {
         if (node->inputs().size() != 2) {
           continue;
         }
-        auto second_input = node->inputs().at(1);
+        auto second_input = node->input(1);
         // already checked first, need to check second
         if (mutated_lists_.count(second_input)) {
           continue;
