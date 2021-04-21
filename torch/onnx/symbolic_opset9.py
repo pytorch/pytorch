@@ -3076,29 +3076,62 @@ def mv(g, self, vec):
     return matmul(g, self, vec)
 
 
-@parse_args('v', 'i', 'v', 'v')
+def _has_duplicated_value(g, values):
+    if values is None:
+        return False
+
+    # from torch.onnx.symbolic_opset11 import unique_dim
+    # x, y, z = unique_dim(g, values, 0, False, 0, 0)
+    # unique_item_count = sym_help._get_tensor_dim_size(x, 0)
+    # values_count = sym_help._get_tensor_dim_size(values, 0)
+
+    return False
+
+
 def index_add(g, self, dim, index, other):
+    if _has_duplicated_value(g, index):
+        raise NotImplementedError("index_add does NOT support duplicated value in 'index' parameter yet.")
+
     from torch.onnx.symbolic_opset9 import scatter_add
 
     dim = sym_help._maybe_get_const(dim, 'i')
-    self_dim_count = sym_help._get_tensor_rank(self)
-    other_dim_count = sym_help._get_tensor_rank(other)
+    self_dim_rank = sym_help._get_tensor_rank(self)
+    other_dim_rank = sym_help._get_tensor_rank(other)
 
-    if other_dim_count != self_dim_count:
-        delta = self_dim_count - other_dim_count
+    if other_dim_rank != self_dim_rank:
+        delta = self_dim_rank - other_dim_rank
         for i in range(delta):
             other = sym_help._unsqueeze_helper(g, other, [sym_help._get_tensor_rank(other)])
 
-    # other.size(dim) == self.size(dim)
+    other_dim_size = sym_help._get_tensor_dim_size(other, dim)
+    self_dim_size = sym_help._get_tensor_dim_size(self, dim)
 
-    other = expand_as(g, other, self)
+    if other_dim_size == self_dim_size:
+        other = expand_as(g, other, self)
+    elif other_dim_size < self_dim_size:
+        # Construct a new shape. It's almost as same as self except the size of dim dimension
+        # is 1 so that we can expand other dimensions as expected.
+        new_shape_axes = [i for i in range(self_dim_rank)]
+        new_shape_starts = [0 for i in range(self_dim_rank)]
+        new_shape_ends = [sym_help._get_tensor_dim_size(self, i)
+                          if (i != dim)
+                          else
+                          1
+                          for i in range(self_dim_rank)]
+
+        new_shape = sym_help._slice_helper(g, 
+                                           self, 
+                                           axes=new_shape_axes, 
+                                           starts=new_shape_starts, 
+                                           ends=new_shape_ends)
+        other = expand_as(g, other, new_shape)
+    else:
+        raise NotImplementedError("index_add does NOT support duplicated value in 'index' parameter yet.")
 
     for i in range(dim):
         index = sym_help._unsqueeze_helper(g, index, [0])
 
-    for i in range(self_dim_count - dim - 1):
+    for i in range(self_dim_rank - dim - 1):
         index = sym_help._unsqueeze_helper(g, index, [sym_help._get_tensor_rank(index)])
 
-    index = expand_as(g, index, other)
-
-    return scatter_add(g, self, dim, index, other)
+    return scatter_add(g, self, dim, expand_as(g, index, other), other)
