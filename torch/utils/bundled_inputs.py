@@ -10,6 +10,10 @@ T = TypeVar("T")
 MAX_RAW_TENSOR_SIZE = 16
 
 class InflatableArg(NamedTuple):
+    """ Helper type for bundled inputs. Value is the compressed/deflated
+    input that is stored in the model and fmt is a code string that is executed to
+    inflate the compressed data into the appropriate input.
+    """
     value: Any
     fmt: str
 
@@ -20,8 +24,36 @@ def augment_model_with_bundled_inputs(
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
         info: Optional[List[str]] = None,  # Optional argument to provide info about forward or its inputs
 ) -> None:
-    """ Wrapper around augment_many_model_functions_with_bundled_inputs to provide a streamlined api for forward
-    which is the only function the vast majority of models need bundled inputs for.
+    """ Add bundled sample inputs to a model for the forward function.
+
+    Models with bundled inputs can be invoked in a uniform manner by
+    benchmarking and code coverage tools.
+
+    Augmented models will support the following methods:
+
+        `get_all_bundled_inputs() -> List[Tuple[Any, ...]]`
+            Returns a list of tuples suitable for passing to the model like
+            `for inp in model.get_all_bundled_inputs(): model(*inp)`
+
+        `get_num_bundled_inputs() -> int`
+            Equivalent to `len(model.get_all_bundled_inputs())`,
+            but slightly easier to call from C++.
+
+        `get_bundled_inputs_functions_and_info() -> Dict[str, Dict[str: List[str]]]`
+            Returns a dictionary mapping function names to a metadata dictionary.
+            This nested dictionary maps preset strings like:
+                'get_inputs_function_name' -> the name of a function attribute in this model that can be
+                    run to get back a list of inputs corresponding to that function.
+                'info' -> the user provided extra information about the bundled inputs
+
+    Inputs can be specified in one of two ways:
+
+      - The model can define `_generate_bundled_inputs_for_forward`
+        get_all_bundled_inputs will simply call this method
+        and cache the value. If the user chooses this method inputs should be None
+
+      - `inputs` is a list of inputs of form List[Tuple[Any, ...]]. A list of tuples where the elements
+        of each tuple are the args that make up one input.
     """
 
     if not isinstance(model, torch.jit.ScriptModule):
