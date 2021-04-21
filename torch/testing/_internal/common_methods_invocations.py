@@ -5708,7 +5708,8 @@ def unpack_variables(args):
 
 
 EXCLUDE_FUNCTIONAL = {
-    'addbmm',
+    'addmm',
+    'addmm_',
     'baddbmm',
     'reshape',
     'where'  # argument order
