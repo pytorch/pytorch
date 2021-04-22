@@ -135,12 +135,14 @@ void _parallel_run(
     std::condition_variable cv;
   } state;
 
-  auto task = [f, &state, begin, end, chunk_size]
+  auto thread_locals = ThreadLocalState();
+  auto task = [f, &state, begin, end, chunk_size, thread_locals]
       (int /* unused */, size_t task_id) {
     int64_t local_start = begin + task_id * chunk_size;
     if (local_start < end) {
       int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
       try {
+        ThreadLocalStateGuard tls_guard(std::move(thread_locals));
         ParallelRegionGuard guard(task_id);
         f(local_start, local_end, task_id);
       } catch (...) {

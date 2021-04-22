@@ -50,10 +50,11 @@ grain_size: number of elements per chunk. impacts the degree of parallelization
 f: user function applied in parallel to the chunks, signature:
   void f(int64_t begin, int64_t end)
 
-Warning: parallel_for does NOT copy thread local
+Warning: Not all parallel_for implementations copy thread local
 states from the current thread to the worker threads.
-This means for example that Tensor operations CANNOT be used in the
-body of your function, only data pointers.
+See Note [Preserve thread local state across thread boundary] for details.
+For implementations that don't preserve thread local state, Tensor operations
+CANNOT be used in the body of your function, only data pointers.
 */
 template <class F>
 inline void parallel_for(
@@ -93,10 +94,11 @@ would be "+" and 0 respectively. This is similar to tbb's approach [1], where
 you need to provide a function to accumulate a subrange, a function to combine
 two partial results and an identity.
 
-Warning: parallel_reduce does NOT copy thread local
+Warning: Not all parallel_reduce implementations copy thread local
 states from the current thread to the worker threads.
-This means for example that Tensor operations CANNOT be used in the
-body of your function, only data pointers.
+See Note [Preserve thread local state across thread boundary] for details.
+For implementations that don't preserve thread local state, Tensor operations
+CANNOT be used in the body of your function, only data pointers.
 
 [1] https://software.intel.com/en-us/node/506154
 */

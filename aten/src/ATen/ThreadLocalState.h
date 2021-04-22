@@ -9,8 +9,13 @@
 
 namespace at {
 
+// Note [Preserve thread local state across thread boundary]
 // Thread local state contains values that are preserved across
 // thread boundaries (e.g. at::launch/JIT fork, autograd, at::parallel_for)
+// Not all at::parallel_for implementations preserve thread_local
+// acrros thread boundaries! For example, ParallelNative and
+// ParallelThreadPoolNative support it but ParallelOpenMP and ParallelNativeTBB
+// don't.
 class TORCH_API ThreadLocalState {
  public:
   // Saves the thread local variables' values and
