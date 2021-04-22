@@ -12023,7 +12023,7 @@ class TestNNDeviceType(NNTestCase):
             m = norm(NUM_CHANNELS, track_running_stats=True)
 
             # Create an appropriately-sized input with a single spatial element.
-            input = torch.randn(BATCH_SIZE, NUM_CHANNELS, *[1 for _ in range(i+1)],
+            input = torch.randn(BATCH_SIZE, NUM_CHANNELS, *[1 for _ in range(i + 1)],
                                 device=device)
             with self.assertRaises(ValueError):
                 m(input)
