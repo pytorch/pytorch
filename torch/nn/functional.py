@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 r"""Functional interface"""
 from typing import Callable, List, Optional, Tuple
 import math
@@ -2075,7 +2074,7 @@ def embedding_bag(
 
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
                                      gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
-                                     during training, i.e. it remains as a fixed “pad”. Note that the embedding
+                                     during training, i.e. it remains as a fixed "pad". Note that the embedding
                                      vector at :attr:`padding_idx` is excluded from the reduction.
 
     Shape:
