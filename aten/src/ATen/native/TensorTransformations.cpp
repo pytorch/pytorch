@@ -40,8 +40,8 @@ Tensor build_index(int64_t num_dims, int64_t flip_dim, int64_t dim_size) {
   new_shape[flip_dim] = dim_size;
 
   TensorOptions tensor_options =
-    TensorOptions(kInt64).
-    device(kCPU);
+    TensorOptions(c10::kLong).
+    device(c10::kCPU);
 
   return at::empty(new_shape, tensor_options);
 }
@@ -103,7 +103,7 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
 
   std::vector<int64_t> flip_dims;
   for(int64_t dim: dims) {
-      dims.push_back(dim);
+      flip_dims.push_back(dim);
   }
 
   std::sort(flip_dims.begin(), flip_dims.end());
@@ -121,14 +121,14 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
   auto indices = build_indices_loop(input, flip_dims);
   auto iter = make_index_iterator(restrided_input, indices);
 
-  if (in_tensor.is_quantized()) {
-    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(in_tensor.scalar_type(),
+  if (input.is_quantized()) {
+    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(input.scalar_type(),
                                         "flip_quantized_cpu", [&] {
       flip_cpu_kernel<scalar_t>(iter);
     });
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16,
-                                          in_tensor.scalar_type(),
+                                          input.scalar_type(),
                                           "flip_cpu", [&] {
       flip_cpu_kernel<scalar_t>(iter);
     });
