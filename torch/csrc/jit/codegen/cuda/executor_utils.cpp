@@ -507,7 +507,7 @@ kir::ExpressionEvaluator bindKernelInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (size_t dim = 0; dim < root_domain.size(); dim++) {
-        const auto extent = root_domain[dim]->rawExtent();
+        const auto extent = root_domain[dim]->extent();
         const auto value = aten_tensor.sizes()[dim];
         const auto prev_value = expr_eval.evaluate(extent);
         if (prev_value.has_value()) {

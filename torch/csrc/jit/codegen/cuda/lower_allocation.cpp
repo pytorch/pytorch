@@ -145,7 +145,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
           id->iterType() == IterType::BroadcastWithoutStride) {
         continue;
       }
-      alloc_dims.push_back(id->rawExtent());
+      alloc_dims.push_back(id->extent());
     }
 
     return alloc_dims;
@@ -207,7 +207,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
           continue;
         }
       }
-      alloc_dims.push_back(concrete_id->rawExtent());
+      alloc_dims.push_back(concrete_id->extent());
     }
 
     return alloc_dims;

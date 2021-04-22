@@ -196,11 +196,10 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
         buffer_ids.end());
 
     kir::Val* buffer_size = buffer_ids.empty() ? ir_builder_.create<kir::Int>(1)
-                                               : buffer_ids[0]->rawExtent();
+                                               : buffer_ids[0]->extent();
 
     for (size_t i = 1; i < buffer_ids.size(); i++) {
-      buffer_size =
-          ir_builder_.mulExpr(buffer_size, buffer_ids[i]->rawExtent());
+      buffer_size = ir_builder_.mulExpr(buffer_size, buffer_ids[i]->extent());
     }
 
     auto sync_ids = out_domain->domain();
@@ -214,10 +213,10 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
         sync_ids.end());
 
     kir::Val* sync_size = sync_ids.empty() ? ir_builder_.create<kir::Int>(1)
-                                           : sync_ids[0]->rawExtent();
+                                           : sync_ids[0]->extent();
 
     for (size_t i = 1; i < sync_ids.size(); i++) {
-      sync_size = ir_builder_.mulExpr(sync_size, sync_ids[i]->rawExtent());
+      sync_size = ir_builder_.mulExpr(sync_size, sync_ids[i]->extent());
     }
 
     const auto zero = ir_builder_.create<kir::Int>(0);
@@ -284,9 +283,9 @@ kir::Allocate* allocGlobalBuffer(
       buffer_ids.end());
 
   kir::Val* buffer_size = buffer_ids.empty() ? ir_builder.create<kir::Int>(1)
-                                             : buffer_ids[0]->rawExtent();
+                                             : buffer_ids[0]->extent();
   for (size_t i = 1; i < buffer_ids.size(); i++) {
-    buffer_size = ir_builder.mulExpr(buffer_size, buffer_ids[i]->rawExtent());
+    buffer_size = ir_builder.mulExpr(buffer_size, buffer_ids[i]->extent());
   }
   const auto zero = ir_builder.create<kir::Int>(0);
   const std::vector<kir::IterDomain*> new_buffer_ids = {

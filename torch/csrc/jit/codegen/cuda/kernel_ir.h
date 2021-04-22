@@ -594,10 +594,6 @@ class TORCH_CUDA_CU_API IterDomain final : public Val {
 
   Val* extent() const;
 
-  Val* rawExtent() const {
-    return extent_;
-  }
-
   bool isSimple() const {
     return is_simple_;
   }

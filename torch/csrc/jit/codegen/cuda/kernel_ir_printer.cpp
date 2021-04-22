@@ -201,7 +201,7 @@ void IrPrinter::visit(const kir::IterDomain* node) {
     ir_str_ << "rfactor.";
   }
   ir_str_ << node->parallelType() << "." << node->iterType() << "("
-          << use(node->start()) << " .. " << use(node->rawExtent()) << ")]";
+          << use(node->start()) << " .. " << use(node->extent()) << ")]";
 }
 
 void IrPrinter::visit(const kir::TensorDomain*) {

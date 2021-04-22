@@ -236,7 +236,7 @@ at::Tensor inferAndAllocOutput(
         id->iterType() == IterType::BroadcastWithoutStride) {
       continue;
     }
-    sizes.push_back(id->rawExtent());
+    sizes.push_back(id->extent());
   }
 
   return inferAndAlloc(tv, sizes, expr_eval, options, zero_init);

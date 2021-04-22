@@ -550,7 +550,7 @@ bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) const {
     if (id->isThread() || id->parallelType() == ParallelType::Vectorize) {
       continue;
     }
-    const auto result = eval.evaluate(id->rawExtent());
+    const auto result = eval.evaluate(id->extent());
     if (!(result.has_value() && result.value() == 1)) {
       return false;
     }

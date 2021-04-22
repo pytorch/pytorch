@@ -705,7 +705,7 @@ void IndexSwizzle::run() {
 
       auto swizzled_idx = ir_builder.modExpr(
           ir_builder.addExpr(idx_to_swizzle_i, idx_to_swizzle_j),
-          id_to_swizzle_j_kir->rawExtent());
+          id_to_swizzle_j_kir->extent());
       index_map_[id_to_swizzle_j_kir] = swizzled_idx;
       swizzled_ids_.insert(id_to_swizzle_j);
       IndexCompute::run();
