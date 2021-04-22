@@ -903,7 +903,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 args=(self._dataset_kind, self._dataset, index_queue,
                       self._worker_result_queue, self._workers_done_event,
                       self._auto_collation, self._collate_fn, self._drop_last,
-                      self._base_seed + i, self._worker_init_fn, i, self._num_workers,
+                      self._base_seed, self._worker_init_fn, i, self._num_workers,
                       self._persistent_workers))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to
