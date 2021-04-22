@@ -225,7 +225,6 @@ bool matmulIsSupported(const torch::jit::Node* node) {
   return true;
 }
 
-
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -328,7 +327,6 @@ ExprHandle tensorexpr::tensorOrConstant(
   return constant(v);
 }
 
-
 ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
   auto ti = bufs_.find(v);
   if (ti != bufs_.end()) {
@@ -372,8 +370,7 @@ ExprHandle TensorExprKernel::tensorOrConstant(
 ExprHandle tensorexpr::broadcast(
     BufHandle b,
     const std::vector<ExprHandle>& axes) {
-  return b.load(
-      computeIndicesToBroadcast(axes, b.dims()));
+  return b.load(computeIndicesToBroadcast(axes, b.dims()));
 }
 
 std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
@@ -990,8 +987,6 @@ Tensor* tensorexpr::computeFourOperand(
         return demoteOutput(compute, outputTensorType);
       });
 }
-
-
 
 // Convert boolean to integer, if needed.
 ExprHandle boolToInteger(const ExprHandle& x) {
@@ -2430,7 +2425,6 @@ Tensor* tensorexpr::computeCatWoConditionals(
     const std::vector<ArgValue>& input_list,
     const ArgValue& arg_dim,
     const std::vector<ExprHandle>& output_shape) {
-
   auto inputs = processCatList(input_list);
   ScalarType high_type = inputs.first;
   std::vector<BufHandle> non_empty_inputs = inputs.second;

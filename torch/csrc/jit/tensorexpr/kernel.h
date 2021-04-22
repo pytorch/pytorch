@@ -124,9 +124,7 @@ ExprHandle demoteOutput(
     const ExprHandle& e,
     const c10::optional<ScalarType> type);
 
-ExprHandle broadcast(
-    BufHandle b,
-    const std::vector<ExprHandle>& axes);
+ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes);
 
 ExprHandle constant(const ArgValue& v);
 
@@ -203,9 +201,7 @@ class TORCH_API TensorExprKernel {
 
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
 
-
   ArgValue toArg(const torch::jit::Value* v) const;
-
 
   ExprHandle tensorOrConstant(
       const torch::jit::Value* v,
