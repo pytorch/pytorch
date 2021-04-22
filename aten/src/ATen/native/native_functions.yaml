@@ -5867,16 +5867,20 @@
     CPU, CUDA: i0_out
 
 - func: sign(Tensor self) -> Tensor
+  structured_delegate: sign.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sign
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: sign.out
   variants: method
   dispatch:
     CompositeExplicitAutograd: sign_
 
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sign_out
 
