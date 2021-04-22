@@ -2161,12 +2161,23 @@ class TestReductions(TestCase):
             numpy_res = np.asarray(np.var(array, **numpy_kwargs))
             torch_res = torch.var(tensor, dim=dim, correction=correction, keepdim=keepdim)
 
+            # Result should never be complex (gh-56627), but for now just test the
+            # imaginary component is 0 or an allowed non-finite value
+            if torch_res.is_complex():
+                imag = torch_res.imag
+                torch_res = torch_res.real
+                finite = imag.isfinite()
+                # All finite imaginary components are zero
+                self.assertEqual(finite, imag == 0)
+                # All non-finite imaginary components coincide with non-finite real components
+                self.assertTrue(torch.all(finite | ~torch_res.isfinite()))
+
             # inf vs. nan results are sensitive to machine precision,
             # just treat them as equivalent
             numpy_res[np.isinf(numpy_res)] = np.nan
             torch_res[torch_res.isinf()] = np.nan
 
-            self.assertEqual(torch_res, numpy_res, exact_dtype=False)
+            self.assertEqual(torch_res, numpy_res)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_std_correction_vs_numpy(self, device, dtype):
@@ -2191,12 +2202,23 @@ class TestReductions(TestCase):
             numpy_res = np.asarray(np.std(array, **numpy_kwargs))
             torch_res = torch.std(tensor, dim=dim, correction=correction, keepdim=keepdim)
 
+            # Result should never be complex (gh-56627), but for now just test the
+            # imaginary component is 0 or an allowed non-finite value
+            if torch_res.is_complex():
+                imag = torch_res.imag
+                torch_res = torch_res.real
+                finite = imag.isfinite()
+                # All finite imaginary components are zero
+                self.assertEqual(finite, imag == 0)
+                # All non-finite imaginary components coincide with non-finite real components
+                self.assertTrue(torch.all(finite | ~torch_res.isfinite()))
+
             # inf vs. nan results are sensitive to machine precision,
             # just treat them as equivalent
             numpy_res[np.isinf(numpy_res)] = np.nan
             torch_res[torch_res.isinf()] = np.nan
 
-            self.assertEqual(torch_res, numpy_res, exact_dtype=False)
+            self.assertEqual(torch_res, numpy_res)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_std_mean_correction(self, device, dtype):
