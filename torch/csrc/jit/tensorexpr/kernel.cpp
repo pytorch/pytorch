@@ -225,6 +225,7 @@ bool matmulIsSupported(const torch::jit::Node* node) {
   return true;
 }
 
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -268,18 +269,6 @@ static std::vector<ExprHandle> computeIndicesToBroadcast(
   return bcast;
 }
 
-ExprHandle TensorExprKernel::broadcastBufTemp(
-    BufHandle b,
-    const std::vector<ExprHandle>& axes) {
-  return b.load(computeIndicesToBroadcast(
-      axes, ExprVectorToExprHandleVector(b.node()->dims())));
-}
-ExprHandle TensorExprKernel::broadcast(
-    const Buf* b,
-    const std::vector<ExprHandle>& axes) {
-  return BufHandle(b).load(
-      computeIndicesToBroadcast(axes, ExprVectorToExprHandleVector(b->dims())));
-}
 
 std::vector<int64_t> bufferSizes(const Buf* b) {
   std::vector<int64_t> sizes;
@@ -330,6 +319,16 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   return e;
 }
 
+ExprHandle tensorexpr::tensorOrConstant(
+    const ArgValue& v,
+    const std::vector<ExprHandle>& axes) {
+  if (auto b = c10::get_if<BufHandle>(&v)) {
+    return broadcast(*b, axes);
+  }
+  return constant(v);
+}
+
+
 ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
   auto ti = bufs_.find(v);
   if (ti != bufs_.end()) {
@@ -361,21 +360,20 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
 }
 
 ExprHandle TensorExprKernel::tensorOrConstant(
-    const ArgValue& v,
-    const std::vector<ExprHandle>& axes) {
-  if (auto b = c10::get_if<BufHandle>(&v)) {
-    return broadcastBufTemp(*b, axes);
-  }
-  return constant(v);
-}
-ExprHandle TensorExprKernel::tensorOrConstant(
     const torch::jit::Value* v,
     const std::vector<ExprHandle>& axes) {
   auto ti = bufs_.find(v);
   if (ti != bufs_.end()) {
-    return broadcast(ti->second, axes);
+    return broadcast(BufHandle(ti->second), axes);
   }
   return constant(v);
+}
+
+ExprHandle tensorexpr::broadcast(
+    BufHandle b,
+    const std::vector<ExprHandle>& axes) {
+  return b.load(
+      computeIndicesToBroadcast(axes, b.dims()));
 }
 
 std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
@@ -492,7 +490,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
-      return broadcastShapes(shapes);
+      return broadcastShapesMut(shapes);
     }
     case aten::lerp:
     case aten::clamp:
@@ -503,7 +501,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
-      return broadcastShapes(shapes);
+      return broadcastShapesMut(shapes);
     }
 
     case aten::addcmul: {
@@ -512,7 +510,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
-      return broadcastShapes(shapes);
+      return broadcastShapesMut(shapes);
     }
     case prim::ConstantChunk: {
       auto shape = sizesForValue(v->node()->input());
@@ -592,7 +590,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
   }
 }
 
-ExprHandle TensorExprKernel::constant(const ArgValue& v) {
+ExprHandle tensorexpr::constant(const ArgValue& v) {
   if (auto s = c10::get_if<tensorexpr::VarHandle>(&v)) {
     return *s;
   } else if (auto d = c10::get_if<double>(&v)) {
@@ -607,7 +605,8 @@ ExprHandle TensorExprKernel::constant(const ArgValue& v) {
     // the operator-specific lowering code.
     return IntImm::make(0);
   }
-  throw unsupported_dtype();
+  TORCH_INTERNAL_ASSERT(false);
+  throw std::runtime_error("");
 }
 ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   if (v->node()->kind() == prim::Constant) {
@@ -665,7 +664,7 @@ ExprHandle promoteHalfToFloat(const ExprHandle& e) {
   }
 }
 
-bool TensorExprKernel::checkTypes(
+bool tensorexpr::checkTypes(
     const ScalarType highType,
     const int typeConstraints) {
   if (typeConstraints == kAllTypes) {
@@ -685,7 +684,7 @@ bool TensorExprKernel::checkTypes(
   return false;
 }
 
-void TensorExprKernel::promoteInputs(
+void tensorexpr::promoteInputs(
     std::vector<ExprHandle>& inputs,
     const int typeConstraints) {
   if (inputs.empty()) {
@@ -707,7 +706,7 @@ void TensorExprKernel::promoteInputs(
   }
 }
 
-ExprHandle TensorExprKernel::demoteOutput(
+ExprHandle tensorexpr::demoteOutput(
     const ExprHandle& e,
     const c10::optional<ScalarType> type) {
   if (!type.has_value()) {
@@ -741,33 +740,21 @@ static bool isOne(ExprHandle e) {
   return n->value() == 1;
 }
 
-std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
-    std::vector<std::vector<ExprHandle>> shapes) {
-  size_t n = shapes.size();
-  if (n == 1) {
-    return shapes[0];
-  }
-  auto res1 = broadcastShapes(shapes[n - 2], shapes[n - 1]);
-  shapes[n - 2] = res1;
-  shapes.pop_back();
-  auto res2 = broadcastShapes(shapes);
-  return res2;
-}
-
-std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
+std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
     const std::vector<ExprHandle>& a,
     const std::vector<ExprHandle>& b) {
   auto at = a.rbegin();
   auto bt = b.rbegin();
   std::vector<ExprHandle> ret;
+  bool hasBroadcast = false;
   while (at != a.rend() || bt != b.rend()) {
     if (at == a.rend()) {
-      hasBroadcast_ = true;
+      hasBroadcast = true;
       ret.push_back(*bt++);
       continue;
     }
     if (bt == b.rend()) {
-      hasBroadcast_ = true;
+      hasBroadcast = true;
       ret.push_back(*at++);
       continue;
     }
@@ -778,7 +765,7 @@ std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
     if (isOne(*at)) {
       if (!isOne(*bt)) {
         dim = *bt;
-        hasBroadcast_ = true;
+        hasBroadcast = true;
       }
     }
     ret.push_back(dim);
@@ -786,7 +773,50 @@ std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
     bt++;
   }
   std::reverse(ret.begin(), ret.end());
-  return ret;
+  return {ret, hasBroadcast};
+}
+
+std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
+    std::vector<std::vector<ExprHandle>> shapes) {
+  size_t n = shapes.size();
+  if (n == 1) {
+    return {shapes[0], false};
+  }
+  auto res1 = broadcastShapesImpl(shapes[n - 2], shapes[n - 1]);
+  shapes[n - 2] = res1.first;
+  shapes.pop_back();
+  auto res2 = broadcastShapesImpl(shapes);
+  return {res2.first, (res1.second || res2.second)};
+}
+
+std::vector<ExprHandle> tensorexpr::broadcastShapes(
+    std::vector<std::vector<ExprHandle>> shapes) {
+  return broadcastShapesImpl(shapes).first;
+}
+
+std::vector<ExprHandle> tensorexpr::broadcastShapes(
+    const std::vector<ExprHandle>& a,
+    const std::vector<ExprHandle>& b) {
+  return broadcastShapesImpl(a, b).first;
+}
+
+std::vector<ExprHandle> TensorExprKernel::broadcastShapesMut(
+    std::vector<std::vector<ExprHandle>> shapes) {
+  auto res = broadcastShapesImpl(shapes);
+  if (res.second) {
+    hasBroadcast_ = true;
+  }
+  return res.first;
+}
+
+std::vector<ExprHandle> TensorExprKernel::broadcastShapesMut(
+    const std::vector<ExprHandle>& a,
+    const std::vector<ExprHandle>& b) {
+  auto res = broadcastShapesImpl(a, b);
+  if (res.second) {
+    hasBroadcast_ = true;
+  }
+  return res.first;
 }
 
 std::vector<ExprHandle> TensorExprKernel::valueShape(
@@ -798,14 +828,14 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(
   return ExprVectorToExprHandleVector(it->second->dims());
 }
 
-std::vector<ExprHandle> TensorExprKernel::valueShape(const ArgValue& v) {
+std::vector<ExprHandle> tensorexpr::valueShape(const ArgValue& v) {
   if (auto b = c10::get_if<tensorexpr::BufHandle>(&v)) {
-    return ExprVectorToExprHandleVector(b->node()->dims());
+    return b->dims();
   }
   return {};
 }
 
-Tensor* TensorExprKernel::computeOneOperand(
+Tensor* tensorexpr::computeOneOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const c10::optional<ScalarType>& outputTensorType,
@@ -815,7 +845,7 @@ Tensor* TensorExprKernel::computeOneOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [this, inputValues, outputTensorType, innerExpr, checkParamTypes](
+      [inputValues, outputTensorType, innerExpr, checkParamTypes](
           const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -826,7 +856,7 @@ Tensor* TensorExprKernel::computeOneOperand(
       });
 }
 
-Tensor* TensorExprKernel::computeTwoOperand(
+Tensor* tensorexpr::computeTwoOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const c10::optional<ScalarType>& outputTensorType,
@@ -836,7 +866,7 @@ Tensor* TensorExprKernel::computeTwoOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [this, inputValues, outputTensorType, innerExpr](
+      [inputValues, outputTensorType, innerExpr](
           const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -850,7 +880,7 @@ Tensor* TensorExprKernel::computeTwoOperand(
       });
 }
 
-Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
+Tensor* tensorexpr::computeTwoOperandWithAlpha(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const c10::optional<ScalarType>& outputTensorType,
@@ -860,7 +890,7 @@ Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [this, inputValues, outputTensorType, innerExpr](
+      [inputValues, outputTensorType, innerExpr](
           const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -875,7 +905,7 @@ Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
       });
 }
 
-Tensor* TensorExprKernel::computeConditionWithTwoOperand(
+Tensor* tensorexpr::computeConditionWithTwoOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const c10::optional<ScalarType>& outputTensorType,
@@ -886,7 +916,7 @@ Tensor* TensorExprKernel::computeConditionWithTwoOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [this, inputValues, outputTensorType, innerExpr](
+      [inputValues, outputTensorType, innerExpr](
           const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -903,7 +933,7 @@ Tensor* TensorExprKernel::computeConditionWithTwoOperand(
       });
 }
 
-Tensor* TensorExprKernel::computeThreeOperand(
+Tensor* tensorexpr::computeThreeOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const c10::optional<ScalarType>& outputTensorType,
@@ -915,7 +945,7 @@ Tensor* TensorExprKernel::computeThreeOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [this, inputValues, outputTensorType, innerExpr, promote_inputs](
+      [inputValues, outputTensorType, innerExpr, promote_inputs](
           const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -931,7 +961,7 @@ Tensor* TensorExprKernel::computeThreeOperand(
         return demoteOutput(compute, outputTensorType);
       });
 }
-Tensor* TensorExprKernel::computeFourOperand(
+Tensor* tensorexpr::computeFourOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const c10::optional<ScalarType>& outputTensorType,
@@ -944,7 +974,7 @@ Tensor* TensorExprKernel::computeFourOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [this, inputValues, outputTensorType, innerExpr](
+      [inputValues, outputTensorType, innerExpr](
           const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -961,26 +991,14 @@ Tensor* TensorExprKernel::computeFourOperand(
       });
 }
 
-namespace {
+
 
 // Convert boolean to integer, if needed.
 ExprHandle boolToInteger(const ExprHandle& x) {
   return x.dtype().scalar_type() == ScalarType::Bool ? cast<int>(x) : x;
 }
 
-} // namespace
-
-c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
-  if (v->type()->kind() == TypeKind::TensorType) {
-    auto tt = v->type()->cast<TensorType>();
-    if (tt->scalarType()) {
-      return static_cast<ScalarType>(*tt->scalarType());
-    }
-  }
-  return c10::nullopt;
-}
-
-Tensor* TensorExprKernel::computeOperandValue(
+Tensor* tensorexpr::computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
     const c10::optional<ScalarType>& outputType,
@@ -1820,6 +1838,17 @@ Tensor* TensorExprKernel::computeOperandValue(
     }
   }
 }
+
+c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
+  if (v->type()->kind() == TypeKind::TensorType) {
+    auto tt = v->type()->cast<TensorType>();
+    if (tt->scalarType()) {
+      return static_cast<ScalarType>(*tt->scalarType());
+    }
+  }
+  return c10::nullopt;
+}
+
 Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   auto inputs = v->node()->inputs();
   switch (v->node()->kind()) {
@@ -2338,7 +2367,7 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(const std::vector<A
   return {highType, nonEmptyInputs};
 
 }
-Tensor* TensorExprKernel::computeCat(
+Tensor* tensorexpr::computeCat(
     const std::vector<ArgValue>& inputList,
     const ArgValue& argDim,
     const std::vector<ExprHandle>& outputShape) {
@@ -2397,7 +2426,7 @@ Tensor* TensorExprKernel::computeCat(
         return load;
       });
 }
-Tensor* TensorExprKernel::computeCatWoConditionals(
+Tensor* tensorexpr::computeCatWoConditionals(
     const std::vector<ArgValue>& input_list,
     const ArgValue& arg_dim,
     const std::vector<ExprHandle>& output_shape) {
@@ -2424,7 +2453,7 @@ Tensor* TensorExprKernel::computeCatWoConditionals(
   auto output_sizes_expr = ExprHandleVectorToExprVector(output_shape);
   auto output_buf = new Buf("aten_cat", output_sizes_expr, ToDtype(high_type));
   if (non_empty_inputs.size() == 0) {
-    return new Tensor(output_buf, new Block({}));
+    return new Tensor(output_buf, new tensorexpr::Block({}));
   }
 
   int64_t concat_dim = c10::get<int64_t>(arg_dim);
@@ -2459,7 +2488,7 @@ Tensor* TensorExprKernel::computeCatWoConditionals(
   };
 
   Expr* concat_dim_size = nullptr;
-  auto block = new Block({});
+  auto block = new tensorexpr::Block({});
   for (size_t i = 0; i < non_empty_inputs.size(); ++i) {
     auto input_dims =
         ExprVectorToExprHandleVector(non_empty_inputs[i].node()->dims());

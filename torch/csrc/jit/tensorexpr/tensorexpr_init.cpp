@@ -535,6 +535,31 @@ void initTensorExprBindings(PyObject* module) {
       [](Stmt* stmt) { return IRSimplifier::simplify(stmt); },
       py::return_value_policy::reference);
 
+  te.def(
+    "lower",
+    [](std::string op_str, py::list inputs, std::vector<ExprHandle> outputShape, Dtype outputType) {
+      auto op = c10::Symbol::fromQualString(op_str);
+      if (op == aten::cat) {
+        throw std::runtime_error("NYI");
+      }
+      std::vector<ArgValue> argInputs;
+      for (auto inp: inputs) {
+        if (py::isinstance<Placeholder>(inp)) {
+          argInputs.push_back(py::cast<Placeholder>(inp).handle());
+          std::cout<<"placeholder"<<std::endl;
+        } else if (py::isinstance<BufHandle>(inp)) {
+          std::cout<<"bufhandle"<<std::endl;
+        } else if (py::isinstance<VarHandle>(inp)) {
+          std::cout<<"varhandle"<<std::endl;
+        } else {
+          std::cout<<"dunno"<<std::endl;
+        }
+        // argInputs.push_back(inp.)
+      }
+      return computeOperandValue(op, argInputs, outputType.scalar_type(), outputShape);
+    }
+  );
+
   using TSGraph = std::shared_ptr<Graph>;
   py::class_<TensorExprKernel>(te, "TensorExprKernel")
       .def(py::init<const TSGraph&>())
