@@ -146,7 +146,7 @@ std::tuple<Tensor &,Tensor &> small_sort_out_cuda(const Tensor &self,
   }
   if (!indices.defined()) {
     indices = at::empty_like(self, self.options().dtype(kLong));
-  } 
+  }
 
   // Make sure sufficient output space is allocated
   std::vector<int64_t> self_size = self.sizes().vec();
@@ -173,7 +173,7 @@ std::tuple<Tensor &,Tensor &> small_sort_out_cuda(const Tensor &self,
 
     // We sort k/v pairs in-place; copy unsorted input to output
     //THCTensor_(copy)(state, sorted, input);
-    values.copy_(self); 
+    values.copy_(self);
 
     // Sort using our in-place k/v kernel that supports arbitrary
     // layout
@@ -309,7 +309,7 @@ void sortKeyValueInplace(Tensor& key,
         keyInfo.dims = 1;
         valueInfo.dims = 1;
         keyInfo.strides[0] = 1;
-        valueInfo.strides[0] = 1; 
+        valueInfo.strides[0] = 1;
       }
       keyInfo.reduceDim(dim);
       int collapseKeyDim = keyInfo.collapseDims(dim);
@@ -339,7 +339,7 @@ void sortKeyValueInplace(Tensor& key,
         keyInfo.dims = 1;
         valueInfo.dims = 1;
         keyInfo.strides[0] = 1;
-        valueInfo.strides[0] = 1; 
+        valueInfo.strides[0] = 1;
       }
       keyInfo.reduceDim(dim);
       int collapseKeyDim = keyInfo.collapseDims(dim);
