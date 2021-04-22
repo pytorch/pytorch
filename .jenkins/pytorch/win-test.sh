@@ -71,6 +71,7 @@ run_tests() {
         "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
         export PYTORCH_COLLECT_COVERAGE=1
+        export COVERAGE_RCFILE="$PWD/.coveragerc" # coverage config file needed for plug-ins and settings to work
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
             "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
