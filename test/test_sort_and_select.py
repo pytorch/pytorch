@@ -184,7 +184,7 @@ class TestSortAndSelect(TestCase):
                     self.assertTrue((t.unsqueeze(-1).transpose(dim, -1) == r1.values.unsqueeze(-1)).any(dim=dim).any(dim=-1).all())
 
                     # assert stride is preserved
-                    if self.device_type == 'cuda' and n > 2048:
+                    if self.device_type == 'cuda':
                         # FIXME: this behavior should be true for all cases, not
                         # just the one specified in if condition
                         self.assertEqual(r1.values.stride(), t.stride())

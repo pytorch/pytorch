@@ -11,8 +11,6 @@
 #include <ATen/native/cuda/SortUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 
-//#include <THC/THCSortUtils.cuh>
-
 namespace {
 
 template<typename scalar_t>
@@ -37,7 +35,7 @@ __global__ void sort_postprocess_kernel(const scalar_t *in, scalar_t *out, int64
 
 namespace at { namespace native {
 
-bool should_use_th_sort(const Tensor &self, int64_t dim) {
+bool should_use_small_sort(const Tensor &self, int64_t dim) {
   int64_t ndim = self.dim();
   dim = maybe_wrap_dim(dim, ndim);
   int64_t nsort = self.sizes()[dim];
@@ -130,16 +128,6 @@ std::tuple<Tensor &,Tensor &> small_sort_out_cuda(const Tensor &self,
   // from thc: sorted->values, indices->indices, input->self
   TensorArg self_arg{self, "self", 1}, values_arg{values, "values", 2}, indices_arg{indices, "indices", 3};
   checkAllSameGPU("small_sort", {self_arg, values_arg, indices_arg});
-  dim = at::maybe_wrap_dim(dim, self);
-  int64_t dims = self.dim();
-  dims = dims == 0 ? 1 : dims;
-  TORCH_CHECK(dims <= MAX_DIMS, "self tensor has too many dimensions");
-  dims = values.dim();
-  dims = dims == 0 ? 1 : dims;
-  TORCH_CHECK(dims <= MAX_DIMS, "values tensor has too many dimensions");
-  dims = indices.dim();
-  dims = dims == 0 ? 1 : dims;
-  TORCH_CHECK(dims <= MAX_DIMS, "indices tensor has too many dimensions");
 
   if (!values.defined()) {
     values = at::empty_like(self, self.options());
@@ -168,16 +156,13 @@ std::tuple<Tensor &,Tensor &> small_sort_out_cuda(const Tensor &self,
   if (sliceSize <= maxSliceSize) {
     // Fill `indices` (the values) with the
     // slice-relative index.
-    //THCudaLongTensor_fillSliceWithIndex(state, indices, dim);
     fillSliceWithIndex(indices, dim);
 
     // We sort k/v pairs in-place; copy unsorted input to output
-    //THCTensor_(copy)(state, sorted, input);
     values.copy_(self);
 
     // Sort using our in-place k/v kernel that supports arbitrary
     // layout
-    //THCTensor_(sortKeyValueInplace)(state, sorted, indices, dim, order);
     sortKeyValueInplace(values, indices, dim, order);
   } else {
     // This should be unreachable due to size threshold dispatching in cuda sort
@@ -298,7 +283,7 @@ void sortKeyValueInplace(Tensor& key,
   // we are sorting on a per-block basis
   // The constructed key/value tensor info is used to select the slice
   // we are sorting on a per-block basis
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, key.scalar_type(), "sortKeyValueInplace", [&]  {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, key.scalar_type(), "sortKeyValueInplace", [&]  {
     if (at::cuda::detail::canUse32BitIndexMath(key)) {
       at::cuda::detail::TensorInfo<scalar_t, unsigned int> keyInfo =
         at::cuda::detail::getTensorInfo<scalar_t, unsigned int>(key);
@@ -381,10 +366,6 @@ void sortKeyValueInplace(Tensor& key,
 // implementation here is a catch-all, so we're not looking for
 // efficiency, but instead correctness.
 std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
-  // use inplace algorithm for smaller input sizes
-  if (should_use_th_sort(self, dim)) {
-    return small_sort_out_cuda(self, stable, values, indices, dim, descending);
-  }
   // this algorithm is always stable
   TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
   bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
@@ -395,6 +376,11 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
 
   TORCH_CHECK(nsort <= std::numeric_limits<int>::max(),
     "The dimension being sorted can not have more than INT_MAX elsments.");
+
+  // use inplace algorithm for smaller input sizes
+  if (should_use_small_sort(self, dim)) {
+    return small_sort_out_cuda(self, stable, values, indices, dim, descending);
+  }
 
   if (ndim == 0) {
     if (!values.defined()) {
