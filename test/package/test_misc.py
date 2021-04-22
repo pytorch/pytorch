@@ -5,7 +5,7 @@ from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
 
-from torch.package import PackageExporter, PackageImporter
+from torch.package import PackageExporter, PackageImporter, is_from_package
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -89,6 +89,28 @@ class TestMisc(PackageTestCase):
             dedent("\n".join(str(import_file_structure).split("\n")[1:])),
             import_exclude,
         )
+
+    def test_is_from_package(self):
+        """is_from_package should work for objects and modules"""
+        import package_a.subpackage
+
+        buffer = BytesIO()
+        obj = package_a.subpackage.PackageASubpackageObject()
+
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.save_pickle("obj", "obj.pkl", obj)
+
+        buffer.seek(0)
+        pi = PackageImporter(buffer)
+        mod = pi.import_module("package_a.subpackage")
+        loaded_obj = pi.load_pickle("obj", "obj.pkl")
+
+        self.assertFalse(is_from_package(package_a.subpackage))
+        self.assertTrue(is_from_package(mod))
+
+        self.assertFalse(is_from_package(obj))
+        self.assertTrue(is_from_package(loaded_obj))
+
 
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_custom_requires(self):
