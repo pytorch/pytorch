@@ -167,35 +167,6 @@ void checkRemainingTime(
   }
 }
 
-// Wrap c10d store as Gloo store
-class GlooStore : public ::gloo::rendezvous::Store {
- public:
-  GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
-
-  void set(const std::string& key, const std::vector<char>& value) override {
-    std::vector<uint8_t> tmp(value.begin(), value.end());
-    store_->set(key, tmp);
-  }
-
-  std::vector<char> get(const std::string& key) override {
-    auto value = store_->get(key);
-    return std::vector<char>(value.begin(), value.end());
-  }
-
-  void wait(const std::vector<std::string>& keys) override {
-    store_->wait(keys, Store::kDefaultTimeout);
-  }
-
-  void wait(
-      const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout) override {
-    store_->wait(keys, timeout);
-  }
-
- protected:
-  c10::intrusive_ptr<::c10d::Store> store_;
-};
-
 typedef void (*ReduceFunc)(void*, const void*, const void*, size_t);
 
 template <
@@ -1084,7 +1055,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     //
     // The correct fix is to stop allocating tensors that are not variables,
     // but to conveniently do this c10d must depend on torch not ATen
-    at::AutoNonVariableTypeMode _no_grad(true);
+    at::AutoDispatchBelowAutograd _no_grad(true);
     auto input = tensors[0];
 
     // Perform local reduction if we have multiple inputs.
