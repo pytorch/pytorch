@@ -427,7 +427,6 @@ def build_ignore_context_manager(ctx, stmt):
     inputs, outputs = process_ins_outs(stmt.items[0].context_expr.keywords)
 
     # build the replacement function str with given inputs and outputs
-    # underscore for the name because it is not exposed to outside
     ignore_function_name = "func_ignore_" + create_unique_name_ext(ctx, stmt)
     ignore_function_str = "\ndef " + ignore_function_name + "("
     for var in inputs:
