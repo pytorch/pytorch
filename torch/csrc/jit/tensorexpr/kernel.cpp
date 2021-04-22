@@ -1333,6 +1333,7 @@ Tensor* tensorexpr::computeOperandValue(
                 tensorOrConstant(inputs[4], {c}), // var
                 constant(inputs[7]) // eps
             };
+
             if (hasWeight) {
               exprInputs.push_back(tensorOrConstant(inputs[1], {c}));
             }
