@@ -1,4 +1,5 @@
 #include <ATen/native/TensorIterator.h>
+#include <c10/core/DeviceGuard.h>
 #include <ATen/Parallel.h>
 #include <algorithm>
 #include <memory>
@@ -18,6 +19,12 @@ static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop);
 static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop);
 
 void TensorIteratorBase::parallel_reduce(loop2d_t loop) {
+  OptionalDeviceGuard device_guard(
+      guarded_ || common_device_.is_cpu()
+          ? nullopt
+          : c10::optional<Device>(common_device_));
+  guarded_ = true;
+
   TORCH_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
   int64_t numel = this->numel();
   if (numel < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||

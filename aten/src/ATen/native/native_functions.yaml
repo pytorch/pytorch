@@ -1636,6 +1636,7 @@
     QuantizedCPU, QuantizedCUDA: empty_per_channel_affine_quantized
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
   common_device_guard: False
   dispatch:
@@ -2315,43 +2316,51 @@
     CompositeExplicitAutograd: logaddexp2
 
 - func: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: xlogy
 
 - func: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function
   dispatch:
     CPU, CUDA: xlogy
 
 - func: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: xlogy
 
 # xlogy: inplace variant
 - func: xlogy_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: xlogy_
 
 - func: xlogy_.Scalar_Other(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: function, method
   dispatch:
     CPU, CUDA: xlogy_
 
 # xlogy: out variant
 - func: xlogy.OutTensor(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: function
   dispatch:
     CPU, CUDA: xlogy_out
 
 - func: xlogy.OutScalar_Self(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: function
   dispatch:
     CPU, CUDA: xlogy_out
 
 - func: xlogy.OutScalar_Other(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  common_device_guard: False   # TensorIterator
   variants: function
   dispatch:
     CPU, CUDA: xlogy_out
@@ -4265,11 +4274,13 @@
     QuantizedCPU, QuantizedCUDA: quantized_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: resize_as_
 
 - func: resize_as_sparse_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
@@ -4525,11 +4536,13 @@
     SparseCPU, SparseCUDA: new_with_dims_and_tensor_sparse
 
 - func: sparse_resize_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_resize_
 
 - func: sparse_resize_and_clear_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_resize_and_clear_
