@@ -864,7 +864,8 @@ class Caffe2Backend(Backend):
             value_info.name for value_info in onnx_graph.input)
         return net
 
-    def _polish_model(model):
+    @classmethod
+    def _polish_model(cls, model):
         onnx.checker.check_model(model)
         onnx.helper.strip_doc_string(model)
         model = onnx.shape_inference.infer_shapes(model)
@@ -880,7 +881,7 @@ class Caffe2Backend(Backend):
         # in the onnx shape inference call were being supressed. Hence a try-catch block
         # is added around the infer_shapes call to avoid these failures and preserve status
         try:
-            onnx_model = _polish_model(onnx_model)
+            onnx_model = cls._polish_model(onnx_model)
         except RuntimeError:
             warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
             
