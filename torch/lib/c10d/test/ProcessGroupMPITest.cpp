@@ -319,7 +319,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
     }
     waitWork(pg, works);
 
-    for (const auto work : works) {
+    for (const auto& work : works) {
       srcRanks.push_back(work->sourceRank());
     }
 
