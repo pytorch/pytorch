@@ -30,8 +30,9 @@ def get_extensions():
     define_macros = []
 
     extra_link_args = []
-    extra_compile_args = {"cxx": ["-O3", "-g", "-std=c++14"]}
-    if int(os.environ.get("DEBUG", 0)):
+    # extra_compile_args = {"cxx": ["-O3", "-g", "-std=c++14"]}
+    # if int(os.environ.get("DEBUG", 0)):
+    if True:
         extra_compile_args = {
             "cxx": ["-O0", "-fno-inline", "-g", "-std=c++14"]}
         extra_link_args = ["-O0", "-g"]

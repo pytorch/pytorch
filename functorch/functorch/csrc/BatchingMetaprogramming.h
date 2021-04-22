@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/Tensor.h>
+#include <functorch/csrc/OutOfPlacePlumbing.h>
 
 namespace at {
 namespace functorch {
@@ -67,8 +68,6 @@ template<class TypeList> using remove_batch_dim_after_tensor_t = typename Remove
 //   static Return apply(Args... args);
 // };
 
-template <typename batch_rule_t, typename Result, typename... Args>
-Result lowerToNextLayer(batch_rule_t batch_rule, Args... args);
 
 //# Tensor lowerToNextLayer(
 //#     std::function<std::tuple<Tensor,optional<int64_t>>(const Tensor&, optional<int64_t>)> batch_rule,
