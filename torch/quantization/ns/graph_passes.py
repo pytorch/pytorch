@@ -11,6 +11,7 @@ from .utils import (
     return_first_non_observer_node,
     get_number_of_non_param_args,
     get_target_type_str,
+    get_arg_indices_of_inputs_to_log,
 )
 
 from .ns_types import (
@@ -96,7 +97,13 @@ def remove_observers_add_loggers(
 
             if node in node_to_instrument_inputs_to_ref_node_name:
                 ref_name = node_to_instrument_inputs_to_ref_node_name[node]
-                for node_arg_idx, node_arg in enumerate(node.args):
+                # Ops such add and mul are special because either
+                # one or two of the first two arguments can be tensors,
+                # and if one argument is a tensor it can be first or
+                # second (x + 1 versus 1 + x).
+                arg_indices_to_log = get_arg_indices_of_inputs_to_log(node)
+                for node_arg_idx in arg_indices_to_log:
+                    node_arg = node.args[node_arg_idx]
                     if type(node_arg) == Node:
                         # create a single input logger
                         prev_node = env[node_arg.name]
