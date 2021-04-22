@@ -44,23 +44,15 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
 
   std::vector<at::Tensor> extractTensors() override {
     pybind11::gil_scoped_acquire ag;
-    std::vector<at::Tensor> tensors;
-    // FIXME As we don't use the blob we could instead use a file-like object
-    // that throws away all data written to it, i.e., act like /dev/null.
-    py::object file_obj = py::module::import("io").attr("BytesIO")();
-    py::object pickler = py::module::import("pickle").attr("Pickler")(file_obj);
-    pickler.attr("persistent_id") =
-        py::cpp_function([&tensors](py::object obj) -> py::object {
-          try {
-            at::Tensor tensor = obj.cast<at::Tensor>();
-            tensors.push_back(std::move(tensor));
-            return py::str("");
-          } catch (const py::cast_error&) {
-            return py::none();
-          }
-        });
-    pickler.attr("dump")(py_obj_);
-    return tensors;
+    // We could implement this entirely in C++ via pybind11 but it turns out to
+    // be substantially slower. Namely, the total time taken by markCompleted on
+    // a CUDAFuture is 21.5us with this implementation, but goes up to 58.7us
+    // when using C++. The reason is unclear.
+    // FIXME There probably is a better package where this code could reside?
+    static py::object extractionFn =
+        py::module::import("torch.distributed.rpc.internal")
+            .attr("_extract_tensors");
+    return extractionFn(py_obj_).cast<std::vector<at::Tensor>>();
   }
 
   // Note [Destructing py::object]

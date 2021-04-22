@@ -26,31 +26,26 @@ namespace {
 
 std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
     const at::IValue& value) {
-  at::IValue::HashAliasedIValues sub_values;
-  try {
+  std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+  // getSubValues works poorly on Python objects: it only works if they can be
+  // converted to a "regular" IValue type hence, for example, it doesn't support
+  // custom subclasses. Thus, instead, we extract the tensors through pickling.
+  if (value.isPyObject()) {
+    std::vector<at::Tensor> tensors =
+        value.toPyObjectHolder()->extractTensors();
+    data_ptrs.reserve(tensors.size());
+    for (const at::Tensor& tensor : tensors) {
+      data_ptrs.emplace_back(tensor.storage().data_ptr());
+    }
+  } else {
+    at::IValue::HashAliasedIValues sub_values;
     // Prefer getSubValues() over visit() as the latter is a silent no-op for
     // some unsupported types, whereas the former at least fails loudly.
     value.getSubValues(sub_values);
-  } catch (const c10::TypeError& err) {
-    // We might not be able to extract subvalues from Python objects (e.g., if
-    // they are custom classes) but we can still extract tensors.
-    if (value.isPyObject()) {
-      std::vector<at::Tensor> tensors =
-          value.toPyObjectHolder()->extractTensors();
-      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
-      data_ptrs.reserve(tensors.size());
-      for (const at::Tensor& tensor : tensors) {
-        data_ptrs.emplace_back(tensor.storage().data_ptr());
+    for (const at::IValue& sub_value : sub_values) {
+      if (sub_value.isTensor()) {
+        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
       }
-      return data_ptrs;
-    }
-    throw;
-  }
-
-  std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
-  for (const at::IValue& sub_value : sub_values) {
-    if (sub_value.isTensor()) {
-      data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
     }
   }
   return data_ptrs;
@@ -91,19 +86,15 @@ std::string formatSetOfDevices(const std::vector<c10::DeviceIndex>& devices) {
 }
 
 // We need devices to be sorted in order to use set_difference.
-c10::optional<std::vector<c10::DeviceIndex>> sortDevices(
-    c10::optional<std::vector<c10::DeviceIndex>> devices) {
-  if (devices.has_value()) {
-    std::sort(devices->begin(), devices->end());
-  }
+std::vector<c10::DeviceIndex> sortDevices(
+    std::vector<c10::DeviceIndex> devices) {
+  std::sort(devices.begin(), devices.end());
   return devices;
 }
 
 } // namespace
 
-CUDAFuture::CUDAFuture(
-    at::TypePtr type,
-    c10::optional<std::vector<c10::DeviceIndex>> devices)
+CUDAFuture::CUDAFuture(at::TypePtr type, std::vector<c10::DeviceIndex> devices)
     : at::ivalue::Future(std::move(type)),
       devices_(sortDevices(std::move(devices))) {
   // Use current device to initialize currentDevice_. This is necessary
@@ -135,21 +126,19 @@ void CUDAFuture::preMarkCompletedHook(
       dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
   std::vector<c10::DeviceIndex> usedDevices =
       getDevicesOfDataPtrs(actualDataPtrs);
-  if (devices_.has_value()) {
-    std::vector<c10::DeviceIndex> excessDevices;
-    std::set_difference(
-        usedDevices.begin(),
-        usedDevices.end(),
-        devices_->begin(),
-        devices_->end(),
-        std::back_inserter(excessDevices));
-    TORCH_CHECK_VALUE(
-        excessDevices.empty(),
-        "The result contained tensors residing on device(s) ",
-        formatSetOfDevices(excessDevices),
-        " which are not among the expected device(s) ",
-        formatSetOfDevices(*devices_));
-  }
+  std::vector<c10::DeviceIndex> excessDevices;
+  std::set_difference(
+      usedDevices.begin(),
+      usedDevices.end(),
+      devices_.begin(),
+      devices_.end(),
+      std::back_inserter(excessDevices));
+  TORCH_CHECK_VALUE(
+      excessDevices.empty(),
+      "The result contained tensors residing on device(s) ",
+      formatSetOfDevices(excessDevices),
+      " which are not among the expected device(s) ",
+      formatSetOfDevices(devices_));
 
   currentDevice_ = c10::cuda::current_device();
 
@@ -166,30 +155,12 @@ void CUDAFuture::preMarkCompletedHook(
 std::function<void(void)> CUDAFuture::wrapCallback(
     std::function<void(void)> callback) {
   return [this, callback{std::move(callback)}]() {
-    // We'd love to get a stream for all devices, even those that are not used
-    // by the value, because the callback could use those other devices, but
-    // unfortunately this could cause a deadlock with NCCL. See
-    // https://github.com/pytorch/pytorch/pull/48500#issuecomment-735395414
-    // In general, if some devices haven't been used yet, by getting a stream
-    // for them we'd initialize them, and in addition to causing NCCL to
-    // misbehaving this also ends up using memory on those devices, which the
-    // user might not want.
     std::vector<at::cuda::CUDAStream> streams;
-    if (devices_.has_value()) {
-      for (const c10::DeviceIndex& idx : *devices_) {
-        // FIXME Should we find a way to allow to change the priority of
-        // streams?
-        streams.push_back(
-            at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
-      }
-    } else {
-      // FIXME Remove this branch when we make devices non-optional.
-      for (const at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
-        // FIXME Should we find a way to allow to change the priority of
-        // streams?
-        streams.push_back(at::cuda::getStreamFromPool(
-            /*isHighPriority=*/false, cudaEvent.device_index()));
-      }
+    for (const c10::DeviceIndex& idx : devices_) {
+      // FIXME Should we find a way to allow to change the priority of
+      // streams?
+      streams.push_back(
+          at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
     }
 
     // Use the dedicated callback stream to run callback.
