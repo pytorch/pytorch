@@ -22,7 +22,9 @@ c10::IValue InlinedCallStackSerializer::serialize(
   elements.emplace_back(
       serialize_module_instance_info(cs_ptr->module_instance()));
   int64_t source_range_tag{-1};
-  const SourceRange& sr = cs_ptr->source_range();
+  const SourceRange& sr = cs_ptr->source_range().findSourceRangeThatGenerated()
+      ? cs_ptr->source_range().findSourceRangeThatGenerated().value()
+      : cs_ptr->source_range();
   auto sr_it = source_range_tags.find(sr);
   if (sr_it != source_range_tags.end()) {
     source_range_tag = sr_it->second;
@@ -105,7 +107,9 @@ std::vector<char> InlinedCallStackPickler::pickle(
     elements.reserve(3);
     elements.emplace_back(debug_handle);
     int64_t source_range_tag{-1};
-    const SourceRange& sr = it.second.first;
+    const SourceRange& sr = it.second.first.findSourceRangeThatGenerated()
+        ? it.second.first.findSourceRangeThatGenerated().value()
+        : it.second.first;
     auto sr_it = source_range_tags.find(sr);
     if (sr_it != source_range_tags.end()) {
       source_range_tag = sr_it->second;
