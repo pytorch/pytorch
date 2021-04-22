@@ -133,14 +133,16 @@ struct functor_name {                                                \
 #define OP_CUSTOM_FUNCTOR(function, op_name, functor_name)                \
 std::vector<Tensor> foreach_tensor_##op_name##_cuda(TensorList tensors) { \
     check_foreach_api_restrictions(tensors);                              \
-    if (!can_use_fast_route(tensors)) {                                   \
+    const bool has_integral = has_int_or_bool_tensor(tensors);            \
+    if (!can_use_fast_route(tensors) || has_integral) {                   \
         return at::native::foreach_tensor_##op_name##_slow(tensors);      \
     }                                                                     \
     return function<functor_name>(tensors);                               \
 }                                                                         \
 void foreach_tensor_##op_name##_cuda_(TensorList tensors) {               \
     check_foreach_api_restrictions(tensors);                              \
-    if (!can_use_fast_route(tensors)) {                                   \
+    const bool has_integral = has_int_or_bool_tensor(tensors);            \
+    if (!can_use_fast_route(tensors) || has_integral) {                   \
         return at::native::foreach_tensor_##op_name##_slow_(tensors);     \
     }                                                                     \
                                                                           \
@@ -247,14 +249,14 @@ struct Abs {
 
 std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
-    bool has_complex = false;
-    for (auto t : tensors) {
-        if (at::isComplexType(t.scalar_type())) {
-            has_complex = true;
+    bool has_complex_or_integer = false;
+    for (const auto& t : tensors) {
+        if (at::isComplexType(t.scalar_type()) || at::isIntegralType(t.scalar_type(), /* includeBool= */true)) {
+            has_complex_or_integer = true;
         }
     }
 
-    if (!can_use_fast_route(tensors) || has_complex) {
+    if (!can_use_fast_route(tensors) || has_complex_or_integer) {
         return at::native::foreach_tensor_abs_slow(tensors);
     }
 
@@ -263,14 +265,14 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
 
 void foreach_tensor_abs_cuda_(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
-    bool has_complex = false;
-    for (auto t : tensors) {
-        if (at::isComplexType(t.scalar_type())) {
-            has_complex = true;
+    bool has_complex_or_integer = false;
+    for (const auto& t : tensors) {
+        if (at::isComplexType(t.scalar_type()) || at::isIntegralType(t.scalar_type(), /* includeBool= */true)) {
+            has_complex_or_integer = true;
         }
     }
 
-    if (!can_use_fast_route(tensors) || has_complex) {
+    if (!can_use_fast_route(tensors) || has_complex_or_integer) {
         return at::native::foreach_tensor_abs_slow_(tensors);
     }
 
