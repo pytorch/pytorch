@@ -1282,6 +1282,7 @@ void initJitScriptBindings(PyObject* module) {
           "get_interface",
           [](const std::shared_ptr<CompilationUnit>& self,
              const std::string& name) { return self->get_interface(name); });
+
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
           "__call__",
@@ -1373,6 +1374,7 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("__doc__", [](const StrongFunctionPtr& self) {
         return self.function_->doc_string();
       });
+
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
           "__call__",

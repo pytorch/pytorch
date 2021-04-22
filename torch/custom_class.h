@@ -302,7 +302,6 @@ class class_ {
     auto method = std::make_unique<jit::BuiltinOpFunction>(
         qualClassName + "." + name, std::move(schema), std::move(func), std::move(doc_string));
     classTypePtr->addMethod(method.get());
-
     registerCustomClassMethod(std::move(method));
     return *this;
   }
