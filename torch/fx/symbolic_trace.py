@@ -10,6 +10,7 @@ import torch
 import torch._C._fx  # type: ignore[import]
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 
+import torch._C.key as key
 import sys
 from .node import Argument, map_aggregate
 from .graph import Graph
@@ -22,6 +23,35 @@ HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 _orig_module_call : Callable = torch.nn.Module.__call__
 _orig_module_getattr : Callable = torch.nn.Module.__getattr__
 
+class PythonTensor(object):
+    def __init__(self, out, proxy):
+        if isinstance(out, torch.Tensor):
+            self.value = torch.empty_like(out)
+        else:
+            self.value = torch.empty(out)
+        self.proxy = proxy
+
+    def __repr__(self):
+        return f"PythonTensor({tuple(self.value.shape)})"
+
+    def tensor(self):
+        return self.value
+
+    def __torch_function__(self, func, types, args=(), kwargs={}):
+        namespace, func_name = func.split("::")
+        func = getattr(getattr(torch.ops, namespace), func_name)
+        outs = kwargs['val']
+        rets = []
+        proxy_args = [i.proxy if isinstance(i, PythonTensor) else i for i in args]
+        out_proxy = func(*proxy_args)
+        if len(outs) == 1 and isinstance(outs[0], torch.Tensor):
+            return [PythonTensor(outs[0], out_proxy)]
+        for idx, out in enumerate(outs):
+            if isinstance(out, torch.Tensor):
+                rets.append(PythonTensor(out, out_proxy[idx]))
+            else:
+                rets.append(out)
+        return rets
 
 def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     co = fn.__code__
@@ -188,6 +218,10 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(a, (torch.Tensor, ScriptObject)):
+            # import pdb; pdb.set_trace()
+            if key.hasKey(a):
+                return super().create_arg(key.removeKey(a).proxy)
+
             qualname : Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
@@ -280,9 +314,11 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
-        if not self.is_leaf_module(m, module_qualified_name):
-            return forward(*args, **kwargs)
-        return self.create_proxy('call_module', module_qualified_name, args, kwargs)
+        # if not self.is_leaf_module(m, module_qualified_name):
+        # import pdb; pdb.set_trace()
+        out = forward(*args, **kwargs)
+        return out
+        # return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
     def create_args_for_root(self, root_fn, is_module, concrete_args=None):
         """
@@ -393,7 +429,9 @@ class Tracer(TracerBase):
                 for n, p in self.root.named_parameters():
                     if attr_val is p:
                         if n not in parameter_proxy_cache:
-                            parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
+                            proxy = self.create_proxy('get_attr', n, (), {})
+                            parameter_proxy_cache[n] = key.addKey(PythonTensor(attr_val.shape, proxy))
+                            parameter_proxy_cache[n].requires_grad = True
                         return parameter_proxy_cache[n]
             return attr_val
 
