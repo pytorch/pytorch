@@ -83,6 +83,13 @@ TORCH_META_FUNC(neg)(const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(trunc) (const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "trunc is not supported for complex inputs");
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -485,16 +492,6 @@ Tensor& nan_to_num_(
     c10::optional<double> neg_inf) {
   return at::nan_to_num_out(self, self, nan, pos_inf, neg_inf);
 }
-
-Tensor& trunc_out(const Tensor& self, Tensor& result) {
-  // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
-    "trunc is not supported for complex inputs");
-
-  return unary_op_impl_out(result, self, trunc_stub);
-}
-Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
-Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
 
 // Alias for trunc
 Tensor& fix_out(const Tensor& self, Tensor& result) { return at::trunc_out(result, self); }
