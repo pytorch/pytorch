@@ -7,6 +7,7 @@
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/ExpandUtils.h>
@@ -16,10 +17,6 @@
 #include <c10/util/MaybeOwned.h>
 #include <THC/THCTensorInfo.cuh>
 #include <THC/THCThrustAllocator.cuh>
-
-#include <thrust/execution_policy.h>
-#include <thrust/device_ptr.h>
-#include <thrust/scan.h>
 
 namespace at { namespace native {
 
@@ -382,20 +379,9 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
   // Use a prefix sum to determine the output locations of the masked elements
   auto maskPrefixSum = at::empty_like(mask, mask.options().dtype(kLong));
 
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-
-  thrust::device_ptr<mask_t> maskData(mask_cont.data_ptr<mask_t>());
-  thrust::device_ptr<int64_t> maskPrefixSumData(
-      maskPrefixSum.data_ptr<int64_t>());
-
-  // Reference for using static_cast on `init_value`:
-  // https://github.com/NVIDIA/thrust/issues/1379
-  thrust::exclusive_scan(
-      thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
-      maskData,
-      maskData + mask_cont.numel(),
-      maskPrefixSumData,
-      static_cast<int64_t>(0));
+  cub::exclusive_sum(
+    mask_cont.data_ptr<mask_t>(), maskPrefixSum.data_ptr<int64_t>(),
+    mask_cont.numel());
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too
