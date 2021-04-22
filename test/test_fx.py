@@ -907,7 +907,7 @@ class TestFX(JitTestCase):
         self.assertEqual(traced_out.right, ref_out.right)
 
     def test_custom_proxy_type_literal(self):
-        class TensorPair:
+        class TensorPair(metaclass=torch.fx.ProxyableClassMeta):
             def __init__(self, left, right):
                 self.left, self.right = left, right
 
@@ -936,7 +936,7 @@ class TestFX(JitTestCase):
         self.assertEqual(traced_out.right, ref_out.right)
 
     def test_custom_proxy_dynamic_value(self):
-        class TensorPair:
+        class TensorPair(metaclass=torch.fx.ProxyableClassMeta):
             def __init__(self, left, right):
                 self.left, self.right = left, right
 
@@ -965,7 +965,7 @@ class TestFX(JitTestCase):
         self.assertEqual(traced_out.right, ref_out.right)
 
     def test_custom_proxy_input_dependent_control_flow(self):
-        class ZeroTensor:
+        class ZeroTensor(metaclass=torch.fx.ProxyableClassMeta):
             def __init__(self, inp):
                 if inp.sum() == 0:
                     self.is_zero = True
