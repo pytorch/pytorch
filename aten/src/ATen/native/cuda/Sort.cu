@@ -52,69 +52,11 @@ std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t d
 
 void fillSliceWithIndex(Tensor& t,
                         int dim) {
-  int64_t dims = t.dim();
-  dims = dims == 0 ? 1 : dims;
-  TORCH_CHECK(dims <= MAX_DIMS, "input tensor has too many dimensions");
-  ptrdiff_t inElements = t.numel();
-  if (inElements > 0) {
-    int64_t sliceSize = t.dim() == 0 ? 1 : t.size(dim);
-    ptrdiff_t numSlices = inElements / sliceSize;
-
-    dim3 grid;
-    if (!getGridFromTiles(numSlices, grid)) {
-      AT_ERROR("Slice to fill with indices is too large");
-    }
-
-    int64_t maxThreads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
-    int64_t numThreads = sliceSize;
-    if (numThreads > maxThreads) {
-      numThreads = maxThreads;
-    }
-
-    dim3 block(numThreads);
-#define FILL_INDEX(T, DIM)                                         \
-    fillSliceWithIndex_kernel<T, DIM>                                     \
-      <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(      \
-        info, numSlices, sliceSize, info.strides[collapseDim]);    \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-
-    if (at::cuda::detail::canUse32BitIndexMath(t)) {
-      at::cuda::detail::TensorInfo<int64_t, unsigned int> info =
-        at::cuda::detail::getTensorInfo<int64_t, uint32_t>(t);
-      if (!t.dim()) {
-        info.dims = 1;
-        info.strides[0] = 1;
-      }
-      info.reduceDim(dim);
-      int collapseDim = info.collapseDims(dim);
-      if (info.isContiguous()) {
-        FILL_INDEX(unsigned int, -2);
-      } else {
-        if (info.dims == 1) {
-          FILL_INDEX(unsigned int, 1);
-        } else if (info.dims == 2) {
-          FILL_INDEX(unsigned int, 2);
-        } else {
-          FILL_INDEX(unsigned int, -1);
-        }
-      }
-    } else {
-      at::cuda::detail::TensorInfo<int64_t, uint64_t> info =
-        at::cuda::detail::getTensorInfo<int64_t, uint64_t>(t);
-      if (!t.dim()) {
-        info.dims = 1;
-        info.strides[0] = 1;
-      }
-      info.reduceDim(dim);
-      int collapseDim = info.collapseDims(dim);
-
-      // catch-all implementation
-      FILL_INDEX(uint64_t, -1);
-    }
-#undef FILL_INDEX
-  }
+  auto sizes = DimVector(t.dim(), 1);
+  sizes[dim] = t.sizes()[dim];
+  auto range = at::arange(t.sizes()[dim], t.options());
+  auto rangeview = range.view(sizes);
+  t.copy_(rangeview);
 }
 
 std::tuple<Tensor &,Tensor &> small_sort_out_cuda(const Tensor &self,
