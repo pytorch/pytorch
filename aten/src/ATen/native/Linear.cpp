@@ -652,8 +652,8 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   TORCH_CHECK(
     output_device == input1_device == input2_device,
     "tensordot: Expected the output and input tensors to be on the "
-    "same device, but got output on ", output_device, " and inputs on ",
-    input_device);
+    "same device, but got output on ", output_device, ", input1 on ",
+    input1_device, ", and input2 on ", input2_device);
   // check if the computed result has the same dtype as the out tensor
   //   (because tensordot does not support type promotion)
   TORCH_CHECK(
