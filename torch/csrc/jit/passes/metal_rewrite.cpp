@@ -196,7 +196,6 @@ script::Module metalOptimizeForMobile(
   cloned_module = freeze_module(cloned_module, preserved_methods);
   metalFusePrePackedConvWithClamp(cloned_module);
   metalFoldPrePackingOps(cloned_module);
-  metalInsertCopyOps(cloned_module);
   removeDropout(cloned_module);
   metalRemoveMutation(cloned_module);
   // remove duplicated constants
