@@ -4585,6 +4585,11 @@ for shape in [(1,), ()]:
         self.assertEqual(out.grad_fn._saved_dim, 0)                       # int64_t -> int
         self.assertIsInstance(out.grad_fn._saved_dim, int)
 
+        out.sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
+            out.grad_fn._saved_tensors
+        self.assertEqual(out.grad_fn._saved_dim, 0)
+
         a = torch.ones(2, 2, requires_grad=True)
         indices = torch.tensor([0, 1])
         out = a[:, indices]
@@ -4645,6 +4650,19 @@ for shape in [(1,), ()]:
         a = torch.ones(2, requires_grad=True)
         out = torch.tanh(a)
         self.assertEqual(out, out.grad_fn._saved_result)                  # saved variable when output
+
+        a = torch.randn(3, 5, requires_grad=True)
+        b = torch.tensor([1, 0, 4])
+        loss = nn.NLLLoss()
+        out = loss(a, b)
+        self.assertIsNone(out.grad_fn._saved_weight)
+        loss = nn.NLLLoss(weight=torch.ones((5,)))
+        out = loss(a, b)
+        self.assertEqual(out.grad_fn._saved_weight, torch.ones((5,)))     # c10:optional<Tensor> -> Tensor?
+
+        out.sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
+            out.grad_fn._saved_weight
 
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
