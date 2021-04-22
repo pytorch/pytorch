@@ -224,6 +224,12 @@ def fuse_fx(model: torch.nn.Module,
            "additional_fuser_method_mapping": {
              (Module1, Module2): fuse_module1_module2
            }
+
+           # Attributes that are not used in forward function will
+           # be removed when constructing GraphModule, this is a list of attributes
+           # to preserve as an attribute of the GraphModule even when they are
+           # not used in the code, these attributes will also persist through deepcopy
+           "preserved_attributes": ["preserved_attr"],
          }
 
     Example:
@@ -352,7 +358,7 @@ def prepare_fx(
         # Attributes that are not used in forward function will
         # be removed when constructing GraphModule, this is a list of attributes
         # to preserve as an attribute of the GraphModule even when they are
-        # not used in the code
+        # not used in the code, these attributes will also persist through deepcopy
         "preserved_attributes": ["preserved_attr"],
       }
 

@@ -2,7 +2,7 @@ import torch
 import copy
 from torch.fx import GraphModule
 from torch.fx.graph import Graph
-from typing import Union, Dict, Any, List, Set
+from typing import Union, Dict, Any, Set
 
 class FusedGraphModule(GraphModule):
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
