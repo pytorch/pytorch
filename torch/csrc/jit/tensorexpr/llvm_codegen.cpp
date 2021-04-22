@@ -1,5 +1,7 @@
 #ifdef TORCH_ENABLE_LLVM
 
+#error Deliberately breaking llvm to see what fails
+
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 
 #include <aten/src/ATen/Parallel.h>
