@@ -43,8 +43,8 @@ def allocate_jacobians_with_outputs(output_tensors: Tuple, numel_input, dtype=No
 def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_grad: bool = False) -> Iterable[torch.Tensor]:
     if is_tensor_like(x):
         # mypy doesn't narrow type of `x` to torch.Tensor
-        if x.requires_grad or not only_requiring_grad:  # type: ignore
-            yield x  # type: ignore
+        if x.requires_grad or not only_requiring_grad:  # type: ignore[union-attr]
+            yield x  # type: ignore[misc]
     elif isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
         for elem in x:
             for result in iter_tensors(elem, only_requiring_grad):
@@ -93,7 +93,7 @@ def iter_tensor(x_tensor):
                 indices = x_indices[i].tolist() + list(x_idx)
                 d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
                 yield x_value, x_idx, d_idx
-    elif x_tensor.layout == torch._mkldnn:  # type: ignore
+    elif x_tensor.layout == torch._mkldnn:  # type: ignore[attr-defined]
         for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
             # this is really inefficient, but without indexing implemented, there's
             # not really a better way than converting back and forth
@@ -236,7 +236,7 @@ def combine_jacobian_cols(jacobians_cols: Dict[int, List[torch.Tensor]], outputs
 def prepped_input(input: torch.Tensor, maybe_perturbed_input: Optional[torch.Tensor],
                   fast_mode=False) -> torch.Tensor:
     # Prepares the inputs to be passed into the function while including the new modified input.
-    if input.layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
+    if input.layout == torch._mkldnn:  # type: ignore[attr-defined] # no attr _mkldnn
         # Convert back to mkldnn
         if maybe_perturbed_input is not None:
             return maybe_perturbed_input.to_mkldnn()
@@ -287,7 +287,7 @@ def get_numerical_jacobian_wrt_specific_input(fn, input_idx, inputs, outputs, ep
 
 
 def get_input_to_perturb(input):
-    if input.layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
+    if input.layout == torch._mkldnn:  # type: ignore[attr-defined] # no attr _mkldnn
         # Convert to dense so we can perform operations that require strided tensors
         input_to_perturb = input.to_dense()
     elif input.layout == torch.sparse_coo:
@@ -497,7 +497,7 @@ def check_inputs(fail_test, tupled_inputs, check_sparse_nnz) -> bool:
             content = inp._values() if inp.is_sparse else inp
             # TODO: To cover more problematic cases, replace stride = 0 check with
             # "any overlap in memory" once we have a proper function to check it.
-            if content.layout is not torch._mkldnn:  # type: ignore
+            if content.layout is not torch._mkldnn:  # type: ignore[attr-defined]
                 if not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
                     raise RuntimeError(
                         f'The {idx}th input has a dimension with stride 0. gradcheck only '
@@ -519,7 +519,7 @@ def check_outputs(outputs) -> None:
         # to modify analytical jacobian
         raise ValueError('Sparse output is not supported at gradcheck yet. '
                          'Please call to_dense() on the output of fn for gradcheck.')
-    if any(t.layout == torch._mkldnn for t in outputs if isinstance(t, torch.Tensor)):  # type: ignore
+    if any(t.layout == torch._mkldnn for t in outputs if isinstance(t, torch.Tensor)):  # type: ignore[attr-defined]
         raise ValueError('MKLDNN output is not supported at gradcheck yet. '
                          'Please call to_dense() on the output of fn for gradcheck.')
 
