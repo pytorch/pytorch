@@ -1,5 +1,6 @@
 import copy
 import math
+import operator
 
 import torch
 import torch.nn as nn
@@ -24,18 +25,43 @@ from torch.testing._internal.common_quantization import (
     SparseNNModel,
     skip_if_no_torchvision,
 )
+from torch.quantization.quantization_mappings import (
+    get_default_static_quant_module_mappings,
+    get_default_dynamic_quant_module_mappings,
+    get_default_float_to_quantized_operator_mappings,
+)
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import override_qengines
+from torch.quantization.fx.pattern_utils import get_default_quant_patterns
+import torch.quantization.fx.quantization_patterns as qp
+from torch.quantization.ns.pattern_utils import (
+    get_base_name_to_sets_of_related_ops,
+    get_type_a_related_to_b,
+)
 from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
     GraphMatchingException,
+)
+from torch.quantization.ns.mappings import (
+    FUNS_IO_TYPE_FP32,
+    FUNS_IO_TYPE_INT8,
+    FUNS_IO_TYPE_FP32_OR_INT8,
+    FUNS_UNMATCHABLE,
+    MODS_IO_TYPE_FP32,
+    MODS_IO_TYPE_INT8,
+    MODS_IO_TYPE_FP32_OR_INT8,
+    MODS_UNMATCHABLE,
+    METHS_IO_TYPE_FP32_OR_INT8,
+    METHS_UNMATCHABLE,
 )
 from torch.quantization._numeric_suite_fx import (
     extract_weights,
     _extract_weights_impl,
     add_loggers,
+    _add_loggers_impl,
     OutputLogger,
     add_shadow_loggers,
+    _add_shadow_loggers_impl,
     extract_logger_info,
     extract_shadow_logger_info,
 )
@@ -55,6 +81,148 @@ class LinearReluFunctional(nn.Module):
 
     def forward(self, x):
         x = F.linear(x, self.w1, self.b1)
+        x = F.relu(x)
+        return x
+
+
+class LinearReluLinearFunctional(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w = nn.Parameter(torch.Tensor(4, 4))
+        self.b = nn.Parameter(torch.zeros(4))
+        torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
+
+    def forward(self, x):
+        x = F.linear(x, self.w, self.b)
+        x = F.relu(x)
+        x = F.linear(x, self.w, self.b)
+        return x
+
+
+class AllConvAndLinearFusionModules(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        # conv1d
+        self.conv1d_0 = nn.Conv1d(1, 1, 1)
+        # conv1d - relu
+        self.conv1d_1 = nn.Conv1d(1, 1, 1)
+        self.relu_0 = nn.ReLU()
+        # conv1d - bn (qat only)
+        self.conv1d_2 = nn.Conv1d(1, 1, 1)
+        self.bn1d_0 = nn.BatchNorm1d(1)
+        # conv1d - bn - relu (qat only)
+        self.conv1d_3 = nn.Conv1d(1, 1, 1)
+        self.bn1d_1 = nn.BatchNorm1d(1)
+        self.relu_4 = nn.ReLU()
+        # conv2d
+        self.conv2d_0 = nn.Conv2d(1, 1, 1)
+        # conv2d - relu
+        self.conv2d_1 = nn.Conv2d(1, 1, 1)
+        self.relu_1 = nn.ReLU()
+        # conv2d - bn (qat only)
+        self.conv2d_2 = nn.Conv2d(1, 1, 1)
+        self.bn2d_0 = nn.BatchNorm2d(1)
+        # conv2d - bn - relu (qat only)
+        self.conv2d_3 = nn.Conv2d(1, 1, 1)
+        self.bn2d_1 = nn.BatchNorm2d(1)
+        self.relu_5 = nn.ReLU()
+        # conv3d
+        self.conv3d_0 = nn.Conv3d(1, 1, 1)
+        # conv3d - relu
+        self.conv3d_1 = nn.Conv3d(1, 1, 1)
+        self.relu_2 = nn.ReLU()
+        # conv3d - bn (qat only)
+        self.conv3d_2 = nn.Conv3d(1, 1, 1)
+        self.bn3d_0 = nn.BatchNorm3d(1)
+        # conv3d - bn - relu (qat only)
+        self.conv3d_3 = nn.Conv3d(1, 1, 1)
+        self.bn3d_1 = nn.BatchNorm3d(1)
+        self.relu_6 = nn.ReLU()
+        # linear
+        self.linear_0 = nn.Linear(1, 1)
+        # linear - relu
+        self.linear_1 = nn.Linear(1, 1)
+        self.relu_3 = nn.ReLU()
+
+    def forward(self, x):
+        # conv1d
+        x = self.conv1d_0(x)
+        x = self.conv1d_1(x)
+        x = self.relu_0(x)
+        x = self.conv1d_2(x)
+        x = self.bn1d_0(x)
+        x = self.conv1d_3(x)
+        x = self.bn1d_1(x)
+        x = self.relu_4(x)
+        # conv2d
+        x = x.reshape(1, 1, 1, 1)
+        x = self.conv2d_0(x)
+        x = self.conv2d_1(x)
+        x = self.relu_1(x)
+        x = self.conv2d_2(x)
+        x = self.bn2d_0(x)
+        x = self.conv2d_3(x)
+        x = self.bn2d_1(x)
+        x = self.relu_5(x)
+        # conv3d
+        x = x.reshape(1, 1, 1, 1, 1)
+        x = self.conv3d_0(x)
+        x = self.conv3d_1(x)
+        x = self.relu_2(x)
+        x = self.conv3d_2(x)
+        x = self.bn3d_0(x)
+        x = self.conv3d_3(x)
+        x = self.bn3d_1(x)
+        x = self.relu_6(x)
+        # linear
+        x = x.reshape(1, 1)
+        x = self.linear_0(x)
+        x = self.linear_1(x)
+        x = self.relu_3(x)
+        return x
+
+
+class AllConvFunctional(torch.nn.Module):
+    def __init__(self, weight1d, weight2d, weight3d, bias1d, bias2d, bias3d):
+        super().__init__()
+        self.weight1d = torch.nn.Parameter(weight1d)
+        self.weight2d = torch.nn.Parameter(weight2d)
+        self.weight3d = torch.nn.Parameter(weight3d)
+        self.bias1d = torch.nn.Parameter(bias1d)
+        self.bias2d = torch.nn.Parameter(bias2d)
+        self.bias3d = torch.nn.Parameter(bias3d)
+        self.stride1d = 1
+        self.padding1d = 0
+        self.dilation1d = 1
+        self.stride2d = (1, 1)
+        self.padding2d = (0, 0)
+        self.dilation2d = (1, 1)
+        self.groups = 1
+        self.stride3d = (1, 1, 1)
+        self.padding3d = (0, 0, 0)
+        self.dilation3d = (1, 1, 1)
+
+    def forward(self, x):
+        x = F.conv1d(
+            x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
+            self.dilation1d, self.groups)
+        x = F.conv1d(
+            x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
+            self.dilation1d, self.groups)
+        x = F.relu(x)
+        x = F.conv2d(
+            x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
+            self.dilation2d, self.groups)
+        x = F.conv2d(
+            x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
+            self.dilation2d, self.groups)
+        x = F.relu(x)
+        x = F.conv3d(
+            x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
+            self.dilation3d, self.groups)
+        x = F.conv3d(
+            x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
+            self.dilation3d, self.groups)
         x = F.relu(x)
         return x
 
@@ -233,11 +401,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @skipIfNoFBGEMM
-    def test_nodes_with_equal_types_do_not_get_matched(self):
-        # verifies that by default, nodes with equivalent types do not get matched.
-        # This is important for user defined types, for which we do not know
-        # the weight extraction functions or input type. In the future, this can
-        # be made configurable.
+    def test_nodes_with_equal_types_get_matched(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -264,18 +428,172 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
-        # Conv2 should not be matched because we disabled quantization for it,
-        # so its type is the same in mp and mq. sigmoid should not be
-        # matched because they use the same function in mp and mq. relu should
-        # be matched because it is in the allowlist of functions with same
-        # signature across dtypes.
+        # all of these should be matched
         expected_types = {
-            'base_op_torch.nn.Conv2d_0':
+            'base_op_torch.nn.Conv2d_1':
                 ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
+            'base_op_torch.nn.Conv2d_0':
+                ((nn.Conv2d, nn.Conv2d), (nn.Conv2d, nn.Conv2d)),
             'base_op_torch.mul_0': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
             'base_op_torch.relu_0': ((F.relu, F.relu), (F.relu, F.relu)),
+            'base_op_torch.sigmoid_0':
+                ((torch.sigmoid, torch.sigmoid), (torch.sigmoid, torch.sigmoid)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
+
+    def test_methods(self):
+        """
+        Verify that graph matching works on methods
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x.sigmoid()
+                return x
+
+        m1 = M().eval()
+        m2 = M().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m1p = prepare_fx(m1, qconfig_dict)
+        m2p = prepare_fx(m2, qconfig_dict)
+        results = get_matching_subgraph_pairs(m1p, m2p)
+        expected_types = {
+            'base_op_torch.sigmoid_0':
+                (('sigmoid', 'sigmoid'), ('sigmoid', 'sigmoid')),
+        }
+        self.assert_types_for_matched_subgraph_pairs(
+            results, expected_types, m1p, m2p)
+
+
+    def test_op_relationship_mapping(self):
+        """
+        Tests that the mapping of op relationships is complete.
+        """
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        type_a_related_to_b = \
+            get_type_a_related_to_b(base_name_to_sets_of_related_ops)
+
+        # 1. check static quant module mappings
+        static_quant_mod_mappings = get_default_static_quant_module_mappings()
+        for fp32_type, int8_type in static_quant_mod_mappings.items():
+            # skip quants and dequants, for the purposes of Numerical Suite
+            types_to_skip = (
+                torch.quantization.QuantStub,
+                torch.quantization.DeQuantStub,
+                nnq.FloatFunctional,
+            )
+            if fp32_type in types_to_skip:
+                continue
+
+            # verify relatedness
+            in_type_a_related_to_b = \
+                (fp32_type, int8_type) in type_a_related_to_b
+            self.assertTrue(
+                in_type_a_related_to_b,
+                f"{fp32_type} and {int8_type} need a relationship mapping")
+
+        # 2. check static quant op mappings
+        static_quant_fun_mappings = get_default_float_to_quantized_operator_mappings()
+        for fp32_type, int8_type in static_quant_fun_mappings.items():
+            # verify relatedness
+            in_type_a_related_to_b = \
+                (fp32_type, int8_type) in type_a_related_to_b
+            self.assertTrue(
+                in_type_a_related_to_b,
+                f"{fp32_type} and {int8_type} need a relationship mapping")
+
+        # 3. check dynamic quant mappings
+        dynamic_quant_mappings = get_default_dynamic_quant_module_mappings()
+        for fp32_type, int8_type in dynamic_quant_mappings.items():
+            # TODO(future PR): enable correct weight extraction for these
+            # and remove from this list.
+            types_to_skip = (
+                nn.GRUCell,
+                nn.GRU,
+                nn.LSTMCell,
+                nn.RNNCell,
+            )
+            if fp32_type in types_to_skip:
+                continue
+            # verify relatedness
+            in_type_a_related_to_b = \
+                (fp32_type, int8_type) in type_a_related_to_b
+            self.assertTrue(
+                in_type_a_related_to_b,
+                f"{fp32_type} and {int8_type} need a relationship mapping")
+
+        # 4. go through the ops mapped to each QuantizeHandler type, and verify
+        # correctness.
+        def _op_in_base_sets_of_related_ops(op):
+            for name, ops in base_name_to_sets_of_related_ops.items():
+                if op in ops:
+                    return True
+            return False
+
+        default_quant_patterns = get_default_quant_patterns()
+        for pattern, qhandler_cls in default_quant_patterns.items():
+            base_op = None
+            if isinstance(pattern, tuple):
+                base_op = pattern[-1]
+            elif isinstance(pattern, str):
+                base_op = pattern
+            else:
+                base_op = pattern
+
+            qhandler_cls_all_ops_quantizeable = [
+                qp.CatQuantizeHandler,
+                qp.ConvReluQuantizeHandler,
+                qp.LinearReLUQuantizeHandler,
+                qp.BatchNormQuantizeHandler,
+                qp.EmbeddingQuantizeHandler,
+                qp.RNNDynamicQuantizeHandler,
+                qp.ELUQuantizeHandler,
+            ]
+
+            qhandler_cls_quant_op_same_signature = [
+                qp.FixedQParamsOpQuantizeHandler,
+                qp.CopyNodeQuantizeHandler,
+            ]
+
+            if qhandler_cls == qp.BinaryOpQuantizeHandler:
+                # these ops do not have quantized equivalents
+                ops_to_skip = [
+                    torch.bmm,
+                    torch.sum,
+                    torch.div,
+                    torch.sub,
+                    operator.truediv,
+                    operator.sub
+                ]
+                if base_op in ops_to_skip:
+                    continue
+                self.assertTrue(
+                    _op_in_base_sets_of_related_ops(base_op),
+                    f"{base_op} not in sets of related ops")
+            elif qhandler_cls == qp.RNNDynamicQuantizeHandler:
+                # TODO(future PR): add support for all classes in
+                # RNNDynamicQuantizeHandler
+                pass
+            elif qhandler_cls == qp.DefaultNodeQuantizeHandler:
+                ops_to_skip = [
+                    torch.nn.SiLU,
+                    torch.nn.functional.silu,
+                ]
+                if base_op in ops_to_skip:
+                    continue
+                self.assertTrue(
+                    _op_in_base_sets_of_related_ops(base_op),
+                    f"{base_op} not in sets of related ops")
+            elif qhandler_cls in qhandler_cls_quant_op_same_signature:
+                # these ops use the same op signature for fp32 and quantized
+                # tensors
+                pass
+            elif qhandler_cls in qhandler_cls_all_ops_quantizeable:
+                self.assertTrue(
+                    _op_in_base_sets_of_related_ops(base_op),
+                    f"{base_op} not in sets of related ops")
+            else:
+                raise AssertionError(
+                    f"handing for {qhandler_cls} not implemented")
 
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
@@ -310,10 +628,12 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
 
 
 class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
-    def _test_extract_weights(self, m, results_len=0, qconfig_dict=None):
+    def _test_extract_weights(
+        self, m, results_len=0, qconfig_dict=None, prepare_fn=prepare_fx
+    ):
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
+        mp = prepare_fn(m, qconfig_dict)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
@@ -332,10 +652,15 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         should_log_inputs=False,
         qconfig_dict=None,
         skip_scripting=False,
+        prepare_fn=prepare_fx,
     ):
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
+        if prepare_fn == prepare_fx:
+            m.eval()
+        else:
+            m.train()
+        mp = prepare_fn(m, qconfig_dict)
         mp(*data)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
@@ -371,10 +696,15 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
     def _test_match_shadow_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
         should_log_inputs=False, qconfig_dict=None, skip_scripting=False,
+        prepare_fn=prepare_fx,
     ):
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
+        if prepare_fn == prepare_fx:
+            m.eval()
+        else:
+            m.train()
+        mp = prepare_fn(m, qconfig_dict)
         mp(*data)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
@@ -408,126 +738,52 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
 class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
-    def test_extract_weights_mod(self):
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                # conv1d
-                self.conv1d_0 = nn.Conv1d(1, 1, 1)
-                # conv1d - relu
-                self.conv1d_1 = nn.Conv1d(1, 1, 1)
-                self.relu_0 = nn.ReLU()
-                # conv2d
-                self.conv2d_0 = nn.Conv2d(1, 1, 1)
-                # conv2d - relu
-                self.conv2d_1 = nn.Conv2d(1, 1, 1)
-                self.relu_1 = nn.ReLU()
-                # conv3d
-                self.conv3d_0 = nn.Conv3d(1, 1, 1)
-                # conv3d - relu
-                self.conv3d_1 = nn.Conv3d(1, 1, 1)
-                self.relu_2 = nn.ReLU()
-                # linear
-                self.linear_0 = nn.Linear(1, 1)
-                # linear - relu
-                self.linear_1 = nn.Linear(1, 1)
-                self.relu_3 = nn.ReLU()
-
-
-            def forward(self, x):
-                x = self.conv1d_0(x)
-                x = self.conv1d_1(x)
-                x = self.relu_0(x)
-                x = x.reshape(1, 1, 1, 1)
-                x = self.conv2d_0(x)
-                x = self.conv2d_1(x)
-                x = self.relu_1(x)
-                x = x.reshape(1, 1, 1, 1, 1)
-                x = self.conv3d_0(x)
-                x = self.conv3d_1(x)
-                x = self.relu_2(x)
-                x = x.reshape(1, 1)
-                x = self.linear_0(x)
-                x = self.linear_1(x)
-                x = self.relu_3(x)
-                return x
-
-        m = M().eval()
-        self._test_extract_weights(m, results_len=8)
+    def test_extract_weights_mod_ptq(self):
+        m = AllConvAndLinearFusionModules().eval()
+        self._test_extract_weights(m, results_len=14)
 
     @skipIfNoFBGEMM
-    def test_extract_weights_linear_fun(self):
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = nn.Parameter(torch.empty(4, 4))
-                self.b = nn.Parameter(torch.zeros(4))
-                torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
+    def test_extract_weights_mod_qat(self):
+        m = AllConvAndLinearFusionModules().train()
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        self._test_extract_weights(
+            m, results_len=14, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
 
-            def forward(self, x):
-                x = F.linear(x, self.w, self.b)
-                x = F.relu(x)
-                x = F.linear(x, self.w, self.b)
-                return x
-
-        m = M().eval()
+    @skipIfNoFBGEMM
+    def test_extract_weights_linear_fun_ptq(self):
+        m = LinearReluLinearFunctional().eval()
         self._test_extract_weights(m, results_len=2)
 
     @skipIfNoFBGEMM
-    def test_extract_weights_conv_fun(self):
-        class M(torch.nn.Module):
-            def __init__(self, weight1d, weight2d, weight3d, bias1d, bias2d, bias3d):
-                super().__init__()
-                self.weight1d = torch.nn.Parameter(weight1d)
-                self.weight2d = torch.nn.Parameter(weight2d)
-                self.weight3d = torch.nn.Parameter(weight3d)
-                self.bias1d = torch.nn.Parameter(bias1d)
-                self.bias2d = torch.nn.Parameter(bias2d)
-                self.bias3d = torch.nn.Parameter(bias3d)
-                self.stride1d = 1
-                self.padding1d = 0
-                self.dilation1d = 1
-                self.stride2d = (1, 1)
-                self.padding2d = (0, 0)
-                self.dilation2d = (1, 1)
-                self.groups = 1
-                self.stride3d = (1, 1, 1)
-                self.padding3d = (0, 0, 0)
-                self.dilation3d = (1, 1, 1)
+    def test_extract_weights_linear_fun_qat(self):
+        m = LinearReluLinearFunctional().train()
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        self._test_extract_weights(
+            m, results_len=2, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
 
-            def forward(self, x):
-                x = F.conv1d(
-                    x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
-                    self.dilation1d, self.groups)
-                x = F.conv1d(
-                    x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
-                    self.dilation1d, self.groups)
-                x = F.relu(x)
-                x = F.conv2d(
-                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
-                    self.dilation2d, self.groups)
-                x = F.conv2d(
-                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
-                    self.dilation2d, self.groups)
-                x = F.relu(x)
-                x = F.conv3d(
-                    x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
-                    self.dilation3d, self.groups)
-                x = F.conv3d(
-                    x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
-                    self.dilation3d, self.groups)
-                x = F.relu(x)
-                return x
-
+    @skipIfNoFBGEMM
+    def test_extract_weights_conv_fun_ptq(self):
         w1d = torch.randn(1, 1, 1)
         w2d = torch.randn(1, 1, 1, 1)
         w3d = torch.randn(1, 1, 1, 1, 1)
         b1d = torch.randn(1)
         b2d = torch.randn(1)
         b3d = torch.randn(1)
-        m = M(w1d, w2d, w3d, b1d, b2d, b3d).eval()
+        m = AllConvFunctional(w1d, w2d, w3d, b1d, b2d, b3d).eval()
         self._test_extract_weights(m, results_len=6)
+
+    @skipIfNoFBGEMM
+    def test_extract_weights_conv_fun_qat(self):
+        w1d = torch.randn(1, 1, 1)
+        w2d = torch.randn(1, 1, 1, 1)
+        w3d = torch.randn(1, 1, 1, 1, 1)
+        b1d = torch.randn(1)
+        b2d = torch.randn(1)
+        b3d = torch.randn(1)
+        m = AllConvFunctional(w1d, w2d, w3d, b1d, b2d, b3d).train()
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        self._test_extract_weights(
+            m, results_len=6, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
 
     @skipIfNoFBGEMM
     def test_extract_weights_dynamic(self):
@@ -540,78 +796,118 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         }
         self._test_extract_weights(m, results_len=1, qconfig_dict=qconfig_dict)
 
-    @skipIfNoFBGEMM
-    def test_match_activations_mod(self):
+    def _test_match_activations_mod_impl(self, prepare_fn=prepare_fx):
         m = nn.Sequential(
             torch.quantization.QuantStub(),
             nn.Conv2d(1, 1, 1),
             nn.Conv2d(1, 1, 1),
         ).eval()
+        qconfig_dict = None
+        if prepare_fn == prepare_qat_fx:
+            qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
         expected_occurrence = {
             ns.call_module(OutputLogger): 2,
         }
         self._test_match_activations(
             m, (torch.randn(2, 1, 2, 2),),
             prepared_expected_node_occurrence=expected_occurrence,
-            results_len=2)
+            results_len=2, qconfig_dict=qconfig_dict, prepare_fn=prepare_fn)
 
-    @override_qengines
-    def test_match_activations_fun(self):
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w1 = nn.Parameter(torch.empty(4, 4))
-                self.b1 = nn.Parameter(torch.zeros(4))
-                self.w2 = nn.Parameter(torch.empty(4, 4))
-                self.b2 = nn.Parameter(torch.zeros(4))
-                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
-                torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
+    @skipIfNoFBGEMM
+    def test_match_activations_mod_ptq(self):
+        self._test_match_activations_mod_impl(prepare_fn=prepare_fx)
 
-            def forward(self, x):
-                x = F.linear(x, self.w1, self.b1)
-                x = F.linear(x, self.w2, self.b2)
-                x = F.relu(x)
-                return x
+    @skipIfNoFBGEMM
+    def test_match_activations_mod_qat(self):
+        self._test_match_activations_mod_impl(prepare_fn=prepare_qat_fx)
 
-        m = M().eval()
+    def _test_match_activations_fun_impl(self, prepare_fn=prepare_fx):
+        m = LinearReluLinearFunctional().eval()
+        qconfig_dict = None
+        if prepare_fn == prepare_qat_fx:
+            qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
         expected_occurrence = {
             ns.call_module(OutputLogger): 2,
         }
         self._test_match_activations(
             m, (torch.randn(4, 4),),
             prepared_expected_node_occurrence=expected_occurrence,
-            results_len=2)
+            results_len=2, prepare_fn=prepare_fn, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
-    def test_add_shadow_loggers_mod(self):
+    def test_match_activations_fun_ptq(self):
+        self._test_match_activations_fun_impl(prepare_fn=prepare_fx)
+
+    @skipIfNoFBGEMM
+    def test_match_activations_fun_qat(self):
+        self._test_match_activations_fun_impl(prepare_fn=prepare_qat_fx)
+
+    @skipIfNoFBGEMM
+    def test_match_activations_meth_ptq(self):
+        """
+        Verify that add_loggers works on methods
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x.sigmoid()
+                return x
+
+        m = M().eval()
+        res = self._test_match_activations(
+            m, (torch.randn(4, 4),),
+            results_len=1)
+
+    def _test_add_shadow_loggers_mod_impl(self, prepare_fn=prepare_fx):
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
             nn.Conv2d(1, 1, 1),
         ).eval()
-        self._test_match_shadow_activations(
-            m, (torch.randn(1, 1, 4, 4),), results_len=2)
+        qconfig_dict = None
+        if prepare_fn == prepare_qat_fx:
+            qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        res = self._test_match_shadow_activations(
+            m, (torch.randn(1, 1, 4, 4),), results_len=2,
+            prepare_fn=prepare_fn, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
-    def test_add_shadow_loggers_fun(self):
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w1 = nn.Parameter(torch.empty(4, 4))
-                self.b1 = nn.Parameter(torch.zeros(4))
-                self.w2 = nn.Parameter(torch.empty(4, 4))
-                self.b2 = nn.Parameter(torch.zeros(4))
-                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
-                torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
+    def test_add_shadow_loggers_mod_ptq(self):
+        self._test_add_shadow_loggers_mod_impl(prepare_fn=prepare_fx)
 
+    @skipIfNoFBGEMM
+    def test_add_shadow_loggers_mod_qat(self):
+        self._test_add_shadow_loggers_mod_impl(prepare_fn=prepare_qat_fx)
+
+    def _test_add_shadow_loggers_fun_impl(self, prepare_fn=prepare_fx):
+        m = LinearReluLinearFunctional()
+        qconfig_dict = None
+        if prepare_fn == prepare_qat_fx:
+            qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        res = self._test_match_shadow_activations(
+            m, (torch.randn(4, 4),), results_len=2, prepare_fn=prepare_fn,
+            qconfig_dict=qconfig_dict)
+
+    @skipIfNoFBGEMM
+    def test_add_shadow_loggers_fun_ptq(self):
+        self._test_add_shadow_loggers_fun_impl(prepare_fn=prepare_fx)
+
+    @skipIfNoFBGEMM
+    def test_add_shadow_loggers_fun_qat(self):
+        self._test_add_shadow_loggers_fun_impl(prepare_fn=prepare_qat_fx)
+
+    @skipIfNoFBGEMM
+    def test_add_shadow_loggers_meth_ptq(self):
+        """
+        Verify that add_loggers works on methods
+        """
+        class M(nn.Module):
             def forward(self, x):
-                x = F.linear(x, self.w1, self.b1)
-                x = F.linear(x, self.w2, self.b2)
-                x = F.relu(x)
+                x = x.sigmoid()
                 return x
 
         m = M().eval()
-        self._test_match_shadow_activations(
-            m, (torch.randn(4, 4),), results_len=2)
+        res = self._test_match_shadow_activations(
+            m, (torch.randn(4, 4),),
+            results_len=1)
 
     @skipIfNoFBGEMM
     def test_add_shadow_loggers_multiple_dtype_casts(self):
@@ -719,6 +1015,236 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 results_len=1,
                 qconfig_dict=qconfig_dict,
                 should_log_inputs=should_log_inputs)
+
+    @skipIfNoFBGEMM
+    def test_op_with_either_fp32_or_int8_input(self):
+        """
+        Verify that shadowing works with ops which accept either fp32 or
+        int8 inputs.
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(x)
+                x = F.relu(x)
+                return x
+
+        m = M()
+        res = self._test_match_shadow_activations(
+            m, (torch.randn(4, 4),),
+            results_len=2)
+
+    @skipIfNoFBGEMM
+    def test_int8_shadows_int8(self):
+        """
+        Verify that shadowing works where both modules are int8
+        """
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mp(torch.randn(4, 1, 4, 4))
+        mq1 = convert_fx(copy.deepcopy(mp))
+        mq2 = convert_fx(mp)
+        mq1_shadows_mq2 = add_shadow_loggers('a', mq1, 'b', mq2, OutputLogger)
+        mq1_shadows_mq2(torch.randn(4, 1, 4, 4))
+        act_compare_dict = extract_shadow_logger_info(
+            mq1_shadows_mq2, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 1)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
+
+    @skipIfNoFBGEMM
+    def test_user_module(self):
+        """
+        For user defined modules,
+        1. weight extraction should not crash
+        2. unshadowed activations should have loggers, loggers will only log if
+             the output dtype is in the allowlist
+        3. shadowed activations should not have loggers
+             (since I/O dtype is unknown)
+        """
+        class UserModule(nn.Module):
+            def forward(self, x):
+                return x
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(1, 1)
+                self.user_module = UserModule()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.user_module(x)
+                return x
+
+        m = M().eval()
+
+        # quantize without tracing through UserModule
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        prepare_custom_config_dict = {'non_traceable_module_name': ['user_module']}
+        mp = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
+        mp(torch.randn(1, 1, 1))
+        mq = convert_fx(copy.deepcopy(mp))
+
+        # weight extraction should not crash
+        weights = _extract_weights_impl('fp32_prepared', mp, 'int8', mq)
+
+        # unshadowed activations should have loggers
+
+        # add loggers, without retracing
+        # note: converting again because we cannot copy a quantized linear
+        mp_ns, mq_ns = _add_loggers_impl(
+            'fp32_prepared', copy.deepcopy(mp), 'int8',
+            convert_fx(copy.deepcopy(mp)), OutputLogger,
+            should_log_inputs=True)
+        # both fp32 and int8 models should have 4 loggers each, 2 for I/O
+        # of linear, and 2 for I/O of user_module
+        unshadowed_expected_occurrence = {
+            ns.call_module(OutputLogger): 4,
+        }
+        self.checkGraphModuleNodes(
+            mp_ns, expected_node_occurrence=unshadowed_expected_occurrence)
+        self.checkGraphModuleNodes(
+            mq_ns, expected_node_occurrence=unshadowed_expected_occurrence)
+
+        # shadowed activations should only have loggers for nodes where
+        # the types are known and we can do a dtype cast
+
+        # add shadow loggers, without retracing
+        mp_shadows_mq_ns = _add_shadow_loggers_impl(
+            'fp32_prepared', mp, 'int8', mq, OutputLogger,
+            should_log_inputs=True)
+        # 2 loggers for I/O of linear, 0 loggers for I/O of user_module
+        shadowed_expected_occurrence = {
+            ns.call_module(OutputLogger): 2,
+        }
+        self.checkGraphModuleNodes(
+            mp_shadows_mq_ns, expected_node_occurrence=unshadowed_expected_occurrence)
+
+    def test_op_io_dtype_coverage(self):
+        """
+        Tests that all the ops quantization cares about have input and output
+        dtypes defined.
+        """
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        type_a_related_to_b = \
+            get_type_a_related_to_b(base_name_to_sets_of_related_ops)
+
+        # 1. check static quant module mappings
+        static_quant_mod_mappings = get_default_static_quant_module_mappings()
+        for fp32_type, int8_type in static_quant_mod_mappings.items():
+            types_to_skip = (
+                torch.quantization.QuantStub,
+                torch.quantization.DeQuantStub,
+                nnq.FloatFunctional,
+                # TODO(future PR): look into whether shadowing embeddings
+                # makes sense
+                nn.Embedding,
+                nn.EmbeddingBag,
+            )
+            if fp32_type in types_to_skip:
+                continue
+            self.assertTrue(
+                fp32_type in MODS_IO_TYPE_FP32,
+                f"missing IO type handling for f{fp32_type}")
+            self.assertTrue(
+                int8_type in MODS_IO_TYPE_INT8,
+                f"missing IO type handling for f{int8_type}")
+
+        # 2. check static quant op mappings
+        static_quant_fun_mappings = get_default_float_to_quantized_operator_mappings()
+        for fp32_type, int8_type in static_quant_fun_mappings.items():
+            self.assertTrue(
+                fp32_type in FUNS_IO_TYPE_FP32,
+                f"missing IO type handling for f{fp32_type}")
+            self.assertTrue(
+                int8_type in FUNS_IO_TYPE_INT8,
+                f"missing IO type handling for f{int8_type}")
+
+        # 3. check dynamic quant mappings
+        dynamic_quant_mappings = get_default_dynamic_quant_module_mappings()
+        for fp32_type1, fp32_type2 in dynamic_quant_mappings.items():
+            # TODO(future PR): verify correct I/O for these and remove from
+            # this list.
+            types_to_skip = (
+                nn.GRUCell,
+                nn.GRU,
+                nn.LSTMCell,
+                nn.RNNCell,
+            )
+            if fp32_type1 in types_to_skip:
+                continue
+            self.assertTrue(
+                fp32_type1 in MODS_IO_TYPE_FP32,
+                f"missing IO type handling for f{fp32_type1}")
+            self.assertTrue(
+                fp32_type2 in MODS_IO_TYPE_FP32,
+                f"missing IO type handling for f{fp32_type2}")
+
+        # 4. go through the ops mapped to each QuantizeHandler type, and verify
+        # correctness.
+        default_quant_patterns = get_default_quant_patterns()
+        for pattern, qhandler_cls in default_quant_patterns.items():
+            base_op = None
+            if isinstance(pattern, tuple):
+                base_op = pattern[-1]
+            elif isinstance(pattern, str):
+                base_op = pattern
+            else:
+                base_op = pattern
+
+            if (
+                qhandler_cls in (
+                    qp.BinaryOpQuantizeHandler,
+                    qp.RNNDynamicQuantizeHandler,
+                )
+            ):
+                # TODO(future PR): implement shadowing for binary ops
+                # TODO(future PR): implement shadowing for RNN ops
+                continue
+            elif qhandler_cls == qp.CatQuantizeHandler:
+                self.assertTrue(
+                    base_op in FUNS_IO_TYPE_FP32,
+                    f"missing IO type handling for {base_op}")
+            elif (
+                qhandler_cls in (
+                    qp.ConvReluQuantizeHandler,
+                    qp.LinearReLUQuantizeHandler,
+                    qp.BatchNormQuantizeHandler,
+                    qp.DefaultNodeQuantizeHandler,
+                    qp.ELUQuantizeHandler,
+                )
+            ):
+                self.assertTrue(
+                    (base_op in FUNS_IO_TYPE_FP32) or (base_op in MODS_IO_TYPE_FP32),
+                    f"missing IO type handling for {base_op}")
+            elif (
+                qhandler_cls in (
+                    qp.FixedQParamsOpQuantizeHandler,
+                    qp.CopyNodeQuantizeHandler,
+                )
+            ):
+                if (
+                    base_op in FUNS_UNMATCHABLE or
+                    base_op in MODS_UNMATCHABLE or
+                    base_op in METHS_UNMATCHABLE
+                ):
+                    continue
+
+                self.assertTrue(
+                    (base_op in FUNS_IO_TYPE_FP32_OR_INT8) or
+                    (base_op in MODS_IO_TYPE_FP32_OR_INT8) or
+                    (base_op in METHS_IO_TYPE_FP32_OR_INT8),
+                    f"missing IO type handling for {base_op}")
+            elif qhandler_cls == qp.EmbeddingQuantizeHandler:
+                # embedding shadowing is not implemented, for now
+                continue
+            else:
+                raise AssertionError(
+                    f"handing for {qhandler_cls} not implemented")
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
@@ -841,7 +1367,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             x = torch.randn(2, 4)
             self._test_match_activations(
                 sparse_nn, (idx, offsets, x),
-                results_len=4,
+                results_len=5,
                 should_log_inputs=should_log_inputs)
 
     @skipIfNoFBGEMM
@@ -851,7 +1377,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
             offsets = torch.LongTensor([0, 4])
             x = torch.randn(2, 4)
-            self._test_match_activations(
+            self._test_match_shadow_activations(
                 sparse_nn, (idx, offsets, x),
                 results_len=4,
                 should_log_inputs=should_log_inputs)

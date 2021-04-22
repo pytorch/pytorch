@@ -7,7 +7,9 @@
 import ipaddress
 import re
 import socket
-from typing import Dict, Optional, Tuple
+from datetime import timedelta
+from threading import Event, Thread
+from typing import Any, Callable, Dict, Optional, Tuple
 
 
 def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
@@ -138,3 +140,72 @@ def _matches_machine_hostname(host: str) -> bool:
             return True
 
     return False
+
+
+class _PeriodicTimer:
+    """Represents a timer that periodically runs a specified function.
+
+    Args:
+        interval:
+            The interval, in seconds, between each run.
+        function:
+            The function to run.
+    """
+
+    # The state of the timer is hold in a separate context object to avoid a
+    # reference cycle between the timer and the background thread.
+    class _Context:
+        interval: float
+        function: Callable[..., None]
+        args: Tuple[Any, ...]
+        kwargs: Dict[str, Any]
+        stop_event: Event
+
+    _thread: Optional[Thread]
+
+    # The context that is shared between the timer and the background thread.
+    _ctx: _Context
+
+    def __init__(
+        self,
+        interval: timedelta,
+        function: Callable[..., None],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        self._ctx = self._Context()
+        self._ctx.interval = interval.total_seconds()
+        self._ctx.function = function  # type: ignore
+        self._ctx.args = args or ()
+        self._ctx.kwargs = kwargs or {}
+        self._ctx.stop_event = Event()
+
+        self._thread = None
+
+    def __del__(self) -> None:
+        self.cancel()
+
+    def start(self) -> None:
+        """Start the timer."""
+        if self._thread:
+            raise RuntimeError("The timer has already started.")
+
+        self._thread = Thread(
+            target=self._run, name="PeriodicTimer", args=(self._ctx,), daemon=True
+        )
+
+        self._thread.start()
+
+    def cancel(self) -> None:
+        """Stop the timer at the next opportunity."""
+        if not self._thread:
+            return
+
+        self._ctx.stop_event.set()
+
+        self._thread.join()
+
+    @staticmethod
+    def _run(ctx) -> None:
+        while not ctx.stop_event.wait(ctx.interval):
+            ctx.function(*ctx.args, **ctx.kwargs)
