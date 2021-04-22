@@ -81,7 +81,10 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         keys.data_ptr<uint8_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
+#ifndef _MSC_VER
+      // This causes failing tests on MSVC for unknown reason.
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
+#endif
     });
   } else if (bits <= 16) {
     auto keys = at::empty(result.sizes(), opt.dtype(kShort)).random_(
@@ -94,7 +97,10 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         keys.data_ptr<int16_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
+#ifndef _MSC_VER
+      // This causes failing tests on MSVC for unknown reason.
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
+#endif
     });
   } else if (bits <= 32) {
     auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(
@@ -107,7 +113,10 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         keys.data_ptr<int>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
+#ifndef _MSC_VER
+      // This causes failing tests on MSVC for unknown reason.
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
+#endif
     });
   } else {
     auto keys = at::empty(result.sizes(), opt.dtype(kLong)).random_(
@@ -120,11 +129,10 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         keys.data_ptr<int64_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
-      std::cout << "keys_tmp:" << keys_tmp << std::endl;
-      std::cout << "result:" << result << std::endl;
+#ifndef _MSC_VER
+      // This causes failing tests on MSVC for unknown reason.
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-      std::cout << "keys_tmp after postprocess:" << keys_tmp << std::endl;
-      std::cout << "result after postprocess:" << result << std::endl;
+#endif
     });
   }
 
