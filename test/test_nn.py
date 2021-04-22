@@ -847,6 +847,19 @@ class TestNN(NNTestCase):
 
             F.conv2d(x, w)
 
+    def test_conv2d_discontiguous_weight(self):
+        # Test for https://github.com/pytorch/pytorch/issues/55781
+        x = torch.ones(64, 16, 16, 16)
+        weight = torch.arange(0, 1.0, 1 / 2.0 ** 10).reshape(32, 16, 1, 2)[:, :, :, ::2]
+        self.assertFalse(weight.is_contiguous())
+        y = torch.nn.functional.conv2d(x, weight, None)
+        if torch.backends.mkldnn.is_available():
+            # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_ = torch.nn.functional.conv2d(x, weight, None)
+                self.assertEqual(y, y_)
+        self.assertEqual(y.sum(), 4186112.)
+
     def test_invalid_conv2d(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
             module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
@@ -1460,6 +1473,10 @@ class TestNN(NNTestCase):
         module_list.extend(s.modules())
         check()
 
+        # verify the right exception is thrown when trying to "forward" through a ModuleList
+        self.assertRaises(NotImplementedError, module_list)
+        self.assertRaises(NotImplementedError, module_list, torch.rand(1, 3))
+
     def test_ModuleDict(self):
         modules = OrderedDict([
             ('act', nn.ReLU()),
@@ -1552,6 +1569,10 @@ class TestNN(NNTestCase):
         self.assertEqual(len(module_dict), 0)
         modules.clear()
         check()
+
+        # verify the right exception is thrown when trying to "forward" through a ModuleDict
+        self.assertRaises(NotImplementedError, module_dict)
+        self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
     def test_ParameterList(self):
         def make_param():
@@ -5418,7 +5439,7 @@ class TestNN(NNTestCase):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
         target = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
         var = torch.tensor([[0.5, 1., 1.5], [1., 1.5, 2.]])
-        component_wise_loss = 0.5 * (torch.sum(torch.log(var) + (input - target)**2 / var, dim=1))
+        component_wise_loss = 0.5 * (torch.log(var) + (input - target)**2 / var)
         self.assertEqual(component_wise_loss,
                          F.gaussian_nll_loss(input, target, var, reduction='none'))
         self.assertEqual(torch.sum(component_wise_loss),
@@ -5428,12 +5449,27 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'is not valid'):
             F.gaussian_nll_loss(input, target, var, reduction='total')
 
+    def test_gaussian_nll_loss_broadcasting(self):
+        input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
+        target_full = torch.tensor([[1., 2., 3.], [1., 2., 3.]])
+        target_part = torch.tensor([[1., 2., 3.]])
+        var_full = torch.tensor([[0.5, 0.5, 0.5], [1.5, 1.5, 1.5]])
+        var_part1 = torch.tensor([[0.5], [1.5]])
+        var_part2 = torch.tensor([0.5, 1.5])
+        component_wise_loss = 0.5 * (torch.log(var_full) + (input - target_full)**2 / var_full)
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target_part, var_full, reduction='none'))
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target_full, var_part1, reduction='none'))
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target_full, var_part2, reduction='none'))
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target_part, var_part1, reduction='none'))
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target_part, var_part2, reduction='none'))
+
     def test_gaussian_nll_loss_args(self):
         input = torch.randn(3, 5)
-        with self.assertRaisesRegex(ValueError, 'input and target must have same size'):
-            target = torch.randn(3, 6)
-            var = torch.ones(3, 5)
-            torch.nn.functional.gaussian_nll_loss(input, target, var)
         with self.assertRaisesRegex(ValueError, 'var is of incorrect size'):
             target = torch.randn(3, 5)
             var = torch.ones(3, 3)
@@ -10607,6 +10643,16 @@ class TestNNInit(TestCase):
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1)
                 init.kaiming_normal_(tensor)
 
+    def test_kaiming_uniform_warning_on_0element_tensor(self):
+        tensor = torch.empty(0, 1)
+        with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op"):
+            _ = init.kaiming_uniform_(tensor)
+
+    def test_kaiming_normal_warning_on_0element_tensor(self):
+        tensor = torch.empty(0, 1)
+        with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op"):
+            _ = init.kaiming_normal_(tensor)
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_uniform(self):
         for use_a in [True, False]:
@@ -12212,6 +12258,27 @@ class TestNNDeviceType(NNTestCase):
             mod = torch.nn.ReflectionPad2d(2)
             inp = torch.randn(3, 0, 10, 10, device=device, dtype=dtype)
             mod(inp)
+
+    @onlyCUDA   # Test if CPU and GPU results match
+    def test_ReflectionPad2d_large(self, device):
+        shapes = ([2, 65736, 6, 6], [65736, 2, 6, 6])
+        pad = (1, 2, 3, 4)
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+
+            out = F.pad(x, pad, mode='reflect')
+            ref_out = F.pad(ref_x, pad, mode='reflect')
+
+            self.assertEqual(out, ref_out)
+
+            g = torch.randn_like(out)
+            ref_g = g.cpu()
+
+            out.backward(g)
+            ref_out.backward(ref_g)
+
+            self.assertEqual(x.grad, ref_x.grad)
 
 
     @onlyOnCPUAndCUDA
