@@ -136,7 +136,8 @@ bool canRunNatively(Node* n) {
       "prim::ListConstruct",
       "prim::ListUnpack",
       "prim::TupleConstruct",
-      "prim::DictConstruct"};
+      "prim::DictConstruct",
+      "aten::__getitem__"};
   auto str = std::string(n->kind().toQualString());
   if (!native_nodes.count(str)) {
     return false;
@@ -534,7 +535,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     auto& out_t = p_node->Output(0).toTensor();
     if (!te->supports(in0_t)) {
       fastResizeToZero(out_t);
-      at::native::tanh_out(in0_t, out_t);
+      at::cpu::tanh_out(out_t, in0_t);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
@@ -555,7 +556,7 @@ REGISTER_OPERATOR_FUNCTOR(
         auto& out_t = p_node->Output(0).toTensor();
         if (!te->supports(in0_t)) {
           fastResizeToZero(out_t);
-          at::native::sigmoid_out(in0_t, out_t);
+          at::cpu::sigmoid_out(out_t, in0_t);
         } else {
           at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
           (*te)(
@@ -910,6 +911,14 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       // put output back
       p_node->Output(0) = std::move(stack[0]);
     };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::__getitem__")) {
+    return [](ProcessedNode* p_node) {
+      auto dict = p_node->Input(0).toGenericDict();
+      auto key = p_node->Input(1);
+      auto value = dict.find(key);
+      TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
+      p_node->Output(0) = value->value();
+    };
   } else if (n->kind() == prim::ListConstruct) {
     return [](ProcessedNode* p_node) {
       // prepare inputs
@@ -1023,8 +1032,7 @@ REGISTER_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // TODO: Support only 9 args once the old signature has been removed.
         TORCH_CHECK(
-            p_node->inputs().size() == 8 ||
-            p_node->inputs().size() == 9,
+            p_node->inputs().size() == 8 || p_node->inputs().size() == 9,
             "Expected number of inputs is 8 or 9, but got " +
                 std::to_string(p_node->inputs().size()));
 
