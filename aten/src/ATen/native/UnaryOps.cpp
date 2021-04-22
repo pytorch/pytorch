@@ -83,6 +83,18 @@ TORCH_META_FUNC(neg)(const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(clamp_max) (const Tensor& self, const Scalar& max) {
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_max only supports strided layout, got: ", self.layout());
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(clamp_min) (const Tensor& self, const Scalar& min) {
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_min only supports strided layout, got: ", self.layout());
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -132,6 +144,14 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
+
+TORCH_IMPL_FUNC(clamp_max) (const Tensor& self, const Scalar& max, const Tensor& result) {
+  clamp_max_stub(device_type(), *this, max);
+}
+
+TORCH_IMPL_FUNC(clamp_min) (const Tensor& self, const Scalar& min, const Tensor& result) {
+  clamp_min_stub(device_type(), *this, min);
+}
 
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
@@ -575,40 +595,6 @@ Tensor clamp(const Tensor& self, const optional<Scalar>& min, const optional<Sca
 
 Tensor& clamp_(Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
   return at::clamp_out(self, self, min, max);
-}
-
-Tensor& clamp_max_out(const Tensor& self, const Scalar& max, Tensor& result) {
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "clamp_max only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::unary_op(result, self);
-  clamp_max_stub(iter.device_type(), iter, max);
-  return result;
-}
-
-Tensor clamp_max(const Tensor& self, const Scalar& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_max_out(result, self, max);
-}
-
-Tensor& clamp_max_(Tensor& self, const Scalar& max) {
-  return at::clamp_max_out(self, self, max);
-}
-
-Tensor& clamp_min_out(const Tensor& self, const Scalar& min, Tensor& result) {
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "clamp_min only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::unary_op(result, self);
-  clamp_min_stub(iter.device_type(), iter, min);
-  return result;
-}
-
-Tensor clamp_min(const Tensor& self, const Scalar& min) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_min_out(result, self, min);
-}
-
-Tensor& clamp_min_(Tensor& self, const Scalar& min) {
-  return at::clamp_min_out(self, self, min);
 }
 
 // Implements the "clip" alias for clamp
