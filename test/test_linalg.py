@@ -617,18 +617,22 @@ class TestLinalg(TestCase):
         A[-1, -1] = 0  # Now A is singular
         _, info = torch.linalg.cholesky_ex(A)
         self.assertEqual(info, 3)
+        with self.assertRaisesRegex(RuntimeError, r'U\(3,3\) is zero, singular U\.'):
+            torch.linalg.cholesky_ex(A, check_errors=True)
 
         # if at least one matrix in the batch is not positive definite,
         # batched info with positive integer for the corresponding matrix is returned
         A = torch.eye(3, 3, dtype=dtype, device=device)
         A = A.reshape((1, 3, 3))
         A = A.repeat(5, 1, 1)
-        A[3, -2, -2] = 0  # Now A[4] is singular
+        A[3, -2, -2] = 0  # Now A[3] is singular
         _, info = torch.linalg.cholesky_ex(A)
 
         expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
         expected_info[3] = 2
         self.assertEqual(info, expected_info)
+        with self.assertRaisesRegex(RuntimeError, r'For batch 3: U\(2,2\) is zero, singular U\.'):
+            torch.linalg.cholesky_ex(A, check_errors=True)
 
     @onlyCPU
     @skipCPUIfNoLapack
