@@ -623,8 +623,12 @@ TEST(LiteInterpreterTest, BackPortByteCodeModel) {
   testModelFile.append("script_module_v5.ptl");
   //  torch::jit::_backport_for_mobile(testModelFile);
   //
-  torch::jit::_backport_for_mobile(
+  auto version = torch::jit::_get_bytecode_version(
       "/Users/chenlai/Documents/pytorch/data/prod_example.pkl");
+  std::cout << "version is " << version;
+  torch::jit::_backport_for_mobile(
+      "/Users/chenlai/Documents/pytorch/data/prod_example.pkl",
+      "/Users/chenlai/Documents/pytorch/data/prod_example_backport.pkl");
 
   //    Module m = load(testModelFile);
   //  std::string output_5 = "output_5.ptl";
