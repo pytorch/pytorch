@@ -611,7 +611,7 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     col_indices_dtype_attr.get())->scalar_type;
 
   if (r.idx == 0) {
-    const int SIZE_ARRAY_ARG = 3, TYPE_INFERENCE_ARG = 4, DEVICE_TYPE_ARG = 7, REQ_GRAD_ARG = 8;
+    const int SIZE_ARRAY_ARG = 3, TYPE_INFERENCE_ARG = 4, DEVICE_TYPE_ARG = 6, REQ_GRAD_ARG = 8;
     bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
     const auto inferred_options = typeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
@@ -632,7 +632,7 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     return at::sparse_csr_tensor(crow_indices, col_indices, values, r.intlist(SIZE_ARRAY_ARG),
                                  values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(REQ_GRAD_ARG));
   } else if (r.idx == 1) {
-    const int TYPE_INFERENCE_ARG = 3, DEVICE_TYPE_ARG = 6, REQ_GRAD_ARG = 7;
+    const int TYPE_INFERENCE_ARG = 3, DEVICE_TYPE_ARG = 5, REQ_GRAD_ARG = 7;
     bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
     const auto inferred_options = typeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
