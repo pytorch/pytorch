@@ -625,7 +625,6 @@ kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),func
                       texture2d<half, access::write> out_tex[[texture(1), function_constant(transpose_out_is_tex)]],
                       constant ushort* inSizeBuffer [[buffer(0)]],
                       constant ushort* outSizeBuffer [[buffer(1)]],
-                      device ushort* indexBuffer [[buffer(2)]],
                       ushort3 gid[[thread_position_in_grid]]) {
 
     const ushort dim0 = ushort_arg_0;
@@ -659,6 +658,8 @@ kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),func
     const ushort n2 = gid.z / slices2;
     const ushort s2 = gid.z - n2 * slices2;
     half4 value;
+    ushort4 threadIndexBufferLower{1, 1, 1, 1};
+    ushort4 threadIndexBufferUpper{1, 1, 1 ,1};
     for (int idx = 0; idx < 4; ++idx){
         ushort offset = 4 * s2 + idx;
         size_t linear_idx2 = n2 * C2 * H2 * W2 + offset * H2 * W2 + gid.y * W2 + gid.x;
@@ -670,20 +671,45 @@ kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),func
         ushort d2 = 0;
         for(int j = dim-1; j>=0; --j){
             d2  = outSizeBuffer[j];
-            indexBuffer[j] = linear_idx2 % d2;
+            if(j > 3) {
+                threadIndexBufferUpper[j-3] = linear_idx2 % d2;
+            } else {
+                threadIndexBufferLower[j] = linear_idx2 % d2;
+            }
             linear_idx2 /= d2;
         }
 
         // swap dims
-        ushort tmp = indexBuffer[dim0];
-        indexBuffer[dim0] = indexBuffer[dim1];
-        indexBuffer[dim1] = tmp;
+        ushort tmp;
+        if(dim0 > 3) {
+            tmp = threadIndexBufferUpper[dim0-3];
+        } else {
+            tmp = threadIndexBufferLower[dim0];
+        }
+        if(dim0 > 3 && dim1 > 3) {
+            threadIndexBufferUpper[dim0-3] = threadIndexBufferUpper[dim1-3];
+        } else if (dim0 > 3 && dim1 < 3) {
+            threadIndexBufferUpper[dim0-3] = threadIndexBufferLower[dim1];
+        } else if (dim0 < 3 && dim1 > 3) {
+            threadIndexBufferLower[dim0] = threadIndexBufferUpper[dim1-3];
+        } else {
+            threadIndexBufferLower[dim0] = threadIndexBufferLower[dim1];
+        }
+        if(dim1 > 3) {
+            threadIndexBufferUpper[dim1-3] = tmp;
+        } else {
+            threadIndexBufferLower[dim1] = tmp;
+        }
 
         size_t linear_idx1 = 0;
         ushort m = 1;
         ushort d1 = 0;
         for(int k = dim-1; k>=0; --k) {
-            d1 = indexBuffer[k];
+            if(k > 3) {
+                d1 = threadIndexBufferUpper[k-3];
+            } else {
+                d1 = threadIndexBufferLower[k];
+            }
             linear_idx1 += d1 * m;
             m *= inSizeBuffer[k];
         }
@@ -721,7 +747,7 @@ kernel void split_channels(texture2d_array<half, access::read> in_arr[[texture(0
                            texture2d_array<half, access::write> out2_arr[[texture(2), function_constant(split_channels_out2_is_arr)]],
                            texture2d<half, access::write> out2_tex[[texture(2),function_constant(split_channels_out2_is_tex)]],
                            ushort3 gid[[thread_position_in_grid]]) {
-    
+
     ushort W,H;
     if(split_channels_in_is_arr) {
         W = in_arr.get_width();
@@ -740,7 +766,7 @@ kernel void split_channels(texture2d_array<half, access::read> in_arr[[texture(0
     half4 tmp2(0.0, 0.0, 0.0, 0.0);
     half4 in41 = split_channels_in_is_arr ? in_arr.read(gid.xy, gid.z) : in_tex.read(gid.xy);
     half4 in42 = split_channels_in_is_arr ? in_arr.read(gid.xy, gid.z+1) : half4(0,0,0,0);
-    
+
     if(gid.z < s1 - 1) {
         if(split_channels_out1_is_arr) {
             out1_arr.write(in41, gid.xy, gid.z);
@@ -816,7 +842,7 @@ kernel void roi_align(texture2d_array<half, access::sample> ina[[texture(0), fun
                       texture2d<half, access::write> out[[texture(1), function_constant(ra_has_out_tex)]],
                       constant half4* rois[[buffer(0)]],
                       ushort3 gid[[thread_position_in_grid]]) {
-    
+
     ushort out_width, out_height;
     if (ra_has_out_arr) {
         out_width = outa.get_width();
@@ -835,28 +861,28 @@ kernel void roi_align(texture2d_array<half, access::sample> ina[[texture(0), fun
     const ushort ph = gid.y;
     const ushort n = gid.z / divRoundUp(C, 4);
     const ushort c = gid.z % divRoundUp(C, 4);
-    
+
     const half4 roi_scaled = rois[n] * spatial_scale;
     const half roi_start_w = roi_scaled[0];
     const half roi_start_h = roi_scaled[1];
     const half roi_end_w = roi_scaled[2];
     const half roi_end_h = roi_scaled[3];
-    
+
     // Force malformed ROIs to be 1x1
     const half roi_width = max(roi_end_w - roi_start_w, (half)1.);
     const half roi_height = max(roi_end_h - roi_start_h, (half)1.);
-    
+
     const half bin_size_h = static_cast<half>(roi_height) / static_cast<half>(out_height);
     const half bin_size_w = static_cast<half>(roi_width) / static_cast<half>(out_width);
-    
+
     const ushort roi_bin_grid_h = sampling_ratio > 0 ? sampling_ratio : ceil(roi_height / static_cast<half>(out_height));
     const ushort roi_bin_grid_w = sampling_ratio > 0 ? sampling_ratio : ceil(roi_width / static_cast<half>(out_width));
-        
+
     const half count = roi_bin_grid_h * roi_bin_grid_w;
     half4 output_val = 0.0;
-    
+
     constexpr sampler s2(coord::pixel, address::clamp_to_edge, filter::linear);
-    
+
     for (int iy = 0; iy < roi_bin_grid_h; iy++) {
         for (int ix = 0; ix < roi_bin_grid_w; ix++) {
             // Shift the pixel by 0.5. This is critical to achieve high accuracy.
