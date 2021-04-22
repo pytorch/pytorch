@@ -184,17 +184,13 @@ TEST(Expr, VectorAdd01) {
     }
   */
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = a_buf.loadWithMask(
-      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
-      Broadcast::make(1, kVectorSize));
-  ExprHandle load_b = b_buf.loadWithMask(
-      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
-      Broadcast::make(1, kVectorSize));
+  ExprHandle load_a =
+      a_buf.load({Ramp::make(index * kVectorSize, 1, kVectorSize)});
+  ExprHandle load_b =
+      b_buf.load({Ramp::make(index * kVectorSize, 1, kVectorSize)});
   ExprHandle value = load_a + load_b;
-  Stmt* store_c = c_buf.storeWithMask(
-      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
-      value,
-      Broadcast::make(1, kVectorSize));
+  Stmt* store_c =
+      c_buf.store({Ramp::make(index * kVectorSize, 1, kVectorSize)}, value);
   Stmt* stmt = For::make(index, 0, kVectorCount, store_c);
 
   ASSERT_EQ(load_a.dtype(), Dtype(kFloat, kVectorSize));
