@@ -599,13 +599,15 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
-def sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
+    alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
+    beta_val =  kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2)
     tests_list = [
-        ((2, 3), (2, 2), (2, 3), kwargs.get('alpha', 1), kwargs.get('beta', 1), False)
+        ((2, 3), (2, 2), (2, 3), False)
     ]
     tests_with_lhs_broadcasting = [
-        ((1,), (2, 2), (2, 3), kwargs.get('alpha', 1), kwargs.get('beta', 1), True),
-        ((), (2, 2), (2, 3), kwargs.get('alpha', 1), kwargs.get('beta', 1), True)
+        ((1,), (2, 2), (2, 3), True),
+        ((), (2, 2), (2, 3), True)
     ]
     test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore
     inputs = tuple(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
@@ -613,18 +615,9 @@ def sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad,
                                                  requires_grad=requires_grad),
                                      make_tensor(shape_c, device, dtype,
                                                  requires_grad=requires_grad)),
-                               kwargs={'alpha': alpha, 'beta': beta},
+                               kwargs={'alpha': alpha_val, 'beta': beta_val},
                                broadcasts_input=broadcasts_input)
-                   for shape_a, shape_b, shape_c, alpha, beta, broadcasts_input in test_cases)
-    return inputs
-
-def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
-    if dtype.is_complex:
-        inputs = sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad,
-                                                       beta=1 + 2j, alpha=2 + 3j)
-    else:
-        inputs = sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad,
-                                                       beta=0.2, alpha=0.6)
+                   for shape_a, shape_b, shape_c, broadcasts_input in test_cases)
     return inputs
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
@@ -2805,17 +2798,25 @@ op_db: List[OpInfo] = [
                                 device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                    )),
     OpInfo('addmm',
+           # This addmm OpInfo is for when alpha and beta are not both equal to 1.
+           # alpha=beta=1 is tested in the following opinfo, because that special case will
+           # trigger addmm being decomposed by a jit pass.
            dtypes=floating_and_complex_types_and(torch.float16),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            supports_inplace_autograd=False,
-           sample_inputs_func=sample_inputs_addmm),
+           sample_inputs_func=sample_inputs_addmm,
+           skips=(
+               # addmm_ resizes input tensor if it's not the correct size, but it shouldn't.
+               # Reference: https://github.com/pytorch/pytorch/issues/56233
+               SkipInfo('TestCommon', 'test_out'),
+           )
+           ),
     OpInfo('addmm',
-           # Another OpInfo is required for addmm because inputs whose alpha & beta are not 1
-           # have nodes that are in the DifferentiableGraph when autodiffed.
-           variant_test_name='non_fusible_nodes',
+           # When alpha=beta=1 as compile-time constants, the JIT will decompose addmm into mm and add.
+           variant_test_name='decomposed',
            dtypes=floating_and_complex_types_and(torch.float16),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -2823,7 +2824,13 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_inplace_autograd=False,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
-           sample_inputs_func=sample_inputs_addmm_non_fusible_nodes),
+           sample_inputs_func=partial(sample_inputs_addmm, alpha=1, beta=1),
+           skips=(
+               # addmm_ resizes input tensor if it's not the correct size, but it shouldn't.
+               # Reference: https://github.com/pytorch/pytorch/issues/56233
+               SkipInfo('TestCommon', 'test_out'),
+           )
+           ),                           
     OpInfo('addmv',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
