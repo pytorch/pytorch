@@ -315,7 +315,7 @@ static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
       // skip LowPrecisionCast if any op input type node is null.
       return;
     }
-    auto input_tensor_type = 
+    auto input_tensor_type =
         n->input(i)->type()->cast<TensorType>()->scalarType().value();
     TORCH_INTERNAL_ASSERT(output_scalar_type == input_tensor_type);
   }
