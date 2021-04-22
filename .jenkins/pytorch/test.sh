@@ -25,6 +25,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
+  export COVERAGE_RCFILE="$PWD/.coveragerc" # coverage config file needed for plug-ins and settings to work
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then

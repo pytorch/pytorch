@@ -1,0 +1,13 @@
+[run]
+omit =
+    */tmp*
+    */Temp/*
+    */usr/local/lib*
+    *test/*
+
+[report]
+omit =
+    */tmp*
+    */Temp/*
+    */usr/local/lib*
+    *test/*

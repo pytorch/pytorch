@@ -39,7 +39,12 @@ if %errorlevel% neq 0 ( exit /b %errorlevel% )
 popd
 
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest coverage
+pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest
+
+:: TODO: All sharded configs run coverage. We should change that to be only one config, but right now we will just
+:: install coverage everywhere. Tracked: https://github.com/pytorch/pytorch/issues/56264
+python -mpip install coverage
+
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
 
 set DISTUTILS_USE_SDK=1
