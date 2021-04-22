@@ -168,10 +168,41 @@ def expand_lower(name, out_shape, inp_shapes, args):
         return A.load(index_or_broadcast(inp_shape, args))
     return te.Compute(name, get_dim_args(out_shape), f)
 
+def mm_lower(name, out_shape, inp_shapes, args):
+    M1 = args[0]
+    M2 = args[1]
+    N, M = inp_shapes[0][0]
+    P = inp_shapes[1][0][1]
+
+    def f(n, p, m):
+        return M1.load([n, m]) * M2.load([m, p])
+    mm = te.Compute('mm', get_dim_args([N,P,M]), f)
+    out = te.Reduce(name, get_dim_args([N, P]), te.Sum(), mm, get_dim_args([M]))
+    return out.buf(), [mm.stmt(), out.stmt()]
+    # C = torch._C._te.BufHandle('C', get_te_shapes([N, P]), get_nnc_type(torch.float))
+    # s = torch._C._te.ExternalCall(C, "nnc_aten_matmul", [M1, M2], [])
+    # return C, [s]
+
+def transpose_lower(name, out_shape, inp_shapes, args):
+    if len(args) == 1:
+        idx_1, idx_2 = 0, 1
+    else:
+        idx_1, idx_2 = args[1], args[2]
+    def transpose(shape):
+        shape[idx_1], shape[idx_2] = shape[idx_2], shape[idx_1]
+        return shape
+    def f(*idxs):
+        idxs = transpose(list(idxs))
+        return args[0].load(idxs)
+    return te.Compute(name, get_dim_args(out_shape), f)
+
 
 lowering_functions[torch.ops.aten.sum] = sum_lower
 lowering_functions[torch.ops.aten.ones_like] = ones_like_lower
 lowering_functions[torch.ops.aten.expand] = expand_lower
+lowering_functions[torch.ops.aten.mm] = mm_lower
+lowering_functions[torch.ops.aten.t] = transpose_lower
+
 func_to_aten = {
     operator.getitem: torch.ops.aten.slice,
     operator.add: torch.ops.aten.add,
@@ -194,10 +225,11 @@ def lower_function(node, op, nnc_args, args):
         if op in func_to_aten:
             op = func_to_aten[op]
         aten_str = f'aten::{op.__name__}'
-        # print(aten_str, nnc_args)
         out = te.lower(aten_str, list(nnc_args), get_te_shapes(node.meta['tensor_meta'].shape), get_nnc_type(torch.float))
-    assert(isinstance(out, te.Tensor))
-    return out.buf(), [out.stmt()]
+    if isinstance(out, te.Tensor):
+        return out.buf(), [out.stmt()]
+    else:
+        return out[0], out[1]
 
 def nnc_compile(model: torch.nn.Module, example_inputs) -> torch.nn.Module:
     """
@@ -244,7 +276,7 @@ def nnc_compile(model: torch.nn.Module, example_inputs) -> torch.nn.Module:
             # also represents an input to the NNC computation.
             shapes = get_te_shapes(node.meta['tensor_meta'].shape)
             placeholder = te.Placeholder(node.name, get_te_type(node), shapes)
-            env[node.name] = placeholder
+            env[node.name] = placeholder.data()
             inputs.append(placeholder)
         elif node.op == 'call_function':
             # This does the bulk of the work - we call `lower_function`, which
@@ -275,7 +307,7 @@ def nnc_compile(model: torch.nn.Module, example_inputs) -> torch.nn.Module:
             module_attrs.append(node)
             shapes = get_te_shapes(node.meta['tensor_meta'].shape)
             placeholder = te.Placeholder(node.name, get_te_type(node), shapes)
-            env[node.name] = placeholder
+            env[node.name] = placeholder.data()
         else:
             print(node.op, node.target)
             raise RuntimeError("not yet implemented")
@@ -290,6 +322,7 @@ def nnc_compile(model: torch.nn.Module, example_inputs) -> torch.nn.Module:
     cg = te.construct_codegen('llvm', stmt, [te.BufferArg(x) for x in [env[i.name] for i in module_attrs] + inputs + outs[0]])
     alloc_results = [torch.empty(i) for i in outs[1]]
     def f(*inps, out_tensors=None):
+        # begin = time.time()
         if out_tensors is None:
             results = alloc_results
         else:
@@ -298,8 +331,11 @@ def nnc_compile(model: torch.nn.Module, example_inputs) -> torch.nn.Module:
             module_stuff = [fetch_attr(i.target).data for i in module_attrs]
         else:
             module_stuff = []
+        # begin2 = time.time()
         cg.call(module_stuff + list(inps) + results)
+        # print("inner", time.time()-begin2)
         if out_tensors is None:
+            # print("outer", time.time()-begin)
             if len(results) == 1:
                 return results[0]
             return results

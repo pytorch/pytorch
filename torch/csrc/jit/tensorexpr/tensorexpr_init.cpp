@@ -556,9 +556,9 @@ void initTensorExprBindings(PyObject* module) {
           } else if (py::isinstance<VarHandle>(inp)) {
             // std::cout << "varhandle" << std::endl;
             argInputs.push_back(py::cast<VarHandle>(inp));
-          } else if (py::isinstance<double>(inp)) {
+          } else if (py::isinstance<py::float_>(inp)) {
             argInputs.push_back(py::cast<double>(inp));
-          } else if (py::isinstance<int64_t>(inp)) {
+          } else if (py::isinstance<py::int_>(inp)) {
             argInputs.push_back(py::cast<int64_t>(inp));
           } else if (py::isinstance<py::none>(inp)){
             argInputs.push_back(ArgNone());

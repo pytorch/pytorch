@@ -206,7 +206,17 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       pyArgs.push_back(pyTensor->value_);
       pyTensorArgs.push_back(pyTensor->value_);
       unwrappedArgs.push_back(getValueFromPyTensor(pyTensor->value_));
-    } else {
+    } else{
+      if(ivalue.isList()) {
+        auto l = ivalue.toList();
+        for (int jdx=0; jdx<l.size(); jdx++) {
+          auto nv = l.get(jdx);
+          if (nv.isTensor() && isPythonTensor(nv.toTensor())) {
+            auto pyTensor = getPythonImpl(nv.toTensor());
+            pyTensorArgs.push_back(pyTensor->value_);
+          }
+        }
+      }
       pyArgs.push_back(torch::jit::toPyObject(ivalue));
       unwrappedArgs.push_back(ivalue);
     }
