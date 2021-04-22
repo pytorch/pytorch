@@ -19,8 +19,8 @@ class ProcessGroupShareTensorTest(test_c10d_spawn.AbstractProcessGroupShareTenso
 
     @classmethod
     def opts(cls, threads=2):
-        opts = c10d.ProcessGroupGloo.Options()
-        opts.timeout = 5.0
+        opts = c10d.ProcessGroupGloo._Options()
+        opts._timeout = 5.0
         opts._devices = [create_device(interface='lo')]
         opts._threads = threads
         return opts
