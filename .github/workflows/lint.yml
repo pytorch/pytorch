@@ -68,6 +68,7 @@ jobs:
           # shellcheck disable=SC2016
           (! git --no-pager grep -InP '# noqa(?!: [A-Z]+\d{3})' -- '**.py' ':(exclude)caffe2' || (echo 'The above lines have unqualified `noqa`; please convert them to `noqa: XXXX`'; false))
       - name: Ensure no unqualified type ignore
+        if: always()
         run: |
           # shellcheck disable=SC2016
           (! git --no-pager grep -InP '# type:\s*ignore(?!\[)' -- '**.py' ':(exclude)test/test_jit.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
