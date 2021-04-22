@@ -12,8 +12,8 @@ namespace {
 
 template <typename scalar_t>
 void cpu_adaptive_max_pool(
-    Tensor& output_,
-    Tensor& indices_,
+    const Tensor& output_,
+    const Tensor& indices_,
     const Tensor& input_,
     IntArrayRef output_size) {
   auto input = input_.contiguous();
@@ -79,8 +79,8 @@ void cpu_adaptive_max_pool(
 
 template <typename scalar_t>
 void cpu_adaptive_max_pool_channels_last(
-    Tensor& output_,
-    Tensor& indices_,
+    const Tensor& output_,
+    const Tensor& indices_,
     const Tensor& input_,
     IntArrayRef output_size) {
   TORCH_CHECK(input_.ndimension() == 4,
@@ -289,8 +289,8 @@ void cpu_adaptive_max_pool_backward_channels_last(
 }
 
 void adaptive_max_pool2d_kernel_impl(
-    Tensor& output,
-    Tensor& indices,
+    const Tensor& output,
+    const Tensor& indices,
     const Tensor& input,
     IntArrayRef output_size) {
   switch (input.suggest_memory_format()) {

@@ -3433,6 +3433,61 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
             ).run(m.graph)
             m(*dummy_inputs)
 
+    # Ensure that attempting to quantize an EmbeddingBag throws an error if
+    # padding_idx is not None
+    @skipIfNoFBGEMM
+    def test_embedding_bag_padding_idx_error(self):
+        class M(torch.nn.Module):
+            def __init__(self, weights):
+                super(M, self).__init__()
+                self.embedding = torch.nn.EmbeddingBag(
+                    num_embeddings=10,
+                    embedding_dim=12,
+                    include_last_offset=True,
+                    sparse=True,
+                    _weight=weights,
+                    mode="sum",
+                    padding_idx=0,
+                )
+
+            def forward(self, indices, offsets):
+                e = self.embedding(indices, offsets)
+                return e
+
+        weights = torch.randn(10, 12, dtype=torch.float32)
+        module = M(weights)
+
+        indices = torch.tensor([0, 1, 2, 3, 4])
+        offsets = torch.tensor([0, 2, 5])
+        dummy_inputs = (indices, offsets)
+
+        int4_qconfig = QConfig(
+            activation=PlaceholderObserver.with_args(
+                dtype=torch.float, custom_op_name="embedding_bag_4bit"
+            ),
+            weight=PlaceholderObserver.with_args(
+                custom_op_name="embedding_bag_4bit"
+            ),
+        )
+        int8_qconfig = QConfig(
+            activation=PlaceholderObserver.with_args(
+                dtype=torch.float, custom_op_name="embedding_bag_byte"
+            ),
+            weight=PlaceholderObserver.with_args(
+                custom_op_name="embedding_bag_byte"
+            ),
+        )
+
+        error_msg = r'Expected aten::embedding_bag padding_idx input to be None'
+        for trace, qconfig in itertools.product([True, False], [int4_qconfig, int8_qconfig]):
+            if trace:
+                m = torch.jit.trace(module, dummy_inputs)
+            else:
+                m = torch.jit.script(module)
+            m = prepare_jit(m, {"embedding": qconfig})
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                m = convert_jit(m)
+
 
 class TestQuantizeJit(QuantizationTestCase):
     @override_qengines
