@@ -34,6 +34,7 @@ list(APPEND Caffe2_CPU_SRCS
   utils/proto_utils.cc
   utils/proto_wrap.cc
   utils/threadpool/ThreadPool.cc
+  utils/signal_handler.cc
   utils/smart_tensor_printer.cc
   utils/string_utils.cc)
 

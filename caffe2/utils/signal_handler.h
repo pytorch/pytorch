@@ -19,6 +19,6 @@ class TORCH_API C2FatalSignalHandler : public c10::FatalSignalHandler {
 // to being off.
 TORCH_API void setPrintStackTracesOnFatalSignal(bool print);
 TORCH_API bool printStackTracesOnFatalSignal();
-#endif // defined(C10_SUPPORTS_SIGNAL_HANDLER)
+#endif // defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLER)
 
 } // namespace caffe2

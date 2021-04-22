@@ -208,7 +208,17 @@ void initJITBindings(PyObject* module) {
             return paramsDict;
           },
           pybind11::return_value_policy::move)
-      .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
+      .def(
+          "_jit_pass_onnx_scalar_type_analysis",
+          [](std::shared_ptr<Graph>& graph,
+             bool lowprecision_cast,
+             int opset_version) {
+            return ScalarTypeAnalysisForONNX(
+                graph, lowprecision_cast, opset_version);
+          },
+          py::arg("graph"),
+          py::arg("lowprecision_cast") = true,
+          py::arg("opset_version"))
       .def(
           "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def(
@@ -1359,10 +1369,12 @@ void initJITBindings(PyObject* module) {
     toIValue(std::move(obj), type);
   });
 
+#if defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
   m.def("set_print_stack_traces_on_fatal_signal", [](bool print) {
     c10::FatalSignalHandler::getInstance().setPrintStackTracesOnFatalSignal(
         print);
   });
+#endif // defined(C10_SUPPORTS_SIGNAL_HANDLER)
 
   initPythonCustomClassBindings(module);
   initPythonIRBindings(module);
