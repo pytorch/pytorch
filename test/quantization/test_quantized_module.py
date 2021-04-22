@@ -31,6 +31,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
+import copy
 import io
 import numpy as np
 import itertools
@@ -328,6 +329,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             np.testing.assert_array_almost_equal(
                 Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
 
+        # Test serialization
         b = io.BytesIO()
         torch.save(qconv_module, b)
         b.seek(0)
@@ -337,6 +339,27 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(loaded_conv.scale, qconv_module.scale)
         self.assertEqual(loaded_conv.zero_point,
                          qconv_module.zero_point)
+
+        # Test copy and deepcopy
+        copied_conv = copy.copy(qconv_module)
+        self.assertEqual(copied_conv.bias(), qconv_module.bias())
+        self.assertEqual(copied_conv.scale, qconv_module.scale)
+        self.assertEqual(copied_conv.zero_point,
+                         qconv_module.zero_point)
+        Y_copied = copied_conv(X_q)
+        if not is_reference:
+            np.testing.assert_array_almost_equal(
+                Y_exp.int_repr().numpy(), Y_copied.int_repr().numpy(), decimal=0)
+
+        deepcopied_conv = copy.deepcopy(qconv_module)
+        self.assertEqual(deepcopied_conv.bias(), qconv_module.bias())
+        self.assertEqual(deepcopied_conv.scale, qconv_module.scale)
+        self.assertEqual(deepcopied_conv.zero_point,
+                         qconv_module.zero_point)
+        Y_deepcopied = copied_conv(X_q)
+        if not is_reference:
+            np.testing.assert_array_almost_equal(
+                Y_exp.int_repr().numpy(), Y_deepcopied.int_repr().numpy(), decimal=0)
 
         # JIT testing
         self.checkScriptable(
