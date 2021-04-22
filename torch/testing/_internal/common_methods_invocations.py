@@ -770,6 +770,33 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
 
     return tuple(sample_inputs)
 
+def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
+    test_cases = [((S, S, M), (S, S, S), (S, S, M), 1, 1, False),
+                  ((1,), (S, S, S), (S, S, M), 1, 1, True),
+                  ((S, S, M), (S, S, S), (S, S, M), 0.6, 0.2, False),
+                  ((1,), (S, S, S), (S, S, M), 0.6, 0.2, True),
+                  ((), (S, S, S), (S, S, M), 1, 1, True),
+                  ((), (S, S, S), (S, S, M), 0.6, 0.2, True),
+                  ]
+    sample_inputs = []
+    for (input_shape, batch1_shape, batch2_shape, alpha, beta, broadcasts_input) in test_cases:
+        args = (make_tensor(input_shape, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor(batch1_shape, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor(batch2_shape, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad))
+        sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]),
+                             kwargs=dict(beta=beta, alpha=alpha), broadcasts_input=broadcasts_input))
+        if dtype.is_complex:
+            sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]),
+                                             kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),
+                                             broadcasts_input=broadcasts_input))
+    return tuple(sample_inputs)
+
 def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
     input1 = SampleInput(
         make_tensor((S, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -2782,6 +2809,49 @@ def sample_inputs_inner(self, device, dtype, requires_grad, **kwargs):
         ),
     )
 
+# Tests for scatter when passing the reduce argument are missing
+# Reference: https://github.com/pytorch/pytorch/issues/56464
+def sample_inputs_scatter(op_info, device, dtype, requires_grad):
+    def _tensor(shape, dtype=dtype, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    def _gather(shape, index_dim, max_indices):
+        return gather_variable(shape, index_dim, max_indices, device=device)
+
+    zero = torch.tensor(0, dtype=torch.long, device=device)
+    test_cases = (
+        (_tensor((M, S)), (0, _gather((S, S), 1, M), _tensor((S, S)))),
+        (_tensor((M, S)), (1, _gather((S, S), 0, S), _tensor((S, S)))),
+        (_tensor((M, S)), (-1, _gather((S, S), 0, S), _tensor((S, S)))),
+        (_tensor((M, S)), (0, _gather((M, S // 2), 1, M), _tensor((M, S // 2)))),
+        (_tensor((M, S)), (1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
+        (_tensor((M, S)), (-1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
+        (_tensor(()), (0, zero.clone().detach(), _tensor(()))),
+        (_tensor(()), (0, zero.clone().detach(), 2.5)),
+    )
+
+    return [SampleInput(tensor, args=args) for tensor, args in test_cases]
+
+def sample_inputs_scatter_add(op_info, device, dtype, requires_grad):
+    def _tensor(shape, dtype=dtype, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    def _gather(shape, index_dim, max_indices):
+        return gather_variable(shape, index_dim, max_indices, device=device)
+
+    zero = torch.tensor(0, dtype=torch.long, device=device)
+    test_cases = (
+        (_tensor((M, S)), (0, _gather((S, S), 1, M), _tensor((S, S)))),
+        (_tensor((M, S)), (1, _gather((S, S), 0, S), _tensor((S, S)))),
+        (_tensor((M, S)), (-1, _gather((S, S), 0, S), _tensor((S, S)))),
+        (_tensor((M, S)), (0, _gather((M, S // 2), 1, M), _tensor((M, S // 2)))),
+        (_tensor((M, S)), (1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
+        (_tensor((M, S)), (-1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))),
+        (_tensor(()), (0, zero.clone().detach(), _tensor(()))),
+    )
+
+    return [SampleInput(tensor, args=args) for tensor, args in test_cases]
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('exp'),
     ForeachUnaryFuncInfo('acos'),
@@ -3098,6 +3168,20 @@ op_db: List[OpInfo] = [
                SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16, ),
                         device_type='cuda', active_if=not SM53OrLater)),
            sample_inputs_func=sample_inputs_addbmm),
+    OpInfo('baddbmm',
+           dtypes=floating_types_and(torch.half),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
+                                           *[torch.bfloat16] if CUDA11OrLater else []),
+           skips=(
+               # baddbmm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16, ),
+                        device_type='cuda', active_if=not SM53OrLater)),
+           sample_inputs_func=sample_inputs_baddbmm),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
@@ -4777,6 +4861,16 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            check_batched_grad=False,  # vmap complains of the sizes
            sample_inputs_func=sample_inputs_take),
+    OpInfo('scatter',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_scatter,
+           supports_out=False),
+    OpInfo('scatter_add',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_scatter_add,
+           supports_out=False),
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
@@ -5359,14 +5453,6 @@ def method_tests():
         ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs_coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs', (True, ['aten::add', 'aten::mm'])),
         ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs_coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('baddbmm', (S, S, M), ((S, S, S), (S, S, M)),),
-        ('baddbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs'),
-        ('baddbmm', (S, S, M), ((S, S, S), (S, S, M)), 'coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('baddbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs_coef', (),
-         (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('baddbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs'),
-        ('baddbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs_coef', (), (), (), ident,
-         {'beta': 0.2, 'alpha': 0.6}),
         ('mvlgamma', torch.empty(S,).uniform_(0.5, 1), [1], "p=1"),
         ('mvlgamma', torch.empty(S,).uniform_(1, 2), [2], "p=2"),
         ('mvlgamma', torch.empty(S, S).uniform_(1.5, 3), [3], "p=3"),
@@ -5476,15 +5562,6 @@ def method_tests():
         ('tensor_split', (S, S, S), (3, 1), 'sections_dim', (False,), [1]),
         ('tensor_split', (S, S, S), ([2, 4],), 'indices', (False,)),
         ('tensor_split', (S, S, S), ([2, 4], 1), 'indices_dim', (False,), [1]),
-        ('scatter', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', (), [0]),
-        ('scatter', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', (), [0]),
-        ('scatter', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalartensor_all_dim0', (), [0]),
-        ('scatter', (), (0, torch.tensor(0, dtype=torch.int64), 2.5), 'scalar_all_dim0', (), [0]),
-        ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', (), [0]),
-        ('scatter_add', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', (), [0]),
-        ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', (), [0]),
-        ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'alert_nondeterministic', (), [0],
-            [expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')]),
         ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
         ('resize_', (), (dont_convert(()),), 'scalar'),
         ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
@@ -5701,7 +5778,6 @@ EXCLUDE_FUNCTIONAL = {
     'addmm',
     'addmm_',
     'addbmm',
-    'baddbmm',
     'addmv',
     'addmv_',
     'addr',
