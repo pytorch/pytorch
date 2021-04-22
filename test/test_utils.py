@@ -422,7 +422,7 @@ test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 class TestFFI(TestCase):
     def test_deprecated(self):
         with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension  # type: ignore  # noqa: F401
+            from torch.utils.ffi import create_extension  # type: ignore[attr-defined] # noqa: F401
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
@@ -706,6 +706,13 @@ class TestHub(TestCase):
             self.assertTrue(os.path.exists(os.path.join(dirname, 'checkpoints', file_name)))
             self.assertEqual(sum_of_state_dict(loaded_state),
                              SUM_OF_HUB_EXAMPLE)
+
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_commit_from_forked_repo(self):
+        with self.assertRaisesRegex(
+                ValueError,
+                'If it\'s a commit from a forked repo'):
+            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
