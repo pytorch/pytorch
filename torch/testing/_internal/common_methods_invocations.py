@@ -605,21 +605,21 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
     scalar = 1 if dtype is torch.bool else scalar
     tests_list = [
-        ((S, S, S), (S, S, S), kwargs.get("alpha", 1), kwargs.get("beta", 1), False),
-        ((S, S, S), (S, S), kwargs.get("alpha", 1), kwargs.get("beta", 1), False),
-        ((), (), kwargs.get("alpha", 1), kwargs.get("beta", 1), False),
-        ((S, S, S), (), kwargs.get("alpha", 1), kwargs.get("beta", 1), False),
-        ((S, S, S), scalar, kwargs.get("alpha", 1), kwargs.get("beta", 1), False),
-        ((), scalar, kwargs.get("alpha", 1), kwargs.get("beta", 1), False)
+        ((S, S, S), (S, S, S), False),
+        ((S, S, S), (S, S), False),
+        ((), (), False),
+        ((S, S, S), (), False),
+        ((S, S, S), scalar, False),
+        ((), scalar, False)
     ]
     tests_with_lhs_broadcasting = [
-        ((S, S), (S, S, S), kwargs.get("alpha", 1), kwargs.get("beta", 1), True),
-        ((), (S, S, S), kwargs.get("alpha", 1), kwargs.get("beta", 1), True),
-        ((S, 1, S), (M, S), kwargs.get("alpha", 1), kwargs.get("beta", 1), True),
+        ((S, S), (S, S, S), True),
+        ((), (S, S, S), True),
+        ((S, 1, S), (M, S), True),
     ]
     test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
     samples = []
-    for first_shape, shape_or_scalar, alpha, beta, broadcasts_input in test_cases:
+    for first_shape, shape_or_scalar, broadcasts_input in test_cases:
         arg = shape_or_scalar
         if isinstance(shape_or_scalar, tuple):
             arg = make_tensor(shape_or_scalar, device=device, dtype=dtype,
@@ -627,7 +627,6 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
         samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
                                                requires_grad=requires_grad),
                                    args=(arg,),
-                                   kwargs=dict(alpha=alpha, beta=beta),
                                    broadcasts_input=broadcasts_input))
     return tuple(samples)
 
