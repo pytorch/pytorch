@@ -70,6 +70,11 @@ void MPSImageWrapper::copyFromTexture(MPSImage* image) {
   }
 }
 
+void MPSImageWrapper::setTexture(MPSImage* image) {
+    TORCH_CHECK(image);
+    _image = image;
+}
+
 void MPSImageWrapper::synchronize() {
   if ([_image isTemporaryImage]) {
     _image =
