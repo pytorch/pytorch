@@ -20,7 +20,8 @@ from torch.distributed.elastic.agent.server.api import (
     WorkerState,
 )
 from torch.distributed.elastic.metrics.api import prof
-from torch.distributed.elastic.multiprocessing import start_processes
+from torch.distributed.elastic.multiprocessing import start_processes, PContext
+from torch.distributed.elastic.utils import macros
 
 
 log = logging.getLogger(__name__)
@@ -104,7 +105,7 @@ class LocalElasticAgent(SimpleElasticAgent):
     ):
         super().__init__(spec, exit_barrier_timeout)
         self._start_method = start_method
-        self._pcontext = None
+        self._pcontext: Optional[PContext] = None
         rdzv_run_id = spec.rdzv_handler.get_run_id()
         self._log_dir = self._make_log_dir(log_dir, rdzv_run_id)
 
@@ -127,8 +128,11 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _start_workers(self, worker_group: WorkerGroup) -> Dict[int, Any]:
         spec = worker_group.spec
         store = worker_group.store
+        assert store is not None
         master_addr, master_port = super()._get_master_addr_port(store)
         restart_count = spec.max_restarts - self._remaining_restarts
+
+        use_agent_store = spec.rdzv_handler.get_backend() == "static"
 
         args: Dict[int, Tuple] = {}
         envs: Dict[int, Dict[str, str]] = {}
@@ -142,18 +146,22 @@ class LocalElasticAgent(SimpleElasticAgent):
                 "ROLE_NAME": spec.role,
                 "LOCAL_WORLD_SIZE": str(spec.local_world_size),
                 "WORLD_SIZE": str(worker.world_size),
+                "GROUP_WORLD_SIZE": str(worker_group.group_world_size),
                 "ROLE_WORLD_SIZE": str(worker.role_world_size),
                 "MASTER_ADDR": master_addr,
                 "MASTER_PORT": str(master_port),
                 "TORCHELASTIC_RESTART_COUNT": str(restart_count),
                 "TORCHELASTIC_MAX_RESTARTS": str(spec.max_restarts),
                 "TORCHELASTIC_RUN_ID": spec.rdzv_handler.get_run_id(),
+                "TORCHELASTIC_USE_AGENT_STORE": str(use_agent_store),
                 "NCCL_ASYNC_ERROR_HANDLING": str(1),
             }
             if "OMP_NUM_THREADS" in os.environ:
                 worker_env["OMP_NUM_THREADS"] = os.environ["OMP_NUM_THREADS"]
             envs[local_rank] = worker_env
-            args[local_rank] = spec.args
+            worker_args = list(spec.args)
+            worker_args = macros.substitute(worker_args, str(local_rank))
+            args[local_rank] = tuple(worker_args)
 
         # scaling events do not count towards restarts (gets same attempt #)
         # remove existing log dir if this restart is due to a scaling event
@@ -161,6 +169,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         shutil.rmtree(attempt_log_dir, ignore_errors=True)
         os.makedirs(attempt_log_dir)
 
+        assert spec.entrypoint is not None
         self._pcontext = start_processes(
             name=spec.role,
             entrypoint=spec.entrypoint,
@@ -184,6 +193,7 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _monitor_workers(self, worker_group: WorkerGroup) -> RunResult:
         role = worker_group.spec.role
         worker_pids = {w.id for w in worker_group.workers}
+        assert self._pcontext is not None
         pc_pids = set(self._pcontext.pids().values())
         if worker_pids != pc_pids:
             log.error(

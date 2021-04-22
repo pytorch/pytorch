@@ -3,7 +3,7 @@ from typing import Any, Optional, overload, Union, TypeVar, Tuple, Sequence
 from torch import Tensor
 from torch.types import _dtype, _device
 
-PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
+PackedSequence_ = namedtuple('PackedSequence_', ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
 
 
 def bind(optional: Any, fn: Any): ...

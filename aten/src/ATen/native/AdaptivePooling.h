@@ -10,7 +10,7 @@ using adaptive_avg_pooling_backward_fn = void(*)(Tensor& grad_input, const Tenso
 DECLARE_DISPATCH(adaptive_avg_pooling_fn, adaptive_avg_pool2d_kernel);
 DECLARE_DISPATCH(adaptive_avg_pooling_backward_fn, adaptive_avg_pool2d_backward_kernel);
 
-using adaptive_max_pooling_fn = void(*)(Tensor& output, Tensor& indices, const Tensor& input, IntArrayRef output_size);
+using adaptive_max_pooling_fn = void(*)(const Tensor& output, const Tensor& indices, const Tensor& input, IntArrayRef output_size);
 using adaptive_max_pooling_backward_fn = void(*)(Tensor& grad_input, const Tensor& grad_output, const Tensor& indices);
 DECLARE_DISPATCH(adaptive_max_pooling_fn, adaptive_max_pool2d_kernel);
 DECLARE_DISPATCH(adaptive_max_pooling_backward_fn, adaptive_max_pool2d_backward_kernel);
