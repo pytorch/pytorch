@@ -566,7 +566,7 @@ struct CodeImpl {
     return instructions_;
   }
 
-  const std::unordered_map<std::string, int> op_to_num_specified_args() const {
+  const std::unordered_map<std::string, int>& op_to_num_specified_args() const {
     return op_to_num_specified_args_;
   }
 
@@ -1130,7 +1130,7 @@ struct MobileCodeImpl : CodeImpl {
   }
 
   int calculate_necessary_args(
-      std::vector<Argument> schema_args,
+      const std::vector<Argument>& schema_args,
       at::ArrayRef<Value*> actual_inputs) {
     AT_ASSERT(schema_args.size() == actual_inputs.size());
     // keeps track of trailing unnecessary args
@@ -1920,7 +1920,7 @@ const std::vector<Instruction>& Code::instructions() const {
   return pImpl->instructions();
 }
 
-const std::unordered_map<std::string, int> Code::op_to_num_specified_args()
+const std::unordered_map<std::string, int>& Code::op_to_num_specified_args()
     const {
   return pImpl->op_to_num_specified_args();
 }
