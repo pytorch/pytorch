@@ -1607,8 +1607,11 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         ExtraFilesMap extra_files_map = extra_files_from_python(extra_files);
-        auto ret = import_ir_module(
+        auto ret = ([&]() {
+          pybind11::gil_scoped_release no_gil;
+          return import_ir_module(
             std::move(cu), filename, optional_device, extra_files_map);
+        })();
         extra_files_to_python(extra_files_map, extra_files);
         return ret;
       });
@@ -1626,8 +1629,11 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         ExtraFilesMap extra_files_map = extra_files_from_python(extra_files);
-        auto ret = import_ir_module(
-            std::move(cu), in, optional_device, extra_files_map);
+        auto ret = ([&]() {
+          pybind11::gil_scoped_release no_gil;
+            return import_ir_module(
+              std::move(cu), in, optional_device, extra_files_map);
+        })();
         extra_files_to_python(extra_files_map, extra_files);
         return ret;
       });
