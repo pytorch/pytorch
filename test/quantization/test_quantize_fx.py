@@ -2899,7 +2899,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         data = (torch.randn(1, 2, 5, 5, dtype=torch.float),
                 torch.randn(1, 2, 5, 5, dtype=torch.float))
-        quantized_node = ns.call_function(torch.ops.quantized.cat)
+        quantized_node = ns.call_function(torch.cat)
         for quant_type in self.static_quant_types:
             self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node)
             self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node)
@@ -2912,7 +2912,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         all_observers = len(dict(m.named_modules(remove_duplicate=False)))
         distinct_observers = len(dict(m.named_modules()))
         self.assertEqual(all_observers, distinct_observers + 2)
-
+        # make sure the converted model runs
+        m = convert_fx(m)
+        m(*data)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm(self):
@@ -3667,7 +3669,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_function(torch.ops.quantized.mul),
                 ns.call_function(torch.ops.quantized.mul),
                 ns.call_function(torch.ops.quantized.add_relu),
-                ns.call_function(torch.ops.quantized.cat),
+                ns.call_function(torch.cat),
                 ns.call_method('dequantize')
             ]
             m = convert_fx(m)

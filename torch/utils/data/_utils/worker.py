@@ -25,7 +25,7 @@ if IS_WINDOWS:
             self.manager_pid = os.getppid()
 
             # mypy cannot detect this code is windows only
-            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)  # type: ignore
+            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)  # type: ignore[attr-defined]
             self.kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
             self.kernel32.OpenProcess.restype = HANDLE
             self.kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
@@ -36,7 +36,7 @@ if IS_WINDOWS:
             self.manager_handle = self.kernel32.OpenProcess(SYNCHRONIZE, 0, self.manager_pid)
 
             if not self.manager_handle:
-                raise ctypes.WinError(ctypes.get_last_error())  # type: ignore
+                raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
 
             self.manager_dead = False
 
