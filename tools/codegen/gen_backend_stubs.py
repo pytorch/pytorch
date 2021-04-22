@@ -69,7 +69,8 @@ Only the following keys are supported: {", ".join(valid_keys)}'
         else:
             assert_never(g)
     for op_name in metadata.keys():
-        assert op_name in native_functions_map, f"Found an invalid operator name: {op_name}"
+        assert op_name in native_functions_map, f"Found an invalid operator name: {op_name}. \
+For the list of valid operator names, see https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/native_functions.yaml"
     return cpp_namespace, [native_to_external(g) for g in grouped_native_functions]
 
 def main() -> None:
@@ -84,18 +85,22 @@ def main() -> None:
         '--dry_run', type=bool, default=False, help='output directory')
     options = parser.parse_args()
 
+    run(options.source_yaml, options.output_dir, options.dry_run)
+
+def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
+
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
     template_dir = os.path.join(pytorch_root, "aten/src/ATen/templates")
 
     def make_file_manager(install_dir: str) -> FileManager:
-        return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run)
+        return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=dry_run)
 
-    fm = make_file_manager(options.output_dir)
+    fm = make_file_manager(output_dir)
 
     native_yaml_path = os.path.join(pytorch_root, 'aten/src/ATen/native/native_functions.yaml')
     grouped_native_functions = get_grouped_native_functions(native_yaml_path)
-    cpp_namespace, external_backend_functions = parse_backend_yaml(options.source_yaml, grouped_native_functions)
+    cpp_namespace, external_backend_functions = parse_backend_yaml(source_yaml, grouped_native_functions)
 
     native_functions = parse_native_yaml(native_yaml_path)
 
