@@ -102,19 +102,17 @@ class ProcessGroupGloo : public ProcessGroup {
       store_->set(key, value);
     }
 
-    void set(const std::string& key, const std::vector<char>& value) override {
+    void set(const std::string& key, const std::vector<uint8_t>& value) override {
       std::vector<uint8_t> tmp(value.begin(), value.end());
       store_->set(key, tmp);
     }
 
     std::vector<uint8_t> getUint(const std::string& key) {
-      auto value = store_->get(key);
-      return value;
+      return store_->get(key);
     }
 
-    std::vector<char> get(const std::string& key) override {
-      auto value = store_->get(key);
-      return std::vector<char>(value.begin(), value.end());
+    std::vector<uin8_t> get(const std::string& key) override {
+      return store_->get(key);
     }
 
     void wait(const std::vector<std::string>& keys) override {
