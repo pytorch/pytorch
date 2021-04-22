@@ -40,6 +40,8 @@ set +e
 
 ./setup.exe -s ${cuda_install_packages} -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
 
+sleep 120
+
 set -e
 
 if [[ "${VC_YEAR}" == "2017" ]]; then
