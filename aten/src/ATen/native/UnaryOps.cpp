@@ -55,6 +55,7 @@ CREATE_UNARY_FLOAT_META_FUNC(log10)
 CREATE_UNARY_FLOAT_META_FUNC(log1p)
 CREATE_UNARY_FLOAT_META_FUNC(log2)
 CREATE_UNARY_FLOAT_META_FUNC(reciprocal)
+CREATE_UNARY_FLOAT_META_FUNC(rsqrt)
 CREATE_UNARY_FLOAT_META_FUNC(sigmoid)
 CREATE_UNARY_FLOAT_META_FUNC(sin)
 CREATE_UNARY_FLOAT_META_FUNC(sinc)
@@ -64,6 +65,16 @@ CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
+
+// These are normal unary ops that preserve dtype
+#define CREATE_UNARY_META_FUNC(func)                  \
+  TORCH_META_FUNC(func) (const Tensor& self) {        \
+    build_unary_op(maybe_get_output(), self);   \
+  }
+CREATE_UNARY_META_FUNC(bitwise_not)
+CREATE_UNARY_META_FUNC(frac)
+CREATE_UNARY_META_FUNC(i0)
+CREATE_UNARY_META_FUNC(round)
 
 } // namespace meta
 
@@ -84,6 +95,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(asin)
 CREATE_UNARY_TORCH_IMPL_FUNC(asinh)
 CREATE_UNARY_TORCH_IMPL_FUNC(atan)
 CREATE_UNARY_TORCH_IMPL_FUNC(atanh)
+CREATE_UNARY_TORCH_IMPL_FUNC(bitwise_not)
 CREATE_UNARY_TORCH_IMPL_FUNC(cos)
 CREATE_UNARY_TORCH_IMPL_FUNC(cosh)
 CREATE_UNARY_TORCH_IMPL_FUNC(digamma)
@@ -93,12 +105,16 @@ CREATE_UNARY_TORCH_IMPL_FUNC(erfinv)
 CREATE_UNARY_TORCH_IMPL_FUNC(exp)
 CREATE_UNARY_TORCH_IMPL_FUNC(exp2)
 CREATE_UNARY_TORCH_IMPL_FUNC(expm1)
+CREATE_UNARY_TORCH_IMPL_FUNC(frac)
+CREATE_UNARY_TORCH_IMPL_FUNC(i0)
 CREATE_UNARY_TORCH_IMPL_FUNC(lgamma)
 CREATE_UNARY_TORCH_IMPL_FUNC(log)
 CREATE_UNARY_TORCH_IMPL_FUNC(log10)
 CREATE_UNARY_TORCH_IMPL_FUNC(log1p)
 CREATE_UNARY_TORCH_IMPL_FUNC(log2)
 CREATE_UNARY_TORCH_IMPL_FUNC(reciprocal)
+CREATE_UNARY_TORCH_IMPL_FUNC(round)
+CREATE_UNARY_TORCH_IMPL_FUNC(rsqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(sigmoid)
 CREATE_UNARY_TORCH_IMPL_FUNC(sin)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
@@ -315,10 +331,6 @@ Tensor conj(const Tensor& self) {
   return at::_conj(self);
 }
 
-Tensor& bitwise_not_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, bitwise_not_stub); }
-Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
-Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
-
 Tensor& ceil_out(const Tensor& self, Tensor& result) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
@@ -349,10 +361,6 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
-Tensor& frac_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, frac_stub); }
-Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
-Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
-
 Tensor& floor_out(const Tensor& self, Tensor& result) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
@@ -362,22 +370,6 @@ Tensor& floor_out(const Tensor& self, Tensor& result) {
 }
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
-
-Tensor& i0_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, i0_stub); }
-Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
-Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
-
-Tensor& round_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, round_stub); }
-Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
-Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
-
-Tensor& rsqrt_out(const Tensor& self, Tensor& result) {
-  return unary_op_impl_float_out(result, self, rsqrt_stub);
-}
-Tensor rsqrt(const Tensor& self) {
-  return unary_op_impl_float(self, rsqrt_stub);
-}
-Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 
 Tensor& sign_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(!self.is_complex(),
