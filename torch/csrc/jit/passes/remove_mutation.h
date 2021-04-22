@@ -14,7 +14,6 @@ struct MutationRemover {
       std::shared_ptr<Graph> graph,
       c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt)
       : aliasDb_(nullptr), graph_(std::move(graph)) {
-    aliasDb_ = torch::make_unique<AliasDb>(graph_);
     mutation_filter_ = mutation_filter;
   }
 
@@ -63,8 +62,8 @@ struct MutationRemover {
       return false;
     }
     auto inputs = n->inputs();
-    if (!aliasDb_->writesToAlias(n, {inputs.at(0)}) ||
-        aliasDb_->writesToAlias(
+    if (!getOrCreateAliasDb()->writesToAlias(n, {inputs.at(0)}) ||
+        getOrCreateAliasDb()->writesToAlias(
             n, {inputs.slice(1).begin(), inputs.slice(1).end()})) {
       return false;
     }
@@ -87,6 +86,13 @@ struct MutationRemover {
   bool RemoveListMutation(Block* block);
   // return true if graph is modified
   bool RemoveTensorMutation(Block* block);
+
+  AliasDb* getOrCreateAliasDb() {
+    if (!aliasDb_) {
+      aliasDb_ = std::make_unique<AliasDb>(graph_);
+    }
+    return aliasDb_.get();
+  }
 
   c10::optional<std::function<bool(Node*)>> mutation_filter_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
