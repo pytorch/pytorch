@@ -434,6 +434,11 @@ Tensor take(const Tensor& self, const Tensor& index) {
 }
 
 Tensor & index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate) {
+  if (!accumulate) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("index_put_ with accumulate=False");
+  }
   return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 
@@ -967,6 +972,14 @@ Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool spars
 Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
+  }
+  if (globalContext().deterministicAlgorithms() && index.dim() == 1 && self.dim() == 1){
+    TORCH_CHECK(index.numel() == grad.numel(), "index and grad should have same number of elements, "
+      "but got ", index.numel(), " versus ", grad.numel());
+    torch::List<c10::optional<Tensor>> indices;
+    indices.reserve(1);
+    indices.push_back(index);
+    return at::zeros(self.sizes(), grad.options()).index_put_(indices, grad, true);
   }
   return at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad);
 }

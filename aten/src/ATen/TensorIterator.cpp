@@ -390,6 +390,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
         op.target_dtype = common_dtype_;
       }
     }
+    common_device_ = common_device;
   }
 }
 
@@ -1230,6 +1231,10 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   if (is_meta_) return;
 
+  // XLA tensors don't have storage, so they don't have an underlying data pointer.
+  // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
+  if (common_device_.type() == DeviceType::XLA) return;
+
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
     op.data = op.tensor.data_ptr();
@@ -1298,12 +1303,7 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
       // for the is_meta_ test.
       TORCH_INTERNAL_ASSERT(op.original_tensor.is_same(t));
       TORCH_INTERNAL_ASSERT(!op.tensor.is_same(t));
-      // fastpath CPU to skip a dispatcher trip
-      if (op.tensor.is_cpu()) {
-        at::native::resize_output_cpu(op.tensor, sizes);
-      } else {
-        at::native::resize_output(op.tensor, sizes);
-      }
+      at::native::resize_output(op.tensor, sizes);
       if (!strides.empty()) {
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
         op.tensor.as_strided_(sizes, strides);
@@ -1329,12 +1329,7 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
       }
       op.current_dtype = op.target_dtype;
   } else if (op.will_resize) {
-      // fastpath CPU to skip a dispatcher trip
-      if (op.tensor.is_cpu()) {
-        at::native::resize_output_cpu(op.tensor, sizes);
-      } else {
-        at::native::resize_output(op.tensor, sizes);
-      }
+      at::native::resize_output(op.tensor, sizes);
       if (!strides.empty()) {
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
         op.tensor.as_strided_(sizes, strides);

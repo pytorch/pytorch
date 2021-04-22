@@ -376,7 +376,7 @@ class StreamContext(object):
 
 def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ignore
     r"""Wrapper around the Context-manager StreamContext that
-        selects a given stream.
+    selects a given stream.
 
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
@@ -491,10 +491,10 @@ def current_blas_handle():
     return torch._C._cuda_getCurrentBlasHandle()
 
 
-from .memory import *
+from .memory import *  # noqa: F403
 
 
-from .random import *
+from .random import *  # noqa: F403
 
 ################################################################################
 # Define Storage and Tensor classes

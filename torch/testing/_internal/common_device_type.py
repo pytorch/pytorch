@@ -432,10 +432,10 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     intersect = set(except_for if except_for else []) & set(only_for if only_for else [])
     assert not intersect, f"device ({intersect}) appeared in both except_for and only_for"
 
-    if except_for is not None:
+    if except_for:
         device_type_test_bases = filter(
             lambda x: x.device_type not in except_for, device_type_test_bases)
-    if only_for is not None:
+    if only_for:
         device_type_test_bases = filter(
             lambda x: x.device_type in only_for, device_type_test_bases)
 
@@ -468,6 +468,9 @@ if _TORCH_TEST_DEVICES:
 
 PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 
+PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY = 'PYTORCH_TESTING_DEVICE_ONLY_FOR'
+PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
+
 
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
@@ -490,7 +493,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     # Acquires members names
     # See Note [Overriding methods in generic tests]
     generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
-    generic_tests = [x for x in generic_members if x.startswith('test')]\
+    generic_tests = [x for x in generic_members if x.startswith('test')]
 
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(device_type_test_bases,
@@ -503,8 +506,8 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     # Usage:
     # export PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda,cpu
     # export PYTORCH_TESTING_DEVICE_EXCEPT_FOR=xla
-    env_only_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_ONLY_FOR", ''))
-    env_except_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_EXCEPT_FOR", ''))
+    env_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, ''))
+    env_except_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, ''))
 
     desired_device_type_test_bases = filter_desired_device_types(desired_device_type_test_bases,
                                                                  env_except_for, env_only_for)
