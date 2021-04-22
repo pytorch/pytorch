@@ -75,19 +75,15 @@ std::string formatSetOfDevices(const std::vector<c10::DeviceIndex>& devices) {
 }
 
 // We need devices to be sorted in order to use set_difference.
-c10::optional<std::vector<c10::DeviceIndex>> sortDevices(
-    c10::optional<std::vector<c10::DeviceIndex>> devices) {
-  if (devices.has_value()) {
-    std::sort(devices->begin(), devices->end());
-  }
+std::vector<c10::DeviceIndex> sortDevices(
+    std::vector<c10::DeviceIndex> devices) {
+  std::sort(devices.begin(), devices.end());
   return devices;
 }
 
 } // namespace
 
-CUDAFuture::CUDAFuture(
-    at::TypePtr type,
-    c10::optional<std::vector<c10::DeviceIndex>> devices)
+CUDAFuture::CUDAFuture(at::TypePtr type, std::vector<c10::DeviceIndex> devices)
     : at::ivalue::Future(std::move(type)),
       devices_(sortDevices(std::move(devices))) {
   // Use current device to initialize currentDevice_. This is necessary
@@ -119,21 +115,19 @@ void CUDAFuture::preMarkCompletedHook(
       dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
   std::vector<c10::DeviceIndex> usedDevices =
       getDevicesOfDataPtrs(actualDataPtrs);
-  if (devices_.has_value()) {
-    std::vector<c10::DeviceIndex> excessDevices;
-    std::set_difference(
-        usedDevices.begin(),
-        usedDevices.end(),
-        devices_->begin(),
-        devices_->end(),
-        std::back_inserter(excessDevices));
-    TORCH_CHECK_VALUE(
-        excessDevices.empty(),
-        "The result contained tensors residing on device(s) ",
-        formatSetOfDevices(excessDevices),
-        " which are not among the expected device(s) ",
-        formatSetOfDevices(*devices_));
-  }
+  std::vector<c10::DeviceIndex> excessDevices;
+  std::set_difference(
+      usedDevices.begin(),
+      usedDevices.end(),
+      devices_.begin(),
+      devices_.end(),
+      std::back_inserter(excessDevices));
+  TORCH_CHECK_VALUE(
+      excessDevices.empty(),
+      "The result contained tensors residing on device(s) ",
+      formatSetOfDevices(excessDevices),
+      " which are not among the expected device(s) ",
+      formatSetOfDevices(devices_));
 
   currentDevice_ = c10::cuda::current_device();
 
@@ -150,30 +144,12 @@ void CUDAFuture::preMarkCompletedHook(
 std::function<void(void)> CUDAFuture::wrapCallback(
     std::function<void(void)> callback) {
   return [this, callback{std::move(callback)}]() {
-    // We'd love to get a stream for all devices, even those that are not used
-    // by the value, because the callback could use those other devices, but
-    // unfortunately this could cause a deadlock with NCCL. See
-    // https://github.com/pytorch/pytorch/pull/48500#issuecomment-735395414
-    // In general, if some devices haven't been used yet, by getting a stream
-    // for them we'd initialize them, and in addition to causing NCCL to
-    // misbehaving this also ends up using memory on those devices, which the
-    // user might not want.
     std::vector<at::cuda::CUDAStream> streams;
-    if (devices_.has_value()) {
-      for (const c10::DeviceIndex& idx : *devices_) {
-        // FIXME Should we find a way to allow to change the priority of
-        // streams?
-        streams.push_back(
-            at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
-      }
-    } else {
-      // FIXME Remove this branch when we make devices non-optional.
-      for (const at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
-        // FIXME Should we find a way to allow to change the priority of
-        // streams?
-        streams.push_back(at::cuda::getStreamFromPool(
-            /*isHighPriority=*/false, cudaEvent.device_index()));
-      }
+    for (const c10::DeviceIndex& idx : devices_) {
+      // FIXME Should we find a way to allow to change the priority of
+      // streams?
+      streams.push_back(
+          at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
     }
 
     // Use the dedicated callback stream to run callback.
