@@ -414,14 +414,6 @@ class ScriptModuleSerializer {
     }
   }
 
-  void useTensorsArchiveTable(bool enable) {
-    use_tensors_archive_table_ = enable;
-  }
-
-  void overwriteBytecodeVersion(const uint64_t bytecode_version) {
-    overwrite_bytecode_version_ = bytecode_version;
-  }
-
  private:
   void writeArchive(
       const std::string& archive_name,
@@ -708,17 +700,6 @@ void BackPortByteCode(
     bool save_mobile_debug_info) {
   const uint64_t output_bytecode_version = input_bytecode_version - 1;
   ScriptModuleSerializer serializer(filename);
-
-  if (output_bytecode_version == kBytecodeVersionV4) {
-    serializer.useTensorsArchiveTable(false);
-    serializer.overwriteBytecodeVersion(kBytecodeVersionV4);
-  } else {
-    TORCH_WARN(
-        "The input bytecode model version is ",
-        input_bytecode_version,
-        ". Currently only support backporting to version ",
-        kBytecodeVersionV4);
-  }
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
 }

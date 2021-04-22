@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -619,12 +620,17 @@ TEST(LiteInterpreterTest, BackPortByteCodeModel) {
   // Load check in model: sequence.ptl
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("test_backport_v5.ptl");
-  Module m = load(testModelFile);
-  std::string output_5 = "output_5.ptl";
-  m._backport_for_mobile(testModelFile, output_5);
-  mobile::Module m_5 = _load_for_mobile(output_5);
-  m_5.forward(std::vector<IValue>({IValue(1)}));
+  testModelFile.append("script_module_v5.ptl");
+  //  torch::jit::_backport_for_mobile(testModelFile);
+  //
+  torch::jit::_backport_for_mobile(
+      "/Users/chenlai/Documents/pytorch/data/prod_example.pkl");
+
+  //    Module m = load(testModelFile);
+  //  std::string output_5 = "output_5.ptl";
+  //  m._backport_for_mobile(testModelFile, output_5);
+  //  mobile::Module m_5 = _load_for_mobile(output_5);
+  //  m_5.forward(std::vector<IValue>({IValue(1)}));
   //  mobile::Module bc = _load_for_mobile(testModelFile);
 
   //  Module m =
