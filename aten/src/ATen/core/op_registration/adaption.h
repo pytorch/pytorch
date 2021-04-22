@@ -71,7 +71,7 @@ inline void check_or_update_common_device(optional<Device>& common_device, const
 
   // TODO: Remove this once TensorIterator can take care about device guard
   if (tensor.is_cpu() && tensor.dim() == 0) {
-    // CPU 0-dimenstion tensor is not considered as common device
+    // CPU Scalar is not considered for common device
     return;
   }
 
