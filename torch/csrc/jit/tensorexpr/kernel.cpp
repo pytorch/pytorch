@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
+#include <iostream>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -2313,6 +2314,30 @@ std::vector<VarHandle> squeezeIndices(
 
 } // namespace
 
+std::pair<ScalarType, std::vector<BufHandle>> processCatList(const std::vector<ArgValue>& inputList) {
+  if (inputList.size() == 0) {
+    throw std::runtime_error("Empty input list is passed to aten::cat");
+  }
+  std::vector<BufHandle> bufInputs;
+  std::vector<BufHandle> nonEmptyInputs;
+  for (auto input : inputList) {
+    auto buf = c10::get<BufHandle>(input);
+    bufInputs.push_back(buf);
+    assert(buf.node()->dims().size() > 0);
+    if (buf.node()->dims().size() == 1 && immediateAs<int>(buf.node()->dim(0)) == 0) {
+      continue;
+    }
+    nonEmptyInputs.push_back(buf);
+  }
+  auto maybe_dtype = bufInputs[0].dtype().scalar_type();
+  ScalarType highType = maybe_dtype;
+  for (const auto input : bufInputs) {
+    auto maybe_dtype = input.dtype().scalar_type();
+    highType = promoteTypes(highType, maybe_dtype);
+  }
+  return {highType, nonEmptyInputs};
+
+}
 Tensor* TensorExprKernel::computeCat(
     const std::vector<ArgValue>& inputList,
     const ArgValue& argDim,
@@ -2320,16 +2345,15 @@ Tensor* TensorExprKernel::computeCat(
   if (getCatWoConditionals()) {
     return computeCatWoConditionals(inputList, argDim, outputShape);
   }
+  auto inputs = processCatList(inputList);
+  ScalarType highType = inputs.first;
+  std::vector<BufHandle> nonEmptyInputs = inputs.second;
   return Compute(
       "aten_cat",
       c10::fmap<DimArg>(outputShape),
       [&](const std::vector<VarHandle>& axes) {
-        if (inputList.size() == 0) {
-          throw std::runtime_error("Empty input list is passed to aten::cat");
-        }
-        std::vector<BufHandle> bufInputs;
-        for (auto input : inputList) {
-          bufInputs.push_back(c10::get<BufHandle>(input));
+        if (nonEmptyInputs.size() == 0) {
+          return ExprHandle(0);
         }
 
         int64_t dim_ = c10::get<int64_t>(argDim);
@@ -2337,13 +2361,6 @@ Tensor* TensorExprKernel::computeCat(
         // Promote input types.
         // Note that we need to consider all inputs, including empty - they
         // also affect the resultant dtype.
-        auto to_buf = [](const ArgValue& x) { return c10::get<BufHandle>(x); };
-        auto maybe_dtype = to_buf(inputList[0]).dtype().scalar_type();
-        ScalarType highType = maybe_dtype;
-        for (const auto input : bufInputs) {
-          auto maybe_dtype = to_buf(input).dtype().scalar_type();
-          highType = promoteTypes(highType, maybe_dtype);
-        }
 
         // Now we know the final dtype, we know what inputs are non-empty,
         // and we know that there is at least one such an input. With all
@@ -2359,20 +2376,20 @@ Tensor* TensorExprKernel::computeCat(
         // where l_i is the corresponding size of the i-th input.
         std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
         ExprHandle load =
-            promoteToDtype(tensorOrConstant(inputList[0], newAxes), highType);
+            promoteToDtype(tensorOrConstant(nonEmptyInputs[0], newAxes), highType);
         size_t offset =
-            dynamic_cast<const IntImm*>(to_buf(inputList[0]).node()->dim(dim))
+            dynamic_cast<const IntImm*>(nonEmptyInputs[0].node()->dim(dim))
                 ->value();
         newAxes[dim] = newAxes[dim] - IntImm::make(offset);
 
-        for (size_t ii = 1; ii < inputList.size(); ++ii) {
-          auto input = inputList[ii];
+        for (size_t ii = 1; ii < nonEmptyInputs.size(); ++ii) {
+          auto input = nonEmptyInputs[ii];
           load = ifThenElse(
               CompareSelect::make(axes[dim], IntImm::make(offset), kLT),
               load,
               promoteToDtype(tensorOrConstant(input, newAxes), highType));
 
-          offset += dynamic_cast<const IntImm*>(to_buf(input).node()->dim(dim))
+          offset += dynamic_cast<const IntImm*>(input.node()->dim(dim))
                         ->value();
           newAxes[dim] = axes[dim] - IntImm::make(offset);
         }
@@ -2381,23 +2398,13 @@ Tensor* TensorExprKernel::computeCat(
       });
 }
 Tensor* TensorExprKernel::computeCatWoConditionals(
-    const std::vector<ArgValue>& inputList,
-    const ArgValue& argDim,
-    const std::vector<ExprHandle>& outputShape) {
-  if (inputList.size() == 0) {
-    throw std::runtime_error("Empty input list is passed to aten::cat");
-  }
+    const std::vector<ArgValue>& input_list,
+    const ArgValue& arg_dim,
+    const std::vector<ExprHandle>& output_shape) {
 
-  // Promote input types.
-  // Note that we need to consider all inputs, including empty - they
-  // also affect the resultant dtype.
-  auto to_buf = [](const ArgValue& x) { return c10::get<BufHandle>(x); };
-  auto maybe_dtype = to_buf(inputList[0]).dtype().scalar_type();
-  ScalarType highType = maybe_dtype;
-  for (const auto input : inputList) {
-    auto maybe_dtype = to_buf(input).dtype().scalar_type();
-    highType = promoteTypes(highType, maybe_dtype);
-  }
+  auto inputs = processCatList(input_list);
+  ScalarType high_type = inputs.first;
+  std::vector<BufHandle> non_empty_inputs = inputs.second;
 
   // Now we build one loop per input:
   //
@@ -2414,14 +2421,17 @@ Tensor* TensorExprKernel::computeCatWoConditionals(
   //     for k
   //       output[i,j+l2,k] = inp3[i,j,k]
 
-  auto output_sizes_expr = ExprHandleVectorToExprVector(outputShape);
-  auto output_buf = new Buf("aten_cat", output_sizes_expr, ToDtype(highType));
+  auto output_sizes_expr = ExprHandleVectorToExprVector(output_shape);
+  auto output_buf = new Buf("aten_cat", output_sizes_expr, ToDtype(high_type));
+  if (non_empty_inputs.size() == 0) {
+    return new Tensor(output_buf, new Block({}));
+  }
 
-  int64_t concat_dim = c10::get<int64_t>(argDim);
+  int64_t concat_dim = c10::get<int64_t>(arg_dim);
   size_t norm_concat_dim =
-      normalizeAndCheckIndex(concat_dim, outputShape.size());
+      normalizeAndCheckIndex(concat_dim, output_shape.size());
 
-  auto gen_code_for_input = [&](const ArgValue& inp,
+  auto gen_code_for_input = [&](const BufHandle& inp,
                                 size_t inp_pos,
                                 const Expr* concat_dim_size,
                                 const std::vector<ExprHandle>& dims) {
@@ -2438,9 +2448,9 @@ Tensor* TensorExprKernel::computeCatWoConditionals(
         store_indices[i] = for_vars[i];
       }
     }
-    auto inp_buf = to_buf(inp).node();
+    auto inp_buf = inp.node();
     auto load_expr = new Load(inp_buf, load_indices);
-    auto load_promoted = promoteToDtype(ExprHandle(load_expr), highType);
+    auto load_promoted = promoteToDtype(ExprHandle(load_expr), high_type);
     Stmt* st = new Store(output_buf, store_indices, load_promoted.node());
     for (size_t i = dims.size(); i > 0; --i) {
       st = new For(for_vars[i - 1], new IntImm(0), dims[i - 1].node(), st);
@@ -2450,14 +2460,14 @@ Tensor* TensorExprKernel::computeCatWoConditionals(
 
   Expr* concat_dim_size = nullptr;
   auto block = new Block({});
-  for (size_t i = 0; i < inputList.size(); ++i) {
+  for (size_t i = 0; i < non_empty_inputs.size(); ++i) {
     auto input_dims =
-        ExprVectorToExprHandleVector(to_buf(inputList[i]).node()->dims());
+        ExprVectorToExprHandleVector(non_empty_inputs[i].node()->dims());
     if (concat_dim_size == nullptr) {
       concat_dim_size = new IntImm(0);
     }
     block->append_stmt(
-        gen_code_for_input(inputList[i], i, concat_dim_size, input_dims));
+        gen_code_for_input(non_empty_inputs[i], i, concat_dim_size, input_dims));
     concat_dim_size =
         new Add(concat_dim_size, input_dims[norm_concat_dim].node());
   }
