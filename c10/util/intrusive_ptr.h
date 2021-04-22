@@ -239,6 +239,7 @@ class intrusive_ptr final {
     if (target_ != NullType::singleton() && detail::atomic_refcount_decrement(target_->refcount_) == 0) {
       // justification for const_cast: release_resources is basically a destructor
       // and a destructor always mutates the object, even for const objects.
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
       const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
 
       // See comment above about weakcount. As long as refcount>0,
@@ -442,9 +443,28 @@ class intrusive_ptr final {
   }
 
   /**
-   * Turn a **non-owning raw pointer** to an intrusive_ptr.
+   * Turn a new instance of TTarget (e.g., literally allocated
+   * using new TTarget(...) into an intrusive_ptr.  If possible,
+   * use intrusive_ptr::make instead which statically guarantees
+   * that the allocation was done properly.
    *
-   * This method is potentially dangerous (as it can mess up refcount).
+   * At the moment, the only reason this method exists is because
+   * pybind11 holder types expect to be able to allocate in
+   * this way (because pybind11 handles the new allocation itself).
+   */
+  static intrusive_ptr unsafe_steal_from_new(TTarget* raw_ptr) {
+    return intrusive_ptr(raw_ptr);
+  }
+
+  /**
+   * Turn a **non-owning raw pointer** to an intrusive_ptr.  It is
+   * the moral equivalent of enable_shared_from_this on a shared pointer.
+   *
+   * This method is only valid for objects that are already live.  If
+   * you are looking for the moral equivalent of unique_ptr<T>(T*)
+   * constructor, see steal_from_new.
+   *
+   * TODO: https://github.com/pytorch/pytorch/issues/56482
    */
   static intrusive_ptr unsafe_reclaim_from_nonowning(TTarget* raw_ptr) {
     // See Note [Stack allocated intrusive_ptr_target safety]
@@ -560,6 +580,7 @@ class weak_intrusive_ptr final {
 
   void reset_() noexcept {
     if (target_ != NullType::singleton() && detail::atomic_weakcount_decrement(target_->weakcount_) == 0) {
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
       delete target_;
     }
     target_ = NullType::singleton();
