@@ -83,6 +83,12 @@ TORCH_META_FUNC(neg)(const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(sign) (const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(),
+              "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -132,6 +138,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
+CREATE_UNARY_TORCH_IMPL_FUNC(sign)
 
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
@@ -378,14 +385,6 @@ Tensor& floor_out(const Tensor& self, Tensor& result) {
 }
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
-
-Tensor& sign_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(),
-              "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
-  return unary_op_impl_out(result, self, sign_stub);
-}
-Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
-Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
 
 Tensor& sgn_out(const Tensor& self, Tensor& result) {
   if (self.is_complex()) {
