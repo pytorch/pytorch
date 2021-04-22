@@ -28,7 +28,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      record_function, emit_nvtx)
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
-from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests,
@@ -762,6 +762,7 @@ class TestAutograd(TestCase):
     def test_hooks_cpp(self):
         # Tests hooks for autograd function implemented in C++
         bn = torch.nn.BatchNorm1d(5, affine=False)
+        bn.double()
         bn.eval()
 
         counter = [0]
@@ -770,13 +771,13 @@ class TestAutograd(TestCase):
             counter[0] += 1
             return grad * 2
 
-        x = torch.ones(5, 5, dtype=torch.float, requires_grad=True)
+        x = torch.ones(5, 5, dtype=torch.double, requires_grad=True)
         z = bn(x)
         z.register_hook(bw_hook)
         z.sum().backward()
 
         self.assertEqual(counter[0], 1, msg='bw_hook not called')
-        self.assertEqual(x.grad, torch.ones(5, 5, dtype=torch.float) * 2, atol=1e-4, rtol=0)
+        self.assertEqual(x.grad, torch.ones(5, 5, dtype=torch.double) * 2, atol=1e-5, rtol=0)
 
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
@@ -5370,22 +5371,13 @@ separate_complex_tests = ['view_as_real', 'div', '__rdiv__', 'sub']
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
 
-complex_list_filter = []
-
-# TODO: Add back 'sgn' to complex_list; removed because of Windows test failure with 11.2
-# See: https://github.com/pytorch/pytorch/issues/51980
-if _get_torch_cuda_version() != (11, 2):
-    complex_list_filter.append('sgn')
-
 # allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
                 'expand', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'zero_',
-                '__radd__', 'mul', '__rmul__', 'matmul',
-                'diagonal', 'fill_', 'sub',
-                'narrow', 'swapaxes', 'swapdims', 'tensor_split',
-                'baddbmm'] + complex_list_filter + separate_complex_tests
+                '__radd__', 'mul', '__rmul__', 'diagonal', 'fill_', 'sub', 'narrow',
+                'swapaxes', 'swapdims', 'tensor_split'] + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
