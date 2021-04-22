@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch._C.key as key
 import torch.fx as fx
+from nnc_compile import nnc_compile
 torch._C._jit_override_can_fuse_on_cpu(True)
 # import torch.autograd.functional
 from types import FunctionType, CodeType
@@ -61,7 +62,7 @@ def grad(f, inps):
             args[idx].requires_grad = True
         out = f(*args)
         out.backward()
-        return [key.removeKey(args[idx].grad).proxy for idx in range(len(inps))]
+        return tuple(key.removeKey(args[idx].grad).proxy for idx in range(len(inps)))
     if len(inps) == 1:
         def f_out(x):
             return f_grad([x])
@@ -71,17 +72,17 @@ def grad(f, inps):
     return f_out
 
 def f(a, b):
-    c = a*b*a*b
-    return (torch.sin(c)+ a).sum()
-inps = (torch.randn(30000), torch.randn(30000))
-grad_f = fx.symbolic_trace(grad(f, inps))
+    return (a*b).sum()
 
-grad_f = torch.jit.trace(grad_f, inps)
-print(grad_f.graph)
+inps = (torch.randn(3000), torch.randn(3000))
+grad_f = fx.symbolic_trace(grad(f, inps))
+print(grad_f.code)
+grad_f = nnc_compile(grad_f, inps)
 
 iters = 1000
 for _ in range(3):
-        grads = grad_f(*inps)
+    grads = grad_f(*inps)
+# print(grads[0].sum(), grads[1].sum())
 begin = time.time()
 for _ in range(iters):
     grad_f(*inps)
@@ -89,6 +90,8 @@ print(time.time() - begin)
 
 for inp in inps:
     inp.requires_grad = True
+f(*inps).backward()
+# print(inps[0].sum(), inps[1].sum())
 begin = time.time()
 for _ in range(iters):
     f(*inps).backward()
