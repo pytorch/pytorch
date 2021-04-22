@@ -1060,17 +1060,11 @@ class TestCase(expecttest.TestCase):
 
         def coo_to_csr(indices, dim):
             r = torch.zeros(dim + 1, dtype=index_dtype)
-            last_i = 0
-            for i in indices:
-                if i == last_i:
-                    r[last_i + 1] += 1
-                else:
-                    for _i in range(last_i, i + 1):
-                        r[_i + 1] = r[last_i + 1]
-                    last_i = i
-                    r[last_i + 1] += 1
-            for _i in range(last_i, dim):
-                r[_i + 1] = r[last_i + 1]
+            for i in range(nnz):
+                hp0 = indices[i]
+                hp1 = dim if i + 1 == nnz else indices[i + 1]
+                if hp0 != hp1:
+                    r[hp0 + 1:hp0 + 1 + hp1] = i + 1
             return r
 
         values = make_tensor([nnz], device=device, dtype=dtype, low=-1, high=1)
