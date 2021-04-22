@@ -3076,22 +3076,9 @@ def mv(g, self, vec):
     return matmul(g, self, vec)
 
 
-def _has_duplicated_value(g, values):
-    if values is None:
-        return False
-
-    # from torch.onnx.symbolic_opset11 import unique_dim
-    # x, y, z = unique_dim(g, values, 0, False, 0, 0)
-    # unique_item_count = sym_help._get_tensor_dim_size(x, 0)
-    # values_count = sym_help._get_tensor_dim_size(values, 0)
-
-    return False
-
-
 def index_add(g, self, dim, index, other):
-    if _has_duplicated_value(g, index):
-        raise NotImplementedError("index_add does NOT support duplicated value in 'index' parameter yet.")
-
+    warnings.warn("Warning: ONNX export does not support duplicated values in 'index' field, " +
+                  "this will cause the ONNX model to be incorrect.")
     from torch.onnx.symbolic_opset9 import scatter_add
 
     dim = sym_help._maybe_get_const(dim, 'i')
@@ -3111,7 +3098,7 @@ def index_add(g, self, dim, index, other):
     elif other_dim_size < self_dim_size:
         # Construct a new shape. It's almost as same as self except the size of dim dimension
         # is 1 so that we can expand other dimensions as expected.
-        new_shape_axes = [i for i in range(self_dim_rank)]
+        new_shape_axes = list(range(self_dim_rank))
         new_shape_starts = [0 for i in range(self_dim_rank)]
         new_shape_ends = [sym_help._get_tensor_dim_size(self, i)
                           if (i != dim)
