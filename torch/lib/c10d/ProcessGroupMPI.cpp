@@ -102,8 +102,10 @@ void ProcessGroupMPI::WorkMPI::finishCompleteFuture(std::exception_ptr eptr) {
   if (eptr) {
     future_->setError(eptr);
     future_->markCompleted();
+    finish(eptr);
   } else {
     future_->markCompleted(at::IValue(*outputTensors_));
+    finish();
   }
 }
 
