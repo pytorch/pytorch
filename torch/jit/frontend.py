@@ -292,12 +292,12 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     # If MonkeyType is installed, get all the consolidated type traces
     # for the arguments from type_trace_db
     type_trace_db = torch.jit._script._get_type_trace_db()
-    args_and_types = None
+    pdt_arg_types = None
     if monkeytype_trace:
         _qualname = get_qualified_name(fn)
-        args_and_types = type_trace_db.get_args_types(_qualname)
+        pdt_arg_types = type_trace_db.get_args_types(_qualname)
 
-    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name, args_and_types=args_and_types)
+    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name, pdt_arg_types=pdt_arg_types)
 
 class Builder(object):
     def __call__(self, ctx, node):
@@ -313,13 +313,13 @@ def build_class_def(ctx, py_def, methods, properties, self_name, assigns):
     return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties, assigns)
 
 
-def build_def(ctx, py_def, type_line, def_name, self_name=None, args_and_types=None):
+def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=None):
     body = py_def.body
     r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
                        py_def.col_offset,
                        py_def.col_offset + len("def"))
 
-    param_list = build_param_list(ctx, py_def.args, self_name, args_and_types)
+    param_list = build_param_list(ctx, py_def.args, self_name, pdt_arg_types)
     return_type = None
     if getattr(py_def, 'returns', None) is not None:
         return_type = build_expr(ctx, py_def.returns)
@@ -339,7 +339,7 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
                      "or use keyword-only arguments with defaults")
 
 
-def build_param_list(ctx, py_args, self_name, args_and_types=None):
+def build_param_list(ctx, py_args, self_name, pdt_arg_types=None):
     if py_args.kwarg is not None:
         expr = py_args.kwarg
         ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
@@ -355,19 +355,25 @@ def build_param_list(ctx, py_args, self_name, args_and_types=None):
             if arg is not None:
                 ctx_range = build_expr(ctx, arg).range()
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
-    result = [build_param(ctx, arg, self_name, kwarg_only=False, args_and_types=args_and_types) for arg in py_args.args]
-    result += [build_param(ctx, arg, self_name, kwarg_only=True, args_and_types=args_and_types) for arg in py_args.kwonlyargs]
+
+    # List of Tuple of args and type as inferred by profile directed typing
+    arg_and_types = [(arg, next(iter(pdt_arg_types[arg.arg])) if pdt_arg_types[arg.arg] else None) for arg in py_args.args]
+    arg_and_types_kwonlyargs = [(arg, next(iter(pdt_arg_types[arg.arg])) if pdt_arg_types[arg.arg] else None)
+                                for arg in py_args.kwonlyargs]
+
+    result = [build_param(ctx, arg, self_name, kwarg_only=False, pdt_arg_type=_type) for arg, _type in arg_and_types]
+    result += [build_param(ctx, arg, self_name, kwarg_only=True, pdt_arg_type=_type) for arg, _type in arg_and_types_kwonlyargs]
     return result
 
 
-def build_param(ctx, py_arg, self_name, kwarg_only, args_and_types=None):
+def build_param(ctx, py_arg, self_name, kwarg_only, pdt_arg_type=None):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     name = py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
-    elif args_and_types:
-        annotation_expr = Var(Ident(r, args_and_types[name].pop()))
+    elif pdt_arg_type:
+        annotation_expr = Var(Ident(r, pdt_arg_type))
     elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
     else:
