@@ -1,6 +1,5 @@
 from typing import Optional, Any
 
-import logging
 import torch
 from torch import Tensor
 from torch.nn.parameter import Parameter, UninitializedParameter, UninitializedBuffer
@@ -136,8 +135,8 @@ class _BatchNorm(_NormBase):
 
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
-            if self.num_batches_tracked is not None:  # type: ignore
-                self.num_batches_tracked = self.num_batches_tracked + 1  # type: ignore
+            if self.num_batches_tracked is not None:  # type: ignore[has-type]
+                self.num_batches_tracked = self.num_batches_tracked + 1  # type: ignore[has-type]
                 if self.momentum is None:  # use cumulative moving average
                     exponential_average_factor = 1.0 / float(self.num_batches_tracked)
                 else:  # use exponential moving average
@@ -203,7 +202,7 @@ class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
         if not self.has_uninitialized_params() and self.num_features != 0:
             super().reset_parameters()
 
-    def initialize_parameters(self, input) -> None:  # type: ignore
+    def initialize_parameters(self, input) -> None:  # type: ignore[override]
         if self.has_uninitialized_params():
             self.num_features = input.shape[1]
             if self.affine:
@@ -658,12 +657,6 @@ class SyncBatchNorm(_BatchNorm):
             raise ValueError(
                 "SyncBatchNorm number of input channels should be non-zero"
             )
-
-    def _specify_ddp_gpu_num(self, gpu_size):
-        if gpu_size > 1:
-            raise ValueError('SyncBatchNorm is only supported for DDP with single GPU per process')
-        logging.warning("WARNING: Since DDP single-process-multiple-device mode is retired, "
-                        "no longer need to call method `_specify_ddp_gpu_num`. The input arg `gpu_size` is ignored.")
 
     def forward(self, input: Tensor) -> Tensor:
         # currently only GPU input is supported

@@ -521,6 +521,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      # TODO: Delete this when https://github.com/pytorch/pytorch/issues/35026 is fixed
+      set_source_files_properties(../torch/csrc/autograd/record_function_ops.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    endif()
   endif()
   list(APPEND TORCH_SRCS ${LIBTORCH_CMAKE_SRCS})
 
