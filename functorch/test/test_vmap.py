@@ -474,6 +474,7 @@ class TestVmapAPI(TestCase):
         vmap(foo, in_dims=(0,))(torch.randn(2, 3))
         vmap(foo, in_dims=(1,))(torch.randn(2, 3))
 
+    @unittest.expectedFailure
     def test_fallback_does_not_warn_by_default(self):
         # NB: One day we will implement a batching rule for torch.atan2.
         # If/when we do, this test should be replaced to test the fallback
@@ -487,6 +488,7 @@ class TestVmapAPI(TestCase):
             # warning, not a warning from the vmap fallback path.
             self.assertEqual(len(wa), 1)
 
+    @unittest.expectedFailure
     def test_fallback_warns_when_warnings_are_enabled(self):
         # NB: One day we will implement a batching rule for torch.atan2.
         # If/when we do, this test should be replaced to test the fallback
@@ -2312,6 +2314,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._test_arithmetic(lambda x, y: x / y, device)
 
     @allowVmapFallbackUsage
+    @unittest.expectedFailure
     def test_binary_cross_entropy(self, device):
         x = F.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
         target = torch.rand(3, 2, device=device)
@@ -2426,6 +2429,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
     @skipCUDAIfNoMagma
     @allowVmapFallbackUsage
+    @unittest.expectedFailure
     def test_symeig(self, device):
         def op(x):
             return torch.symeig(x, eigenvectors=True)[0]
