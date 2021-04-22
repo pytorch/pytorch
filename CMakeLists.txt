@@ -288,7 +288,7 @@ option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 cmake_dependent_option(
-    USE_DEPLOY "Build embedded torch::deploy interpreter" OFF
+    USE_DEPLOY "Build embedded torch::deploy interpreter.  See torch/csrc/deploy/README.md for more info." OFF
     "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 
@@ -330,7 +330,7 @@ if(WIN32)
 endif()
 
 if(USE_GLOO_WITH_OPENSSL AND LINUX)
-  find_package(OpenSSL REQUIRED)
+  find_package(OpenSSL 1.1 REQUIRED EXACT)
   if(OPENSSL_FOUND)
     set(USE_TCP_OPENSSL_LOAD ON CACHE STRING "")
   else()
