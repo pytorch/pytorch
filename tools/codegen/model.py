@@ -138,6 +138,7 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
         DispatchKey.CUDA,
         DispatchKey.QuantizedCUDA,
         DispatchKey.SparseCUDA,
+        DispatchKey.SparseCsrCUDA,
         DispatchKey.AutogradCUDA,
         DispatchKey.CUDATensorId,
     }
