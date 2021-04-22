@@ -492,7 +492,7 @@ void ProcessGroupGloo::RecvWork::abort() {
 }
 
 ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
-    : ProcessGroup::Options(timeout, GLOO_BACKEND_NAME), threads(2) {}
+    : ProcessGroup::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
 
 namespace {
 
@@ -1057,7 +1057,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     //
     // The correct fix is to stop allocating tensors that are not variables,
     // but to conveniently do this c10d must depend on torch not ATen
-    at::AutoDispatchBelowInplaceOrView guard;
+    at::AutoDispatchBelowAutograd guard;
     auto input = tensors[0];
 
     // Perform local reduction if we have multiple inputs.
