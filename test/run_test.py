@@ -1032,16 +1032,22 @@ def export_S3_test_times(test_times_filename: str, test_times: Dict[str, float])
 def query_changed_test_files() -> List[str]:
     cmd = ["git", "diff", "--name-only", "origin/master", "HEAD"]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
     if proc.returncode != 0:
         raise RuntimeError("Unable to get changed files")
+
     lines = proc.stdout.decode().strip().split("\n")
     lines = [line.strip() for line in lines]
     return lines
 
 
-
 def reorder_tests(tests: List[str]) -> List[str]:
-    changed_files = query_changed_test_files()
+    try:
+        changed_files = query_changed_test_files()
+    except Exception:
+        # If unable to get changed files from git, quit without doing any sorting
+        return tests
+
     prefix = f"test{os.path.sep}"
     changed_tests = [f for f in changed_files if f.startswith(prefix) and f.endswith(".py")]
     changed_tests = [f[len(prefix):] for f in changed_tests]
@@ -1056,8 +1062,13 @@ def reorder_tests(tests: List[str]) -> List[str]:
         else:
             the_rest.append(test)
 
-    return bring_to_front + the_rest
+    sorted_tests = bring_to_front + the_rest
 
+    if len(sorted_tests) != len(tests):
+        # Something went wrong, bail out without doing any sorting
+        return tests
+
+    return sorted_tests
 
 
 def main():
