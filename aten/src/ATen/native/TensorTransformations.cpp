@@ -103,6 +103,9 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
 
   std::vector<int64_t> flip_dims;
   for(int64_t dim: dims) {
+      if(dim < 0) {
+        dim = input.ndimension() + dim;
+      }
       flip_dims.push_back(dim);
   }
 
