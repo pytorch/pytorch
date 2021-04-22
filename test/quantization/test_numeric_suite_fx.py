@@ -106,13 +106,13 @@ class LinearReluLinearFunctional(nn.Module):
 
 
 class AddMulFunctional(nn.Module):
-    def forward(self, x):
+    def forward(self, x, y):
         x = x + 1.0
         x = x * 1.0
         x = 1.0 + x
         x = 1.0 * x
-        x = x + x
-        x = x * x
+        x = x + y
+        x = x * y
         return x
 
 
@@ -1043,7 +1043,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_add_mul_inputs_activations(self):
         m = AddMulFunctional().eval()
         res = self._test_match_activations(
-            m, (torch.randn(2, 2),),
+            m, (torch.randn(2, 2), torch.randn(2, 2)),
             results_len=6, should_log_inputs=True)
 
     @skipIfNoFBGEMM
