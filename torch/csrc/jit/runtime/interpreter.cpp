@@ -668,8 +668,6 @@ struct CodeImpl {
       if (count < num_include) {
         emitUse(input, false);
         count++;
-      } else {
-        emitUse(input, true);
       }
     }
   }

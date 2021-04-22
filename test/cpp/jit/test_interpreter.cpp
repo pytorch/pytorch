@@ -152,17 +152,6 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   ASSERT_TRUE(op_to_specified_args.size() == 2);
   ASSERT_TRUE(op_to_specified_args["aten::slice.Tensor"] == 4);
   ASSERT_TRUE(op_to_specified_args["aten::slice.str"] == 1);
-  // TODO: this portion will be enabled later
-  // auto instructions_copy = function.instructions();
-  // int count = 0;
-  // for (auto inst: instructions_copy) {
-  //   if (inst.op == DROPR) {
-  //     count++;
-  //   }
-  // }
-  // // threee inputs should have been dropped
-  // ASSERT_TRUE(count == 5) << "five inputs should have been dropped but "
-  //                         << count << " dropped\n";
   auto graph_vararg = build_mobile_export_analysis_graph_with_vararg();
   MobileCode function_vararg(graph_vararg, "");
   auto op_to_specified_args_vararg = function_vararg.op_to_num_specified_args();
