@@ -14850,6 +14850,7 @@ dedent """
 
 
     def test_named_buffers_are_iterable(self):
+        raise RuntimeError("Fail on purpose")
         class MyMod(torch.nn.Module):
             def __init__(self):
                 super(MyMod, self).__init__()
