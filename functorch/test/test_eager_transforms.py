@@ -402,9 +402,12 @@ class TestComposability(TestCase):
         y = vmap(foo)(x)
         self.assertEqual(y, vjp_fn(x))
 
-        xs = torch.randn(5, 3)
+        # TODO: there's a very interesting error message when the following
+        # is on CPU
+        xs = torch.randn(5, 3, device=device)
         expected = torch.stack([vjp_fn(x)[0] for x in xs])
-        self.assertEqual(vmap(lambda x: vjp_fn(x)[0])(xs), expected)
+        result = vmap(lambda x: vjp_fn(x)[0])(xs)
+        self.assertEqual(result, expected)
 
     def test_vjp_grad(self, device):
         x = torch.randn([], device=device)
