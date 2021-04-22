@@ -195,6 +195,10 @@ class ComputeFunction:
         if Variant.function not in f.variants and not self.is_redispatching_fn:
             return None
 
+        with native_function_manager(f):
+            return self.callImpl(f)
+
+    def callImpl(self, f: NativeFunction) -> str:
         name = cpp.name(f.func)
 
         sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
@@ -759,6 +763,26 @@ def get_custom_build_selector(
 
     return selector
 
+def get_grouped_native_functions(native_yaml_path: str) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
+    native_functions = parse_native_yaml(native_yaml_path)
+
+    pre_grouped_native_functions: Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]]
+    pre_grouped_native_functions = defaultdict(dict)
+    for f in native_functions:
+        d = pre_grouped_native_functions[f.func.signature()]
+        assert f.func.kind() not in d
+        d[f.func.kind()] = f
+
+    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
+        r = NativeFunctionsGroup.from_dict(d)
+        if r is None:
+            return list(d.values())
+        else:
+            return [r]
+
+    # TODO: how come ValuesView isn't a Sequence lol
+    return list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate ATen source files')
     parser.add_argument(
@@ -813,24 +837,9 @@ def main() -> None:
         options.op_selection_yaml_path,
     )
 
-    native_functions = parse_native_yaml(os.path.join(options.source_path, 'native/native_functions.yaml'))
-
-    pre_grouped_native_functions: Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]]
-    pre_grouped_native_functions = defaultdict(dict)
-    for f in native_functions:
-        d = pre_grouped_native_functions[f.func.signature()]
-        assert f.func.kind() not in d
-        d[f.func.kind()] = f
-
-    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
-        r = NativeFunctionsGroup.from_dict(d)
-        if r is None:
-            return list(d.values())
-        else:
-            return [r]
-
-    # TODO: how come ValuesView isn't a Sequence lol
-    grouped_native_functions = list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
+    native_yaml_path = os.path.join(options.source_path, 'native/native_functions.yaml')
+    native_functions = parse_native_yaml(native_yaml_path)
+    grouped_native_functions = get_grouped_native_functions(native_yaml_path)
     structured_native_functions = [g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)]
 
     template_dir = os.path.join(options.source_path, "templates")
