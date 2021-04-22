@@ -94,6 +94,19 @@ void checkSameSizeAndType(
 
 } // namespace
 
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupMPI::WorkMPI::getFuture() {
+  return future_;
+}
+
+void ProcessGroupMPI::WorkMPI::finishCompleteFuture(std::exception_ptr eptr) {
+  if (eptr) {
+    future_->setError(eptr);
+    future_->markCompleted();
+  } else {
+    future_->markCompleted(at::IValue(*outputTensors_));
+  }
+}
+
 ProcessGroupMPI::AsyncWork::AsyncWork(
     at::Tensor tensor,
     MPI_Request request,
@@ -330,9 +343,9 @@ void ProcessGroupMPI::runLoop() {
 
     try {
       workEntry->run(workEntry);
-      work->finish();
+      work->finishCompleteFuture();
     } catch (...) {
-      work->finish(std::current_exception());
+      work->finishCompleteFuture(std::current_exception());
     }
 
     lock.lock();
@@ -343,7 +356,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
     std::unique_ptr<WorkEntry> entry,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors) {
-  auto work = c10::make_intrusive<WorkMPI>(profilingTitle, inputTensors);
+  auto work = c10::make_intrusive<WorkMPI>(profilingTitle, &(entry->dst), inputTensors);
   std::unique_lock<std::mutex> lock(pgMutex_);
   queue_.push_back(std::make_tuple(std::move(entry), work));
   lock.unlock();
