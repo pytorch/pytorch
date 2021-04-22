@@ -488,23 +488,10 @@ def async_add_multi_fanout(to, x, num, step):
     return ret_future
 
 
-def MyConvNetForMNIST(device):
-    return nn.Sequential(
-        nn.Conv2d(1, 16, 3, 1),
-        nn.ReLU(),
-        nn.Conv2d(16, 32, 3, 1),
-        nn.ReLU(),
-        nn.MaxPool2d(2),
-        nn.Flatten(1),
-        nn.Linear(4608, 128),
-        nn.ReLU(),
-        nn.Linear(128, 10),
-    ).to(device)
-
-
 # A custom Python class that contains a tensor, needed to see if we correctly
 # use the Python pickler to extract tensors from non-IValue-convertible types.
 class TensorWrapper:
+    __slots__ = ("tensor",)
     def __init__(self, t):
         self.tensor = t
 
@@ -4817,6 +4804,29 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         for rpc_api in ["rpc_sync", "rpc_async", "remote"]:
             self._test_rref_proxy_timeout(rpc_api)
 
+
+class MyConvNetForMNIST(nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(1, 16, 3, 1),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, 3, 1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Flatten(1),
+            nn.Linear(4608, 128),
+            nn.ReLU(),
+            nn.Linear(128, 10),
+        ).to(device)
+
+    def forward(self, x, is_rref=False):
+        if is_rref:
+            return self.net(x.to_here())
+        else:
+            return self.net(x)
+
+
 class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
     def _test_device_maps(self, options, errMsg="Invalid device_map"):
@@ -4843,7 +4853,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         options.set_device_map(dst, {torch.cuda.device_count(): 0})
 
-        self._test_device_maps(options)
+        self._test_device_maps(
+            options,
+            errMsg="Invalid device in TensorPipe options"
+        )
 
     @skip_if_lt_x_gpu(1)
     def test_device_maps_invalid_max_remote_device(self):
@@ -4929,53 +4942,6 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             return x.to(z_to) + y.to(z_to)
         else:
             raise ValueError("Wrong device affinity")
-
-    def _test_device_maps_new_gpu(self, x_from, y_from, z_to, device_map, dst=None):
-        x_to = device_map[x_from]
-        y_to = device_map[y_from]
-
-        options = self.rpc_backend_options
-        dst = worker_name((self.rank + 1) % self.world_size) if dst is None else dst
-        options.set_device_map(dst, device_map)
-
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=options,
-        )
-
-        x = torch.zeros(2).to(x_from)
-        y = torch.ones(2).to(y_from)
-
-        errMsg = "RPC detected that a user-function output tensor on device"
-        with self.assertRaisesRegex(RuntimeError, errMsg):
-            ret = rpc.rpc_sync(
-                dst,
-                TensorPipeAgentCudaRpcTest._gpu_add_given_gpus,
-                args=(x, y, x_to, y_to, z_to)
-            )
-
-        rpc.shutdown()
-
-    @skip_if_lt_x_gpu(2)
-    def test_device_map_error_on_new_gpu_0(self):
-        self._test_device_maps_new_gpu(
-            x_from=1,
-            y_from=1,
-            z_to=0,
-            device_map={0 : 0, 1 : 1}
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_device_map_error_on_new_gpu_1(self):
-        self._test_device_maps_new_gpu(
-            x_from=0,
-            y_from=0,
-            z_to=1,
-            device_map={0 : 0, 1 : 1}
-        )
 
     def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map, dst=None):
         x_to = device_map[x_from]
@@ -5603,11 +5569,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
-    @skip_if_lt_x_gpu(1)
-    def test_rref_to_here_synchronization(self):
+    def _test_rref_synchronization(self, local_device, remote_device):
         dst = worker_name((self.rank + 1) % self.world_size)
         options = self.rpc_backend_options
-        options.set_device_map(dst, {0: 0})
+        options.set_device_map(dst, {local_device : remote_device})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -5623,20 +5588,46 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             # This test needs multiple iterations and significant batch size to simulate real
             # training of a CNN of MNIST-like data.
             # see https://github.com/pytorch/pytorch/issues/54771
-            rref = rpc.remote(dst, MyConvNetForMNIST, args=("cuda:0",))
-            for _ in range(100):
-                x = torch.randn(100, 1, 28, 28).to("cuda:0")
+            rref = rpc.remote(dst, MyConvNetForMNIST, args=(remote_device,))
+            for _ in range(20):
+                x = torch.randn(100, 1, 28, 28).to(local_device)
                 actual = rref.remote().forward(x).to_here()
                 expected = rref.rpc_sync().forward(x)
                 self.assertEqual(actual, expected)
 
         rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_rref_to_here_synchronization1(self):
+        self._test_rref_synchronization("cuda:0", "cuda:0")
 
     @skip_if_lt_x_gpu(2)
-    def test_rref_to_here_synchronization_cross_device(self):
+    def test_rref_to_here_synchronization2(self):
+        self._test_rref_synchronization("cuda:1", "cuda:0")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_to_here_synchronization3(self):
+        self._test_rref_synchronization("cuda:1", "cuda:1")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_to_here_synchronization4(self):
+        self._test_rref_synchronization("cuda:0", "cuda:1")
+
+    def _test_rref_as_arg_synchronization(
+        self,
+        local_device,
+        remote_device,
+        devicesOptions=None
+    ):
         dst = worker_name((self.rank + 1) % self.world_size)
         options = self.rpc_backend_options
-        options.set_device_map(dst, {1: 0})
+        options.set_device_map(dst, {local_device: remote_device})
+
+        input_src = worker_name((self.rank - 1 + self.world_size) % self.world_size)
+        options.set_device_map(input_src, {remote_device: local_device})
+
+        if devicesOptions is not None:
+            options.set_devices(devicesOptions[self.rank])
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -5652,32 +5643,107 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             # This test needs multiple iterations and significant batch size to simulate real
             # training of a CNN of MNIST-like data.
             # see https://github.com/pytorch/pytorch/issues/54771
-            rref = rpc.remote(dst, MyConvNetForMNIST, args=("cuda:0",))
-            for _ in range(100):
-                x = torch.randn(100, 1, 28, 28).to("cuda:1")
-                actual = rref.remote().forward(x).to_here()
-                expected = rref.rpc_sync().forward(x)
+            rref = rpc.remote(dst, MyConvNetForMNIST, args=(remote_device,))
+            for _ in range(20):
+                rref_x = RRef(torch.randn(100, 1, 28, 28).to(local_device))
+                actual = rref.remote().forward(rref_x, True).to_here()
+                expected = rref.rpc_sync().forward(rref_x, True)
                 self.assertEqual(actual, expected)
 
         rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_rref_as_arg_synchronization1(self):
+        self._test_rref_as_arg_synchronization("cuda:0", "cuda:0")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_as_arg_synchronization2(self):
+        self._test_rref_as_arg_synchronization("cuda:1", "cuda:0")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_as_arg_synchronization3(self):
+        self._test_rref_as_arg_synchronization("cuda:1", "cuda:1")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_as_arg_synchronization4(self):
+        self._test_rref_as_arg_synchronization("cuda:0", "cuda:1")
+
+    @skip_if_lt_x_gpu(1)
+    def test_rref_as_arg_synchronization5(self):
+        self._test_rref_as_arg_synchronization(
+            "cuda:0",
+            "cuda:0",
+            [["cuda:0"] for _ in range(4)],  # devicesOptions
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_devices_option_mismatch(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "but not included the devices field"
+        ):
+            dst = worker_name((self.rank + 1) % self.world_size)
+            options = self.rpc_backend_options
+            options.set_device_map(dst, {0 : 0})
+            options.set_devices([1])
+
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=options,
+            )
+
+            rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_devices_option_mismatch_reverse(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "but not included the devices field"
+        ):
+            dst = worker_name((self.rank + 1) % self.world_size)
+
+            options = rpc.TensorPipeRpcBackendOptions(
+                init_method=self.rpc_backend_options.init_method,
+                num_worker_threads=self.rpc_backend_options.num_worker_threads,
+                device_maps={dst: {0 : 1}},
+                devices=[0]
+            )
+
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=options,
+            )
+
+            rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_int(self):
-        fut = Future([0])
+        fut = Future(devices=[0])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_str(self):
-        fut = Future(["cuda:0"])
+        fut = Future(devices=["cuda:0"])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_device(self):
-        fut = Future([torch.device("cuda", 0)])
+        fut = Future(devices=[torch.device("cuda", 0)])
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_device_not_cuda(self):
+        with self.assertRaisesRegex(ValueError, "Expected CUDA devices, got "):
+            fut = Future(devices=["cpu"])
 
     def _test_cuda_future_extraction(self, wrapper, unwrapper):
         # We check proper CUDA stream synchronization by filling the tensor with
         # the expected value in one stream, and reading it from another stream.
         tensor = torch.zeros((100,), device="cuda:0")
-        future = Future(["cuda:0"])
+        future = Future(devices=["cuda:0"])
         with torch.cuda.device("cuda:0"):
             stream = torch.cuda.Stream()
             another_stream = torch.cuda.Stream()
@@ -5714,7 +5780,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         # the expected value in one stream, and reading it from another stream.
         tensor0 = torch.zeros((100,), device="cuda:0")
         tensor1 = torch.zeros((100,), device="cuda:1")
-        parent_future = Future(["cuda:0", "cuda:1"])
+        parent_future = Future(devices=["cuda:0", "cuda:1"])
 
         def cb(fut):
             t0 = fut.value()
@@ -5739,15 +5805,16 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def test_cuda_future_value_on_bad_device(self):
         tensor0 = torch.zeros((100,), device="cuda:0")
         tensor1 = torch.zeros((100,), device="cuda:1")
-        parent_future = Future(["cuda:1"])
+        parent_future = Future(devices=["cuda:1"])
 
         # As a plus, we test that futures still invoke callbacks even in case of
         # error, and that the child futures are successful if those callbacks
         # don't access the parent future.
         def cb(fut):
-            torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
-            tensor1.fill_(1)
-            return tensor1
+            with torch.cuda.device("cuda:1"):
+                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                tensor1.fill_(1)
+                return tensor1
 
         child_future = parent_future.then(cb)
         with torch.cuda.device("cuda:0"):
