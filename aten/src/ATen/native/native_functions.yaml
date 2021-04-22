@@ -1685,16 +1685,20 @@
     Meta: fill_meta_
 
 - func: floor(Tensor self) -> Tensor
+  structured_delegate: floor.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: floor
 
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: floor.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: floor_
 
 - func: floor.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: floor_out
 

@@ -76,6 +76,14 @@ CREATE_UNARY_META_FUNC(frac)
 CREATE_UNARY_META_FUNC(i0)
 CREATE_UNARY_META_FUNC(round)
 
+
+TORCH_META_FUNC(floor) (const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "floor is not supported for complex inputs");
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -124,6 +132,9 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
+CREATE_UNARY_TORCH_IMPL_FUNC(floor)
+
+
 
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
@@ -360,16 +371,6 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 // special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
-
-Tensor& floor_out(const Tensor& self, Tensor& result) {
-  // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
-    "floor is not supported for complex inputs");
-
-  return unary_op_impl_out(result, self, floor_stub);
-}
-Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
-Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
 
 Tensor& sign_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(!self.is_complex(),
