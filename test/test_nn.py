@@ -587,6 +587,7 @@ class TestNN(NNTestCase):
 
         return_val = "None"
         hook_called = [0]
+
         def hook(mod, grad_input, grad_output):
             hook_called[0] += 1
             for gI in grad_input:
