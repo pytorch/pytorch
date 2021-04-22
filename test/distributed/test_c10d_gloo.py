@@ -7,7 +7,6 @@ import random
 import sys
 import tempfile
 import unittest
-from datetime import timedelta
 from functools import reduce
 from itertools import groupby
 
@@ -602,14 +601,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.scatter([t1], [], opts)
 
         with self.assertRaisesRegex(
-                ValueError, "requires a single-element output tensor list"
+            ValueError, "requires a single-element output tensor list"
         ):
             opts = c10d.ScatterOptions()
             opts.rootRank = 0
             pg.scatter([], [], opts)
 
         with self.assertRaisesRegex(
-                ValueError, "requires a single-element output tensor list"
+            ValueError, "requires a single-element output tensor list"
         ):
             opts = c10d.ScatterOptions()
             opts.rootRank = 0
@@ -629,7 +628,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         incorrect_list_size = self.world_size - 1
         err_str = "Incorrect input list size {}. Input list size should be {}"
         with self.assertRaisesRegex(
-                ValueError, err_str.format(incorrect_list_size, desired_list_size)
+            ValueError, err_str.format(incorrect_list_size, desired_list_size)
         ):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
@@ -637,7 +636,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         incorrect_list_size = self.world_size + 1
         with self.assertRaisesRegex(
-                ValueError, err_str.format(incorrect_list_size, desired_list_size)
+            ValueError, err_str.format(incorrect_list_size, desired_list_size)
         ):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
@@ -756,28 +755,28 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.gather([], [t1], opts)
 
         with self.assertRaisesRegex(
-                ValueError, "requires a single-element input tensor list"
+            ValueError, "requires a single-element input tensor list"
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = 0
             pg.gather([], [], opts)
 
         with self.assertRaisesRegex(
-                ValueError, "requires a single-element input tensor list"
+            ValueError, "requires a single-element input tensor list"
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = 0
             pg.gather([], [t1, t1], opts)
 
         with self.assertRaisesRegex(
-                ValueError, "requires a single-element output list"
+            ValueError, "requires a single-element output list"
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
             pg.gather([], [t1], opts)
 
         with self.assertRaisesRegex(
-                ValueError, "requires a single-element output list"
+            ValueError, "requires a single-element output list"
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
@@ -787,7 +786,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         incorrect_list_size = self.world_size - 1
         err_str = "Incorrect output list size {}. Output list size should be {}"
         with self.assertRaisesRegex(
-                ValueError, err_str.format(incorrect_list_size, desired_list_size)
+            ValueError, err_str.format(incorrect_list_size, desired_list_size)
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
@@ -795,7 +794,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         incorrect_list_size = self.world_size + 1
         with self.assertRaisesRegex(
-                ValueError, err_str.format(incorrect_list_size, desired_list_size)
+            ValueError, err_str.format(incorrect_list_size, desired_list_size)
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
@@ -904,12 +903,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.allgather([], [])
 
         with self.assertRaisesRegex(
-                ValueError, "requires input/output tensor lists to have the same length"
+            ValueError, "requires input/output tensor lists to have the same length"
         ):
             pg.allgather([], [t1])
 
         with self.assertRaisesRegex(
-                ValueError, "requires input/output tensor lists to have the same length"
+            ValueError, "requires input/output tensor lists to have the same length"
         ):
             pg.allgather([[t1] * self.world_size, [t1] * self.world_size], [t1])
 
@@ -1007,7 +1006,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # One of output tensors does not match input list.
         dummy_output_lists[0] = [torch.zeros([0], dtype=torch.float32)]
         with self.assertRaisesRegex(
-                ValueError, "invalid size of output tensor at index 0"
+            ValueError, "invalid size of output tensor at index 0"
         ):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 
@@ -1021,14 +1020,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             [torch.zeros([1], dtype=torch.float32)] for _ in range(self.world_size + 1)
         ]
         with self.assertRaisesRegex(
-                ValueError, "output lists should be equal to world size"
+            ValueError, "output lists should be equal to world size"
         ):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 
         # Output is not a list of lists.
         dummy_output_lists = [torch.zeros([0], dtype=torch.float32)]
         with self.assertRaisesRegex(
-                RuntimeError, "Invalid function argument.*output_tensor_lists"
+            RuntimeError, "Invalid function argument.*output_tensor_lists"
         ):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 
@@ -1057,7 +1056,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.reduce([t1], opts)
 
         with self.assertRaisesRegex(
-                ValueError, "requires a single-element tensor list"
+            ValueError, "requires a single-element tensor list"
         ):
             opts = c10d.ReduceOptions()
             opts.rootRank = self.rank
@@ -1624,7 +1623,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         train_loop(ddp_withoutload, optimizer_withoutload, 6)
 
         for p_withload, p_withoutload, p_non_ddp_withload in zip(
-                ddp_withload.parameters(), ddp_withoutload.parameters(), model_withload.parameters()
+            ddp_withload.parameters(), ddp_withoutload.parameters(), model_withload.parameters()
         ):
             self.assertEqual(p_withload, p_withoutload)
             self.assertEqual(p_non_ddp_withload, p_withoutload)

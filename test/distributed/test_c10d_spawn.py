@@ -94,4 +94,3 @@ class AbstractProcessGroupShareTensorTest(object):
             c2p.put((rank, torch.ones(2, 2) * i, ys[0][i].to("cpu")))
 
         p2c.get()
-
