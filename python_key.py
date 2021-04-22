@@ -104,9 +104,7 @@ eps = 0.01
 begin = time.time()
 for iter in range(iters):
     inps = gen_inputs()
-    begin = time.time()
     grads = nnc_grad(*inps)
-    print(time.time()-begin)
     avg = (1-eps)*avg + eps*grads[0].sum()
     # print(grads)
     # if iter % 1000 == 0:
@@ -122,9 +120,7 @@ f = Foo(num_features)
 begin = time.time()
 for iter in range(iters):
     inps = gen_inputs()
-    begin = time.time()
     f(*inps).backward()
-    print(time.time()-begin)
     grads = [p.grad for p in f.parameters()]
     avg = (1-eps)*avg + eps*grads[0].sum()
     # if iter % 1000 == 0:
