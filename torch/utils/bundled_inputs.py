@@ -10,9 +10,15 @@ T = TypeVar("T")
 MAX_RAW_TENSOR_SIZE = 16
 
 class InflatableArg(NamedTuple):
-    """ Helper type for bundled inputs. Value is the compressed/deflated
-    input that is stored in the model and fmt is a code string that is executed to
-    inflate the compressed data into the appropriate input.
+    """ Helper type for bundled inputs.
+
+        'value' is the compressed/deflated input that is stored in the model. Value
+        must be of the same type as the arguments to the function that it is a deflated
+        input for.
+
+        'fmt' is a formatable code string that is executed to inflate the compressed data into
+        the appropriate input. It can use 'value' as an input to the format str. It must result
+        in a value of the same type as 'value'.
 
     Note: Only top level InflatableArgs can be inflated. i.e. you cannot place
     an inflatable arg inside of some other structure. You should instead create
