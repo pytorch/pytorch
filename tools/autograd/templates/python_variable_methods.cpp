@@ -123,38 +123,6 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "stride(int64_t dim)",
-    "stride()",
-    "stride(Dimname dim)",
-  });
-  auto& self_ = THPVariable_Unpack(self);
-  ParsedArgs<3> parsed_args;
-  auto r = parser.parse(self, args, kwargs, parsed_args);
-
-  if(r.has_torch_function()){
-    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
-  }
-
-  if (r.idx == 0) {
-    return wrap(self_.stride(r.toInt64(0)));
-  } else if (r.idx == 1) {
-    // yes, this is called strides in ATen.
-    IntArrayRef strides = self_.strides();
-    // we can't do the normal wrapping here because IntArrayRef maps to both
-    // torch.Size and tuple in python
-    return THPUtils_packInt64Array(strides.size(), strides.data());
-  }
-  else if (r.idx == 2) {
-    return wrap(self_.stride(r.dimname(0)));
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 // implemented on the python object to avoid dispatch overhead
 static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
 {
@@ -224,49 +192,6 @@ static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
    auto& self_ = THPVariable_Unpack(self);
    return THPUtils_packInt64(self_.numel());
    END_HANDLE_TH_ERRORS
-}
-
-static Tensor dispatch_contiguous(const Tensor & self, at::MemoryFormat memory_format) {
-  pybind11::gil_scoped_release no_gil;
-  OptionalDeviceGuard device_guard(device_of(self));
-  return self.contiguous(memory_format);
-}
-
-static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "contiguous(*, MemoryFormat memory_format=contiguous_format)",
-  });
-  ParsedArgs<1> parsed_args;
-  auto r = parser.parse(self, args, kwargs, parsed_args);
-
-  if(r.has_torch_function()){
-    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
-  }
-
-  auto& self_ = THPVariable_Unpack(self);
-  auto memory_format = r.memoryformat(0);
-  // avoids touching the GIL or current device if self is already contiguous
-  if (self_.is_contiguous(memory_format)) {
-    // NOTE: this logic is duplicated from VariableType.cpp. Since we need to
-    // record this call to contiguous() in the trace regardless of whether
-    // we actually call contiguous here, we need to record this information
-    // manually.
-    if (jit::tracer::isTracing()) {
-      auto tracer_state = jit::tracer::getTracingState();
-      auto node = tracer_state->graph->create(jit::aten::contiguous, /*num_outputs=*/0);
-      jit::tracer::recordSourceLocation(node);
-      jit::tracer::addInputs(node, "self", self_);
-      jit::tracer::addInputs(node, "memory_format", memory_format);
-      tracer_state->graph->insertNode(node);
-      jit::tracer::addOutput(node, self_);
-    }
-    Py_INCREF(self);
-    return self;
-  }
-  return THPVariable_Wrap(dispatch_contiguous(self_, memory_format));
-  END_HANDLE_TH_ERRORS
 }
 
 static Tensor dispatch_copy_(const Tensor & self, const Tensor & other, bool non_blocking) {
@@ -1169,7 +1094,6 @@ PyMethodDef variable_methods[] = {
   {"bfloat16", castPyCFunctionWithKeywords(THPVariable_bfloat16), METH_VARARGS | METH_KEYWORDS, NULL},
   {"byte", castPyCFunctionWithKeywords(THPVariable_byte), METH_VARARGS | METH_KEYWORDS, NULL},
   {"char", castPyCFunctionWithKeywords(THPVariable_char), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"contiguous", castPyCFunctionWithKeywords(THPVariable_contiguous), METH_VARARGS | METH_KEYWORDS, NULL},
   {"copy_", castPyCFunctionWithKeywords(THPVariable_copy_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", castPyCFunctionWithKeywords(THPVariable_cpu), METH_VARARGS | METH_KEYWORDS, NULL},
   {"cuda", castPyCFunctionWithKeywords(THPVariable_cuda), METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1204,7 +1128,6 @@ PyMethodDef variable_methods[] = {
   {"storage", THPVariable_storage, METH_NOARGS, NULL},
   {"storage_offset", THPVariable_storage_offset, METH_NOARGS, NULL},
   {"storage_type", THPVariable_storage_type, METH_NOARGS, NULL},
-  {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, NULL},
   {"to", castPyCFunctionWithKeywords(THPVariable_to), METH_VARARGS | METH_KEYWORDS, NULL},
   {"tolist", THPVariable_tolist, METH_NOARGS, NULL},
   {"type", castPyCFunctionWithKeywords(THPVariable_type), METH_VARARGS | METH_KEYWORDS, NULL},
