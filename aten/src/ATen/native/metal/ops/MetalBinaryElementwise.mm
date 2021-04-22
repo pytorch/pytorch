@@ -186,7 +186,6 @@ Tensor& add__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
 
 Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
-  TORCH_CHECK(input1.dim() == input2.dim());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNSubtract>(input1, input2_);
