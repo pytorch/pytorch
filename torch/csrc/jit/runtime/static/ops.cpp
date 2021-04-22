@@ -3,6 +3,7 @@
 #include <ATen/CPUFunctions.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/IndexingUtils.h>
@@ -1129,5 +1130,43 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    c10::optional<std::string> rounding_mode = c10::nullopt;
+    if (p_node->inputs().size() > 2) {
+      rounding_mode = p_node->Input(2).toOptional<std::string>();
+    }
+
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+
+    const auto& in1_t = p_node->Input(1).isTensor()
+        ? p_node->Input(1).toTensor()
+        : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
+    at::cpu::div_out(out_t, in0_t, in1_t, rounding_mode);
+  };
+});
+
+REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    const auto alpha = p_node->Input(2).toScalar();
+
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+
+    const auto& in1_t = p_node->Input(1).isTensor()
+        ? p_node->Input(1).toTensor()
+        : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
+    at::cpu::sub_out(out_t, in0_t, in1_t, alpha);
+  };
+});
 } // namespace jit
 } // namespace torch
