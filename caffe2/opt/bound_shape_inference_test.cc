@@ -669,7 +669,7 @@ TEST(BoundShapeInference, Bucketize) {
   shape_map.emplace(
       "In",
       makeTensorInfo(
-          {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+          {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX, TensorBoundShape_DimType_CONSTANT},
           {spec.max_batch_size, 60}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -677,7 +677,7 @@ TEST(BoundShapeInference, Bucketize) {
   verifyShapeInfo(
       out_shape,
       "Out",
-      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 60},
       TensorProto_DataType_INT32);
 }

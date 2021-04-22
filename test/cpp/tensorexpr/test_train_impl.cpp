@@ -229,7 +229,7 @@ REGISTER_METHOD(
       TORCH_CHECK(vinputs.at(0)->shape.size() == vinputs.at(1)->shape.size());
       auto vars = get_vars(vinputs.at(0)->shape, vbindings);
       Tensor* o = Compute("o", vars, [&](const VarHandle& i) {
-        return inputs.at(0)->call(i) + inputs.at(1)->call(i);
+        return inputs.at(0)->load(i) + inputs.at(1)->load(i);
       });
       return {o};
     },
@@ -252,7 +252,7 @@ REGISTER_METHOD(
       TORCH_CHECK(vinputs.at(0)->shape.size() == vinputs.at(1)->shape.size());
       auto vars = get_vars(vinputs.at(0)->shape, vbindings);
       Tensor* o = Compute("o", vars, [&](const VarHandle& i) {
-        return inputs.at(0)->call(i) - inputs.at(1)->call(i);
+        return inputs.at(0)->load(i) - inputs.at(1)->load(i);
       });
       return {o};
     },
@@ -274,7 +274,7 @@ REGISTER_METHOD(
       TORCH_CHECK(inputs.size() == 1);
       auto vars = get_vars(vinputs.at(0)->shape, vbindings);
       Tensor* o = Compute("o", vars, [&](const VarHandle& i) {
-        return FloatImm::make(-1.0f) * inputs.at(0)->call(i);
+        return FloatImm::make(-1.0f) * inputs.at(0)->load(i);
       });
       return {o};
     },
@@ -297,7 +297,7 @@ REGISTER_METHOD(
       TORCH_CHECK(vinputs.at(0)->shape.size() == vinputs.at(1)->shape.size());
       auto vars = get_vars(vinputs.at(0)->shape, vbindings);
       Tensor* o = Compute("o", vars, [&](const VarHandle& i) {
-        return inputs.at(0)->call(i) * inputs.at(1)->call(i);
+        return inputs.at(0)->load(i) * inputs.at(1)->load(i);
       });
       return {o};
     },
@@ -322,7 +322,7 @@ REGISTER_METHOD(
       TORCH_CHECK(vinputs.at(0)->shape.size() == vinputs.at(1)->shape.size());
       auto vars = get_vars(vinputs.at(0)->shape, vbindings);
       Tensor* o = Compute("o", vars, [&](const VarHandle& i) {
-        return inputs.at(0)->call(i) / inputs.at(1)->call(i);
+        return inputs.at(0)->load(i) / inputs.at(1)->load(i);
       });
       return {o};
     },
@@ -352,7 +352,7 @@ REGISTER_METHOD(
           {},
           Sum(),
           [=](const VarHandle& i) -> ExprHandle {
-            return inputs.at(0)->call(i);
+            return inputs.at(0)->load(i);
           },
           vars);
 
@@ -375,7 +375,7 @@ REGISTER_METHOD(
       TORCH_CHECK(inputs.size() == 2);
       auto vars = get_vars(vinputs.at(1)->shape, vbindings);
       Tensor* o = Compute(
-          "o", vars, [&](const VarHandle& i) { return inputs.at(0)->call(0); });
+          "o", vars, [&](const VarHandle& i) { return inputs.at(0)->load(0); });
 
       return {o};
     },
@@ -484,7 +484,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
       Placeholder inpB(BufHandle(get_name(id), exprs, kFloat));
       auto inpT =
           Compute("input" + get_name(id), vars, [&](const VarHandle& i) {
-            return Load::make(BufHandle(inpB.data()), {i}, 1);
+            return Load::make(BufHandle(inpB.data()), {i});
           });
       inputs.emplace(&t, inpB);
       bindings.emplace(&t, inpT);
