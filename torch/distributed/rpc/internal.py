@@ -179,6 +179,19 @@ def deserialize(binary_data, tensor_table):
     return _internal_rpc_pickler.deserialize(binary_data, tensor_table)
 
 
+class _TensorExtractor(pickle.Pickler):
+    def __init__(self, *args, tensors, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tensors = tensors
+
+    def persistent_id(self, obj):
+        if isinstance(obj, torch.Tensor):
+            self.tensors.append(obj)
+            return ""
+        else:
+            return None
+
+
 def _extract_tensors(obj):
     r"""
     This function is exclusively called from C++.
@@ -187,15 +200,8 @@ def _extract_tensors(obj):
     It extracts the tensors contained in the given object, through pickling.
     """
     tensors = []
-    def cb(x):
-        if isinstance(x, torch.Tensor):
-            tensors.append(x)
-            return ""
-        else:
-            return None
-    p = pickle.Pickler(io.BytesIO())
-    p.persistent_id = cb
-    p.dump(obj)
+    extractor = _TensorExtractor(io.BytesIO(), protocol=-1, tensors=tensors)
+    extractor.dump(obj)
     return tensors
 
 
