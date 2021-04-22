@@ -47,9 +47,6 @@ void assert_ignored_methods_not_called(
   const bool recurse = true;
   std::vector<Node*> all_nodes =
       findAllNodes({fn->graph()->block()}, c10::prim::CallMethod, recurse);
-  if (all_nodes.empty()) {
-    return;
-  }
 
   // Extract method names from these nodes.
   std::unordered_set<std::string> encountered_ignored_methods;
@@ -58,6 +55,9 @@ void assert_ignored_methods_not_called(
     if (ignored_methods.count(n->s(attr::name)) > 0) {
       encountered_ignored_methods.insert(n->s(attr::name));
     }
+  }
+  if (encountered_ignored_methods.empty()) {
+    return;
   }
 
   std::string encountered_ignored_methods_str;
@@ -89,9 +89,7 @@ void assert_ignored_attributes_not_referenced(
   const bool recurse = true;
   std::vector<Node*> all_nodes =
       findAllNodes({fn->graph()->block()}, c10::prim::GetAttr, recurse);
-  if (all_nodes.empty()) {
-    return;
-  }
+
   // Extract attribute names from these nodes.
   std::unordered_set<std::string> encountered_ignored_attributes;
 
@@ -99,6 +97,9 @@ void assert_ignored_attributes_not_referenced(
     if (ignored_attributes.count(n->s(attr::name)) > 0) {
       encountered_ignored_attributes.insert(n->s(attr::name));
     }
+  }
+  if (encountered_ignored_attributes.empty()) {
+    return;
   }
 
   std::string encountered_ignored_attributes_str;

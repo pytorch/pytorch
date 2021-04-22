@@ -509,9 +509,16 @@ class TestOptimizer(TestCase):
         class MyTestModule(torch.nn.Module):
             def __init__(self):
                 super(MyTestModule, self).__init__()
+                self.abc = 23
+                self.pqr = torch.Tensor([1., 2., 3.])
 
             def forward(self, inputs):
-                return inputs
+                x = self.dummy_method_cloned()
+                return (inputs, x)
+
+            @torch.jit.export
+            def dummy_method_cloned_not_2(self):
+                return self.pqr, self.dummy_method_not_cloned()
 
             @torch.jit.export
             def dummy_method_not_cloned(self):
@@ -521,24 +528,67 @@ class TestOptimizer(TestCase):
             def dummy_method_cloned(self):
                 return None
 
-        m = torch.jit.script(MyTestModule())
-        cloned = torch._C._clone_module_with_class(m._c, ["dummy_method_not_cloned"])
+            @torch.jit.export
+            def dummy_method_ref_attr_pqr(self):
+                return self.pqr
 
-        self.assertEqual(
-            (
-                hasattr(m, "dummy_method_not_cloned"),
-                hasattr(m, "dummy_method_cloned"),
-                hasattr(cloned, "dummy_method_not_cloned"),
-                hasattr(cloned, "dummy_method_cloned"),
-            ),
-            (True, True, False, True),
+        m = torch.jit.script(MyTestModule())
+
+        # Check that the methods exist on the original model.
+        self.assertEqual(hasattr(m, "dummy_method_not_cloned"), True)
+        self.assertEqual(hasattr(m, "dummy_method_cloned"), True)
+        self.assertEqual(hasattr(m, "dummy_method_cloned_not_2"), True)
+        self.assertEqual(hasattr(m, "pqr"), True)
+
+        # Case-1: Successfully clone, ignoring 2 methods, keeping all attributes.
+        cloned = torch._C._clone_module_with_class(
+            m._c,
+            ["dummy_method_not_cloned", "dummy_method_cloned_not_2"],  # ignored_methods
+            [],  # ignored_attributes
         )
 
+        # Check that the ignored methods don't exist on the cloned model.
+        self.assertEqual(hasattr(cloned, "dummy_method_not_cloned"), False)
+        self.assertEqual(hasattr(cloned, "dummy_method_cloned"), True)
+        self.assertEqual(hasattr(cloned, "dummy_method_cloned_not_2"), False)
+        self.assertEqual(hasattr(cloned, "pqr"), True)
+
+        # Check that the cloned class has a classname that starts with __torch__.
         self.assertTrue(
             cloned.qualified_name.startswith('__torch__.'),
             ("Expected the cloned module's name to start with the string "
              "'__torch__.', but got: {0}").format(cloned.qualified_name),
         )
+
+
+        # Case-2: Successfully clone the module, ignoring the attribute pqr, and the method that references it.
+        cloned = torch._C._clone_module_with_class(
+            m._c,
+            ["dummy_method_not_cloned", "dummy_method_cloned_not_2", "dummy_method_ref_attr_pqr"],
+            ["pqr"],
+        )
+
+        # Check that the ignored methods don't exist on the cloned model.
+        self.assertEqual(hasattr(cloned, "dummy_method_not_cloned"), False)
+        self.assertEqual(hasattr(cloned, "dummy_method_cloned"), True)
+        self.assertEqual(hasattr(cloned, "dummy_method_cloned_not_2"), False)
+        self.assertEqual(hasattr(cloned, "dummy_method_ref_attr_pqr"), False)
+        self.assertEqual(hasattr(cloned, "pqr"), False)
+
+
+        # Case-3: The statement below will throw since dummy_method_cloned2 is preserved,
+        # and references dummy_method_not_cloned, which is not cloned.
+        with self.assertRaises(RuntimeError):
+            cloned = torch._C._clone_module_with_class(m._c, ["dummy_method_not_cloned"], [])
+
+        # Case-4: The statement below will throw since dummy_method_ref_attr_pqr
+        # is preserved, and references "pqr", which is not cloned.
+        with self.assertRaises(RuntimeError):
+            cloned = torch._C._clone_module_with_class(
+                m._c,
+                ["dummy_method_not_cloned", "dummy_method_cloned2"],
+                ["pqr"],
+            )
 
 
 if __name__ == '__main__':
