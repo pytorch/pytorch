@@ -608,8 +608,8 @@ void testStoreSetGet(const std::string& path) {
   auto rank_1_glooStore = static_cast<c10d::ProcessGroupGloo::GlooStore*>(
       tests[1].getProcessGroup()._getStore().get());
 
-  rank_0_glooStore->setUint("testKey", testVector);
-  auto value = rank_1_glooStore->getUint("testKey");
+  rank_0_glooStore->set("testKey", testVector);
+  auto value = rank_1_glooStore->get("testKey");
   EXPECT_TRUE(value == testVector);
 }
 
