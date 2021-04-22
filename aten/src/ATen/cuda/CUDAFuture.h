@@ -15,10 +15,7 @@ namespace cuda {
 
 struct TORCH_CUDA_CPP_API CUDAFuture final : at::ivalue::Future {
  public:
-  // FIXME Remove the c10::optional once the TensorPipe agent can provide this.
-  explicit CUDAFuture(
-      at::TypePtr type,
-      c10::optional<std::vector<c10::DeviceIndex>> devices = nullopt);
+  CUDAFuture(at::TypePtr type, std::vector<c10::DeviceIndex> devices);
 
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) override;
 
@@ -54,8 +51,7 @@ struct TORCH_CUDA_CPP_API CUDAFuture final : at::ivalue::Future {
   // current when invoking a callback, thus allowing the callback to use devices
   // that the parent future didn't use. This field is set to the value provided
   // in the constructor and will be "inherited" by all child futures.
-  // FIXME Remove the c10::optional once the TensorPipe agent can provide this.
-  const c10::optional<std::vector<c10::DeviceIndex>> devices_;
+  const std::vector<c10::DeviceIndex> devices_;
 };
 
 } // namespace cuda
