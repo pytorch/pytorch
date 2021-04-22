@@ -33,7 +33,7 @@ from .importer import Importer, OrderedImporter, sys_importer
 
 class EmptyMatchError(Exception):
     """This is an exception that is thrown when a mock or extern is marked as
-    allow_empty=False, and is not matched with any module during packaging.
+    ``allow_empty=False``, and is not matched with any module during packaging.
     """
 
     pass
@@ -48,11 +48,11 @@ class DeniedModuleError(Exception):
 
 
 class PackageExporter:
-    """Exporters allow you to write packages of code, pickled python data, and
+    """Exporters allow you to write packages of code, pickled Python data, and
     arbitrary binary and text resources into a self-contained package.
 
     Imports can load this code in a hermetic way, such that code is loaded
-    from the package rather than the normal python import system. This allows
+    from the package rather than the normal Python import system. This allows
     for the packaging of PyTorch model code and data so that it can be run
     on a server or used in the future for transfer learning.
 
@@ -68,7 +68,7 @@ class PackageExporter:
     a locally-installed package, but then fails when the package is copied to another machine.
 
     When source code is added to the package, the exporter optionally can scan it
-    for further code dependencies (`dependencies=True`). It looks for import statements,
+    for further code dependencies (``dependencies=True``). It looks for import statements,
     resolves relative references to qualified module names, and calls :meth:`require_module`
     on each it finds, recursively resolving dependencies.
     """
@@ -88,10 +88,10 @@ class PackageExporter:
         Create an exporter.
 
         Args:
-            f: The location to export to. Can be a  string/Path object containing a filename,
-                or a Binary I/O object.
+            f: The location to export to. Can be a  ``string``/``Path`` object containing a filename,
+                or a binary I/O object.
             importer: If a single Importer is passed, use that to search for modules.
-                If a sequence of importers are passsed, an OrderedImporter will be constructed out of them.
+                If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
             verbose: Print information about dependency resolution to stdout.
                 Useful for tracking down why certain files get included.
         """
@@ -136,7 +136,7 @@ class PackageExporter:
             file_or_directory (str): the path to a file or directory of code. When a directory, all python files in the directory
                 are recursively copied using :meth:`save_source_file`. If a file is named "/__init__.py" the code is treated
                 as a package.
-            dependencies (bool, optional): If True, we scan the source for dependencies.
+            dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
         path = Path(file_or_directory)
         if path.is_dir():
@@ -222,11 +222,12 @@ class PackageExporter:
 
         Args:
             module_name (str): e.g. `my_package.my_subpackage`, code will be saved to provide code for this package.
-            src (str): The python source code to save for this package
+            src (str): The Python source code to save for this package.
             is_package (bool, optional): If True, this module is treated as a package. Packages are allowed to have submodules
-                (e.g. my_package.my_subpackage.my_subsubpackage), and resources can be saved inside them. Defaults to False.
+                (e.g. my_package.my_subpackage.my_subsubpackage), and resources can be saved inside them. Defaults to ``False``.
             dependencies (bool, optional): If True, we scan the source for dependencies.
-            orig_file_name (str, optional): If present, used in logging to identifying where the source came from. Defaults to None.
+            orig_file_name (str, optional): If present, used in logging to identifying where the source came from.
+                Defaults to ``None``.
         """
         self.provided[module_name] = True
         extension = "/__init__.py" if is_package else ".py"
@@ -350,13 +351,13 @@ node [shape=box];
         self.save_module(module_name, dependencies)
 
     def save_module(self, module: Union[str, types.ModuleType], dependencies=True):
-        """Save the code for `module` into the package. Code for the module is resolved using the `importers` path to find the
-        module object, and then using its `__file__` attribute to find the source code.
+        """Save the code for ``module`` into the package. Code for the module is resolved using the ``importers`` path to find the
+        module object, and then using its ``__file__`` attribute to find the source code.
 
         Args:
             module (Union[str, types.ModuleType]): e.g. `my_package.my_subpackage`, code will be saved to provide code
                 for this package.
-            dependencies (bool, optional): If True, we scan the source for dependencies.
+            dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
         if isinstance(module, str):
             module_name = module
@@ -382,16 +383,16 @@ node [shape=box];
         If `dependencies` is true, this method will also scan the pickled objects for which modules are required
         to reconstruct them and save the relevant code.
 
-        To be able to save an object where `type(obj).__name__` is `my_module.MyObject`,
-        `my_module.MyObject` must resolve to the class of the object according to the `importer` order. When saving objects that
-        have previously been packaged, the importer's `import_module` method will need to be present in the `importer` list
+        To be able to save an object where ``type(obj).__name__`` is ``my_module.MyObject``,
+        ``my_module.MyObject`` must resolve to the class of the object according to the ``importer`` order. When saving objects that
+        have previously been packaged, the importer's ``import_module`` method will need to be present in the ``importer`` list
         for this to work.
 
         Args:
-            package (str): The name of module package this resource should go it (e.g. "my_package.my_subpackage")
-            resource (str): A unique name for the resource, used to indentify it to load.
+            package (str): The name of module package this resource should go in (e.g. "my_package.my_subpackage")
+            resource (str): A unique name for the resource, used to identify it to load.
             obj (Any): The object to save, must be picklable.
-            dependencies (bool, optional): If True, we scan the source for dependencies.
+            dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
@@ -423,12 +424,12 @@ node [shape=box];
         self._write(filename, data_value)
 
     def save_text(self, package: str, resource: str, text: str):
-        """Save text data to the package
+        """Save text data to the package.
 
         Args:
             package (str): The name of module package this resource should go it (e.g. "my_package.my_subpackage")
-            resource (str): A unique name for the resource, used to indentify it to load.
-            text (str): The contents to save
+            resource (str): A unique name for the resource, used to identify it to load.
+            text (str): The contents to save.
         """
         return self.save_binary(package, resource, text.encode("utf-8"))
 
@@ -437,7 +438,7 @@ node [shape=box];
 
         Args:
             package (str): The name of module package this resource should go it (e.g. "my_package.my_subpackage")
-            resource (str): A unique name for the resource, used to indentify it to load.
+            resource (str): A unique name for the resource, used to identify it to load.
             binary (str): The data to save.
         """
         filename = self._filename(package, resource)
