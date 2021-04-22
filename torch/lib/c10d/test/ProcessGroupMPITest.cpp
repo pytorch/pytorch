@@ -27,7 +27,6 @@ void waitWork(
 
 void testAllreduce(int iter = 1000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  std::cerr << "rank " << pg->getRank() << "\n";
   // Generate inputs
   std::vector<std::vector<at::Tensor>> allTensors(iter);
   for (auto i = 0; i < iter; ++i) {
@@ -43,9 +42,7 @@ void testAllreduce(int iter = 1000) {
     works.push_back(std::move(work));
   }
 
-  std::cerr << "wait\n";
   waitWork(pg, works);
-  std::cerr << "wait done\n";
 
   // Get the world size
   auto worldSize = pg->getSize();
