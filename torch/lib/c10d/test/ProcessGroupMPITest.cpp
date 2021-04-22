@@ -11,13 +11,28 @@
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
-// Wait for work to complete
+// Wait for work to complete. To be removed once all works are migrated
+// to futures.
 void waitWork(
     c10::intrusive_ptr<::c10d::ProcessGroupMPI> pg,
     std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
   for (auto& work : works) {
     try {
       work->wait();
+    } catch (const std::exception& ex) {
+      std::cerr << "Exception received: " << ex.what() << std::endl;
+      pg->abort();
+    }
+  }
+}
+
+// Wait using Futures
+void waitFuture(
+    c10::intrusive_ptr<::c10d::ProcessGroupMPI> pg,
+    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
+  for (auto& work : works) {
+    try {
+      work->getFuture()->wait();
     } catch (const std::exception& ex) {
       std::cerr << "Exception received: " << ex.what() << std::endl;
       pg->abort();
@@ -42,7 +57,7 @@ void testAllreduce(int iter = 1000) {
     works.push_back(std::move(work));
   }
 
-  waitWork(pg, works);
+  waitFuture(pg, works);
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -82,7 +97,7 @@ void testBroadcast(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  waitWork(pg, works);
+  waitFuture(pg, works);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
@@ -113,7 +128,7 @@ void testReduce(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  waitWork(pg, works);
+  waitFuture(pg, works);
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -160,7 +175,7 @@ void testAllgather(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  waitWork(pg, works);
+  waitFuture(pg, works);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
@@ -196,7 +211,7 @@ void testGather(int iter = 10000) {
         allOutputTensors[i][0][j] = at::zeros({16, 16});
       }
     } else {
-      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
+      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>(0);
     }
   }
 
@@ -208,7 +223,7 @@ void testGather(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  waitWork(pg, works);
+  waitFuture(pg, works);
 
   // Verify outputs
   if (rank == 0) {
@@ -247,7 +262,7 @@ void testScatter(int iter = 1) {
         allInputTensors[i][0][j] = at::ones({16, 16}) * rank * i;
       }
     } else {
-      allInputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
+      allInputTensors[i] = std::vector<std::vector<at::Tensor>>(0);
     }
   }
 
@@ -259,7 +274,7 @@ void testScatter(int iter = 1) {
     works.push_back(std::move(work));
   }
 
-  waitWork(pg, works);
+  waitFuture(pg, works);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
