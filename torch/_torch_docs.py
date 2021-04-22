@@ -1903,9 +1903,7 @@ Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this r
 
 .. note::
     If :attr:`min` is greater than :attr:`max` :func:`torch.clamp(..., min, max) <torch.clamp>`
-    sets all values equal to :attr:`max`.
-
-    This is shown in the second example below.
+    sets all elements in :attr:`input` to the value of :attr:`max`.
 
 Args:
     {input}
@@ -1922,8 +1920,6 @@ Example::
     tensor([-1.7120,  0.1734, -0.0478, -0.0922])
     >>> torch.clamp(a, min=-0.5, max=0.5)
     tensor([-0.5000,  0.1734, -0.0478, -0.0922])
-    >>> torch.clamp(a, min=8.0, max=11.0)
-    tensor([1., 1., 1., 1.])
 
 .. function:: clamp(input, *, min, out=None) -> Tensor
 
