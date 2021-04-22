@@ -406,6 +406,7 @@ script::Module optimizeForMobile(
 
   if (!optimization_blocklist.count(
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
+    // TODO fix duplication caused by referencing same op across multiple functions
     insertPrePackedOps(cloned_module);
     cloned_module = freeze_module(cloned_module, preserved_list);
     fusePrePackedLinearConvWithClamp(cloned_module);
