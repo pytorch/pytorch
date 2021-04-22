@@ -173,7 +173,7 @@ class GraphModule(torch.nn.Module):
         # it is a subclass of the user-defined class, the only difference
         # is an extra layer to install the forward method
 
-        class GraphModuleImpl(cls):  # type: ignore
+        class GraphModuleImpl(cls):  # type: ignore[misc, valid-type]
             pass
         return super().__new__(GraphModuleImpl)
 
@@ -488,7 +488,7 @@ class {module_name}(torch.nn.Module):
             # constiuent substrings of the error message
             tb_repr = traceback.format_exc()
             custom_msg = ("Call using an FX-traced Module, "
-                          f"line {err_lineno} of the traced Module’s "
+                          f"line {err_lineno} of the traced Module's "
                           "generated forward function:")
             before_err = "".join(all_src_lines[err_lineno - 2 : err_lineno])
             marker = "~" * err_line_len + "~~~ <--- HERE"
@@ -503,7 +503,7 @@ class {module_name}(torch.nn.Module):
             except Exception as e:
                 assert e.__traceback__
                 topmost_framesummary: traceback.FrameSummary = \
-                    traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore
+                    traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore[arg-type]
                 if "eval_with_key" in topmost_framesummary.filename:
                     print(generate_error_message(topmost_framesummary),
                           file=sys.stderr)

@@ -1,6 +1,17 @@
 import collections
 
-from .constants import *
+from .constants import (API_BLAS, API_C10, API_CAFFE2, API_DRIVER, API_FFT,
+                        API_PYTORCH, API_RAND, API_ROCTX, API_RTC, API_RUNTIME,
+                        API_SPARSE, CONV_CACHE, CONV_CONTEXT, CONV_D3D9,
+                        CONV_D3D10, CONV_D3D11, CONV_DEF, CONV_DEVICE,
+                        CONV_DEVICE_FUNC, CONV_EGL, CONV_ERROR, CONV_EVENT,
+                        CONV_EXEC, CONV_GL, CONV_GRAPHICS, CONV_INCLUDE,
+                        CONV_INCLUDE_CUDA_MAIN_H, CONV_INIT, CONV_JIT,
+                        CONV_MATH_FUNC, CONV_MEM, CONV_MODULE,
+                        CONV_NUMERIC_LITERAL, CONV_OCCUPANCY, CONV_OTHER,
+                        CONV_PEER, CONV_SPECIAL_FUNC, CONV_STREAM,
+                        CONV_SURFACE, CONV_TEX, CONV_THREAD, CONV_TYPE,
+                        CONV_VDPAU, CONV_VERSION, HIP_UNSUPPORTED)
 
 """ Mapping of CUDA functions, include files, constants, and types to ROCm/HIP equivalents
 This closely follows the implementation in hipify-clang
@@ -7734,7 +7745,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cub::Sum", ("hipcub::Sum", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::TransformInputIterator", ("hipcub::TransformInputIterator", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::WarpReduce", ("hipcub::WarpReduce", CONV_SPECIAL_FUNC, API_RUNTIME)),
-        ("namespace cub", ("namespace hipcub", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("nvtxMark", ("roctxMark", CONV_OTHER, API_ROCTX)),
         ("nvtxMarkA", ("roctxMarkA", CONV_OTHER, API_ROCTX)),
         ("nvtxRangePushA", ("roctxRangePushA", CONV_OTHER, API_ROCTX)),

@@ -4,7 +4,6 @@ from .node import Node
 from .symbolic_trace import symbolic_trace
 
 import copy
-from enum import Enum, auto
 from typing import Callable, Dict, List, NamedTuple, Optional, Set
 import torch
 
@@ -88,109 +87,45 @@ class SubgraphMatcher:
 def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
     gm.delete_all_unused_submodules()
 
-    class ErrType(Enum):
-        EXISTS_AS_OTHER_ATTR = auto()
-        DOES_NOT_EXIST = auto()
+    replacement.lint()
 
-    class FoundModule():
-        def __init__(self, mod_match: Optional[torch.nn.Module],
-                     err: Optional[ErrType]):
-            assert(mod_match is not None or err is not None)
-            self.mod_match = mod_match
-            self.err = err
-
-        # For tuple unpacking
-        def __iter__(self):
-            yield from [self.mod_match, self.err]
-
-    def try_get_submodule(mod: torch.nn.Module, target: str) -> FoundModule:
+    def try_get_submodule(mod: torch.nn.Module, target: str) -> Optional[torch.nn.Module]:
         try:
             mod_match = mod.get_submodule(target)
-            return FoundModule(mod_match, None)
-        except AttributeError as e:
-            assert(e.args and len(e.args))
-            if ("not an nn.Module" in e.args[0]):
-                return FoundModule(None, ErrType.EXISTS_AS_OTHER_ATTR)
-            elif("has no attribute" in e.args[0]):
-                return FoundModule(None, ErrType.DOES_NOT_EXIST)
-            else:
-                raise RuntimeError("Unknown error type found when "
-                                   "attempting to replace missing "
-                                   "submodule in subgraph rewriter!"
-                                   "Please report a bug to PyTorch")
+            return mod_match
+        except AttributeError:
+            return None
 
     for node in gm.graph.nodes:
-        if node.op == "call_module":
+        if node.op == "call_module" or node.op == "get_attr":
 
-            gm_submod, gm_err = try_get_submodule(gm, node.target)
+            gm_submod = try_get_submodule(gm, node.target)
 
-            replacement_submod, replacement_err = try_get_submodule(replacement, 
-                                                                    node.target)
+            replacement_submod = try_get_submodule(replacement, node.target)
 
-            # CASE 1: This target already exists as a submodule
-            # in our result GraphModule and there's no overlap
-            # with `replacement`. We don't have to do anything
-            if gm_submod and not replacement_submod:
+            # CASE 1: This target already exists as a submodule in our
+            # result GraphModule. Whether or not it exists in
+            # `replacement`, the existing submodule takes precedence.
+            if gm_submod is not None:
                 continue
 
-            # CASE 2: The target exists as a submodule in both `gm`
-            # and `replacement`
-            elif gm_submod and replacement_submod:
-                # The submodules are the same, so it doesn't matter
-                if type(gm_submod) == type(replacement_submod):
-                    continue
-                # Submodule type mismatch! Which are we supposed to
-                # use?
-                else:
-                    raise RuntimeError("Attempted to replace ",
-                                       node.target, " during subgraph "
-                                       "rewriting, but both the "
-                                       "original GraphModule `gm` and "
-                                       "the replacement nn.Module "
-                                       "`replacement` have a submodule"
-                                       " of this name. The two "
-                                       "submodules reference different"
-                                       " objects, so it is unclear "
-                                       "what ", node.target, " should"
-                                       " refer to")
-
-            # CASE 3: The target was part of the original GraphModule
-            # `gm`, but it wasn't a submodule
-            elif not gm_submod and gm_err == ErrType.EXISTS_AS_OTHER_ATTR:
-                raise RuntimeError("Attempted to replace ", node.target,
-                                   " during subgraph rewriting, but ",
-                                   node.target, " already exists in the"
-                                   " original GraphModule `gm` as "
-                                   "something other than an nn.Module")
-
-            # CASE 4: The target wasn't part of `gm`, but we found the
-            # correct replacement submodule in `replacement`
-            elif (not gm_submod and gm_err == ErrType.DOES_NOT_EXIST 
-                    and replacement_submod):
+            # CASE 2: The target exists as a submodule in `replacement`
+            # only, so we need to copy it over.
+            elif replacement_submod is not None:
                 new_submod = copy.deepcopy(getattr(replacement, node.target))
                 gm.add_submodule(node.target, new_submod)
 
-            # CASE 5: The target wasn't part of `gm`, and the
-            # replacement we found wasn't a submodule
-            elif (not gm_submod and not replacement_submod
-                    and replacement_err == ErrType.EXISTS_AS_OTHER_ATTR):
-                raise RuntimeError("Attempted to replace ", node.target,
-                                   " during subgraph rewriting, but ",
-                                   node.target, " does not exist in the"
-                                   " original GraphModule `gm`. The "
-                                   "candidate replacement submodule "
-                                   "in `replacement` is not an "
-                                   "nn.Module")
+            # CASE 3: The target doesn't exist as a submodule in `gm`
+            # or `replacement`
+            raise RuntimeError("Attempted to create a \"", node.op,
+                               "\" node during subgraph rewriting with"
+                               " target ", node.target, " but the "
+                               "referenced submodule does not exist in"
+                               "either the original GraphModule `gm` "
+                               "or the replacement GraphModule "
+                               "`replacement`")
 
-            # CASE 5: The target wasn't part of `gm` or `replacement`
-            else:
-                raise RuntimeError("Attempted to replace ", node.target,
-                                   " during subgraph rewriting, but ",
-                                   node.target, " does not exist in the"
-                                   " original GraphModule `gm` or in "
-                                   "the replacement nn.Module "
-                                   "`replacement`")
-
+    gm.lint()
 
 def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -> List[Match]:
     """

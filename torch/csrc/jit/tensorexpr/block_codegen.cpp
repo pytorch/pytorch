@@ -11,6 +11,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_TRIGGER(block_codegen_created);
 std::string blockDtypeCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
@@ -18,6 +19,7 @@ std::string blockDtypeCppString(const Dtype& dtype) {
       return "1";
     case ScalarType::Half:
       return "2";
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case ScalarType::Char:
       return "1";
     case ScalarType::Byte:
@@ -367,6 +369,7 @@ void BlockCodeGen::call(const std::vector<CallArg>& args) {
 }
 
 BlockCodeGen::~BlockCodeGen() = default;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCodeGen<BlockCodeGen> block_codegen_reg("block_codegen");
 
 } // namespace tensorexpr

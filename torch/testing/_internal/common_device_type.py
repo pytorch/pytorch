@@ -427,6 +427,21 @@ def get_device_type_test_bases():
 device_type_test_bases = get_device_type_test_bases()
 
 
+def filter_desired_device_types(device_type_test_bases, except_for=None, only_for=None):
+    # device type cannot appear in both except_for and only_for
+    intersect = set(except_for if except_for else []) & set(only_for if only_for else [])
+    assert not intersect, f"device ({intersect}) appeared in both except_for and only_for"
+
+    if except_for:
+        device_type_test_bases = filter(
+            lambda x: x.device_type not in except_for, device_type_test_bases)
+    if only_for:
+        device_type_test_bases = filter(
+            lambda x: x.device_type in only_for, device_type_test_bases)
+
+    return list(device_type_test_bases)
+
+
 # Note [How to extend DeviceTypeTestBase to add new test device]
 # The following logic optionally allows downstream projects like pytorch/xla to
 # add more test devices.
@@ -446,11 +461,15 @@ device_type_test_bases = get_device_type_test_bases()
 _TORCH_TEST_DEVICES = os.environ.get('TORCH_TEST_DEVICES', None)
 if _TORCH_TEST_DEVICES:
     for path in _TORCH_TEST_DEVICES.split(':'):
-        mod = runpy.run_path(path, init_globals=globals())
+        # runpy (a stdlib module) lacks annotations
+        mod = runpy.run_path(path, init_globals=globals())  # type: ignore[func-returns-value]
         device_type_test_bases.append(mod['TEST_CLASS'])
 
 
 PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
+
+PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY = 'PYTORCH_TESTING_DEVICE_ONLY_FOR'
+PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 
 
 # Adds 'instantiated' device-specific test cases to the given scope.
@@ -476,15 +495,29 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
+    # Filter out the device types based on user inputs
+    desired_device_type_test_bases = filter_desired_device_types(device_type_test_bases,
+                                                                 except_for, only_for)
+
+    def split_if_not_empty(x: str):
+        return x.split(",") if len(x) != 0 else []
+
+    # Filter out the device types based on environment variables if available
+    # Usage:
+    # export PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda,cpu
+    # export PYTORCH_TESTING_DEVICE_EXCEPT_FOR=xla
+    env_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, ''))
+    env_except_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, ''))
+
+    desired_device_type_test_bases = filter_desired_device_types(desired_device_type_test_bases,
+                                                                 env_except_for, env_only_for)
+
+
     # Creates device-specific test cases
-    for base in device_type_test_bases:
-        # Skips bases listed in except_for
-        if except_for is not None and only_for is not None:
-            assert base.device_type not in except_for or base.device_type not in only_for,\
-                "same device cannot appear in except_for and only_for"
-        if except_for is not None and base.device_type in except_for:
-            continue
-        if only_for is not None and base.device_type not in only_for:
+    for base in desired_device_type_test_bases:
+        # Special-case for ROCm testing -- only test for 'cuda' i.e. ROCm device by default
+        # The except_for and only_for cases were already checked above. At this point we only need to check 'cuda'.
+        if TEST_WITH_ROCM and base.device_type != 'cuda':
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()

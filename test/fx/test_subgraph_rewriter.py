@@ -376,7 +376,6 @@ class TestSubgraphRewriter(JitTestCase):
         test_outs = traced.forward(x)
         self.assertEqual(ref_outs, test_outs)
 
-
     def test_subgraph_rewriter_replaces_referenced_submodules(self):
         class M(torch.nn.Module):
             def __init__(self):

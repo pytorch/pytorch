@@ -13,7 +13,7 @@ import warnings
 
 
 if TYPE_CHECKING:
-    from .graph_module import GraphModule  # noqa
+    from .graph_module import GraphModule
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -120,13 +120,20 @@ class _Namespace:
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
+        match = self._name_suffix_regex.match(candidate)
+        if match is None:
+            base = candidate
+            num = None
+        else:
+            base, num_str = match.group(1, 2)
+            num = int(num_str)
+
+        candidate = base if num is None else f'{base}_{num}'
+        num = num if num else 0
+
         while candidate in self._used_names or self._is_illegal_name(candidate, obj):
-            match = self._name_suffix_regex.match(candidate)
-            if match is None:
-                candidate = candidate + '_1'
-            else:
-                base, num = match.group(1, 2)
-                candidate = f'{base}_{int(num) + 1}'
+            num += 1
+            candidate = f'{base}_{num}'
 
         self._used_names.setdefault(candidate)
         if obj is None:
@@ -1004,15 +1011,20 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):
                         m_itr = getattr(m_itr, atom, None)
+                        if isinstance(m_itr, torch.nn.Module):
+                            continue
+                        seen_qualname = '.'.join(target_atoms[:i])
                         if m_itr is None:
-                            seen_qualname = '.'.join(target_atoms[:i])
                             raise RuntimeError(f'Node {node} target {node.target} references nonexistent attribute '
                                                f'{atom} of {seen_qualname}')
+                        else:
+                            raise RuntimeError(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
+                                               'not reference an nn.Module')
 
     def eliminate_dead_code(self):
         """
         Remove all dead code from the graph, based on each node's number of
-        users, and whether the nodes have any side effects The graph must be
+        users, and whether the nodes have any side effects. The graph must be
         topologically sorted before calling.
 
         Returns:
