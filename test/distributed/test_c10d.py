@@ -763,16 +763,16 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self._fork_processes()
 
     def opts(self, threads=2):
-        opts = c10d.ProcessGroupGloo.Options()
-        opts.timeout = 5.0
+        opts = c10d.ProcessGroupGloo._Options()
+        opts._timeout = 5.0
         opts._devices = [create_device(interface=LOOPBACK)]
         opts._threads = threads
         return opts
 
     def test_multi_device_constructor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        opts = c10d.ProcessGroupGloo.Options()
-        opts.timeout = 5.0
+        opts = c10d.ProcessGroupGloo._Options()
+        opts._timeout = 5.0
         opts._devices = [
             create_device(interface=LOOPBACK),
             create_device(interface=LOOPBACK),
@@ -2398,7 +2398,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
     ):
         store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo.Options()
+        options = c10d.ProcessGroupGloo._Options()
         options._devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(
             store, self.rank, self.world_size, options
@@ -4865,7 +4865,7 @@ class CommTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_broadcast_coalesced_gloo_cuda(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo.Options()
+        options = c10d.ProcessGroupGloo._Options()
         options._devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(
             store, self.rank, self.world_size, options
@@ -4878,7 +4878,7 @@ class CommTest(MultiProcessTestCase):
     @requires_gloo()
     def test_broadcast_coalesced_gloo_cpu(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo.Options()
+        options = c10d.ProcessGroupGloo._Options()
         options._devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(
             store, self.rank, self.world_size, options
@@ -4939,64 +4939,6 @@ class CommTest(MultiProcessTestCase):
     def test_sequence_num_set_nccl_new_group(self):
         torch.cuda.set_device(self.rank)
         self._test_sequence_num_set_new_group(backend="nccl")
-
-    @requires_gloo()
-    def test_pass_gloo_options(self):
-        pg_opts = c10d.ProcessGroupGloo.Options()
-        pg_opts.timeout = timedelta(seconds=10)
-        pg_opts._devices = [create_device(interface=LOOPBACK)]
-        pg_opts._threads = 2
-
-        store = c10d.FileStore(self.file_name, self.world_size)
-
-        dist.init_process_group(
-            "gloo",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-            pg_options=pg_opts
-        )
-
-        default_pg = c10d.distributed_c10d._get_default_group()
-
-        # Test properly set devices on options if user don't set devices
-        no_device_thread_pg_opts = c10d.ProcessGroupGloo.Options(timeout=timedelta(seconds=10))
-        no_device_thread_pg = dist.new_group([0, 1], pg_options=no_device_thread_pg_opts)
-        self.assertTrue(len(no_device_thread_pg.options._devices) != 0)
-        # ensure created pg have the correct timeout set instead of default time out
-        self.assertEqual(no_device_thread_pg.options.timeout, timedelta(seconds=10))
-
-        # Test if user pass in Options, set threads, but not set devices, should error out
-        no_device_pg_opts = c10d.ProcessGroupGloo.Options(timeout=timedelta(seconds=10))
-        no_device_pg_opts._threads = 4
-
-        with self.assertRaisesRegex(
-            RuntimeError, "threads and devices must be passed in together"
-        ):
-            no_device_pg = dist.new_group([0, 1], pg_options=no_device_pg_opts)
-
-        dist.destroy_process_group(default_pg)
-        self.assertFalse(dist.is_initialized())
-
-
-    @requires_gloo()
-    def test_pass_gloo_options_and_timeout(self):
-        pg_opts = c10d.ProcessGroupGloo.Options()
-        pg_opts.timeout = timedelta(seconds=10)
-
-        store = c10d.FileStore(self.file_name, self.world_size)
-        # Test timeout and pg_options both set, should error out
-        with self.assertRaisesRegex(
-            RuntimeError, "timeout value defined in pg_options are conflicting"
-        ):
-            dist.init_process_group(
-                "gloo",
-                world_size=self.world_size,
-                rank=self.rank,
-                store=store,
-                timeout=timedelta(20),
-                pg_options=pg_opts
-            )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
