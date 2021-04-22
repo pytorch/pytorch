@@ -20,15 +20,19 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-// static py::object* py_onnx = nullptr;
+static std::shared_ptr<py::object> py_onnx_ptr = nullptr;
+
+
+// py::object py_onnx = NULL;
 
 
 static void export_to_onnx(Module module, std::string file_name, torch::Tensor inputs){
-    // if (py_onnx == nullptr) {
-    //     *py_onnx = py::module::import("torch.onnx");
-    // }
-    py::object py_onnx = py::module::import("torch.onnx");
-    py_onnx.attr("export_c_module")(module, file_name, inputs);
+    if (py_onnx_ptr == nullptr) {
+        *py_onnx_ptr = py::module::import("torch.onnx");
+    }
+    // py::object py_onnx = py::module::import("torch.onnx");
+    // py_onnx.attr("export_c_module")(module, file_name, inputs);
+    py_onnx_ptr->attr("export_c_module")(module, file_name, inputs);
 }
 
 torch::jit::Module NeZha_ConvertModule(Module& module, torch::Tensor input) {
