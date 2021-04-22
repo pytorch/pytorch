@@ -620,30 +620,26 @@ class TestNN(NNTestCase):
         mod(inp, False).sum().backward()
         self.assertEqual(hook_called[0], 1)
 
-        # Input inplace error should throw an error (warning during deprecation cycle)
-        with self.assertWarnsRegex(UserWarning, "Output 0 of BackwardHookFunctionBackward is "
-                                   "a view and is being modified inplace."):
+        # Input inplace error should throw an error
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                    "a view and is being modified inplace."):
             mod(inp.clone(), True)
 
         # Input inplace error should throw an error if we try to re-use the view after they have
-        # been modified (warning during deprecation cycle)
+        # been modified
         local_inp = inp.clone()
         out = mod(local_inp, False)
         local_inp[0] *= 1
-        with self.assertWarnsRegex(UserWarning, "Output 0 of BackwardHookFunctionBackward is "
-                                   "a view and its base or another view"):
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                    "a view and its base or another view"):
             # Any operation involving the view will fail here
             mod.inp + 2
 
-        # Output inplace error should throw an error (warning during deprecation cycle)
-        with self.assertWarnsRegex(UserWarning, "BackwardHookFunctionBackward is a view "
-                                   "and is being modified inplace."):
-            # This error won't happen once the warning above is a proper error
-            with self.assertRaisesRegex(RuntimeError, "Module backward hook for grad_input is "
-                                        "called before the grad_output one."):
-                out = mod(inp, False)
-                out += 1
-                out.sum().backward()
+        # Output inplace error should throw an error
+        out = mod(inp, False)
+        with self.assertRaisesRegex(RuntimeError, "BackwardHookFunctionBackward is a view "
+                                    "and is being modified inplace."):
+            out += 1
 
     def test_hook_non_full_warning(self):
         def noop(*args):
@@ -850,6 +846,19 @@ class TestNN(NNTestCase):
                                     r' but got 5-dimensional input of size \[1, 10, 1, 28, 28\] instead'):
 
             F.conv2d(x, w)
+
+    def test_conv2d_discontiguous_weight(self):
+        # Test for https://github.com/pytorch/pytorch/issues/55781
+        x = torch.ones(64, 16, 16, 16)
+        weight = torch.arange(0, 1.0, 1 / 2.0 ** 10).reshape(32, 16, 1, 2)[:, :, :, ::2]
+        self.assertFalse(weight.is_contiguous())
+        y = torch.nn.functional.conv2d(x, weight, None)
+        if torch.backends.mkldnn.is_available():
+            # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_ = torch.nn.functional.conv2d(x, weight, None)
+                self.assertEqual(y, y_)
+        self.assertEqual(y.sum(), 4186112.)
 
     def test_invalid_conv2d(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
@@ -1166,10 +1175,18 @@ class TestNN(NNTestCase):
         block.add_module('linear1', l1)
         block.add_module('linear2', l2)
         n = Net()
-        s = nn.Sequential(n, n, n, n)
+        s = nn.Sequential(n, n)
         self.assertEqual(list(s.named_modules()), [('', s), ('0', n), ('0.l1', l),
                                                    ('0.block', block), ('0.block.linear1', l1),
                                                    ('0.block.linear2', l2)])
+        # test the option to not remove duplicate module instances
+        self.assertEqual(list(s.named_modules(remove_duplicate=False)), [
+            ('', s), ('0', n), ('0.l1', l), ('0.l2', l),
+            ('0.block', block), ('0.block.linear1', l1),
+            ('0.block.linear2', l2),
+            ('1', n), ('1.l1', l), ('1.l2', l),
+            ('1.block', block), ('1.block.linear1', l1),
+            ('1.block.linear2', l2)])
 
     def test_register_buffer_raises_error_if_name_is_not_string(self):
         m = nn.Module()
@@ -1456,6 +1473,10 @@ class TestNN(NNTestCase):
         module_list.extend(s.modules())
         check()
 
+        # verify the right exception is thrown when trying to "forward" through a ModuleList
+        self.assertRaises(NotImplementedError, module_list)
+        self.assertRaises(NotImplementedError, module_list, torch.rand(1, 3))
+
     def test_ModuleDict(self):
         modules = OrderedDict([
             ('act', nn.ReLU()),
@@ -1548,6 +1569,10 @@ class TestNN(NNTestCase):
         self.assertEqual(len(module_dict), 0)
         modules.clear()
         check()
+
+        # verify the right exception is thrown when trying to "forward" through a ModuleDict
+        self.assertRaises(NotImplementedError, module_dict)
+        self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
     def test_ParameterList(self):
         def make_param():
@@ -5414,7 +5439,7 @@ class TestNN(NNTestCase):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
         target = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
         var = torch.tensor([[0.5, 1., 1.5], [1., 1.5, 2.]])
-        component_wise_loss = 0.5 * (torch.sum(torch.log(var) + (input - target)**2 / var, dim=1))
+        component_wise_loss = 0.5 * (torch.log(var) + (input - target)**2 / var)
         self.assertEqual(component_wise_loss,
                          F.gaussian_nll_loss(input, target, var, reduction='none'))
         self.assertEqual(torch.sum(component_wise_loss),
@@ -5424,12 +5449,27 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'is not valid'):
             F.gaussian_nll_loss(input, target, var, reduction='total')
 
+    def test_gaussian_nll_loss_broadcasting(self):
+        input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
+        target_full = torch.tensor([[1., 2., 3.], [1., 2., 3.]])
+        target_part = torch.tensor([[1., 2., 3.]])
+        var_full = torch.tensor([[0.5, 0.5, 0.5], [1.5, 1.5, 1.5]])
+        var_part1 = torch.tensor([[0.5], [1.5]])
+        var_part2 = torch.tensor([0.5, 1.5])
+        component_wise_loss = 0.5 * (torch.log(var_full) + (input - target_full)**2 / var_full)
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target_part, var_full, reduction='none'))
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target_full, var_part1, reduction='none'))
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target_full, var_part2, reduction='none'))
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target_part, var_part1, reduction='none'))
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target_part, var_part2, reduction='none'))
+
     def test_gaussian_nll_loss_args(self):
         input = torch.randn(3, 5)
-        with self.assertRaisesRegex(ValueError, 'input and target must have same size'):
-            target = torch.randn(3, 6)
-            var = torch.ones(3, 5)
-            torch.nn.functional.gaussian_nll_loss(input, target, var)
         with self.assertRaisesRegex(ValueError, 'var is of incorrect size'):
             target = torch.randn(3, 5)
             var = torch.ones(3, 3)
@@ -9194,7 +9234,9 @@ class TestNN(NNTestCase):
               ]]
         )
         #  ChannelsFirst
-        y = F.channel_shuffle(x, 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2)
+            self.assertEqual(len(w), 0)
         self.assertEqual(y, y_ref)
         #  ChannelsLast not supported for 3dim
 
@@ -9222,10 +9264,14 @@ class TestNN(NNTestCase):
               ]]
         )
         #  ChannelsFirst NCHW
-        y = F.channel_shuffle(x, 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2)
+            self.assertEqual(len(w), 0)
         self.assertEqual(y, y_ref)
         #  ChannelsLast NHWC
-        y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last), 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last), 2)
+            self.assertEqual(len(w), 0)
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
@@ -9253,10 +9299,14 @@ class TestNN(NNTestCase):
               ]]
         )
         #  ChannelsFirst NCHW
-        y = F.channel_shuffle(x, 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2)
+            self.assertEqual(len(w), 0)
         self.assertEqual(y, y_ref)
         #  ChannelsLast NHWC
-        y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last_3d), 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last_3d), 2)
+            self.assertEqual(len(w), 0)
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
@@ -10592,6 +10642,16 @@ class TestNNInit(TestCase):
             with self.assertRaises(ValueError):
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1)
                 init.kaiming_normal_(tensor)
+
+    def test_kaiming_uniform_warning_on_0element_tensor(self):
+        tensor = torch.empty(0, 1)
+        with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op"):
+            _ = init.kaiming_uniform_(tensor)
+
+    def test_kaiming_normal_warning_on_0element_tensor(self):
+        tensor = torch.empty(0, 1)
+        with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op"):
+            _ = init.kaiming_normal_(tensor)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_uniform(self):
@@ -12199,6 +12259,27 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
+    @onlyCUDA   # Test if CPU and GPU results match
+    def test_ReflectionPad2d_large(self, device):
+        shapes = ([2, 65736, 6, 6], [65736, 2, 6, 6])
+        pad = (1, 2, 3, 4)
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+
+            out = F.pad(x, pad, mode='reflect')
+            ref_out = F.pad(ref_x, pad, mode='reflect')
+
+            self.assertEqual(out, ref_out)
+
+            g = torch.randn_like(out)
+            ref_g = g.cpu()
+
+            out.backward(g)
+            ref_out.backward(ref_g)
+
+            self.assertEqual(x.grad, ref_x.grad)
+
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
@@ -12813,7 +12894,8 @@ class TestNNDeviceType(NNTestCase):
         helper(1, 100000, 32, 32, ks=4)
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
-    @onlyCUDA
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_max_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None):
@@ -13258,7 +13340,8 @@ class TestNNDeviceType(NNTestCase):
                     for dim in [0, 1]:
                         ref_output = fn(ref_input, dtype=torch.float, dim=dim)
                         output = fn(input, dtype=torch.float, dim=dim)
-                        grad_output = torch.rand_like(output)
+                        grad_output = torch.rand(size, device=device, dtype=dtype)
+                        grad_output = grad_output[shift[0]:, shift[1]:]
                         ref_grad_output = grad_output.clone().cpu().detach()
                         grad_input, = torch.autograd.grad(output, input, grad_outputs=(grad_output), create_graph=True)
                         ref_grad_input, = torch.autograd.grad(ref_output, ref_input,

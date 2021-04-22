@@ -618,6 +618,20 @@ jobs:
           fi
           echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
+
+          echo "Retrieving test reports"
+          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
+          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
+              echo "Retrieving C++ coverage report"
+              docker cp $id:/var/lib/jenkins/workspace/build/coverage.info ./test
+          fi
+          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
+              echo "Retrieving Python coverage report"
+              docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
+              docker cp $id:/var/lib/jenkins/workspace/test/coverage.xml ./test
+              python3 -mpip install codecov
+              python3 -mcodecov
+          fi
     - run:
         name: Report results
         no_output_timeout: "5m"
@@ -642,20 +656,6 @@ jobs:
           EOL
           echo "(cat docker_commands.sh | docker exec -u jenkins -e LANG=C.UTF-8 -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
-
-          echo "Retrieving test reports"
-          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
-          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
-              echo "Retrieving C++ coverage report"
-              docker cp $id:/var/lib/jenkins/workspace/build/coverage.info ./test
-          fi
-          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
-              echo "Retrieving Python coverage report"
-              docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
-              docker cp $id:/var/lib/jenkins/workspace/test/coverage.xml ./test
-              python3 -mpip install codecov
-              python3 -mcodecov
-          fi
         when: always
     - store_test_results:
         path: test-reports
@@ -818,6 +818,8 @@ jobs:
           when: always
       - store_test_results:
           path: test/test-reports
+      - store_artifacts:
+          path: test/coverage.xml
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:
@@ -1415,6 +1417,16 @@ jobs:
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
+      - run:
+          name: Report results
+          no_output_timeout: "5m"
+          command: |
+            set -ex
+            source /Users/distiller/workspace/miniconda3/bin/activate
+            pip install boto3
+            export PYTHONPATH="$PWD"
+            python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          when: always
       - store_test_results:
           path: test/test-reports
 
@@ -6784,33 +6796,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "1"
           vc_product: BuildTools
-          vc_version: "14.28.29333"
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_version: "10.1"
-          executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py36_cuda10.1_test1
-          python_version: "3.6"
-          requires:
-            - pytorch_windows_vs2019_py36_cuda10.1_build
-          test_name: pytorch-windows-test1
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: "14.28.29333"
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_version: "10.1"
-          executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py36_cuda10.1_test2
-          python_version: "3.6"
-          requires:
-            - pytorch_windows_vs2019_py36_cuda10.1_build
-          test_name: pytorch-windows-test2
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: "14.28.29333"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -6819,45 +6805,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "1"
           vc_product: BuildTools
-          vc_version: "14.28.29333"
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.1"
-          executor: windows-with-nvidia-gpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          name: pytorch_windows_vs2019_py36_cuda11.1_test1
-          python_version: "3.6"
-          requires:
-            - pytorch_windows_vs2019_py36_cuda11.1_build
-          test_name: pytorch-windows-test1
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: "14.28.29333"
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.1"
-          executor: windows-with-nvidia-gpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          name: pytorch_windows_vs2019_py36_cuda11.1_test2
-          python_version: "3.6"
-          requires:
-            - pytorch_windows_vs2019_py36_cuda11.1_build
-          test_name: pytorch-windows-test2
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: "14.28.29333"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cpu-py3
@@ -6866,17 +6814,11 @@ workflows:
           python_version: "3.6"
           use_cuda: "0"
           vc_product: BuildTools
-          vc_version: "14.28.29333"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cpu-py3
           cuda_version: cpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: pytorch_windows_vs2019_py36_cpu_test1
           python_version: "3.6"
           requires:
@@ -6884,17 +6826,11 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: BuildTools
-          vc_version: "14.28.29333"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cpu-py3
           cuda_version: cpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: pytorch_windows_vs2019_py36_cpu_test2
           python_version: "3.6"
           requires:
@@ -6902,7 +6838,7 @@ workflows:
           test_name: pytorch-windows-test2
           use_cuda: "0"
           vc_product: BuildTools
-          vc_version: "14.28.29333"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
@@ -6920,7 +6856,7 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: BuildTools
-          vc_version: "14.28.29333"
+          vc_version: ""
           vc_year: "2019"
       - update_s3_htmls:
           context: org-member
@@ -8178,6 +8114,36 @@ workflows:
               only:
                 - /ci-all\/.*/
                 - /release\/.*/
+
+  # the following clones pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7's tests but enables
+  # slow tests and sets an environment variable so gradcheck runs with fast_mode=False
+  slow-gradcheck-scheduled-ci:
+    triggers:
+      - schedule:
+          # runs every 8 hours on the 45th minute
+          cron: "45 0,8,16 * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
+          requires:
+            - "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_old_gradcheck_tests
+          requires:
+            - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
+          build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-old-gradcheck-tests"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
   ecr_gc:
     triggers:
       - schedule:

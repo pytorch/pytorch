@@ -256,7 +256,7 @@ Tensor internal_new_from_data(
   // here.
   Tensor tensor;
   {
-    at::AutoNonVariableTypeMode guard;  // TODO: remove
+    at::AutoDispatchBelowAutograd guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(
@@ -472,11 +472,6 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
   if (isSparse(dispatchKeyToBackend(dispatch_key))) {
     return legacy_sparse_tensor_ctor(dispatch_key, scalar_type, args, kwargs);
   }
-
-  TORCH_WARN_ONCE(
-      "Legacy tensor constructor is deprecated. "
-      "Use: torch.tensor(...) for creating tensors from tensor-like objects; "
-      "or torch.empty(...) for creating an uninitialized tensor with specific sizes.");
 
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);

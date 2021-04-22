@@ -193,6 +193,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.unify_type_list,
         torch.is_warn_always_enabled,
         torch.set_warn_always,
+        torch.vitals_enabled,
+        torch.set_vital,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
@@ -638,7 +640,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.fractional_max_pool3d_with_indices: (
             lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False,
             _random_samples=None: -1),
-        torch.nn.functional.gaussian_nll_loss: (lambda input, target, var, full=False, eps=1e-06, reduction='mean': -1),
+        torch.nn.functional.gaussian_nll_loss: lambda input, target, var, full=False, eps=1e-06, reduction='mean': -1,
         torch.nn.functional.gelu: lambda input: -1,
         torch.nn.functional.glu: lambda input, dim=-1: -1,
         torch.nn.functional.grid_sample: lambda input, grid, mode='bilinear', padding_mode='zeros', align_corners=None: -1,
