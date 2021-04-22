@@ -615,7 +615,7 @@ void testStoreSetGet(const std::string& path) {
 
 #ifndef _WIN32
 TEST(ProcessGroupGlooTest, testSIGSTOPException) {
-  // test SIGSTOP
+  // Test SIGSTOP
   // Fork() and TSAN don't play well together,
   // so skip the test if we're testing with TSAN.
   if (isTSANEnabled()) {
