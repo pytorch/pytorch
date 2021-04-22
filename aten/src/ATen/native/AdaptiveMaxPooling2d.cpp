@@ -4,50 +4,58 @@
 
 
 namespace at {
+namespace meta {
+TORCH_META_FUNC(adaptive_max_pool2d) (const Tensor& input, IntArrayRef output_size) {
+  for (int64_t i = 0; i < input.ndimension(); i++) {
+    TORCH_CHECK(
+        input.size(i) > 0,
+        "adaptive_max_pool2d: expected input to have non-empty spatial dimensions, "
+        "but input has sizes ",
+        input.sizes(),
+        " with dimension ",
+        i,
+        " being "
+        "empty");
+  }
+
+  TORCH_CHECK(
+      (input.ndimension() == 3 || input.ndimension() == 4),
+      "non-empty 3D or 4D (batch mode) tensor expected for input");
+
+  TORCH_CHECK(
+      output_size.size() == 2,
+      "adaptive_max_pool2d: internal error: output_size.size() must be 2");
+
+  int dimH = 1;
+  int64_t sizeB = 1;
+  int64_t sizeD = 0;
+
+  if (input.ndimension() == 4) {
+    sizeB = input.size(0);
+    dimH++;
+  }
+
+  sizeD = input.size(dimH - 1);
+
+  int64_t osizeH = output_size[0];
+  int64_t osizeW = output_size[1];
+
+  /* resize output */
+  if (input.ndimension() == 3) {
+    set_output(0, {sizeD, osizeH, osizeW}, input.options());
+    /* indices will contain i,j locations for each output point */
+    set_output(1, {sizeD, osizeH, osizeW}, input.options().dtype(kLong));
+  } else {
+    set_output(0, {sizeB, sizeD, osizeH, osizeW}, input.options().memory_format(input.suggest_memory_format()));
+    /* indices will contain i,j locations for each output point */
+    set_output(1, {sizeB, sizeD, osizeH, osizeW}, input.options().memory_format(input.suggest_memory_format()).dtype(kLong));
+  }
+}
+} // namespace meta
+
 namespace native {
 
 namespace {
-
-void adaptive_max_pool2d_out_cpu_template(
-          Tensor& output,
-          Tensor& indices,
-          const Tensor& input,
-          IntArrayRef output_size)
-{
-  int64_t ndim = input.ndimension();
-  for (int64_t i = 0; i < ndim; i++) {
-    TORCH_CHECK(input.size(i) > 0,
-      "adaptive_max_pool2d: expected input to have non-empty spatial dimensions, "
-      "but input has sizes ", input.sizes(), " with dimension ", i, " being "
-      "empty");
-  }
-
-  TORCH_CHECK((ndim == 3 || ndim == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
-
-  TORCH_CHECK(output_size.size() == 2,
-    "adaptive_max_pool2d: internal error: output_size.size() must be 2");
-
-  TORCH_CHECK(input.dtype() == output.dtype(),
-    "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
-
-  int64_t channels  = input.size(-3);
-  int64_t input_height = input.size(-2);
-  int64_t input_width = input.size(-1);
-  int64_t output_height = output_size[0];
-  int64_t output_width = output_size[1];
-
-  if (ndim == 3) {
-    output.resize_({channels, output_height, output_width});
-    indices.resize_({channels, output_height, output_width});
-  } else {
-    int64_t nbatch = input.size(0);
-    output.resize_({nbatch, channels, output_height, output_width}, input.suggest_memory_format());
-    indices.resize_({nbatch, channels, output_height, output_width}, input.suggest_memory_format());
-  }
-
-  adaptive_max_pool2d_kernel(kCPU, output, indices, input, output_size);
-}
 
 Tensor& adaptive_max_pool2d_backward_out_cpu_template(
           Tensor& grad_input,
@@ -79,31 +87,9 @@ Tensor& adaptive_max_pool2d_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> adaptive_max_pool2d_out_cpu(const Tensor& input,
-  IntArrayRef output_size,
-  Tensor& output,
-  Tensor& indices)
-{
-  adaptive_max_pool2d_out_cpu_template(
-    output,
-    indices,
-    input,
-    output_size);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
-}
-
-std::tuple<Tensor, Tensor> adaptive_max_pool2d_cpu(
-  const Tensor& input,
-  IntArrayRef output_size)
-{
-  Tensor output = at::empty({0}, input.options());
-  Tensor indices = at::empty({0}, input.options().dtype(kLong));
-  adaptive_max_pool2d_out_cpu_template(
-    output,
-    indices,
-    input,
-    output_size);
-  return std::tuple<Tensor, Tensor>(output, indices);
+TORCH_IMPL_FUNC(adaptive_max_pool2d_out_cpu)
+(const Tensor& input, IntArrayRef output_size, const Tensor& output, const Tensor& indices) {
+  adaptive_max_pool2d_kernel(kCPU, output, indices, input, output_size);
 }
 
 Tensor& adaptive_max_pool2d_backward_out_cpu(
