@@ -12021,6 +12021,7 @@ class TestNNDeviceType(NNTestCase):
         norms = [torch.nn.InstanceNorm1d, torch.nn.InstanceNorm2d, torch.nn.InstanceNorm3d]
         for i, norm in enumerate(norms):
             m = norm(NUM_CHANNELS, track_running_stats=True)
+            m.to(device)
 
             # Create an appropriately-sized input with a single spatial element.
             input = torch.randn(BATCH_SIZE, NUM_CHANNELS, *[1 for _ in range(i + 1)],
