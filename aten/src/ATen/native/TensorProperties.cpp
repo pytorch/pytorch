@@ -59,10 +59,6 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-Tensor conj(const Tensor & self) {
-  return self.conj();
-}
-
 Tensor contiguous(const Tensor & self) {
   return contiguous(self, MemoryFormat::Contiguous);
 }
