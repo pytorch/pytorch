@@ -4,7 +4,7 @@ import inspect
 import math
 import os
 from types import CodeType, FunctionType, ModuleType
-from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
+from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, Type, List, Callable, Union
 from itertools import chain
 import torch
 import torch._C._fx  # type: ignore[import]
@@ -24,7 +24,7 @@ _orig_module_getattr : Callable = torch.nn.Module.__getattr__
 
 # TODO: document proxyable types
 
-proxyable_classes : Dict[str, None] = {}
+proxyable_classes : Dict[Type, None] = {}
 
 class ProxyableClassMeta(type):
     def __init__(cls, name, bases, attrs):
@@ -32,12 +32,12 @@ class ProxyableClassMeta(type):
         return super().__init__(name, bases, attrs)
 
     def __call__(cls, *args, **kwargs):
-        instance = cls.__new__(cls, *args, **kwargs)
+        instance = cls.__new__(cls)  # type: ignore[call-overload]
 
         found_proxies = []
 
         def check_proxy(a):
-            if isinstance(a, torch.fx.Proxy):
+            if isinstance(a, Proxy):
                 found_proxies.append(a)
 
         map_aggregate(args, check_proxy)
@@ -47,7 +47,7 @@ class ProxyableClassMeta(type):
             tracer = found_proxies[0].tracer
             return tracer.create_proxy('call_function', cls, args, kwargs)
         else:
-            cls.__init__(instance, *args, **kwargs)
+            cls.__init__(instance, *args, **kwargs)  # type: ignore[misc]
             return instance
 
 
