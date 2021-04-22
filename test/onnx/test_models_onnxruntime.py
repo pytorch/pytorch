@@ -1,5 +1,5 @@
 import unittest
-import onnxruntime  # noqa
+import onnxruntime  # noqa: F401
 
 from test_models import TestModels
 from test_pytorch_onnx_onnxruntime import run_model_test
