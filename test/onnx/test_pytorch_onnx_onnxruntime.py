@@ -8410,6 +8410,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_tensordot_dynamic_dim(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
+                # Add comments for checking CI only.
                 output = torch.tensordot(x, y, 2)
                 return output
 
