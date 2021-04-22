@@ -93,7 +93,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
     int index;
     int carry;
     exclusiveBinaryPrefixScan<int, true>(smem, hasTopK, &index, &carry, AddOp<int>());
-    
+
     if (hasTopK) {
       int writeIndex = writeIndexStart + index;
       CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);

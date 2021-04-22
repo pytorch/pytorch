@@ -298,7 +298,7 @@ void sortKeyValueInplace(Tensor& key,
   // we are sorting on a per-block basis
   // The constructed key/value tensor info is used to select the slice
   // we are sorting on a per-block basis
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, key.scalar_type(), "sortKeyValueInplace", [&]  {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, key.scalar_type(), "sortKeyValueInplace", [&]  {
     if (at::cuda::detail::canUse32BitIndexMath(key)) {
       at::cuda::detail::TensorInfo<scalar_t, unsigned int> keyInfo =
         at::cuda::detail::getTensorInfo<scalar_t, unsigned int>(key);
