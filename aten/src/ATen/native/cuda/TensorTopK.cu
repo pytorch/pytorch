@@ -257,7 +257,6 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
       THError("Slice to sort is too large");                              \
     }                                                                     \
                                                                           \
-	  /*dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) C10_WARP_SIZE), (int64_t) 1024)); */\
     dim3 block(std::min(at::cuda::ATenCeilDiv(sliceSize, (int64_t) C10_WARP_SIZE)*(int64_t) C10_WARP_SIZE, (int64_t) 1024)); \
                                                                           \
     /* This is used as a template parameter to calculate indices. */      \
