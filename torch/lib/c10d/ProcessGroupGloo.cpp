@@ -110,6 +110,8 @@ namespace c10d {
 
 namespace {
 
+constexpr int kBytes = 8;
+
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
@@ -490,7 +492,7 @@ void ProcessGroupGloo::RecvWork::abort() {
 }
 
 ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
-    : ProcessGroup::Options(timeout, GLOO_BACKEND_NAME), threads(2) {}
+    : ProcessGroup::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
 
 namespace {
 
@@ -1055,7 +1057,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     //
     // The correct fix is to stop allocating tensors that are not variables,
     // but to conveniently do this c10d must depend on torch not ATen
-    at::AutoDispatchBelowAutograd _no_grad(true);
+    at::AutoDispatchBelowAutograd guard;
     auto input = tensors[0];
 
     // Perform local reduction if we have multiple inputs.
@@ -2819,6 +2821,31 @@ void ProcessGroupGloo::monitoredBarrier(
   LOG(INFO) << "All ranks passed monitoredBarrier in "
             << elapsedTime.count()
             << " ms.";
+}
+
+void ProcessGroupGloo::setSequenceNumberForGroup() {
+  if (rank_ == 0) {
+    // Create and broadcast sequence number
+    auto seq = 1 + rand();
+    sequenceNum_ = c10d::SequenceNum(seq);
+    std::vector<char> values = c10d::toVec<char>(seq, kBytes);
+    store_->set(kSeqNumStoreKey, values);
+  } else {
+    // Read rank 0's sequence number from store.
+   sequenceNum_ = c10d::SequenceNum();
+   store_->wait({kSeqNumStoreKey}, options_->timeout);
+   std::vector<char> values = store_->get(kSeqNumStoreKey);
+   uint64_t num = c10d::fromVec<char>(values);
+   sequenceNum_->set(num);
+   }
+}
+
+uint64_t ProcessGroupGloo::getSequenceNumberForGroup() {
+  TORCH_CHECK(
+    sequenceNum_ != c10::nullopt,
+    "Sequence number is not set for rank ", rank_
+  );
+  return sequenceNum_->get();
 }
 
 } // namespace c10d
