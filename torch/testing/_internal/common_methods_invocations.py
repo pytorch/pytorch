@@ -3150,7 +3150,7 @@ op_db: List[OpInfo] = [
                # Reference: https://github.com/pytorch/pytorch/issues/56233
                SkipInfo('TestCommon', 'test_out'),
            )
-           ),                           
+           ),
     OpInfo('addmv',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
