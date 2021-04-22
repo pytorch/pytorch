@@ -1437,7 +1437,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         # test shadowed activations
 
         node_type_to_io_type_map = get_node_type_to_io_type_map()
-        node_type_to_io_type_map['funs_io_type_fp32'].add(_wrapped_hardswish_fp16)
+        node_type_to_io_type_map['funs_io_type_fp16'].add(_wrapped_hardswish_fp16)
 
         m1_shadows_m2_ns = _add_shadow_loggers_impl(
             'a', m1, 'b', m2, OutputLogger,
