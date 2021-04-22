@@ -10,7 +10,7 @@ import yaml
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
 from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
-                                     intArrayRefT, tensorOptionsT, typeAndSizeT, intT,
+                                     intArrayRefT, tensorOptionsT, typeAndSizeT, intT, boolT,
                                      tensorGeometryT, scalarTypeT, SpecialArgName)
 from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
@@ -22,7 +22,7 @@ try:
     # use faster C loader if available
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
     with open(derivatives_yaml_path, 'r') as f:
@@ -495,7 +495,7 @@ def saved_variables(
         # replace self.is_conj() with self_conjugate
         (r'{}.is_conj\(\)', {
             'suffix': '_conjugate',
-            'type': 'bool',
+            'nctype': lambda name: NamedCType(name, BaseCType(boolT)),
         })
     ]
 

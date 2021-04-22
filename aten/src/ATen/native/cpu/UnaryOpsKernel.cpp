@@ -711,7 +711,7 @@ REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(angle_stub, &angle_kernel);
 REGISTER_DISPATCH(real_stub, &real_kernel);
 REGISTER_DISPATCH(imag_stub, &imag_kernel);
-REGISTER_DISPATCH(conj_stub, &conj_kernel);
+REGISTER_DISPATCH(conj_physical_stub, &conj_kernel);
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);

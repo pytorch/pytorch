@@ -67,6 +67,8 @@ def _shape_as_tensor(g, input):
 
 
 def _reshape_from_tensor(g, input, shape):
+    if (isinstance(shape, list)):
+        shape = g.op("Concat", *shape, axis_i=0)
     return g.op('Reshape', input, shape)
 
 
@@ -356,7 +358,7 @@ def _maybe_cast_reduce_op_input(g, self):
     if dtype is not None:
         # pytorch reduce-ops cast all other integral types to int64
         if not sym_help._is_fp(self) and not (dtype == 'Long'):
-            self = _cast_Long(g, self, False)  # type: ignore
+            self = _cast_Long(g, self, False)  # type: ignore[name-defined]
     return self
 
 
@@ -1782,13 +1784,13 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
 
 def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
     fill_value = sym_help._maybe_get_const(fill_value, 'f')
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    dtype = 6 if dtype is None else dtype
     if sym_help._is_value(fill_value):
-        dtype = 6 if dtype is None else dtype
         tmp = zeros_like(g, input, dtype, layout, device)
+        fill_value = g.op("Cast", fill_value, to_i=sym_help.scalar_type_to_onnx[dtype])
         return add(g, tmp, fill_value, g.op("Constant", value_t=torch.tensor(1)))
     else:
-        dtype = sym_help._get_const(dtype, 'i', 'dtype')
-        dtype = 6 if dtype is None else dtype
         shape = g.op("Shape", input)
         return g.op("ConstantOfShape", shape,
                     value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
@@ -2004,13 +2006,17 @@ def repeat_interleave(g, self, repeats, dim=None):
         if not sym_help._is_tensor(repeats):
             repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
         if input_sizes[dim] == 0:
-            raise NotImplementedError("Unsupported repeat_interleave along dimension with unknown input size")
+            return sym_help._onnx_opset_unsupported_detailed('repeat_interleave', 9, 11,
+                                                             'Unsupported along dimension with unknown input size')
         else:
             reps = input_sizes[dim]
             repeats = expand(g, repeats, g.op("Constant", value_t=torch.tensor([reps])), None)
 
     # Cases where repeats is a 1 dim Tensor
     elif repeats_dim == 1:
+        if input_sizes[dim] == 0:
+            return sym_help._onnx_opset_unsupported_detailed('repeat_interleave', 9, 11,
+                                                             'Unsupported along dimension with unknown input size')
         assert repeats_sizes[0] == input_sizes[dim], "repeats must have the same size as input along dim"
         reps = repeats_sizes[0]
     else:
@@ -2291,7 +2297,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
     if lengths.type().scalarType() != 'Int':
-        lengths = _cast_Int(g, lengths, False)  # type: ignore
+        lengths = _cast_Int(g, lengths, False)  # type: ignore[name-defined]
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
@@ -2397,7 +2403,7 @@ def isnan(g, input):
     return output
 
 def _any(g, input):
-    input = _cast_Long(g, input, False)  # type: ignore
+    input = _cast_Long(g, input, False)  # type: ignore[name-defined]
     input_sum = sym_help._reducesum_helper(g, input, keepdims_i=0)
     return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
 
@@ -2471,6 +2477,13 @@ def prim_shape(g, self):
 
 def prim_max(g, self, other):
     return g.op('Max', self, other)
+
+def prim_min(g, self, other=None):
+    if not other:
+        if (sym_help._is_packed_list(self)):
+            self = stack(g, self, g.op("Constant", value_t=torch.tensor([0])))
+        return min(g, self)
+    return min(g, self, other)
 
 def prim_data(g, self):
     return self
@@ -2670,7 +2683,7 @@ def arange(g, *args):
 
 
 def masked_fill(g, self, mask, value):
-    mask = _cast_Bool(g, mask, False)  # type: ignore
+    mask = _cast_Bool(g, mask, False)  # type: ignore[name-defined]
     value = sym_help._maybe_get_scalar(value)
     return g.op('Where', mask, sym_help._if_scalar_type_as(g, value, self), self)
 
@@ -3022,3 +3035,27 @@ def linear(g, input, weight, bias):
             output = add(g, bias, output)
 
     return output
+
+
+@parse_args('v', 'b', 'i', 'v', 'v', 'v', 'v')
+def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device=None, pin_memory=None, requires_grad=False):
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+        if sym_help._dtype_is_fp(dtype) is False:
+            dtype = torch.float
+        dtype = sym_help.scalar_type_to_pytorch_type.index(dtype)
+
+    n_array = arange(g, window_length, 4, None, None, None)
+    output = g.op('Cast', n_array, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    output = mul(g, g.op('Constant', value_t=torch.tensor(math.pi, dtype=torch.float)), output)
+
+    if periodic is False:
+        window_length = sub(g, window_length, g.op("Constant", value_t=torch.tensor(1, dtype=torch.int)))
+    output = div(g, output, window_length)
+    output = g.op("Cast", square(g, sin(g, output)), to_i=sym_help.scalar_type_to_onnx[dtype])
+
+    return output
+
+
+def mv(g, self, vec):
+    return matmul(g, self, vec)

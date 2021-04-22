@@ -100,9 +100,11 @@ TORCH_LIBRARY_IMPL(_, Conjugate, m) {
 TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("copy_", torch::CppFunction::makeFallthrough());
   m.impl("conj", torch::CppFunction::makeFallthrough());
+  m.impl("_conj", torch::CppFunction::makeFallthrough());
   m.impl("conj_physical_", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
   m.impl("empty_like", torch::CppFunction::makeFallthrough());
+  m.impl("empty.memory_format", torch::CppFunction::makeFallthrough());
   m.impl("empty.out", torch::CppFunction::makeFallthrough());
   m.impl("empty_strided", torch::CppFunction::makeFallthrough());
   m.impl("stride.int", torch::CppFunction::makeFallthrough());

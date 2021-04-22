@@ -780,6 +780,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.real: lambda input, out=None: -1,
         torch.vdot: lambda input, other, out=None: -1,
         torch.view_as_real: lambda input: -1,
+        torch.view_as_real_physical: lambda input: -1,
         torch.view_as_complex: lambda input: -1,
         torch.reciprocal: lambda input, out=None: -1,
         torch.relu: lambda input, inplace=False: -1,
