@@ -884,7 +884,6 @@ class Caffe2Backend(Backend):
             onnx_model = cls._polish_model(onnx_model)
         except RuntimeError:
             warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
-            
         init_model = cls.optimize_onnx(onnx_model, init=True)
         pred_model = cls.optimize_onnx(onnx_model, predict=True)
 
