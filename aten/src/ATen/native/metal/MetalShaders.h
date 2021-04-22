@@ -580,7 +580,7 @@ kernel void reshape(texture2d_array<half, access::read> in_arr[[texture(0), func
     const ushort C1 = ushort_arg_6;
     const ushort N1 = ushort_arg_7;
 
-    const int numel1 = H1 * W1 * C1 * N1;
+    const size_t numel1 = H1 * W1 * C1 * N1;
     const ushort slices2 = divRoundUp(C2, 4);
     const ushort slices1 = divRoundUp(C1, 4);
     const ushort n2 = gid.z / slices2; //image index
@@ -590,7 +590,7 @@ kernel void reshape(texture2d_array<half, access::read> in_arr[[texture(0), func
         // we compute the "linear index" of the output element,
         // and convert it to the equivalent "linear index" of the input element.
         ushort offset = 4 * s2 + idx;
-        int64_t linear_idx = n2 * C2 * H2 * W2 + offset * H2 * W2 + gid.y * W2 + gid.x;
+        size_t linear_idx = n2 * C2 * H2 * W2 + offset * H2 * W2 + gid.y * W2 + gid.x;
         if(linear_idx >= numel1){
             value[idx] = 0;
             continue;
@@ -653,7 +653,7 @@ kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),func
     if (gid.x >= W2 || gid.y >= H2) {
         return;
     }
-    const int numel = H2 * W2 * C2 * N2;
+    const size_t numel = H2 * W2 * C2 * N2;
     const ushort slices2 = divRoundUp(C2, 4);
     const ushort slices1 = divRoundUp(C1, 4);
     const ushort n2 = gid.z / slices2;
@@ -661,7 +661,7 @@ kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),func
     half4 value;
     for (int idx = 0; idx < 4; ++idx){
         ushort offset = 4 * s2 + idx;
-        int64_t linear_idx2 = n2 * C2 * H2 * W2 + offset * H2 * W2 + gid.y * W2 + gid.x;
+        size_t linear_idx2 = n2 * C2 * H2 * W2 + offset * H2 * W2 + gid.y * W2 + gid.x;
         if(linear_idx2 >= numel) {
             value[idx] = 0;
             continue;
@@ -679,7 +679,7 @@ kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),func
         indexBuffer[dim0] = indexBuffer[dim1];
         indexBuffer[dim1] = tmp;
 
-        int64_t linear_idx1 = 0;
+        size_t linear_idx1 = 0;
         ushort m = 1;
         ushort d1 = 0;
         for(int k = dim-1; k>=0; --k) {
