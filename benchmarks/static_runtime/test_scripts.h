@@ -224,3 +224,43 @@ const std::string embedding_bag_max_last_offset = R"JIT(
   def forward(self, a: Tensor, b: Tensor, c: Tensor):
       return torch.embedding_bag(a, b, c, False, 2, False, None, True)
 )JIT";
+
+const auto div_tensor = R"JIT(
+  def forward(self, a: Tensor, b: Tensor):
+      return torch.div(a, b)
+)JIT";
+
+const auto div_scalar = R"JIT(
+  def forward(self, a: Tensor, b: int):
+      return torch.div(a, b)
+)JIT";
+
+const auto div_tensor_mode = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: str):
+      return torch.div(a, b, rounding_mode=c)
+)JIT";
+
+const auto div_scalar_mode = R"JIT(
+  def forward(self, a: Tensor, b: float, c: str):
+      return torch.div(a, b, rounding_mode=c)
+)JIT";
+
+const auto sub_tensor = R"JIT(
+  def forward(self, a: Tensor, b: Tensor):
+      return torch.sub(a, b)
+)JIT";
+
+const auto sub_scalar = R"JIT(
+  def forward(self, a: Tensor, b: int):
+      return torch.sub(a, b)
+)JIT";
+
+const auto sub_tensor_alpha = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: float):
+      return torch.sub(a, b, alpha=c)
+)JIT";
+
+const auto sub_scalar_alpha = R"JIT(
+  def forward(self, a: Tensor, b: float, c: int):
+      return torch.sub(a, b, alpha=c)
+)JIT";
