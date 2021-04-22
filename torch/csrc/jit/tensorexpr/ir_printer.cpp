@@ -258,19 +258,8 @@ void IRPrinter::visit(const IfThenElse* v) {
        << *v->false_value() << ")";
 }
 
-void IRPrinter::visit(const BaseCallNode* v) {
+void IRPrinter::visit(const Intrinsics* v) {
   os() << v->func_name() << "(";
-  for (int i = 0; i < v->nparams(); i++) {
-    if (i > 0) {
-      os() << ", ";
-    }
-    os() << *v->param(i);
-  }
-  os() << ")";
-}
-
-void IRPrinter::visit(const FunctionCall* v) {
-  os() << *v->tensor()->buf() << "(";
   for (int i = 0; i < v->nparams(); i++) {
     if (i > 0) {
       os() << ", ";

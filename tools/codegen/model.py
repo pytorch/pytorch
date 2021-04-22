@@ -5,8 +5,6 @@ from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequenc
 from enum import Enum, auto
 import itertools
 
-from tools.codegen.utils import *
-
 # A little trick from https://github.com/python/mypy/issues/6366
 # for getting mypy to do exhaustiveness checking
 # TODO: put this somewhere else, maybe
@@ -74,6 +72,8 @@ class DispatchKey(Enum):
     MkldnnCPU = auto()
     SparseCPU = auto()
     SparseCUDA = auto()
+    SparseCsrCPU = auto()
+    SparseCsrCUDA = auto()
     SparseHIP = auto()
     SparseXPU = auto()
     NestedTensor = auto()
@@ -167,6 +167,10 @@ class NativeFunction:
     # defined later in the file.  I opted for this ordering of the
     # classes for expository clarity.)
     func: 'FunctionSchema'
+
+    # Whether or not to generate mutable tensor arguments like regular
+    # ones
+    use_const_ref_for_mutable_tensors: bool
 
     # Whether or not to omit automatic generation of a DeviceGuard
     device_guard: bool
@@ -263,6 +267,9 @@ class NativeFunction:
         assert isinstance(cpp_no_default_args_list, list)
         cpp_no_default_args = set(cpp_no_default_args_list)
 
+        use_const_ref_for_mutable_tensors = e.pop('use_const_ref_for_mutable_tensors', False)
+        assert isinstance(use_const_ref_for_mutable_tensors, bool)
+
         variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
         variants: Set[Variant] = set()
@@ -333,11 +340,14 @@ class NativeFunction:
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
 
-        e.pop('__line__')
+        # don't care if it exists or not; make it easier to use this function
+        # with other yaml parsers that aren't setting __line__ in the dict
+        e.pop('__line__', None)
         assert not e, f"leftover entries: {e}"
 
         return NativeFunction(
             func=func,
+            use_const_ref_for_mutable_tensors=use_const_ref_for_mutable_tensors,
             variants=variants,
             structured=structured,
             structured_delegate=structured_delegate,
@@ -739,7 +749,7 @@ class Annotation:
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
-        m = re.match(r'^([a-z])(!?)$', ann)
+        m = re.match(r'^([a-z])(!?)(!?)$', ann)
         assert m is not None, f'unrecognized alias annotation {ann}'
         alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
@@ -1093,22 +1103,6 @@ class Arguments:
             ret.append(self.tensor_options)
         ret.extend(self.post_tensor_options_kwarg_only)
         return ret
-
-    # NB: contains out args.
-    @property
-    def tensor_args(self) -> Sequence[Union[Argument, SelfArgument]]:
-        ret: List[Union[Argument, SelfArgument]] = []
-        candidates: List[Union[Argument, SelfArgument]] = []
-        candidates.extend(self.positional)
-        candidates.extend(self.pre_tensor_options_kwarg_only)
-        candidates.extend(self.post_tensor_options_kwarg_only)
-        candidates.extend(self.out)
-        for arg in candidates:
-            a = arg.argument if isinstance(arg, SelfArgument) else arg
-            if a.type.is_tensor_like():
-                ret.append(arg)
-        return ret
-
 
     def signature(self, *, strip_default: bool = False) -> 'Arguments':
         # dataclasses.replace could be used here, but it is less

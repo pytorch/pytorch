@@ -74,7 +74,8 @@ def create_scripted_module(first_arg, first_kwarg=-1):
     return scripted_module
 
 
-class RemoteModuleTest(RpcAgentTestFixture):
+# Common utils for both CPU and CUDA test suites
+class CommonRemoteModuleTest(RpcAgentTestFixture):
     @property
     def world_size(self):  # Override setting in RpcAgentTestFixture
         return 2
@@ -102,6 +103,8 @@ class RemoteModuleTest(RpcAgentTestFixture):
             scripted_remote_module = torch.jit.script(remote_module)
             yield scripted_remote_module
 
+
+class RemoteModuleTest(CommonRemoteModuleTest):
     @dist_utils.dist_init
     def test_bad_module(self):
         if self.rank != 0:
@@ -233,99 +236,6 @@ class RemoteModuleTest(RpcAgentTestFixture):
             self.assertEqual(rref, remote_module.module_rref)
             for param in rref.to_here().parameters():
                 self.assertTrue(torch.equal(param, _PARAM_VAL))
-
-    @skip_if_lt_x_gpu(1)
-    @dist_utils.dist_init
-    def test_valid_device(self):
-        if self.rank != 0:
-            return
-        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
-
-        for remote_module in self._create_remote_module_iter(
-            "{}/cuda:0".format(dst_worker_name), modes=[ModuleCreationMode.MODULE_CTOR]
-        ):
-            device = rpc.rpc_sync(
-                dst_worker_name, remote_device, (remote_module.module_rref,)
-            )
-            self.assertEqual(device.type, "cuda")
-            self.assertEqual(device.index, 0)
-
-    @skip_if_lt_x_gpu(1)
-    @dist_utils.dist_init
-    def test_invalid_devices(self):
-        if self.rank != 0:
-            return
-        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Expected one of .+ device type at start of device string",
-        ):
-            list(
-                self._create_remote_module_iter(
-                    "{}/foo".format(dst_worker_name),
-                    modes=[ModuleCreationMode.MODULE_CTOR],
-                )
-            )
-
-        with self.assertRaisesRegex(
-            RuntimeError, r"CUDA error: invalid device ordinal"
-        ):
-            list(
-                self._create_remote_module_iter(
-                    "{}/cuda:100".format(dst_worker_name),
-                    modes=[ModuleCreationMode.MODULE_CTOR],
-                )
-            )
-
-        with self.assertRaisesRegex(RuntimeError, r"Invalid device string: 'cpu2'"):
-            list(
-                self._create_remote_module_iter(
-                    "{}/cpu2".format(dst_worker_name),
-                    modes=[ModuleCreationMode.MODULE_CTOR],
-                )
-            )
-
-        with self.assertRaisesRegex(RuntimeError, r"Device string must not be empty"):
-            list(
-                self._create_remote_module_iter(
-                    "{}/".format(dst_worker_name),
-                    modes=[ModuleCreationMode.MODULE_CTOR],
-                )
-            )
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Could not parse remote_device: worker1/cuda:0/cuda:1. The valid format is '<workername>/<device>'",
-        ):
-            list(
-                self._create_remote_module_iter(
-                    "{}/cuda:0/cuda:1".format(dst_worker_name),
-                    modes=[ModuleCreationMode.MODULE_CTOR],
-                )
-            )
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"The workername in remote_device '/' cannot be empty. The valid format is '<workername>/<device>'",
-        ):
-            list(
-                self._create_remote_module_iter(
-                    "/",
-                    modes=[ModuleCreationMode.MODULE_CTOR],
-                )
-            )
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"The workername in remote_device '/cuda:0' cannot be empty. The valid format is '<workername>/<device>'",
-        ):
-            list(
-                self._create_remote_module_iter(
-                    "/cuda:0",
-                    modes=[ModuleCreationMode.MODULE_CTOR],
-                )
-            )
 
     @dist_utils.dist_init
     def test_unsupported_methods(self):
@@ -474,3 +384,98 @@ class RemoteModuleTest(RpcAgentTestFixture):
                 ValueError, r"Method ``extra_repr`` not supported for RemoteModule"
             ):
                 remote_module.extra_repr()
+
+
+class CudaRemoteModuleTest(CommonRemoteModuleTest):
+    @skip_if_lt_x_gpu(1)
+    @dist_utils.dist_init
+    def test_valid_device(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        for remote_module in self._create_remote_module_iter(
+            "{}/cuda:0".format(dst_worker_name), modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            device = rpc.rpc_sync(
+                dst_worker_name, remote_device, (remote_module.module_rref,)
+            )
+            self.assertEqual(device.type, "cuda")
+            self.assertEqual(device.index, 0)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_utils.dist_init
+    def test_invalid_devices(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Expected one of .+ device type at start of device string",
+        ):
+            list(
+                self._create_remote_module_iter(
+                    "{}/foo".format(dst_worker_name),
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"CUDA error: invalid device ordinal"
+        ):
+            list(
+                self._create_remote_module_iter(
+                    "{}/cuda:100".format(dst_worker_name),
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )
+
+        with self.assertRaisesRegex(RuntimeError, r"Invalid device string: 'cpu2'"):
+            list(
+                self._create_remote_module_iter(
+                    "{}/cpu2".format(dst_worker_name),
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )
+
+        with self.assertRaisesRegex(RuntimeError, r"Device string must not be empty"):
+            list(
+                self._create_remote_module_iter(
+                    "{}/".format(dst_worker_name),
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Could not parse remote_device: worker1/cuda:0/cuda:1. The valid format is '<workername>/<device>'",
+        ):
+            list(
+                self._create_remote_module_iter(
+                    "{}/cuda:0/cuda:1".format(dst_worker_name),
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"The workername in remote_device '/' cannot be empty. The valid format is '<workername>/<device>'",
+        ):
+            list(
+                self._create_remote_module_iter(
+                    "/",
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"The workername in remote_device '/cuda:0' cannot be empty. The valid format is '<workername>/<device>'",
+        ):
+            list(
+                self._create_remote_module_iter(
+                    "/cuda:0",
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )

@@ -115,14 +115,14 @@ def div(g, self, other, *args):
 
 @parse_args('v', 'v', 's')
 def _div_rounding_mode(g, self, other, rounding_mode):
-    if rounding_mode == 'true':
+    if rounding_mode is None:
         return true_divide(g, self, other)
     elif rounding_mode == 'floor':
         return _floor_divide(g, self, other)
     elif rounding_mode == 'trunc':
         return _trunc_divide(g, self, other)
     else:
-        raise RuntimeError(f'Unsupported rounding mode: "{rounding_mode}". Expected "true", "floor" or "trunc"')
+        raise RuntimeError(f'Unsupported rounding mode: "{rounding_mode}". Expected None, "floor" or "trunc"')
 
 
 def _trunc_divide(g, self, other):
@@ -358,7 +358,7 @@ def _maybe_cast_reduce_op_input(g, self):
     if dtype is not None:
         # pytorch reduce-ops cast all other integral types to int64
         if not sym_help._is_fp(self) and not (dtype == 'Long'):
-            self = _cast_Long(g, self, False)  # type: ignore
+            self = _cast_Long(g, self, False)  # type: ignore[name-defined]
     return self
 
 
@@ -486,7 +486,7 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i', 'i')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
@@ -495,7 +495,8 @@ def embedding_bag(g,
                   mode,
                   sparse,
                   per_sample_weights,
-                  include_last_offset):
+                  include_last_offset,
+                  padding_idx):
     if not sym_help._is_none(per_sample_weights):
         return sym_help._onnx_unsupported('embedding_bag  with per_sample_weights')
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
@@ -508,7 +509,8 @@ def embedding_bag(g,
                     scale_grad_by_freq_i=scale_grad_by_freq,
                     mode_i=mode,
                     sparse_i=sparse,
-                    include_last_offset_i=include_last_offset)
+                    include_last_offset_i=include_last_offset,
+                    padding_idx_i=padding_idx)
     else:
         return sym_help._onnx_unsupported('embedding_bag')
 
@@ -1883,6 +1885,12 @@ def hardswish(g, self):
     hardtanh_ = g.op("Div", hardtanh_, g.op('Constant', value_t=torch.tensor(6, dtype=torch.float)))
     return g.op("Mul", self, hardtanh_)
 
+
+@parse_args('v')
+def hardsigmoid(g, self):
+    return g.op('HardSigmoid', self, alpha_f=1 / 6)
+
+
 def alias(g, self):
     return self
 
@@ -2304,7 +2312,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
     if lengths.type().scalarType() != 'Int':
-        lengths = _cast_Int(g, lengths, False)  # type: ignore
+        lengths = _cast_Int(g, lengths, False)  # type: ignore[name-defined]
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
@@ -2410,7 +2418,7 @@ def isnan(g, input):
     return output
 
 def _any(g, input):
-    input = _cast_Long(g, input, False)  # type: ignore
+    input = _cast_Long(g, input, False)  # type: ignore[name-defined]
     input_sum = sym_help._reducesum_helper(g, input, keepdims_i=0)
     return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
 
@@ -2690,7 +2698,7 @@ def arange(g, *args):
 
 
 def masked_fill(g, self, mask, value):
-    mask = _cast_Bool(g, mask, False)  # type: ignore
+    mask = _cast_Bool(g, mask, False)  # type: ignore[name-defined]
     value = sym_help._maybe_get_scalar(value)
     return g.op('Where', mask, sym_help._if_scalar_type_as(g, value, self), self)
 
