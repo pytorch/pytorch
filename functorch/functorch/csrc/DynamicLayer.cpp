@@ -1,5 +1,6 @@
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/TensorWrapper.h>
+#include <functorch/csrc/BatchedTensorImpl.h>
 
 #include <torch/library.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
@@ -209,25 +210,25 @@ constexpr DispatchKeySet all_dynlayer_keyset = DispatchKeySet({
   DispatchKey::InplaceOrView
 }) | autograd_dispatch_keyset;
 
-static void sanityCheckStack(torch::jit::Stack* stack) {
-  if (stack->size() > 0) {
-    auto last_ivalue = (*stack)[stack->size() - 1];
-    if (last_ivalue.isTensor()) {
-      auto tensor = last_ivalue.toTensor();
-      auto* wrapper = maybeGetTensorWrapper(tensor);
-      TORCH_INTERNAL_ASSERT(wrapper == nullptr);
-      TORCH_INTERNAL_ASSERT(tensor.has_storage());
-    }
-  }
+static void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  auto num_args = op.schema().arguments().size();
+  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), 
+      [](const Tensor& tensor) {
+        auto* wrapper = maybeGetTensorWrapper(tensor);
+        TORCH_INTERNAL_ASSERT(wrapper == nullptr);
+        auto* batched = maybeGetBatchedImpl(tensor);
+        TORCH_INTERNAL_ASSERT(batched == nullptr);
+        return tensor;
+      });
 }
 
 void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
-  // if (c10::show_dispatch_trace_enabled()) {
-  //   std::cout << "DLS size: " << dynamicLayerStack.size() << std::endl;
-  // }
+  if (c10::show_dispatch_trace_enabled()) {
+    std::cout << "DLS size: " << dynamicLayerStack.size() << std::endl;
+  }
   if (dynamicLayerStack.size() == 0) {
-    sanityCheckStack(stack);
+    sanityCheckStack(op, stack);
     c10::impl::ExcludeDispatchKeyGuard guard(all_dynlayer_keyset);
     op.callBoxed(stack);
     return;
@@ -243,7 +244,7 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
 
   auto layer = dynamicLayerStack.back();
 
-  DispatchKeySet exclude = DispatchKeySet::FULL;
+  DispatchKeySet exclude = all_dynlayer_keyset;
   exclude = exclude.remove(DispatchKey::DynamicLayerBack);
   if (layer.key() == DispatchKey::Autograd) {
     exclude = exclude - autograd_dispatch_keyset;
@@ -270,6 +271,18 @@ struct WithoutTop {
 
   bool prev_grad_enabled_;
   DynamicLayer layer_;
+};
+
+struct SaveLocalDispatchKeySet {
+ public:
+  SaveLocalDispatchKeySet() :
+    saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {}
+  ~SaveLocalDispatchKeySet() {
+    c10::impl::_force_tls_local_dispatch_key_set(saved_keyset_);
+  }
+
+ private:
+  c10::impl::LocalDispatchKeySet saved_keyset_;
 };
 
 void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
@@ -332,6 +345,7 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   // "reset exclude set"
   // TODO: Still a problem with composabiilty and AutoNonVariableTypeGuard.
   // Users cannot do torch.no_grad otherwise there will be problems.
+  SaveLocalDispatchKeySet save_guard;
   auto keyset = c10::impl::PODLocalDispatchKeySet();
   c10::impl::_force_tls_local_dispatch_key_set(keyset);
   c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerFront, true);

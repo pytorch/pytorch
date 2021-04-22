@@ -15,10 +15,7 @@ static bool has_level(const Tensor& self, int64_t level) {
     return false;
   }
   auto bdims = batched->bdims();
-  auto* it = std::find_if(bdims.begin(), bdims.end(), [&](const BatchDim& bdim) {
-    return bdim.level() == level;
-  });
-  return it != bdims.end();
+  return bdims.back().level() >= level;
 }
 
 Tensor _add_batch_dim(const Tensor& self, int64_t batch_dim, int64_t level) {
@@ -100,7 +97,8 @@ Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, 
     auto self_sizes = self.sizes();
     VmapDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
     expanded_sizes.insert(expanded_sizes.begin() + out_dim, batch_size);
-    return self.expand(expanded_sizes);
+    auto result = self.expand(expanded_sizes);
+    return result;
   }
 
   // Must be batched if has_level(self, /*any_level*/)
@@ -110,7 +108,8 @@ Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, 
   Tensor self_without_bdim;
   int64_t newly_exposed_logical_dim;
   std::tie(self_without_bdim, newly_exposed_logical_dim) = remove_existing_batch_dim(batched, level);
-  return _movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
+  auto result = _movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
+  return result;
 }
 
 Tensor _wrap_for_grad(const Tensor& self, int64_t level) {

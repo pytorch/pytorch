@@ -141,6 +141,12 @@ Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
   if (tensor.is_cuda()) {
     key_set = key_set.add(DispatchKey::CUDA);
   }
+  auto* batched = maybeGetBatchedImpl(tensor);
+  if (batched) {
+    auto requested_level = bdims.back().level();
+    auto batched_level = batched->bdims().back().level();
+    TORCH_INTERNAL_ASSERT(requested_level > batched_level);
+  }
   return at::detail::make_tensor<BatchedTensorImpl>(key_set, tensor, std::move(bdims));
 }
 
