@@ -1349,7 +1349,6 @@ filegroup(
         "caffe2/utils/proto_convert.cc",
         "caffe2/utils/proto_utils.cc",
         "caffe2/utils/proto_wrap.cc",
-        "caffe2/utils/signal_handler.cc",
         "caffe2/utils/smart_tensor_printer.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
