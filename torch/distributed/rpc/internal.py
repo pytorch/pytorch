@@ -179,6 +179,26 @@ def deserialize(binary_data, tensor_table):
     return _internal_rpc_pickler.deserialize(binary_data, tensor_table)
 
 
+def _extract_tensors(obj):
+    r"""
+    This function is exclusively called from C++.
+    See ``torch/csrc/jit/python/python_ivalue.h``.
+
+    It extracts the tensors contained in the given object, through pickling.
+    """
+    tensors = []
+    def cb(x):
+        if isinstance(x, torch.Tensor):
+            tensors.append(x)
+            return ""
+        else:
+            return None
+    p = pickle.Pickler(io.BytesIO())
+    p.persistent_id = cb
+    p.dump(obj)
+    return tensors
+
+
 def _run_function(python_udf):
     r"""
     This function is exclusively called from C++.

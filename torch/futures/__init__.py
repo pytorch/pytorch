@@ -23,7 +23,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     also exposes a set of APIs to add callback functions and set results.
     """
 
-    def __init__(self, devices: Optional[List[Union[int, str, torch.device]]] = None):
+    def __init__(self, *, devices: Optional[List[Union[int, str, torch.device]]] = None):
         r"""
         Create a ``Future`` that is allowed to use (a subset of) the given
         devices. All devices must be CUDA devices (if PyTorch supports CUDA).
@@ -211,7 +211,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             raise fut_result
 
         super()._set_unwrap_func(raise_error)
-        self.set_result(result)  # type: ignore
+        self.set_result(result)  # type: ignore[arg-type]
 
 
 def collect_all(futures: List[Future]) -> Future[List[Future]]:
