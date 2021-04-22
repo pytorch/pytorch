@@ -292,6 +292,20 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
 
     return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
 
+def is_torch_jit_ignore_context_manager(stmt):
+    # checks if the statement is torch.jit.ignore context manager
+    if isinstance(stmt.items[0].context_expr, ast.Call):
+        # extract torch part
+        function = stmt.items[0].context_expr.func
+        if isinstance(function, ast.Attribute):
+            attr_name = function.attr
+            attr_value = function.value
+            if attr_name == "ignore" and isinstance(attr_value, ast.Attribute):
+                # there should be at most two nested attributes (e.g torch.jit.ignore)
+                if attr_value.attr == "jit" and isinstance(attr_value.value, ast.Name):
+                    if attr_value.value.id == "torch":
+                        return True
+    return False
 
 class Builder(object):
     def __call__(self, ctx, node):
@@ -635,15 +649,11 @@ class StmtBuilder(Builder):
     def build_With(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
         # Handle ignore context manager
-        if isinstance(stmt.items[0].context_expr, ast.Call):
+        if is_torch_jit_ignore_context_manager(stmt):
             if sys.version_info < (3, 9):
-                raise RuntimeError("Custom context manager is not supported")
-            context_manager_name = stmt.items[0].context_expr.func.id
-            if context_manager_name == "objmode":
-                assign_ast = build_ignore_context_manager(ctx, stmt)
-                return build_stmt(ctx, assign_ast)
-            else:
-                raise NotSupportedError(r, "Context manager with name {} is not supported".format(context_manager_name))
+                raise NotSupportedError("torch.jit.ignore context manager is only supported in 3.9")
+            assign_ast = build_ignore_context_manager(ctx, stmt)
+            return build_stmt(ctx, assign_ast)
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
 
 class ExprBuilder(Builder):

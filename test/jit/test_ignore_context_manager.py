@@ -26,7 +26,7 @@ class TestIgnoreContextManager(JitTestCase):
                 b: int = 5
                 c: int = 0
                 d: int = 6
-                with objmode(a="inp:int", b="inp:int", c="out:int", d="out:int"):
+                with torch.jit.ignore(a="inp:int", b="inp:int", c="out:int", d="out:int"):
                     l = [2 for i in range(a) if i > 2]
                     c = l[0] + a + b
                     d = 9
@@ -42,7 +42,7 @@ class TestIgnoreContextManager(JitTestCase):
                 a: int = 4
                 b: int = 5
                 c: int = 0
-                with objmode(a="inp:int", b="inp:int", c="out:int"):
+                with torch.jit.ignore(a="inp:int", b="inp:int", c="out:int"):
                     l = [2 for i in range(a) if i > 2]
                     c = l[0] + a + b
                 return c
@@ -56,7 +56,7 @@ class TestIgnoreContextManager(JitTestCase):
             def forward(self):
                 a: int = 4
                 b: int = 5
-                with objmode(a="inp:int", b="out:int"):
+                with torch.jit.ignore(a="inp:int", b="out:int"):
                     l = [2 for i in range(a) if i > 2]
                     b = l[0] + a
                 return b
@@ -72,28 +72,8 @@ class TestIgnoreContextManager(JitTestCase):
             def forward(self):
                 a: int = 4
                 b: int = 5
-                with objmode(a="inp:int", b="inp:int"):
+                with torch.jit.ignore(a="inp:int", b="inp:int"):
                     l = [2 + b for i in range(a) if i > 2]
                 return a
         s = torch.jit.script(A())
         self.assertEqual(s(), 4)
-
-    @unittest.skipIf(sys.version_info < (3, 9), "only supported in python3.9")
-    def test_with_ignore_context_manager_wrong_name(self):
-        class A(torch.nn.Module):
-            def __init__(self):
-                super(A, self).__init__()
-
-            def forward(self):
-                a: int = 4
-                b: int = 5
-                c: int = 0
-                d: int = 6
-                with objdfjehfeh(a="inp:int", b="inp:int", c="out:int", d="out:int"):
-                    l = [2 for i in range(a) if i > 2]
-                    c = l[0] + a + b
-                    d = 9
-                return c + d
-        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
-                                    "Context manager with name objdfjehfeh is not supported"):
-            s = torch.jit.script(A())
