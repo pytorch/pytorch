@@ -124,42 +124,88 @@ kir::Expr* findVectorizedSet(
 
 // Get full extent for the inner-most, merged root domain
 kir::Val* getVectorizeExtent(
-    kir::TensorView* tv,
-    const std::vector<kir::Val*>& indices) {
-  auto domain = tv->domain()->hasRFactor() ? tv->domain()->rfactorDomain()
-                                           : tv->domain()->rootDomain();
-
-  TORCH_INTERNAL_ASSERT(domain.size() == indices.size());
-
-  bool is_contiguous = true;
-  for (auto status : tv->domain()->contiguity()) {
-    is_contiguous &= status;
-  }
-
-  // If the tensorview is not contiguous, return inner-most root domain extent
-  if (!is_contiguous) {
-    return domain.back()->extent();
-  }
-
+    kir::TensorView* producer_tv,
+    kir::TensorView* consumer_tv) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
+  auto consumer_fuser_tv = consumer_tv->fuserTv();
+  auto producer_fuser_tv = producer_tv->fuserTv();
+
+  auto p2c = PairwiseRootDomainMap(producer_fuser_tv, consumer_fuser_tv)
+                 .mapProducerToConsumer(
+                     producer_fuser_tv->domain(), consumer_fuser_tv->domain());
+
+  auto consumer_root_right_of_ca_domains = IterVisitor::getInputsTo(
+      {consumer_fuser_tv->domain()->domain().begin() +
+           consumer_fuser_tv->getComputeAtPosition(),
+       consumer_fuser_tv->domain()->domain().end()});
+  auto producer_root_right_of_ca_domains = IterVisitor::getInputsTo(
+      {producer_fuser_tv->domain()->domain().begin() +
+           producer_fuser_tv->getComputeAtPosition(),
+       producer_fuser_tv->domain()->domain().end()});
+
+  const auto& consumer_contig = consumer_fuser_tv->domain()->contiguity();
+  const auto& producer_contig = producer_fuser_tv->domain()->contiguity();
+
+  // No rfactor should exist in the producer TVs
+  TORCH_INTERNAL_ASSERT(
+      !producer_tv->domain()->hasRFactor(),
+      "Invalid producer tensor: ",
+      producer_fuser_tv);
+  auto producer_root_domain = producer_fuser_tv->getRootDomain();
+
   // Calculate extent of merged root domains
   kir::Val* extent = nullptr;
-  for (int i = int(domain.size()) - 1; i >= 0; --i) {
-    auto root_id = domain.at(i);
-    if (root_id->isBroadcast() || root_id->isReduction() ||
-        gpu_lower->trivialReductionInfo().isDerived(root_id)) {
+  auto consumer_root_idx = int(consumer_fuser_tv->getRootDomain().size()) - 1;
+  for (int i = int(producer_root_domain.size()) - 1; i >= 0; --i) {
+    auto producer_root_id = producer_root_domain.at(i);
+
+    TORCH_INTERNAL_ASSERT(
+        !gpu_lower->trivialReductionInfo().isDerived(producer_root_id),
+        "No trivial reduciton axis should exist: ",
+        producer_root_id);
+
+    // If the producer ID is reduction or broadcast, it should be safe
+    // to ignore.
+    if (producer_root_id->isReduction()) {
       continue;
-    } else if (extent == nullptr) {
-      extent = root_id->extent();
-    } else if (extent != nullptr && indices.at(i)->isZeroInt()) {
-      // This root id must be merged and contiguous. Expand the
-      // vectorization partition.
-      extent = ir_builder.mulExpr(extent, root_id->extent());
-    } else {
+    } else if (producer_root_id->isBroadcast()) {
+      --consumer_root_idx;
+      continue;
+    }
+
+    // There must be a matching consumer root ID as the producer ID is
+    // not reduction and the expression between them is UnaryOpType::Set.
+    auto it = p2c.find(producer_root_id);
+    TORCH_INTERNAL_ASSERT(
+        it != p2c.end(), "No matching consumer root ID found");
+    auto consumer_root_id = it->second;
+
+    // Don't extend the vectorization domain beyond the CA position
+    if (consumer_root_right_of_ca_domains.find(consumer_root_id) ==
+            consumer_root_right_of_ca_domains.end() ||
+        producer_root_right_of_ca_domains.find(producer_root_id) ==
+            producer_root_right_of_ca_domains.end()) {
       break;
     }
+
+    // We now know it's safe to extend the vectorization domain to these
+    // axes. It shouldn't matter whether producer or consumer is used.
+    auto consumer_extent = gpu_lower->lowerValue(consumer_root_id->rawExtent());
+    if (extent == nullptr) {
+      extent = consumer_extent;
+    } else {
+      extent = ir_builder.mulExpr(extent, consumer_extent);
+    }
+
+    // If it's not contiguous, extending the vectorization domain
+    // further is not possible
+    if (!(producer_contig.at(i) && consumer_contig.at(consumer_root_idx))) {
+      break;
+    }
+
+    --consumer_root_idx;
   }
 
   TORCH_INTERNAL_ASSERT(extent != nullptr);
@@ -251,7 +297,7 @@ kir::ForLoop* handleMisalignedVectorization(
             in_tv->fuserTv(), out_tv->fuserTv(), loop_structure);
 
   //  Get full extent for merged root domains
-  auto extent = getVectorizeExtent(vec_tv, indices);
+  auto extent = getVectorizeExtent(in_tv, out_tv);
 
   auto vector_size =
       vec_tv->domain()->domain().back()->extent()->as<kir::Int>();
