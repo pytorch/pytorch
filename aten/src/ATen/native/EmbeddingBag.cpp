@@ -625,6 +625,10 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
       });
     });
     apply_bag_size(mode, output, bag_size);
+    if (mode == MODE_SUM) {
+      // make bag_size output deterministic
+      at::native::zero_(bag_size);
+    }
     max_indices = bag_size;
   } else { // MODE_MAX
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(

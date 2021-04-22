@@ -186,14 +186,12 @@ class ProcessGroupNCCL : public ProcessGroup {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
     explicit Options(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
         bool is_high_priority_stream = false);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
         bool is_high_priority_stream = false) {
-      return c10::make_intrusive<Options>(timeout, is_high_priority_stream);
+      return c10::make_intrusive<Options>(is_high_priority_stream);
     }
 
     // Schedule NCCL operations on high priority CUDA streams
@@ -321,6 +319,15 @@ class ProcessGroupNCCL : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
+
+   // Agrees on an initial sequence number for the whole group by having rank 0
+  // create it and broadcast it to other ranks using the store.
+  void setSequenceNumberForGroup() override;
+
+  // Retrieves the current sequence number for the whole group, which should be
+  // in sync. If the returned number is not consistent across the group, it
+  // may indicate that there is some sort of collective desynchronization.
+  uint64_t getSequenceNumberForGroup() override;
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
