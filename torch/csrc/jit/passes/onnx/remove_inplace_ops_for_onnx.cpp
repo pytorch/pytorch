@@ -843,8 +843,8 @@ void RemoveInplaceOpsForONNX(
   MutationRemover mr(graph);
   ImplicitCastForBinaryInplaceOps(graph->block());
   PrepareForRemoveMutations(mr, graph->block());
-  RemoveTensorMutation(graph);
-  RemoveListMutation(graph);
+  mr.removeTensorMutation();
+  mr.removeListMutation();
   InplaceConverter ic(graph, &mr, model);
   ic.convertMutationForONNX();
 }
