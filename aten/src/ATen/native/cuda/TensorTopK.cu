@@ -1,9 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
-#include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
+#include <ATen/native/cuda/SortUtils.cuh>
 
 #include <c10/macros/Macros.h>
 
@@ -91,7 +93,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
     int index;
     int carry;
     exclusiveBinaryPrefixScan<int, true>(smem, hasTopK, &index, &carry, AddOp<int>());
-
+    
     if (hasTopK) {
       int writeIndex = writeIndexStart + index;
       CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
@@ -154,12 +156,12 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
               Tensor& indices) {
   TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
   checkAllSameGPU("topk_out_cuda", {topK_arg, indices_arg, input_arg});
+  TORCH_CHECK(self.dtype() == values.dtype(), "expected input to match values dtype");
+  TORCH_CHECK(indices.dtype() == at::kLong, "expected indices to be of type ", at::kLong);
   dim = at::maybe_wrap_dim(dim, self);
-  TORCH_CHECK(values.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
-  TORCH_CHECK(indices.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   int numDims = self.dim();
   numDims = numDims == 0 ? 1 : numDims;
-  TORCH_CHECK(numDims <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
+  TORCH_CHECK(numDims <= MAX_DIMS, "input tensor has too many dimensions");
   TORCH_CHECK(dim >= 0 && dim < numDims, "dim not in range");
 
   int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
@@ -172,8 +174,8 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   if (topKSize.size() > 0) {
     topKSize[dim] = k;
   }
-  values.resize_(topKSize);
-  indices.resize_(topKSize);
+  at::native::resize_output(values, topKSize);
+  at::native::resize_output(indices, topKSize);
   // static_cast is required to ensure that the correct type (INDEX_T)
   // is provided to the kernel for the arguments.
 
@@ -255,7 +257,8 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
       THError("Slice to sort is too large");                              \
     }                                                                     \
                                                                           \
-    dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) C10_WARP_SIZE), (int64_t) 1024)); \
+	  /*dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) C10_WARP_SIZE), (int64_t) 1024)); */\
+    dim3 block(std::min(at::cuda::ATenCeilDiv(sliceSize, (int64_t) C10_WARP_SIZE)*(int64_t) C10_WARP_SIZE, (int64_t) 1024)); \
                                                                           \
     /* This is used as a template parameter to calculate indices. */      \
     /* We only specialize it if all collapsed dim sizes are the */        \
@@ -299,10 +302,11 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     } else {
       maxSliceSize = 2048;
     }
-    if (sliceSize <= maxSliceSize) {
+    if (k <= maxSliceSize) {
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
-      legacy::cuda::_th_sort_key_value_inplace(values, indices, dim, largest);
+
+      sortKeyValueInplace(values, indices, dim, largest);
     } else {
       // Depend upon the backup sort that returns indices, which we
       // can use in conjunction with gather to produce the original

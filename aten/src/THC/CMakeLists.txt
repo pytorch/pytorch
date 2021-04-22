@@ -9,7 +9,7 @@ set(extra_src)
 # loop over all types
 foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    # loop over files which need to be split between types (because of long compile times)
-   foreach(THC_FILE TensorSort TensorMathPointwise TensorMathReduce)
+   foreach(THC_FILE TensorMathPointwise TensorMathReduce)
       if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
          file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu"
            "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerate${THC_TYPE}Type.h>\n")
@@ -26,7 +26,7 @@ foreach(THC_FILE TensorMathPointwise TensorMathReduce)
    list(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
 endforeach()
 
-foreach(THC_FILE TensorMathReduce TensorSort)
+foreach(THC_FILE TensorMathReduce)
    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu")
       file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu"
         "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerateBFloat16Type.h>\n")
@@ -51,7 +51,6 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCSortUtils.cu
   ${extra_src}
   PARENT_SCOPE)
@@ -99,7 +98,6 @@ install(FILES
           THCGenerateComplexDoubleType.h
           THCIntegerDivider.cuh
           THCNumerics.cuh
-          THCTensorSort.cuh
           THCTensorInfo.cuh
           THCTensorMathPointwise.cuh
           THCTensorTypeUtils.cuh
@@ -135,6 +133,4 @@ install(FILES
           generic/THCTensorMathReduce.cu
           generic/THCTensorScatterGather.h
           generic/THCTensorScatterGather.cu
-          generic/THCTensorSort.h
-          generic/THCTensorSort.cu
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")

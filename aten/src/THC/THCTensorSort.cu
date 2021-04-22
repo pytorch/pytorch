@@ -1,3 +1,4 @@
+/*
 #include <THC/THCTensorSort.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAException.h>
@@ -63,4 +64,4 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
 
 #undef FILL_INDEX
   }
-}
+}*/
