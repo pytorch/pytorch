@@ -875,16 +875,20 @@
   variants: function
 
 - func: ceil(Tensor self) -> Tensor
+  structured_delegate: ceil.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: ceil
 
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: ceil.out
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: ceil_
 
 - func: ceil.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: ceil_out
 
