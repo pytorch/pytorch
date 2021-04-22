@@ -17,6 +17,8 @@ class ScalarTypeHashFunction {
   }
 };
 
+const int ONNX_OPSET_14 = 14;
+
 static const std::unordered_map<c10::ScalarType, int, ScalarTypeHashFunction>
     scalarTypeToONNXTypeMap = {
         {c10::kFloat, 1},
@@ -61,6 +63,10 @@ static const std::unordered_set<NodeKind> comparisonOps = {
     onnx::LessOrEqual,
 };
 
+static bool IsStandardOp(const NodeKind& nkind) {
+  return standardOps.find(nkind) != standardOps.end();
+}
+
 static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
 }
@@ -73,9 +79,7 @@ static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
 }
 
 static bool IsImplicitCastSupported(const NodeKind& nodeKind) {
-  return (
-      standardOps.find(nodeKind) != standardOps.end() ||
-      comparisonOps.find(nodeKind) != comparisonOps.end());
+  return IsStandardOp(nodeKind) || IsComparisonOp(nodeKind);
 }
 
 static c10::optional<c10::ScalarType> PromoteScalarTypes(
@@ -220,6 +224,18 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   return st;
 }
 
+static c10::optional<c10::ScalarType> LowPrecisionCastForStandardOps(
+    const Node* n,
+    const c10::ScalarType& scalar_type) {
+  // StandardOps do not support uint8\int8\int16 in ONNX now.
+  if (n->kind() != onnx::Gemm && IsStandardOp(n->kind()) &&
+      (scalar_type == c10::kByte || scalar_type == c10::kChar ||
+       scalar_type == c10::kShort)) {
+    return c10::kLong;
+  }
+  return scalar_type;
+}
+
 static void UpdateScalarTypeForInputs(
     Node* n,
     const c10::ScalarType& scalar_type) {
@@ -271,6 +287,51 @@ static void UpdateScalarTypeForOutput(
       CreateProfiledTensorTypeWithScalarType(output_tensor_type, scalar_type));
 }
 
+static void RecoverScalarTypeForOutput(
+    Value* out,
+    const c10::ScalarType& scalar_type) {
+  Node* n = out->node();
+  TORCH_INTERNAL_ASSERT(nullptr != n);
+  const int64_t onnx_type = ScalarTypeToONNXType(scalar_type);
+  Node* cast_node = n->owningGraph()->create(onnx::Cast, 1);
+  cast_node->addInput(out);
+  cast_node->i_(attr::to, onnx_type);
+  cast_node->insertAfter(n);
+  out->replaceAllUsesAfterNodeWith(cast_node, cast_node->output());
+}
+
+static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
+  TORCH_INTERNAL_ASSERT(n->outputs().size() == 1);
+  if (n->output()->type()->cast<TensorType>() == nullptr ||
+      n->output()->type()->cast<TensorType>()->scalarType() == c10::nullopt) {
+    // skip LowPrecisionCast if op output type is null.
+    return;
+  }
+  auto output_scalar_type =
+      n->output()->type()->cast<TensorType>()->scalarType().value();
+  for (size_t i = 0; i < n->inputs().size(); ++i) {
+    if (n->input(i)->type()->cast<TensorType>() == nullptr ||
+        n->input(i)->type()->cast<TensorType>()->scalarType() == c10::nullopt) {
+      // skip LowPrecisionCast if any op input type node is null.
+      return;
+    }
+    auto input_tensor_type =
+        n->input(i)->type()->cast<TensorType>()->scalarType().value();
+    TORCH_INTERNAL_ASSERT(output_scalar_type == input_tensor_type);
+  }
+
+  // The LowPrecision problem will be fixed in ONNX opset 14.
+  if (opset_version < ONNX_OPSET_14) {
+    auto expected_scalar_type_cast =
+        LowPrecisionCastForStandardOps(n, output_scalar_type);
+    UpdateScalarTypeForInputs(n, *expected_scalar_type_cast);
+    if (output_scalar_type != *expected_scalar_type_cast) {
+      // If input type is changed, convert it to the original type.
+      RecoverScalarTypeForOutput(n->output(), output_scalar_type);
+    }
+  }
+}
+
 static void ImplicitCastNodeForONNX(Node* n) {
   if (IsImplicitCastSupported(n->kind())) {
     auto expected_scalar_type = InferExpectedScalarType(n);
@@ -294,10 +355,32 @@ static void ImplicitCastForONNX(Block* block) {
   EliminateDeadCode(
       block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
+
+static void LowPrecisionCastForStandardOpsONNX(
+    Block* block,
+    int opset_version) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
+    for (auto sub : it->blocks()) {
+      LowPrecisionCastForStandardOpsONNX(sub, opset_version);
+    }
+
+    if (IsStandardOp(it->kind())) {
+      LowPrecisionCastNodeForStandardOps(*it, opset_version);
+    }
+  }
+  EliminateDeadCode(
+      block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
+}
 } // anonymous namespace
 
-void ScalarTypeAnalysisForONNX(const std::shared_ptr<Graph>& graph) {
+void ScalarTypeAnalysisForONNX(
+    const std::shared_ptr<Graph>& graph,
+    bool lowprecision_cast,
+    int opset_version) {
   ImplicitCastForONNX(graph->block());
+  if (lowprecision_cast) {
+    LowPrecisionCastForStandardOpsONNX(graph->block(), opset_version);
+  }
 }
 
 void ScalarTypeAnalysisNodeForONNX(Node* n) {

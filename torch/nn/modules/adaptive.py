@@ -12,7 +12,7 @@ from .module import Module
 from ..functional import log_softmax
 
 
-_ASMoutput = namedtuple('ASMoutput', ['output', 'loss'])
+_ASMoutput = namedtuple('_ASMoutput', ['output', 'loss'])
 
 
 class AdaptiveLogSoftmaxWithLoss(Module):
