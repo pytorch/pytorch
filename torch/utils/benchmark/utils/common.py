@@ -15,7 +15,7 @@ import numpy as np
 import torch
 
 
-__all__ = ["TaskSpec", "Measurement", "make_temp_dir"]
+__all__ = ["TaskSpec", "Measurement", "_make_temp_dir"]
 
 
 _MAX_SIGNIFICANT_FIGURES = 4
@@ -295,14 +295,30 @@ def set_torch_threads(n: int) -> Iterator[None]:
         torch.set_num_threads(prior_num_threads)
 
 
-def make_temp_dir(prefix: Optional[str] = None, gc_dev_shm: bool = False):
-    use_dev_shm = (os.getenv("BENCHMARK_USE_DEV_SHM") or "").lower() in ("1", "true")
+def _make_temp_dir(prefix: Optional[str] = None, gc_dev_shm: bool = False) -> str:
+    """Create a temporary directory. The caller is responsible for cleanup.
+
+    This function is conceptually similar to `tempfile.mkdtemp`, but with
+    the key additional feature that it will use shared memory if the
+    `BENCHMARK_USE_DEV_SHM` environment variable is set. This is an
+    implementation detail, but an important one for cases where many Callgrind
+    measurements are collected at once. (Such as when collecting
+    microbenchmarks.)
+
+    This is an internal utility, and is exported solely so that microbenchmarks
+    can reuse the util.
+    """
+    use_dev_shm: bool = (os.getenv("BENCHMARK_USE_DEV_SHM") or "").lower() in ("1", "true")
     if use_dev_shm:
         root = "/dev/shm/pytorch_benchmark_utils"
         assert os.name == "posix", f"tmpfs (/dev/shm) is POSIX only, current platform is {os.name}"
         assert os.path.exists("/dev/shm"), "This system does not appear to support tmpfs (/dev/shm)."
         os.makedirs(root, exist_ok=True)
 
+        # Because we're working in shared memory, it is more important than
+        # usual to clean up ALL intermediate files. However we don't want every
+        # worker to walk over all outstanding directories, so instead we only
+        # check when we are sure that it won't lead to contention.
         if gc_dev_shm:
             for i in os.listdir(root):
                 owner_file = os.path.join(root, i, "owner.pid")
@@ -326,6 +342,8 @@ def make_temp_dir(prefix: Optional[str] = None, gc_dev_shm: bool = False):
     else:
         root = tempfile.gettempdir()
 
+    # We include the time so names sort by creation time, and add a UUID
+    # to ensure we don't collide.
     name = f"{prefix or tempfile.gettempprefix()}__{int(time.time())}__{uuid.uuid4()}"
     path = os.path.join(root, name)
     os.makedirs(path, exist_ok=False)

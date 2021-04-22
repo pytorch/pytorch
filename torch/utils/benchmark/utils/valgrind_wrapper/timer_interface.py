@@ -582,7 +582,7 @@ class _ValgrindWrapper(object):
         3) Parse the run results.
         4) Cleanup the scratch directory.
         """
-        working_dir = common.make_temp_dir(prefix="callgrind")
+        working_dir = common._make_temp_dir(prefix="callgrind")
         data_dir = os.path.join(working_dir, "data")
         script_file = os.path.join(working_dir, "timer_callgrind.py")
         callgrind_out = os.path.join(working_dir, "callgrind.out")

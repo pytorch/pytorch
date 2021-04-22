@@ -85,8 +85,8 @@ class Runner:
         cadence: float = 1.0,
     ) -> None:
         self._work_items: Tuple[WorkOrder, ...] = work_items
-        self._core_pool: CorePool = core_pool or CorePool(0, min(CPU_COUNT - 4, int(CPU_COUNT * 0.75), 39))
-        self._cadence = cadence
+        self._core_pool: CorePool = core_pool or CorePool(0, CPU_COUNT - 4)
+        self._cadence: float = cadence
 
         # Working state.
         self._work_queue: List[WorkOrder] = list(work_items)
