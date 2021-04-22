@@ -136,6 +136,14 @@ class TORCH_API Tensor {
     }
   }
 
+  Tensor conj() const {
+    if (!this->is_complex()) {
+      return *this;
+    } else {
+      return this->_conj();
+    }
+  }
+
   /// Should be used if *this can reasonably be expected to be contiguous and
   /// performance is important.
   /// Compared to contiguous, it saves a reference count

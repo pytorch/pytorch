@@ -235,8 +235,8 @@ _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \
-_(aten, _conj) \
 _(aten, conj) \
+_(aten, _conj) \
 _(aten, complex) \
 _(aten, copysign) \
 _(aten, polar) \
@@ -754,6 +754,7 @@ _(aten, zeros_like) \
 _(aten, real) \
 _(aten, imag) \
 _(aten, view_as_real) \
+_(aten, view_as_real_physical) \
 _(aten, view_as_complex) \
 /* nothing */
 

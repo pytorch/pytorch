@@ -258,6 +258,11 @@
   dispatch:
     CPU, CUDA: view_as_real
 
+- func: view_as_real_physical(Tensor(a) self) -> Tensor(a)
+  variants: function
+  dispatch:
+    CPU, CUDA: view_as_real_physical
+
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
@@ -283,15 +288,21 @@
 - func: imag(Tensor(a) self) -> Tensor(a)
   variants: function
 
-- func: conj(Tensor(a) self) -> Tensor(a)
+- func: _conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
   dispatch:
-    CompositeExplicitAutograd: conj
+    CompositeExplicitAutograd: _conj
 
-- func: view_as_real_physical(Tensor(a) self) -> Tensor(a)
-  variants: function
+- func: conj(Tensor(a) self) -> Tensor(a)
+  variants: function, method
+  manual_cpp_binding: True
+
+- func: conj_physical(Tensor self) -> Tensor
+  variants: function, method
+
+- func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutograd: view_as_real_physical
+    CPU, CUDA: conj_physical_out
 
 - func: conj_physical_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -5051,9 +5062,6 @@
   structured_delegate: digamma.out
   variants: method
 
-- func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
-  variants: method
-
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
   variants: method
   dispatch:
@@ -5820,6 +5828,11 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: polygamma
+
+- func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CompositeExplicitAutograd: polygamma_
 
 - func: erfinv(Tensor self) -> Tensor
   structured_delegate: erfinv.out
@@ -7456,6 +7469,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool2d_out_cpu
     CUDA: adaptive_max_pool2d_out_cuda
@@ -7463,9 +7477,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d(Tensor self, int[2] output_size) -> (Tensor, Tensor)
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool2d_cpu
-    CUDA: adaptive_max_pool2d_cuda
+  structured_delegate: adaptive_max_pool2d.out
 
 - func: adaptive_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -7482,6 +7494,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool3d_out_cpu
     CUDA: adaptive_max_pool3d_out_cuda
@@ -7489,9 +7502,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d(Tensor self, int[3] output_size) -> (Tensor, Tensor)
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool3d_cpu
-    CUDA: adaptive_max_pool3d_cuda
+  structured_delegate: adaptive_max_pool3d.out
 
 - func: adaptive_max_pool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -8653,6 +8664,12 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg_lstsq
+
+- func: linalg_lstsq.out(Tensor self, Tensor b, float? cond=None, *, str? driver=None, Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values) -> (Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_lstsq_out
 
 - func: _lstsq_helper_(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float cond, str driver_name) -> Tensor(a!)
   variants: function

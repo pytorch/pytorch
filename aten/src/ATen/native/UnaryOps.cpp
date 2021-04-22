@@ -332,10 +332,7 @@ Tensor resolve_conj(const Tensor& self) {
   return result.copy_(self);
 }
 
-Tensor conj(const Tensor& self) {
-  if (!self.is_complex()) {
-    return self;
-  }
+Tensor _conj(const Tensor& self) {
   Tensor self_;
   auto impl = c10::make_intrusive<TensorImpl>(
     Storage(self.storage()), self.key_set(), self.dtype());
@@ -347,13 +344,13 @@ Tensor conj(const Tensor& self) {
   return self_;
 }
 
-Tensor& conj_physical_out(Tensor& result, const Tensor& self) {
-  return unary_op_impl_out(result, self, conj_stub);
+Tensor conj(const Tensor& self) {
+  return self.conj();
 }
 
-Tensor& conj_physical_(Tensor& self) {
-  return unary_op_impl_(self, conj_physical_out);
-}
+Tensor& conj_physical_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, conj_physical_stub); }
+Tensor conj_physical(const Tensor& self) { return unary_op_impl(self, at::conj_physical_out); }
+Tensor& conj_physical_(Tensor& self) { return unary_op_impl_out(self, self, conj_physical_stub); }
 
 Tensor& bitwise_not_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
@@ -771,7 +768,7 @@ DEFINE_DISPATCH(abs_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-va
 DEFINE_DISPATCH(angle_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(real_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(imag_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(conj_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(conj_physical_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(asinh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)

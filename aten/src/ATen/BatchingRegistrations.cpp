@@ -1177,6 +1177,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   TRIVIAL_OP(imag)
   TRIVIAL_OP(real);
   TRIVIAL_OP(view_as_real);
+  TRIVIAL_OP(view_as_real_physical);
   m.impl("view_as_complex", view_as_complex_batching_rule);
 #undef TRIVIAL
 
