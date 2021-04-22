@@ -5,7 +5,9 @@ import torch.backends.xnnpack
 import torch.utils.bundled_inputs
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.jit_utils import get_forward, get_forward_graph
-from torch.utils.mobile_optimizer import *
+from torch.utils.mobile_optimizer import (LintCode,
+                                          generate_mobile_module_lints,
+                                          optimize_for_mobile)
 from torch.nn import functional as F
 from torch._C import MobileOptimizerType
 from torch.testing._internal.common_quantized import override_quantized_engine
@@ -54,10 +56,10 @@ class TestOptimizer(TestCase):
         class MyTestModule(torch.nn.Module):
             def __init__(self):
                 super(MyTestModule, self).__init__()
-                self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
-                self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))))
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.conv_weight = torch.nn.Parameter(torch.rand(conv_weight_shape))
+                self.conv_bias = torch.nn.Parameter(torch.rand((conv_bias_shape)))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -142,8 +144,8 @@ class TestOptimizer(TestCase):
         class MyMobileOptimizedTagTest(torch.nn.Module):
             def __init__(self):
                 super(MyMobileOptimizedTagTest, self).__init__()
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
 
             def forward(self, x):
                 o = F.linear(x, self.linear_weight, self.linear_bias)
@@ -159,8 +161,8 @@ class TestOptimizer(TestCase):
         class MyPreserveMethodsTest(torch.nn.Module):
             def __init__(self):
                 super(MyPreserveMethodsTest, self).__init__()
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
 
             def forward(self, x):
                 o = F.linear(x, self.linear_weight, self.linear_bias)

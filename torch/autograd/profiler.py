@@ -807,11 +807,11 @@ class FormattedTimesMixin(object):
 
     @property
     def cpu_time(self):
-        return 0.0 if self.count == 0 else 1.0 * self.cpu_time_total / self.count  # type: ignore
+        return 0.0 if self.count == 0 else 1.0 * self.cpu_time_total / self.count  # type: ignore[attr-defined]
 
     @property
     def cuda_time(self):
-        return 0.0 if self.count == 0 else 1.0 * self.cuda_time_total / self.count  # type: ignore
+        return 0.0 if self.count == 0 else 1.0 * self.cuda_time_total / self.count  # type: ignore[attr-defined]
 
 
 class Interval(object):
@@ -1564,7 +1564,7 @@ def build_table(
     row_format = row_format_lst[0]
     header_sep = header_sep_lst[0]
     line_length = line_length_lst[0]
-    add_column = None  # type: ignore
+    add_column = None  # type: ignore[assignment]
 
     # Have to use a list because nonlocal is Py3 only...
     result = []

@@ -126,6 +126,15 @@ c10::optional<std::vector<int64_t>> tensorSizes(torch::jit::Value* v) {
   return it->sizes().concrete_sizes();
 }
 
+bool isFloatTensor(const torch::jit::Value* v) {
+  auto const& tt = v->type()->cast<TensorType>();
+  if (!tt) {
+    return false;
+  }
+  auto const& st = tt->scalarType();
+  return st && *st == c10::ScalarType::Float;
+}
+
 // The fuser only supports conv2d with very specific properties:
 // - Static shapes: 4-d input and filter, 1-d bias.
 // - Constant strides/padding/dilation/groups
@@ -144,6 +153,13 @@ bool conv2dIsSupported(const torch::jit::Node* node) {
   // Everything should be statically known.
   if (!input || !weight || !bias || !stride || !pad || !dilation || !groups) {
     GRAPH_DEBUG("some params aren't static");
+    return false;
+  }
+
+  // Inputs should be float32.  Other dtypes need more testing.
+  if (!isFloatTensor(node->input(0)) || !isFloatTensor(node->input(1)) ||
+      !isFloatTensor(node->input(2))) {
+    GRAPH_DEBUG("only float32 allowed");
     return false;
   }
 
@@ -187,6 +203,26 @@ bool conv2dIsSupported(const torch::jit::Node* node) {
   return true;
 }
 
+// The fuser currently only supports matmul of 2D x 2D matrices
+bool matmulIsSupported(const torch::jit::Node* node) {
+  auto const& input0 = tensorSizes(node->input(0));
+  auto const& input1 = tensorSizes(node->input(1));
+
+  // Everything should be statically known.
+  if (!input0 || !input1) {
+    GRAPH_DEBUG("matmulIsSupported: Input shapes aren't static");
+    return false;
+  }
+
+  // Proper ndim for tensor inputs.
+  if (input0->size() != 2 || input1->size() != 2) {
+    GRAPH_DEBUG("matmulIsSupported: Unsupported input sizes");
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -203,8 +239,8 @@ size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   return static_cast<size_t>(idx);
 }
 
-static at::ScalarType tensorType(Tensor* t) {
-  return static_cast<at::ScalarType>(t->buf()->dtype().scalar_type());
+static at::ScalarType tensorType(const Buf* b) {
+  return static_cast<at::ScalarType>(b->dtype().scalar_type());
 }
 
 static std::vector<ExprHandle> computeIndicesToBroadcast(
@@ -230,21 +266,35 @@ static std::vector<ExprHandle> computeIndicesToBroadcast(
   return bcast;
 }
 
-ExprHandle TensorExprKernel::broadcast(
-    Tensor* t,
+ExprHandle TensorExprKernel::broadcastBufTemp(
+    BufHandle b,
     const std::vector<ExprHandle>& axes) {
-  return t->call(computeIndicesToBroadcast(
-      axes, ExprVectorToExprHandleVector(t->buf()->dims())));
+  return b.load(computeIndicesToBroadcast(
+      axes, ExprVectorToExprHandleVector(b.node()->dims())));
+}
+ExprHandle TensorExprKernel::broadcast(
+    const Buf* b,
+    const std::vector<ExprHandle>& axes) {
+  return BufHandle(b).load(
+      computeIndicesToBroadcast(axes, ExprVectorToExprHandleVector(b->dims())));
+}
+
+std::vector<int64_t> bufferSizes(const Buf* b) {
+  std::vector<int64_t> sizes;
+  for (size_t i = 0; i < b->ndim(); i++) {
+    sizes.push_back(dynamic_cast<const IntImm*>(b->dim(i))->value());
+  }
+  return sizes;
 }
 
 ExprHandle TensorExprKernel::chunk(
-    Tensor* t,
+    const Buf* b,
     size_t chunkIdx,
     int64_t dim,
     int64_t chunks,
     const std::vector<ExprHandle>& axes) {
   auto norm_dim = normalizeAndCheckIndex(dim, axes.size());
-  auto sizes = bufferSizes(t);
+  auto sizes = bufferSizes(b);
   size_t step = sizes[norm_dim] / chunks;
 
   std::vector<ExprHandle> indices;
@@ -256,7 +306,7 @@ ExprHandle TensorExprKernel::chunk(
     }
   }
 
-  return t->call(indices);
+  return BufHandle(b).load(indices);
 }
 
 ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
@@ -278,11 +328,50 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   return e;
 }
 
+ArgValue TensorExprKernel::jitToArgValue(const torch::jit::Value* v) const {
+  auto ti = bufs_.find(v);
+  if (ti != bufs_.end()) {
+    return BufHandle(ti->second);
+  }
+  if (v->node()->kind() == prim::Constant) {
+    const auto val = toIValue(v).value();
+    if (val.isDouble()) {
+      return val.toDouble();
+    } else if (val.isInt()) {
+      return val.toInt();
+    } else if (val.isBool()) {
+      return val.toBool();
+    } else if (val.isNone()) {
+      // This is just a placeholder so we don't throw.  None-handling
+      // is operator-specific and should be handled properly in
+      // the operator-specific lowering code.
+      return ArgNone();
+    } else {
+      throw unsupported_dtype();
+    }
+  }
+
+  if (!scalars_.count(v)) {
+    throw malformed_input("no scalar in Constant");
+  }
+
+  return ArgValue(scalars_.at(v));
+}
+
+ExprHandle TensorExprKernel::tensorOrConstant(
+    const ArgValue& v,
+    const std::vector<ExprHandle>& axes) {
+  if (auto b = c10::get_if<BufHandle>(&v)) {
+    return broadcastBufTemp(*b, axes);
+  }
+  return constant(v);
+}
+
 ExprHandle TensorExprKernel::tensorOrConstant(
     const torch::jit::Value* v,
     const std::vector<ExprHandle>& axes) {
-  auto ti = tensors_.find(v);
-  if (ti != tensors_.end()) {
+  auto ti = bufs_.find(v);
+  if (ti != bufs_.end()) {
     return broadcast(ti->second, axes);
   }
   return constant(v);
@@ -503,6 +592,23 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
   }
 }
 
+ExprHandle TensorExprKernel::constant(const ArgValue& v) {
+  if (auto s = c10::get_if<tensorexpr::VarHandle>(&v)) {
+    return *s;
+  } else if (auto d = c10::get_if<double>(&v)) {
+    return DoubleImm::make(*d);
+  } else if (auto i = c10::get_if<int64_t>(&v)) {
+    return LongImm::make(*i);
+  } else if (auto b = c10::get_if<bool>(&v)) {
+    return BoolImm::make(*b);
+  } else if (c10::get_if<ArgNone>(&v)) {
+    // This is just a placeholder so we don't throw.  None-handling
+    // is operator-specific and should be handled properly in
+    // the operator-specific lowering code.
+    return IntImm::make(0);
+  }
+  throw unsupported_dtype();
+}
 ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   if (v->node()->kind() == prim::Constant) {
     const auto val = toIValue(v).value();
@@ -603,6 +709,44 @@ void TensorExprKernel::promoteInputs(
 
 ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
+    const c10::optional<at::ScalarType> type) {
+  if (!type.has_value()) {
+    return e;
+  }
+  if (*type == static_cast<at::ScalarType>(e.dtype().scalar_type())) {
+    return e;
+  }
+
+  switch (*type) {
+// NOLINTNEXTLINE
+#define TYPE_CASE(Type, Name) \
+  case at::ScalarType::Name:  \
+    return cast<Type>(e);
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    case at::ScalarType::Bool:
+      return cast<bool>(e);
+    default:
+      throw unsupported_dtype();
+  }
+
+  return e;
+}
+
+c10::optional<at::ScalarType> getOutputType(const torch::jit::Value* v) {
+  if (v->type()->kind() != TypeKind::TensorType) {
+    return c10::optional<at::ScalarType>();
+  }
+
+  if (!v->isCompleteTensor()) {
+    return c10::nullopt;
+  }
+
+  return v->type()->castRaw<TensorType>()->scalarType();
+}
+
+ExprHandle TensorExprKernel::demoteOutput(
+    const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
     return e;
@@ -692,11 +836,18 @@ std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
 
 std::vector<ExprHandle> TensorExprKernel::valueShape(
     const torch::jit::Value* v) {
-  auto it = tensors_.find(v);
-  if (it == tensors_.end()) {
+  auto it = bufs_.find(v);
+  if (it == bufs_.end()) {
     return {};
   }
-  return ExprVectorToExprHandleVector(it->second->buf()->dims());
+  return ExprVectorToExprHandleVector(it->second->dims());
+}
+
+std::vector<ExprHandle> TensorExprKernel::valueShape(const ArgValue& v) {
+  if (auto b = c10::get_if<tensorexpr::BufHandle>(&v)) {
+    return ExprVectorToExprHandleVector(b->node()->dims());
+  }
+  return {};
 }
 
 Tensor* TensorExprKernel::computeOneOperand(
@@ -743,6 +894,30 @@ Tensor* TensorExprKernel::computeTwoOperand(
         promoteInputs(inputs);
         ExprHandle compute = innerExpr(inputs[0], inputs[1]);
         return demoteOutput(compute, n->output());
+      });
+}
+
+Tensor* TensorExprKernel::computeTwoOperand(
+    const std::string& name,
+    const std::vector<ArgValue> inputValues,
+    const c10::optional<at::ScalarType> outputTensorType,
+    const std::vector<ExprHandle> outputShape,
+    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+        innerExpr) {
+  return Compute(
+      name,
+      c10::fmap<DimArg>(outputShape),
+      [this, inputValues, outputTensorType, innerExpr](
+          const std::vector<VarHandle>& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        std::vector<ExprHandle> inputs = {
+            tensorOrConstant(inputValues[0], indices),
+            tensorOrConstant(inputValues[1], indices),
+        };
+
+        promoteInputs(inputs);
+        ExprHandle compute = innerExpr(inputs[0], inputs[1]);
+        return demoteOutput(compute, outputTensorType);
       });
 }
 
@@ -935,8 +1110,18 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::mul: {
+      std::vector<ArgValue> argInputs;
+      for (auto inp : v->node()->inputs()) {
+        argInputs.push_back(jitToArgValue(inp));
+      }
+      auto outputType = getOutputType(v->node()->output());
+      auto outputShape = inferSizesForValue(v);
       return computeTwoOperand(
-          "aten_mul", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_mul",
+          argInputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return boolToInteger(lhs) * boolToInteger(rhs);
           });
     } break;
@@ -1281,8 +1466,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::type_as: {
       auto const& n = v->node();
-      Tensor* rhs = tensors_.at(n->input(1));
-      auto dtype = rhs->buf()->dtype();
+      const Buf* rhs = bufs_.at(n->input(1));
+      auto dtype = rhs->dtype();
       return computeOneOperand(
           "aten_type_as", v, [dtype](const ExprHandle& lhs) {
             return Cast::make(dtype, lhs);
@@ -1534,7 +1719,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             int64_t chunks = n->i(attr::chunks);
             std::vector<ExprHandle> indices(axes.begin(), axes.end());
             return chunk(
-                tensors_.at(n->input(0)), v->offset(), dim, chunks, indices);
+                bufs_.at(n->input(0)), v->offset(), dim, chunks, indices);
           });
     }
 
@@ -1605,7 +1790,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
             ExprHandle load = promoteToDtype(
                 tensorOrConstant(nonempty_inputs[0], newAxes), highType);
-            size_t offset = bufferSizes(tensors_.at(nonempty_inputs[0]))[dim];
+            size_t offset = bufferSizes(bufs_.at(nonempty_inputs[0]))[dim];
             newAxes[dim] = newAxes[dim] - IntImm::make(offset);
 
             for (size_t ii = 1; ii < nonempty_inputs.size(); ++ii) {
@@ -1615,7 +1800,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
                   load,
                   promoteToDtype(tensorOrConstant(input, newAxes), highType));
 
-              offset += bufferSizes(tensors_.at(input))[dim];
+              offset += bufferSizes(bufs_.at(input))[dim];
               newAxes[dim] = axes[dim] - IntImm::make(offset);
             }
 
@@ -1683,9 +1868,69 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       return computeConv2d(v);
     }
 
+    case aten::matmul: {
+      return computeMatmul(v);
+    }
+
     default: {
       throw std::runtime_error("Unhandled node kind");
     }
+  }
+}
+
+// Return the (lower, upper) loop bounds if they are constants, else nullopt.
+c10::optional<std::pair<int64_t, int64_t>> loopBounds(const For* loop) {
+  auto start = IRSimplifier::simplify(loop->start());
+  auto stop = IRSimplifier::simplify(loop->stop());
+  if (!start->isConstant() || !stop->isConstant()) {
+    return c10::nullopt;
+  }
+  return c10::make_optional(
+      std::make_pair(immediateAs<int64_t>(start), immediateAs<int64_t>(stop)));
+}
+
+// True if all the loops in this vector have equal bounds.
+bool loopBoundsAllEqual(const std::vector<For*>& loops) {
+  auto bounds = loopBounds(loops[0]);
+  if (!bounds) {
+    return false;
+  }
+  for (auto const& loop : loops) {
+    auto next = loopBounds(loop);
+    if (!next) {
+      return false;
+    }
+    if (bounds->first != next->first || bounds->second != next->second) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Recursively fuse all the loops with matching bounds in `st`.  Stops fusing
+// at any level containing non-loops or non-matching bounds.  The restriction
+// on matching bounds exists to avoid inserting conditionals on the loop
+// indices where none would be needed, which would significantly complicate
+// vectorization.
+void fuseAllLoops(Stmt* st) {
+  if (auto block = dynamic_cast<tensorexpr::Block*>(st)) {
+    std::vector<For*> loopsToFuse;
+    for (auto stmt : *block) {
+      auto loop = dynamic_cast<For*>(stmt);
+      if (!loop) {
+        // Block contains something that's not a loop.  Quit.
+        return;
+      }
+      loopsToFuse.push_back(loop);
+    }
+    if (!loopBoundsAllEqual(loopsToFuse)) {
+      return;
+    }
+    For* fusedLoop;
+    if (!LoopNest::fuseLoops(loopsToFuse, &fusedLoop)) {
+      return;
+    }
+    fuseAllLoops(fusedLoop->body());
   }
 }
 
@@ -1705,12 +1950,22 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
     root_stmt->accept(block_analysis.get());
   }
 
-  // inlining output & intermediate buffers can duplicate computation.
-  // it slows down cpu code generation but is enabled on gpu because it avoids
-  // difficult synchronization logic across blocks.
-  bool allow_duplicated_work =
-      (backendType == kCudaCodeGen || backendType == kBlockCodeGen);
-  l.inlineIntermediateBufs(allow_duplicated_work);
+  // Inlining output & intermediate buffers can duplicate computation.
+  // Duplicating work can slow down the program if it's not ameliorated in some
+  // way, but we've empirically found that:
+  // - On CPU, LLVM's CSE does a good job as long as you horizontally fuse
+  //   output loops.
+  // - On GPU, there's enough compute to hide the extra work, and inlining
+  //   avoids synchronizing between kernels.
+  l.inlineIntermediateBufs(/*allow_duplicated_work=*/true);
+
+  // Fuse loops "horizontally".  This pass allows us to combine loops that
+  // write to different output buffers, as long as they have the same bounds.
+  if (backendType == kLLVMCodeGen) {
+    GRAPH_DEBUG("after inline", *l.root_stmt());
+    fuseAllLoops(l.root_stmt());
+    GRAPH_DEBUG("after fuse", *l.root_stmt());
+  }
 
   if (backendType == kCudaCodeGen) {
     for (auto buf : bufOutputs_) {
@@ -1880,8 +2135,9 @@ void TensorExprKernel::genInputDebugNames() {
   input_name_map_ = std::move(value_to_name);
 }
 
-void TensorExprKernel::bindInput(const torch::jit::Value* input) {
+Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
+  Tensor* result = nullptr;
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
@@ -1896,18 +2152,18 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
             DimArg(IntImm::make(size), "i" + c10::to_string(i)));
       }
       auto const strides = tt->strides();
-      tensors_.emplace(
-          input,
-          Compute(
-              "input" + c10::to_string(tensors_.size() + 1),
-              inputTensorDims,
-              [&](const std::vector<VarHandle>& axes) {
-                ExprHandle idx = 0;
-                for (size_t i = 0; i < axes.size(); i++) {
-                  idx = idx + axes[i] * IntImm::make(*strides[i]);
-                }
-                return inBuffer.load(idx);
-              }));
+      result = Compute(
+          "input" + c10::to_string(bufs_.size() + 1),
+          inputTensorDims,
+          [&](const std::vector<VarHandle>& axes) {
+            ExprHandle idx = 0;
+            for (size_t i = 0; i < axes.size(); i++) {
+              idx = idx + axes[i] * IntImm::make(*strides[i]);
+            }
+            return inBuffer.load(idx);
+          });
+      bufs_.emplace(input, result->buf());
+
       bufferArgs_.emplace_back(inBuffer);
       break;
     }
@@ -1934,6 +2190,7 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
   }
+  return result;
 }
 
 namespace {
@@ -1998,9 +2255,9 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
     dtype = Dtype(*maybe_stype);
   }
   BufHandle ResultBuf("conv", shape, dtype);
-  BufHandle inp = BufHandle(tensors_.at(n->input(0))->buf());
-  BufHandle w = BufHandle(tensors_.at(n->input(1))->buf());
-  BufHandle b = BufHandle(tensors_.at(n->input(2))->buf());
+  BufHandle inp = BufHandle(bufs_.at(n->input(0)));
+  BufHandle w = BufHandle(bufs_.at(n->input(1)));
+  BufHandle b = BufHandle(bufs_.at(n->input(2)));
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int sH, sW;
@@ -2046,6 +2303,49 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
       {inp, w, b},
       {sH, sW, pH, pW, dH, dW, groups});
   return new Tensor(ResultBuf.node(), s);
+}
+
+Tensor* TensorExprKernel::computeMatmul(const torch::jit::Value* v) {
+  const Node* n = v->node();
+  auto const& shape = sizesForValue(v);
+  Dtype dtype = kFloat;
+  auto maybe_stype = findDtypeForValue(v);
+  if (maybe_stype) {
+    dtype = Dtype(*maybe_stype);
+  }
+  BufHandle ResultBuf("matmul", shape, dtype);
+  const Buf* a = bufs_.at(n->input(0));
+  const Buf* b = bufs_.at(n->input(1));
+
+  auto size_a = ExprVectorToExprHandleVector(a->dims());
+  auto size_b = ExprVectorToExprHandleVector(b->dims());
+  const IntImm* total_size = dynamic_cast<const IntImm*>(
+      IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
+
+  // For small sizes, where N*M*K < 1000, lower matmul to a naive 3-level
+  // loopnest. The number is not tuned very carefully, and in future we should
+  // fine-tune it as well as we should add more advanced native TE lowerings for
+  // matmuls. For bigger sizes we generate a TE ExternalCall, which would call
+  // an aten::matmul.
+  // Native, even naive, lowering is beneficial when the sizes are small because
+  // it allows to eliminate dispatch overhead.
+  if (total_size && total_size->value() < 1000) {
+    return Reduce(
+        "nnc_matmul",
+        {{size_a[0], "M"}, {size_b[1], "N"}},
+        Sum(),
+        [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+          BufHandle ah(a);
+          BufHandle bh(b);
+          return Load::make(ah, {m, k}) * Load::make(bh, {k, n});
+        },
+        {{size_a[1], "K"}});
+  } else {
+    return new Tensor(
+        ResultBuf.node(),
+        ExternalCall::make(
+            ResultBuf, "nnc_aten_matmul", {BufHandle(a), BufHandle(b)}, {}));
+  }
 }
 
 Tensor* TensorExprKernel::computeSoftmax(
@@ -2154,21 +2454,21 @@ Tensor* TensorExprKernel::computeSoftmax(
       Compute("aten_softmax_exp", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             v->node()->input(0), convert_indices_to_expr_handle(indices));
-        return exp(inp - max->call(remove_softmax_dim_index(indices)));
+        return exp(inp - max->load(remove_softmax_dim_index(indices)));
       });
   auto sum = Reduce(
       "aten_softmax_sum",
       non_softmax_dims,
       Sum(),
       [&](ParameterList& indices) {
-        return e->call(move_softmax_dim_index_to_pos(indices));
+        return e->load(move_softmax_dim_index_to_pos(indices));
       },
       {output_dims[softmax_dim]});
   if (!log_softmax) {
     auto result =
         Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
-          return e->call(indices) /
-              sum->call(remove_softmax_dim_index(indices));
+          return e->load(indices) /
+              sum->load(remove_softmax_dim_index(indices));
         });
     return new Tensor(
         result->buf(),
@@ -2177,15 +2477,15 @@ Tensor* TensorExprKernel::computeSoftmax(
 
   auto log_sum = Compute(
       "aten_softmax_log_sum", non_softmax_dims, [&](ParameterList& indices) {
-        return log(sum->call(indices));
+        return log(sum->load(indices));
       });
   auto result =
       Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             v->node()->input(0), convert_indices_to_expr_handle(indices));
         auto non_softmax_indices = remove_softmax_dim_index(indices);
-        return inp - max->call(non_softmax_indices) -
-            log_sum->call(non_softmax_indices);
+        return inp - max->load(non_softmax_indices) -
+            log_sum->load(non_softmax_indices);
       });
   return new Tensor(
       result->buf(),
@@ -2272,11 +2572,10 @@ Tensor* TensorExprKernel::computeCatWoConditionals(const torch::jit::Value* v) {
         store_indices[i] = for_vars[i];
       }
     }
-    auto inp_buf = tensors_.at(inp)->buf();
-    auto load_expr = new Load(inp_buf, load_indices, new IntImm(1));
+    auto inp_buf = bufs_.at(inp);
+    auto load_expr = new Load(inp_buf, load_indices);
     auto load_promoted = promoteToDtype(ExprHandle(load_expr), highType);
-    Stmt* st = new Store(
-        output_buf, store_indices, load_promoted.node(), new IntImm(1));
+    Stmt* st = new Store(output_buf, store_indices, load_promoted.node());
     for (size_t i = dims.size(); i > 0; --i) {
       st = new For(for_vars[i - 1], new IntImm(0), dims[i - 1].node(), st);
     }
@@ -2388,8 +2687,8 @@ bool denseAndNonOverlapping(
 
 Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   const TensorTypePtr& tt = v->type()->expect<TensorType>();
-  TORCH_INTERNAL_ASSERT(tensors_.count(v));
-  Tensor* tensor = tensors_[v];
+  TORCH_INTERNAL_ASSERT(bufs_.count(v));
+  const Buf* buf = bufs_.at(v);
 
   TORCH_INTERNAL_ASSERT(tt->sizes().concrete_sizes());
   const auto sizes = *tt->sizes().concrete_sizes();
@@ -2399,12 +2698,12 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   // All Tensors in NNC are layed out in default, contiguous layout.
   // If the output is also default contiguous we don't need to do anything
   if (strides == default_strides) {
-    return tensor;
+    return new Tensor(buf, nullptr);
   }
   // If the tensor is not dense or overlaps, we have
   // no way of matching the profiled striding
   if (!denseAndNonOverlapping(sizes, strides)) {
-    return tensor;
+    return new Tensor(buf, nullptr);
   }
 
   auto dims = dimsFromSizes(sizesForValue(v));
@@ -2446,8 +2745,38 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
               Mod::make(absolute_position, IntImm::make(stride));
           new_axes[stride_index] = index;
         }
-        return tensor->call(new_axes);
+        return BufHandle(buf).load(new_axes);
       });
+}
+
+void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    // Only Tensor constants need to be bound, scalar constants will be turned
+    // into immediates in TE IR
+    return;
+  }
+  auto const_tensor = toIValue(v)->toTensor();
+
+  const auto& tt = v->type()->expect<TensorType>();
+  const auto sizes = *tt->sizes().concrete_sizes();
+  std::vector<ExprHandle> te_sizes;
+  te_sizes.reserve(sizes.size());
+  for (auto s : sizes) {
+    te_sizes.push_back(IntImm::make(s));
+  }
+
+  const Buf* buf = new Buf(
+      "const_" + v->debugName(),
+      ExprHandleVectorToExprVector(te_sizes),
+      ToDtype(static_cast<ScalarType>(*tt->scalarType())));
+
+  if (!const_tensor.is_contiguous()) {
+    const_tensor = const_tensor.clone().contiguous();
+    unpacked_constant_tensors_.push_back(const_tensor);
+  }
+
+  constants_.push_back({buf, const_tensor.data_ptr()});
+  bufs_[v] = buf;
 }
 
 void TensorExprKernel::compile() {
@@ -2461,22 +2790,25 @@ void TensorExprKernel::compile() {
   nInputs_ = graph_->inputs().size();
   genInputDebugNames();
   for (auto const& input : graph_->inputs()) {
-    bindInput(input);
     inputTypes_.push_back(input->type());
-    if (input->type()->kind() == TypeKind::TensorType) {
-      block->append_stmt(tensors_.at(input)->stmt());
+    if (Tensor* t = bindInput(input)) {
+      block->append_stmt(t->stmt());
     }
   }
 
   // Bind nodes to tensor compute expressions.
   for (auto const& n : graph_->nodes()) {
-    if (n->kind() == prim::Constant || n->kind() == prim::ListConstruct) {
+    if (n->kind() == prim::ListConstruct) {
+      continue;
+    } else if (n->kind() == prim::Constant) {
+      bindConstant(n->output());
       continue;
     } else {
       for (auto const& output : n->outputs()) {
         if (output->hasUses()) {
-          tensors_.emplace(output, computeValue(output));
-          block->append_stmt(tensors_.at(output)->stmt());
+          Tensor* t = computeValue(output);
+          bufs_.emplace(output, t->buf());
+          block->append_stmt(t->stmt());
         }
       }
     }
@@ -2488,19 +2820,19 @@ void TensorExprKernel::compile() {
 
   device_ = *pickDeviceType(graph_->inputs());
 
-  // Move output operands from `tensors_` to `bufOutputs_`
+  // Move output operands from `bufs_` to `bufOutputs_`
   for (const auto& output : graph_->outputs()) {
-    if (!tensors_.count(output)) {
+    if (!bufs_.count(output)) {
       throw malformed_input("cannot find output Tensor");
     }
     // The "strided" tensor will be incorrect if used in NNC,
     // since NNC views it as contiguous. Only convert it to the right
     // strides at the end of the kernel (if already contiguous it's a no-op)
     Tensor* properly_strided_output = convertOutputToCorrectStrides(output);
-    if (tensors_.at(output) != properly_strided_output) {
+    if (properly_strided_output->stmt()) {
       block->append_stmt(properly_strided_output->stmt());
     }
-    tensors_[output] = properly_strided_output;
+    bufs_[output] = properly_strided_output->buf();
     const auto& tt = output->type()->expect<TensorType>();
     auto sizes = *tt->sizes().concrete_sizes();
     tensorOutputSizes_.push_back(sizes);
@@ -2514,11 +2846,15 @@ void TensorExprKernel::compile() {
       tensorOutputStrides_.push_back(TensorType::contiguousStridesOf(sizes));
     }
 
-    bufOutputs_.insert(tensors_.at(output)->buf());
-    bufferArgs_.emplace_back(tensors_.at(output));
+    bufOutputs_.insert(bufs_.at(output));
+    bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
     tensorOutputTensorOptions_.emplace_back(
-        c10::TensorOptions(tensorType(tensors_[output])).device(device_));
-    tensors_.erase(output);
+        c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));
+    bufs_.erase(output);
+  }
+
+  for (auto c : constants_) {
+    bufferArgs_.emplace_back(BufHandle(c.buf));
   }
 
   BackendType backendType = inferBackendTypeFromDevice(device_);
@@ -2570,6 +2906,8 @@ void TensorExprKernel::run(Stack& stack) {
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
+  // TODO: preallocate `runArgs` during compilation and fill in values where
+  // possible (e.g. for constant tensors)
   std::vector<CodeGen::CallArg> runArgs;
   runArgs.reserve(inputs.size() + bufOutputs_.size());
 
@@ -2594,6 +2932,11 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
         opts.pinned_memory));
     runArgs.emplace_back(outputs.back().data_ptr());
   }
+
+  for (auto c : constants_) {
+    runArgs.emplace_back(c.ptr);
+  }
+
   return runArgs;
 }
 

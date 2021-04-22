@@ -26,6 +26,7 @@ struct OverloadedFunction : public Function {
   OverloadedFunction(
       c10::QualifiedName qualname,
       c10::FunctionSchema schema,
+      at::ClassTypePtr owning_class,
       std::function<void(Stack&)> callable,
       std::string doc_string = "")
       : name_(std::move(qualname)),
@@ -33,6 +34,7 @@ struct OverloadedFunction : public Function {
         schema_(std::move(schema)),
         doc_string_(std::move(doc_string)) {
     TORCH_INTERNAL_ASSERT(schema_.returns().size() == 1);
+    owning_class_ = owning_class;
   }
 
   const std::string& doc_string() const override {
@@ -53,14 +55,13 @@ struct OverloadedFunction : public Function {
 
   std::pair<size_t, MatchedSchema> matchOverloadedSchemas(
       const SourceRange& loc,
-      const at::ClassTypePtr& owner_class,
       Graph& graph,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     // Even though overloaded methods are inserted into graph with
     // a mangled name, the original name can still be found with
     // name(). Therefore, we don't need to check for mangled names here.
-    auto overloadedMethods = owner_class->findOverloadedMethod(name());
+    auto overloadedMethods = owning_class_->findOverloadedMethod(name());
     std::vector<const at::FunctionSchema*> schemas;
     for (auto method : overloadedMethods) {
       try {
@@ -175,6 +176,8 @@ struct OverloadedFunction : public Function {
   c10::FunctionSchema schema_;
 
   std::string doc_string_;
+  // this is necessary for querying other overloaded methods
+  at::ClassTypePtr owning_class_;
 };
 
 } // namespace jit

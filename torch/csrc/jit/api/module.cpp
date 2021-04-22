@@ -2,7 +2,6 @@
 
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>

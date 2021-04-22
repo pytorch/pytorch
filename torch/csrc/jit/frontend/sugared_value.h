@@ -462,7 +462,7 @@ struct MethodValue : public SugaredValue {
         if (auto overloaded_method =
                 dynamic_cast<OverloadedFunction*>(method)) {
           auto matched = overloaded_method->matchOverloadedSchemas(
-              loc, class_type, *f.graph(), argsWithSelf, kwargs);
+              loc, *f.graph(), argsWithSelf, kwargs);
           auto mangled_name =
               method_name + "__" + std::to_string(matched.first);
           Value* output =

@@ -459,6 +459,7 @@ class class_ {
     auto method = std::make_unique<jit::OverloadedFunction>(
         qualMethodName,
         std::move(schema),
+        classTypePtr,
         std::move(wrapped_func),
         std::move(doc_string));
 
