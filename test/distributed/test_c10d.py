@@ -49,6 +49,7 @@ from torch.testing._internal.common_distributed import (
     create_device,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
+    create_tcp_store,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -299,27 +300,9 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         return c10d.PrefixStore(self.prefix, self.filestore)
 
-
-def create_tcp_store(addr, world_size=1, wait_for_workers=True):
-    """
-    Creates a TCP store. Retries if the chosen port is already in use.
-    """
-    ports = []
-    for _ in range(10):
-        try:
-            port = common.find_free_port()
-            ports.append(port)
-            return c10d.TCPStore(addr, port, world_size, True, wait_for_workers=wait_for_workers)
-        except RuntimeError as error:
-            if str(error) == "Address already in use":
-                continue
-            raise
-    raise RuntimeError("Unable to find free port (tried %s)" % ", ".join(ports))
-
-
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
-        store = create_tcp_store("localhost")
+        store = create_tcp_store()
         store.set_timeout(timedelta(seconds=300))
         return store
 
@@ -329,7 +312,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         else:
             err_msg_reg = "^Address already in use$"
         with self.assertRaisesRegex(RuntimeError, err_msg_reg):
-            addr = "localhost"
+            addr = DEFAULT_HOSTNAME
             port = common.find_free_port()
 
             # Use noqa to silence flake8.
@@ -418,7 +401,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super(PrefixTCPStoreTest, self).setUp()
-        self.tcpstore = create_tcp_store("localhost")
+        self.tcpstore = create_tcp_store()
         self.prefix = "test_prefix"
         self.tcpstore.set_timeout(timedelta(seconds=300))
 
@@ -652,7 +635,7 @@ class RendezvousFileTest(TestCase):
 @skip_if_win32()
 class RendezvousTCPTest(TestCase):
     def create_tcp_url(self):
-        addr = "localhost"
+        addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
         url = "tcp://%s:%d?world_size=%d" % (addr, port, 1)
         return url
@@ -4904,6 +4887,58 @@ class CommTest(MultiProcessTestCase):
         ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
+
+    def _test_sequence_num_set_default_pg(self, backend):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        default_pg = c10d.distributed_c10d._get_default_group()
+        seq_num = default_pg._get_sequence_number_for_group()
+        obj_list = [None for _ in range(dist.get_world_size())]
+        dist.all_gather_object(obj_list, seq_num)
+        self.assertEqual(len(set(obj_list)), 1)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_default_pg_gloo(self):
+        self._test_sequence_num_set_default_pg(backend="gloo")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_default_pg_nccl(self):
+        torch.cuda.set_device(self.rank)
+        self._test_sequence_num_set_default_pg(backend="nccl")
+
+    def _test_sequence_num_set_new_group(self, backend):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        subgroup = dist.new_group([0, 1])
+        subgroup_seq = subgroup._get_sequence_number_for_group()
+        obj_list = [None for _ in range(dist.get_world_size())]
+        dist.all_gather_object(obj_list, subgroup_seq)
+        self.assertEqual(len(set(obj_list)), 1)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_gloo_new_group(self):
+        self._test_sequence_num_set_new_group(backend="gloo")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_nccl_new_group(self):
+        torch.cuda.set_device(self.rank)
+        self._test_sequence_num_set_new_group(backend="nccl")
 
     @requires_gloo()
     def test_pass_gloo_options(self):
