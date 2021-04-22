@@ -189,11 +189,13 @@ def _get_subgraph_relationship_type(
 
     # TODO(next): make this code handle matching by what is before the base op
     if node_a.op != node_b.op:
-        # for now, comparing call_module to call_function is not supported
-        # this can be added later if needed
-        return SubgraphTypeRelationship.NOT_RELATED
+        if not (
+            node_a.op in ('call_function', 'call_method') and
+            node_b.op in ('call_function', 'call_method')
+        ):
+            return SubgraphTypeRelationship.NOT_RELATED
 
-    if node_a.op == 'call_function':
+    if node_a.op in ('call_function', 'call_method'):
         if node_a.target == node_b.target:
             node_a_has_prev = subgraph_a.base_op_node == subgraph_a.start_node
             node_b_has_prev = subgraph_b.base_op_node == subgraph_b.start_node
@@ -229,6 +231,7 @@ def _get_subgraph_relationship_type(
             return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
         else:
             return SubgraphTypeRelationship.NOT_RELATED
+    # TODO(before land): delete
     elif node_a.op == 'call_method':
         assert (subgraph_a.base_op_node == subgraph_a.start_node and
                 subgraph_b.base_op_node == subgraph_b.start_node), \
