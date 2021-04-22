@@ -122,6 +122,10 @@ def grad_with_value(f, diff_argnums=(0,), has_aux=False):
         finally:
             if grad_input is not None:
                 grad_input = _undo_create_differentiable(grad_input, level)
+            if output is not None:
+                output = _undo_create_differentiable(output, level)
+            if aux is not None:
+                aux = _undo_create_differentiable(aux, level)
             _grad_decrement_nesting()
         if has_aux:
             return grad_input, output, aux

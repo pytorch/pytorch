@@ -1414,73 +1414,101 @@ TORCH_LIBRARY_IMPL(_, BatchedOutOfTree, m) {
 // // debug_t<tail_t<tail_t<typelist<Tensor, optional<int64_t>>>>> dt;
 // debug_t<remove_batch_dim_after_tensor_t<typelist<Tensor, optional<int64_t>>>> dt;
 
-static Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) {
-  if (bdim.has_value()) {
-    return makeBatched(tensor, {{level, bdim.value()}});
-  }
-  return tensor;
-}
-
 
 std::tuple<Tensor,optional<int64_t>> abs_batch_rule(const Tensor& tensor, optional<int64_t> batch_dim) {
   return {tensor.abs(), batch_dim};
 }
 
-std::tuple<Tensor, optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level) {
-  auto* batched = maybeGetBatchedImpl(tensor);
-  if (!batched) {
-    return {tensor, nullopt};
-  }
-  TORCH_INTERNAL_ASSERT(batched->bdims().size() == 1);
-  auto batched_level = batched->bdims().back().level();
-  if (batched_level == level) {
-    auto bdim = batched->bdims().back().dim();
-    return {batched->value(), bdim};
-  }
-  return {tensor, nullopt};
+template <typename F, F Func>
+std::tuple<Tensor,optional<int64_t>> unwrap_and_call2(const Tensor& tensor, optional<int64_t> batch_dim) {
+  return {Func(tensor), batch_dim};
 }
 
-typedef std::tuple<Tensor, optional<int64_t>> (*something_t)(const Tensor&, optional<int64_t>);
-
-template <>
-Tensor lowerToNextLayer<something_t, Tensor, const Tensor&>(
-    something_t batch_rule,
-    const Tensor& tensor) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  auto unwrapped = unwrapTensorAtLevel(tensor, cur_level);
-  auto unwrapped_result = batch_rule(std::get<0>(unwrapped), std::get<1>(unwrapped));
-  return makeBatched(std::get<0>(unwrapped_result), std::get<1>(unwrapped_result), cur_level);
+static Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_dim) {
+  if (!maybe_batch_dim.has_value()) {
+    return tensor;
+  }
+  return tensor.movedim(maybe_batch_dim.value(), 0);
 }
 
-// Tensor absBatchRule(const Tensor& tensor) {
-//   return lowerToNextLayer(abs_batch_rule, tensor);
-// }
-// 
-//template <typename Result, typename... Args>
-//Result primBatchRule(Args... args) {
-//  return lowerToNextLayer(abs_batch_rule, std::forward<Args>(args)...);
-//}
+static int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim) {
+  int64_t result = tensor.dim();
+  if (maybe_batch_dim.has_value()) {
+    result -= 1;
+  }
+  return result;
+}
 
-// template <typename func_t>
-// typename c10::guts::function_traits<func_t>::result_type primBatchRule(const Tensor& tensor) {
-//   return lowerToNextLayer(abs_batch_rule, tensor);
-// }
+static Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, int64_t logical_rank) {
+  if (!has_bdim) {
+    return tensor;
+  }
+  auto tensor_logical_rank = rankWithoutBatchDim(tensor, has_bdim);
+  if (tensor_logical_rank >= logical_rank) {
+    return tensor;
+  }
+  VmapDimVector new_sizes(tensor.sizes().begin(), tensor.sizes().end());
+  for (int64_t i = 0; i < logical_rank - tensor_logical_rank; i++) {
+    new_sizes.insert(new_sizes.begin() + 1, 1);
+  }
+  return tensor.view(new_sizes);
+}
 
-// std::function<Tensor(const Tensor&)> kFunc = primBatchRule<Tensor, const Tensor&>;
-// // std::function<Tensor(const Tensor&)> kFunc3 = PrimBatchRule3<decltype(&abs_batch_rule), &abs_batch_rule>::apply;
-// 
-// std::function<Tensor(const Tensor&)> kFunc3 = PrimBatchRule3<decltype(&abs_batch_rule), &abs_batch_rule>::apply;
-//
-// debug_t<decltype(abs_batch_rule)> foobar;
+static void handleScalarTypePromotion(Tensor& logical_scalar_tensor, Tensor& second) {
+  auto result_type = at::native::result_type(logical_scalar_tensor[0], second);
+  if (logical_scalar_tensor.scalar_type() != result_type) {
+    logical_scalar_tensor = logical_scalar_tensor.to(result_type);
+  }
+  if (second.scalar_type() != result_type) {
+    second = second.to(result_type);
+  }
+}
+
+template <typename F, F Func>
+std::tuple<Tensor,optional<int64_t>> binary_pointwise_batch_rule(
+    const Tensor& tensor, optional<int64_t> tensor_batch_dim,
+    const Tensor& other, optional<int64_t> other_batch_dim) {
+  // compute max logical rank
+  auto tensor_logical_rank = rankWithoutBatchDim(tensor, tensor_batch_dim);
+  auto other_logical_rank = rankWithoutBatchDim(other, other_batch_dim);
+  auto max_logical_rank = std::max(tensor_logical_rank, other_logical_rank);
+
+  auto tensor_ = moveBatchDimToFront(tensor, tensor_batch_dim);
+  auto other_ = moveBatchDimToFront(other, other_batch_dim);
+
+  // In the (0D, ND) case, type promotion semantics are different :/
+  auto tensor_is_logical_scalar = (tensor_logical_rank == 0 && tensor_batch_dim.has_value());
+  auto other_is_logical_scalar = (other_logical_rank == 0 && other_batch_dim.has_value());
+  if (tensor_is_logical_scalar && !other_is_logical_scalar) {
+    handleScalarTypePromotion(tensor_, other_);
+  }
+  if (other_is_logical_scalar && !tensor_is_logical_scalar) {
+    handleScalarTypePromotion(other_, tensor_);
+  }
+
+  // If the dimensions aren't aligned, we need to line them up.
+  // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
+  // Note that only tensors that have a batch dim need to be modified.
+  // Tensor[B, 2, 3, 5] + Tensor[5] -> no changes needed
+  tensor_ = maybePadToLogicalRank(tensor_, tensor_batch_dim, max_logical_rank);
+  other_ = maybePadToLogicalRank(other_, other_batch_dim, max_logical_rank);
+
+  auto result = Func(tensor_, other_);
+  auto result_batch_dim = tensor_batch_dim.has_value() || other_batch_dim.has_value()
+    ? optional<int64_t>{0} : nullopt;
+  return { std::move(result), std::move(result_batch_dim) };
+}
+
 
 TORCH_LIBRARY_IMPL(aten, BatchedOutOfTree, m) {
-  // m.impl("abs", kFunc3);
-  //m.impl("abs", PrimBatchRule6<Tensor(const Tensor&)>::apply);
-  // m.impl("abs", PrimBatchRule7<decltype(&abs_batch_rule), &abs_batch_rule, Tensor(const Tensor&)>::apply);
-  m.impl("abs", PrimBatchRule7<decltype(&abs_batch_rule), &abs_batch_rule, to_operator_t<decltype(abs_batch_rule)>>::apply);
+
+#define VMAP_SUPPORT(op, batch_rule) \
+  m.impl(op, PrimBatchRule7< \
+      decltype(&batch_rule), &batch_rule, to_operator_t<decltype(batch_rule)> \
+      >::apply);
+
+  // VMAP_OUTPLACE_OP("abs", abs_batch_rule);
+  // m.impl("abs", PrimBatchRule7<decltype(&abs_batch_rule), &abs_batch_rule, to_operator_t<decltype(abs_batch_rule)>>::apply);
 
   // NB: Ideally we would like some operators, like size.int, to "fallthrough"
   // to the underlying implementation. However, because a BatchedTensor is a
@@ -1553,10 +1581,10 @@ TORCH_LIBRARY_IMPL(aten, BatchedOutOfTree, m) {
 //   m.impl("clamp_max", clamp_max_batching_rule);
 
 // unary pointwise, out-of-place, no additional arguments.
-#define UNARY_POINTWISE(op) m.impl(#op, \
-    unwrap_and_call<Tensor (*)(const Tensor&), at::op>);
-  // m.impl("abs", PrimBatchRule3<decltype(&abs_batch_rule), &abs_batch_rule>::apply);
-  // UNARY_POINTWISE(abs);
+#define UNARY_POINTWISE_BATCH_RULE(op) unwrap_and_call2<decltype(&op), &op>
+
+#define UNARY_POINTWISE(op) VMAP_SUPPORT(#op, UNARY_POINTWISE_BATCH_RULE(at::op));
+  UNARY_POINTWISE(abs);
   UNARY_POINTWISE(acos);
   UNARY_POINTWISE(asin);
   UNARY_POINTWISE(atan);
@@ -1606,21 +1634,24 @@ TORCH_LIBRARY_IMPL(aten, BatchedOutOfTree, m) {
   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
   using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
 
-#define BINARY_POINTWISE(op) \
-  m.impl(#op".Tensor", binary_pointwise_batching_rule<TensorTensorType, at::op>); \
-  m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
-#define BINARY_POINTWISE_VA(op, ...) \
-  { \
-    using Binop = Tensor (*)(const Tensor&, const Tensor&, __VA_ARGS__); \
-    using Unop = Tensor (*)(const Tensor&, Scalar, __VA_ARGS__); \
-    m.impl(#op".Tensor", binary_pointwise_batching_rule<Binop, at::op, __VA_ARGS__>); \
-    m.impl(#op".Scalar", unwrap_and_call<Unop, at::op, Scalar, __VA_ARGS__>); \
-  }
+// #define BINARY_POINTWISE(op) \
+//   m.impl(#op".Tensor", binary_pointwise_batching_rule<TensorTensorType, at::op>); \
+//   m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
+// #define BINARY_POINTWISE_VA(op, ...) \
+//   { \
+//     using Binop = Tensor (*)(const Tensor&, const Tensor&, __VA_ARGS__); \
+//     using Unop = Tensor (*)(const Tensor&, Scalar, __VA_ARGS__); \
+//     m.impl(#op".Tensor", binary_pointwise_batching_rule<Binop, at::op, __VA_ARGS__>); \
+//     m.impl(#op".Scalar", unwrap_and_call<Unop, at::op, Scalar, __VA_ARGS__>); \
+//   }
 
+#define BINARY_POINTWISE_BATCH_RULE(op) binary_pointwise_batch_rule<TensorTensorType, &op>
+#define BINARY_POINTWISE(op) VMAP_SUPPORT(#op".Tensor", BINARY_POINTWISE_BATCH_RULE(at::op));
 //   BINARY_POINTWISE_VA(add, Scalar);
 //   BINARY_POINTWISE_VA(sub, Scalar);
 //   BINARY_POINTWISE_VA(rsub, Scalar);
-//   BINARY_POINTWISE(mul);
+  BINARY_POINTWISE(mul);
+  VMAP_SUPPORT("tanh_backward", BINARY_POINTWISE_BATCH_RULE(at::tanh_backward));
 //   BINARY_POINTWISE(div);
 // 
 //   // at::pow has three out-of-place overloads
