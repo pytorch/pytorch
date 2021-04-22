@@ -7,6 +7,7 @@ from tools.codegen.api.types import (ArgName, BaseCType, Binding, ConstRefCType,
                                      OptionalCType, TupleCType, SpecialArgName, boolT, scalarT,
                                      tensorListT, dimnameListT, tensorT, voidT,
                                      BaseTypeToCppMapping, intArrayRefT, tensorOptionsT)
+from tools.codegen import local
 from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
@@ -68,7 +69,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
-            if mutable:
+            if mutable and not local.use_const_ref_for_mutable_tensors():
                 return NamedCType(binds, MutRefCType(BaseCType(tensorT)))
             else:
                 return NamedCType(binds, ConstRefCType(BaseCType(tensorT)))
@@ -78,7 +79,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
             raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
-            if mutable:
+            if mutable and not local.use_const_ref_for_mutable_tensors():
                 return NamedCType(binds, MutRefCType(BaseCType(tensorT)))  # TODO: fix this discrepancy
             else:
                 return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(tensorT))))
@@ -121,7 +122,10 @@ def returntype_type(t: Type, *, mutable: bool) -> CType:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
-                return MutRefCType(BaseCType(tensorT))
+                if local.use_const_ref_for_mutable_tensors():
+                    return ConstRefCType(BaseCType(tensorT))
+                else:
+                    return MutRefCType(BaseCType(tensorT))
             else:
                 return BaseCType(tensorT)
         elif t.name == BaseTy.Scalar:
