@@ -40,8 +40,8 @@ Tensor build_index(int64_t num_dims, int64_t flip_dim, int64_t dim_size) {
   new_shape[flip_dim] = dim_size;
 
   TensorOptions tensor_options =
-    TensorOptions(at::kInt64).
-    device(at::kCPU);
+    TensorOptions(kInt64).
+    device(kCPU);
 
   return at::empty(new_shape, tensor_options);
 }
@@ -69,7 +69,7 @@ static TensorIterator make_index_iterator(const Tensor input, const std::vector<
   config.set_check_mem_overlap(false)
         .check_all_same_dtype(false)
         .declare_static_dtype_and_device(input.scalar_type(), input.device())
-        .add_output(torch::Tensor())
+        .add_output(Tensor())
         .add_input(input);
   for (auto& index : indices) {
     config.add_input(index);
@@ -99,26 +99,26 @@ void flip_cpu_kernel(TensorIterator& iter) {
 }
 
 Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
-  auto in_tensor = self;
+  auto input = self;
 
-  std::vector<int64_t> dims;
-  for(int64_t dim: flip_dims) {
+  std::vector<int64_t> flip_dims;
+  for(int64_t dim: dims) {
       dims.push_back(dim);
   }
 
-  std::sort(dims.begin(), dims.end());
+  std::sort(flip_dims.begin(), flip_dims.end());
 
   auto shape = input.sizes().vec();
   auto strides = input.strides().vec();
 
   // Set stride to zero on the dimensions that are going to be flipped
-  for(auto dim: dims) {
+  for(auto dim: flip_dims) {
     strides[dim] = 0;
   }
 
   // Restride the input to index only on the dimensions to flip
   auto restrided_input = input.as_strided(shape, strides);
-  auto indices = build_indices_loop(input, dims);
+  auto indices = build_indices_loop(input, flip_dims);
   auto iter = make_index_iterator(restrided_input, indices);
 
   if (in_tensor.is_quantized()) {
