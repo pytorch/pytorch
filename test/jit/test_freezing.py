@@ -1890,7 +1890,6 @@ class TestFrozenOptimizations(JitTestCase):
             op_map = {
                 'prim::MKLDNNHardSwish' : F.hardswish,
                 'prim::MKLDNNHardSigmoid' : F.hardsigmoid,
-                'prim::MKLDNNRelu6' : F.relu6
             }
 
             input_sizes = ([0], [1], [3], [1, 3, 8, 8])
