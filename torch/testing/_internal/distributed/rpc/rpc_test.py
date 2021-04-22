@@ -492,6 +492,7 @@ def async_add_multi_fanout(to, x, num, step):
 # use the Python pickler to extract tensors from non-IValue-convertible types.
 class TensorWrapper:
     __slots__ = ("tensor",)
+
     def __init__(self, t):
         self.tensor = t
 
@@ -5752,9 +5753,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
                 tensor.fill_(1)
                 future.set_result(wrapper(tensor))
             with torch.cuda.stream(another_stream):
-                self.assertTrue(torch.equal(
-                    unwrapper(future.wait()).cpu(), torch.ones((100,))
-                ))
+                self.assertTrue(torch.eq(unwrapper(future.wait()), 1).all().item())
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_cuda_tensor(self):
@@ -5797,9 +5796,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         with torch.cuda.device("cuda:1"):
             another_stream = torch.cuda.Stream()
             with torch.cuda.stream(another_stream):
-                self.assertTrue(torch.equal(
-                    child_future.wait().cpu(), torch.ones((100,))
-                ))
+                self.assertTrue(torch.eq(child_future.wait(), 1).all().item())
 
     @skip_if_lt_x_gpu(2)
     def test_cuda_future_value_on_bad_device(self):
@@ -5832,6 +5829,4 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         with torch.cuda.device("cuda:1"):
             another_stream = torch.cuda.Stream()
             with torch.cuda.stream(another_stream):
-                self.assertTrue(torch.equal(
-                    child_future.wait().cpu(), torch.ones((100,))
-                ))
+                self.assertTrue(torch.eq(child_future.wait(), 1).all().item())
