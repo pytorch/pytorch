@@ -2314,7 +2314,8 @@ std::vector<VarHandle> squeezeIndices(
 
 } // namespace
 
-std::pair<ScalarType, std::vector<BufHandle>> processCatList(const std::vector<ArgValue>& inputList) {
+std::pair<ScalarType, std::vector<BufHandle>> processCatList(
+    const std::vector<ArgValue>& inputList) {
   if (inputList.size() == 0) {
     throw std::runtime_error("Empty input list is passed to aten::cat");
   }
@@ -2324,7 +2325,8 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(const std::vector<A
     auto buf = c10::get<BufHandle>(input);
     bufInputs.push_back(buf);
     assert(buf.node()->dims().size() > 0);
-    if (buf.node()->dims().size() == 1 && immediateAs<int>(buf.node()->dim(0)) == 0) {
+    if (buf.node()->dims().size() == 1 &&
+        immediateAs<int>(buf.node()->dim(0)) == 0) {
       continue;
     }
     nonEmptyInputs.push_back(buf);
@@ -2336,7 +2338,6 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(const std::vector<A
     highType = promoteTypes(highType, maybe_dtype);
   }
   return {highType, nonEmptyInputs};
-
 }
 Tensor* TensorExprKernel::computeCat(
     const std::vector<ArgValue>& inputList,
@@ -2375,8 +2376,8 @@ Tensor* TensorExprKernel::computeCat(
         //              inpN[i, j-l_N_1, k]   if l1+l2+...l_N_1  < i
         // where l_i is the corresponding size of the i-th input.
         std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
-        ExprHandle load =
-            promoteToDtype(tensorOrConstant(nonEmptyInputs[0], newAxes), highType);
+        ExprHandle load = promoteToDtype(
+            tensorOrConstant(nonEmptyInputs[0], newAxes), highType);
         size_t offset =
             dynamic_cast<const IntImm*>(nonEmptyInputs[0].node()->dim(dim))
                 ->value();
@@ -2389,8 +2390,8 @@ Tensor* TensorExprKernel::computeCat(
               load,
               promoteToDtype(tensorOrConstant(input, newAxes), highType));
 
-          offset += dynamic_cast<const IntImm*>(input.node()->dim(dim))
-                        ->value();
+          offset +=
+              dynamic_cast<const IntImm*>(input.node()->dim(dim))->value();
           newAxes[dim] = axes[dim] - IntImm::make(offset);
         }
 
@@ -2401,7 +2402,6 @@ Tensor* TensorExprKernel::computeCatWoConditionals(
     const std::vector<ArgValue>& input_list,
     const ArgValue& arg_dim,
     const std::vector<ExprHandle>& output_shape) {
-
   auto inputs = processCatList(input_list);
   ScalarType high_type = inputs.first;
   std::vector<BufHandle> non_empty_inputs = inputs.second;
@@ -2466,8 +2466,8 @@ Tensor* TensorExprKernel::computeCatWoConditionals(
     if (concat_dim_size == nullptr) {
       concat_dim_size = new IntImm(0);
     }
-    block->append_stmt(
-        gen_code_for_input(non_empty_inputs[i], i, concat_dim_size, input_dims));
+    block->append_stmt(gen_code_for_input(
+        non_empty_inputs[i], i, concat_dim_size, input_dims));
     concat_dim_size =
         new Add(concat_dim_size, input_dims[norm_concat_dim].node());
   }
