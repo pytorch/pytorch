@@ -32,6 +32,112 @@ using ArgValue = c10::variant<
     bool,
     ArgNone>;
 
+enum ElementType {
+  kAllTypes = 0,
+  kIntegralTypes = 1 << 0,
+  kFloatingPointTypes = 1 << 1,
+  kBoolType = 1 << 2,
+  kComplexTypes = 1 << 3,
+  kQintTypes = 1 << 4,
+  kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
+};
+
+TORCH_API Tensor* computeOperandValue(
+    c10::Symbol op,
+    const std::vector<ArgValue>& inputs,
+    const c10::optional<ScalarType>& outputType,
+    const std::vector<ExprHandle>& outputShape);
+
+Tensor* computeCat(
+    const std::vector<ArgValue>& inputList,
+    const ArgValue& argDim,
+    const std::vector<ExprHandle>& outputShape);
+
+Tensor* computeCatWoConditionals(
+    const std::vector<ArgValue>& inputList,
+    const ArgValue& argDim,
+    const std::vector<ExprHandle>& outputShape);
+
+ExprHandle tensorOrConstant(
+    const ArgValue& v,
+    const std::vector<ExprHandle>& axes);
+
+Tensor* computeOneOperand(
+    const std::string& name,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
+    const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
+    const int checkParamTypes = kAllTypes);
+
+Tensor* computeTwoOperand(
+    const std::string& name,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
+    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+        innerExpr);
+
+Tensor* computeTwoOperandWithAlpha(
+    const std::string& name,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
+    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+        innerExpr);
+
+Tensor* computeThreeOperand(
+    const std::string& name,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
+    const std::function<
+        ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
+        innerExpr,
+    bool promote_inputs = true);
+
+Tensor* computeConditionWithTwoOperand(
+    const std::string& name,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
+    const std::function<
+        ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
+        innerExpr);
+
+Tensor* computeFourOperand(
+    const std::string& name,
+    const std::vector<ArgValue>& inputValues,
+    const c10::optional<ScalarType>& outputTensorType,
+    const std::vector<ExprHandle>& outputShape,
+    const std::function<ExprHandle(
+        const ExprHandle&,
+        const ExprHandle&,
+        const ExprHandle&,
+        const ExprHandle&)>& innerExpr);
+
+void promoteInputs(
+    std::vector<ExprHandle>& inputs,
+    int typeConstraints = kAllTypes);
+
+ExprHandle demoteOutput(
+    const ExprHandle& e,
+    const c10::optional<ScalarType> type);
+
+ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes);
+
+ExprHandle constant(const ArgValue& v);
+
+std::vector<ExprHandle> valueShape(const ArgValue& v);
+
+bool checkTypes(const ScalarType highType, const int typeConstraints);
+
+std::vector<ExprHandle> broadcastShapes(
+    const std::vector<ExprHandle>& a,
+    const std::vector<ExprHandle>& b);
+std::vector<ExprHandle> broadcastShapes(
+    std::vector<std::vector<ExprHandle>> shapes);
+
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
     const Buf* buf;
@@ -58,15 +164,6 @@ class TORCH_API TensorExprKernel {
   }
 
  private:
-  enum ElementType {
-    kAllTypes = 0,
-    kIntegralTypes = 1 << 0,
-    kFloatingPointTypes = 1 << 1,
-    kBoolType = 1 << 2,
-    kComplexTypes = 1 << 3,
-    kQintTypes = 1 << 4,
-    kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
-  };
 
   enum BackendType {
     kUninitialized,
@@ -87,19 +184,14 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> sizesFromVaryingShape(
       const c10::VaryingShape<int64_t>& shape);
 
-  std::vector<ExprHandle> broadcastShapes(
+  // These functions broadcast shape and also store a `hasBroadcast_` variable.
+  std::vector<ExprHandle> broadcastShapesMut(
       const std::vector<ExprHandle>& a,
       const std::vector<ExprHandle>& b);
-  std::vector<ExprHandle> broadcastShapes(
+  std::vector<ExprHandle> broadcastShapesMut(
       std::vector<std::vector<ExprHandle>> shapes);
 
-  ExprHandle constant(const ArgValue& v);
   ExprHandle constant(const torch::jit::Value* v);
-  ExprHandle broadcast(const Buf* b, const std::vector<ExprHandle>& axes);
-  ExprHandle broadcastBufTemp( // TODO(chilli): switch over to this when
-                               // finished refactoring
-      BufHandle b,
-      const std::vector<ExprHandle>& axes);
   ExprHandle chunk(
       const Buf* b,
       size_t chunkIdx,
@@ -107,94 +199,18 @@ class TORCH_API TensorExprKernel {
       int64_t chunks,
       const std::vector<ExprHandle>& axes);
 
-  std::vector<ExprHandle> valueShape(const ArgValue& v);
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
 
-  bool checkTypes(const ScalarType highType, const int typeConstraints);
-
-  void promoteInputs(
-      std::vector<ExprHandle>& inputs,
-      int typeConstraints = kAllTypes);
-
-  ExprHandle demoteOutput(
-      const ExprHandle& e,
-      const c10::optional<ScalarType> type);
   ArgValue toArg(const torch::jit::Value* v) const;
-
-  ExprHandle tensorOrConstant(
-      const ArgValue& v,
-      const std::vector<ExprHandle>& axes);
 
   ExprHandle tensorOrConstant(
       const torch::jit::Value* v,
       const std::vector<ExprHandle>& axes);
 
-  Tensor* computeOneOperand(
-      const std::string& name,
-      const std::vector<ArgValue>& inputValues,
-      const c10::optional<ScalarType>& outputTensorType,
-      const std::vector<ExprHandle>& outputShape,
-      const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
-      const int checkParamTypes = kAllTypes);
-
-  Tensor* computeTwoOperand(
-      const std::string& name,
-      const std::vector<ArgValue>& inputValues,
-      const c10::optional<ScalarType>& outputTensorType,
-      const std::vector<ExprHandle>& outputShape,
-      const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
-          innerExpr);
-
-  Tensor* computeTwoOperandWithAlpha(
-      const std::string& name,
-      const std::vector<ArgValue>& inputValues,
-      const c10::optional<ScalarType>& outputTensorType,
-      const std::vector<ExprHandle>& outputShape,
-      const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
-          innerExpr);
-
-  Tensor* computeThreeOperand(
-      const std::string& name,
-      const std::vector<ArgValue>& inputValues,
-      const c10::optional<ScalarType>& outputTensorType,
-      const std::vector<ExprHandle>& outputShape,
-      const std::function<
-          ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
-          innerExpr,
-      bool promote_inputs = true);
-
-  Tensor* computeConditionWithTwoOperand(
-      const std::string& name,
-      const std::vector<ArgValue>& inputValues,
-      const c10::optional<ScalarType>& outputTensorType,
-      const std::vector<ExprHandle>& outputShape,
-      const std::function<
-          ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
-          innerExpr);
-
-  Tensor* computeFourOperand(
-      const std::string& name,
-      const std::vector<ArgValue>& inputValues,
-      const c10::optional<ScalarType>& outputTensorType,
-      const std::vector<ExprHandle>& outputShape,
-      const std::function<ExprHandle(
-          const ExprHandle&,
-          const ExprHandle&,
-          const ExprHandle&,
-          const ExprHandle&)>& innerExpr);
-
   Tensor* computeSum(const torch::jit::Value* v);
 
   Tensor* computeSoftmax(const torch::jit::Value* v, bool log_softmax);
 
-  Tensor* computeCat(
-      const std::vector<ArgValue>& inputList,
-      const ArgValue& argDim,
-      const std::vector<ExprHandle>& outputShape);
-  Tensor* computeCatWoConditionals(
-      const std::vector<ArgValue>& inputList,
-      const ArgValue& argDim,
-      const std::vector<ExprHandle>& outputShape);
 
   Tensor* computeCatWoConditionals(const torch::jit::Value* v);
 
@@ -209,12 +225,6 @@ class TORCH_API TensorExprKernel {
   Tensor* computeValue(const torch::jit::Value* v);
 
   void bindConstant(const torch::jit::Value* v);
-
-  Tensor* computeOperandValue(
-      c10::Symbol op,
-      const std::vector<ArgValue>& inputs,
-      const c10::optional<ScalarType>& outputType,
-      const std::vector<ExprHandle>& outputShape);
 
   Stmt* transformLoops(BackendType backendType, Stmt* st);
 

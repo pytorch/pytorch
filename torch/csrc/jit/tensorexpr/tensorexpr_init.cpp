@@ -535,6 +535,40 @@ void initTensorExprBindings(PyObject* module) {
       [](Stmt* stmt) { return IRSimplifier::simplify(stmt); },
       py::return_value_policy::reference);
 
+  te.def(
+      "lower",
+      [](std::string op_str,
+         py::list inputs,
+         std::vector<ExprHandle> outputShape,
+         Dtype outputType) {
+        auto op = c10::Symbol::fromQualString(op_str);
+        if (op == aten::cat) {
+          throw std::runtime_error("NYI");
+        }
+        std::vector<ArgValue> argInputs;
+        for (auto inp : inputs) {
+          if (py::isinstance<Placeholder>(inp)) {
+            std::cout << "placeholder" << std::endl;
+            argInputs.push_back(py::cast<Placeholder>(inp).handle());
+          } else if (py::isinstance<BufHandle>(inp)) {
+            std::cout << "bufhandle" << std::endl;
+            argInputs.push_back(py::cast<BufHandle>(inp));
+          } else if (py::isinstance<VarHandle>(inp)) {
+            std::cout << "varhandle" << std::endl;
+            argInputs.push_back(py::cast<VarHandle>(inp));
+          } else if (py::isinstance<double>(inp)) {
+            argInputs.push_back(py::cast<double>(inp));
+          } else if (py::isinstance<int64_t>(inp)) {
+            argInputs.push_back(py::cast<int64_t>(inp));
+          } else {
+            throw std::runtime_error("nyi");
+          }
+          // argInputs.push_back(inp.)
+        }
+        return computeOperandValue(
+            op, argInputs, outputType.scalar_type(), outputShape);
+      });
+
   using TSGraph = std::shared_ptr<Graph>;
   py::class_<TensorExprKernel>(te, "TensorExprKernel")
       .def(py::init<const TSGraph&>())
