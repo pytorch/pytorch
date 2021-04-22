@@ -575,6 +575,61 @@ class TestLinalg(TestCase):
         for upper in [True, False]:
             run_test(upper)
 
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_cholesky_with_info(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_test(n, batch):
+            A = random_hermitian_pd_matrix(n, *batch, dtype=dtype, device=device)
+            expected_L = np.linalg.cholesky(A.cpu().numpy())
+            expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
+            actual_L, actual_info = torch.linalg.cholesky_ex(A)
+
+            # For fp32 individual entries in matrices can differ between PyTorch and NumPy
+            # Let's compare the norms of matrices instead
+            if A.numel() > 0 and dtype in [torch.float32, torch.complex64]:
+                # axis is specified to calculate matrix norm for batched input
+                expected_norm = np.linalg.norm(expected_L, ord=1, axis=(-2, -1))
+                actual_norm = torch.linalg.norm(actual_L, ord=1, axis=(-2, -1))
+                # Compare the norms with standard tolerances
+                self.assertEqual(actual_norm, expected_norm)
+                # and individual values with a higher tolerance
+                self.assertEqual(actual_L, expected_L, atol=1e-2, rtol=1e-5)
+            else:
+                self.assertEqual(actual_L, expected_L)
+            self.assertEqual(actual_info, expected_info)
+
+        ns = (0, 3, 5)
+        batches = ((), (2, ), (2, 1))
+        for n, batch in itertools.product(ns, batches):
+            run_test(n, batch)
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_cholesky_with_info_non_pd(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        # if the input matrix is not positive definite, info with positive integer is returned
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        A[-1, -1] = 0  # Now A is singular
+        _, info = torch.linalg.cholesky_ex(A)
+        self.assertEqual(info, 3)
+
+        # if at least one matrix in the batch is not positive definite,
+        # batched info with positive integer for the corresponding matrix is returned
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        A = A.reshape((1, 3, 3))
+        A = A.repeat(5, 1, 1)
+        A[3, -2, -2] = 0  # Now A[4] is singular
+        _, info = torch.linalg.cholesky_ex(A)
+
+        expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
+        expected_info[3] = 2
+        self.assertEqual(info, expected_info)
+
     @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.float64, torch.complex128)

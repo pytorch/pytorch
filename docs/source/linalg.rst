@@ -42,3 +42,11 @@ Functions
     qr
     lstsq
     householder_product
+
+Experimental Functions
+---------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    cholesky_ex

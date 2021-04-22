@@ -1607,10 +1607,12 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+static void apply_cholesky(const Tensor& self, bool upper, const Tensor& info) {
 #ifndef USE_MAGMA
-AT_ERROR("cholesky: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.cholesky on a CUDA tensor requires compiling ",
+      "PyTorch with MAGMA. Please use PyTorch built with MAGMA support.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
 
@@ -1619,17 +1621,28 @@ AT_ERROR("cholesky: MAGMA library not found in "
   auto lda = std::max<magma_int_t>(1, n);
 
   if (self.dim() == 2) {
-    magma_int_t info = 0;
-    magmaCholesky<scalar_t>(uplo, n, self_data, lda, &info);
-    infos[0] = info;
+    // magmaCholesky requires info to be on CPU
+    magma_int_t info_cpu = 0;
+    magmaCholesky<scalar_t>(uplo, n, self_data, lda, &info_cpu);
+    info.fill_(info_cpu);
   } else {
+    TORCH_INTERNAL_ASSERT(info.is_cuda());
+    auto info_data = info.data_ptr<magma_int_t>();
+
+    // magmaCholeskyBatched supports only upper=false
+    uplo = MagmaLower;
+
+    // if upper=true we need to tranpose the self tensor
+    if (upper) {
+      // self.transpose_(-2, -1);
+      self_data = self.transpose(-2, -1).data_ptr<scalar_t>();
+    }
+
     auto self_mat_stride = matrixStride(self);
     magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
 
-    magma_int_t* info_array;
     scalar_t** self_array;
 
-    ALLOCATE_ARRAY(info_array, magma_int_t, batch_size);
     ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
 
     // Set up the created arrays
@@ -1649,7 +1662,7 @@ AT_ERROR("cholesky: MAGMA library not found in "
     int64_t mini_batches = batch_size / batch_limit, mini_idx;
     for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
       scalar_t** self_array_cur = &self_array[mini_idx];
-      magma_int_t* info_array_cur = &info_array[mini_idx];
+      magma_int_t* info_array_cur = &info_data[mini_idx];
 
       magmaCholeskyBatched<scalar_t>(
         uplo, n, self_array_cur, lda, info_array_cur, batch_limit, magma_queue);
@@ -1659,46 +1672,41 @@ AT_ERROR("cholesky: MAGMA library not found in "
     // which concisely is equal to batch_size % batch_limit
     if (batch_size % batch_limit != 0) {
       magmaCholeskyBatched<scalar_t>(
-        uplo, n, &self_array[mini_idx], lda, &info_array[mini_idx], batch_size % batch_limit, magma_queue);
-    }
-
-    for (int64_t i = 0; i < batch_size; i++) {
-      infos[i] = info_array[i];
+        uplo, n, &self_array[mini_idx], lda, &info_data[mini_idx], batch_size % batch_limit, magma_queue);
     }
   }
 #endif
 }
 
-Tensor _cholesky_helper_cuda_magma(const Tensor& self, bool upper) {
-  std::vector<int64_t> infos(batchCount(self), 0);
-
-  Tensor result;
-  if (self.dim() > 2) {
+void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) {
+  Tensor result = input;
+  if (input.dim() > 2) {
     // MAGMA's batched cholesky operator has an off-by-one error causing IMA
     // (see https://github.com/pytorch/pytorch/issues/42666). This code is based
     // on the #cloneBatchedColumnMajor function however it pads the input with
     // one extra element utilizing the fact that the resize_as_ method preserves
     // the storage even if it's larger than the new sizes. This way if MAGMA
     // reads off bounds it will still be valid user memory.
-    const Tensor input = upper ? self : self.transpose(-1, -2);
     result = at::empty(input.numel() + 1, input.options());
-    result.resize_as_(input).copy_(input).transpose_(-1, -2);
-  } else {
-    result = cloneBatchedColumnMajor(upper ? self.transpose(-1, -2) : self);
+    result.resize_as_(input).transpose_(-2, -1);
+    TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+    result.copy_(input);
   }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      self.scalar_type(), "cholesky_cuda", [&] {
-        apply_cholesky<scalar_t>(result, false, infos);
-      });
+    input.scalar_type(), "cholesky_cuda", [&] {
+      apply_cholesky<scalar_t>(result, upper, info);
+    });
 
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "cholesky_cuda");
-  } else {
-    singleCheckErrors(infos[0], "cholesky_cuda");
+  if (input.dim() > 2) {
+    // if upper=true we need to tranpose and conjugate the result tensor
+    // because the cholesky decomposition is stored in the lower triangular part
+    if (upper) {
+      input.copy_(result.conj().transpose(-2, -1));
+    } else {
+      input.copy_(result);
+    }
   }
-
-  return upper ? result.transpose_(-1, -2) : result;
 }
 
 // Todo: cusolverDnXpotrfBatched has some numerical issue and is not used
@@ -1706,17 +1714,46 @@ Tensor _cholesky_helper_cuda_magma(const Tensor& self, bool upper) {
 //     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
 //     See https://github.com/pytorch/pytorch/issues/53879.
 Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
+  auto info_shape = IntArrayRef(
+    self.sizes().cbegin(), self.sizes().cend() - 2); // self.shape[:-2]
+  Tensor self_working_copy = cloneBatchedColumnMajor(self);
+  Tensor info = at::empty({info_shape}, self.options().dtype(kInt));
+
 #ifdef USE_CUSOLVER
   if (batchCount(self) == 1 || !use_magma_) {
-    return _cholesky_helper_cuda_cusolver(self, upper);
-  }
-  else {
-    return _cholesky_helper_cuda_magma(self, upper);
+    cholesky_helper_cusolver(self_working_copy, upper, info);
+  } else {
+    cholesky_helper_magma(self_working_copy, upper, info);
   }
 #else
-  return _cholesky_helper_cuda_magma(self, upper);
+  cholesky_helper_magma(self_working_copy, upper, info);
 #endif
+
+  if (self.dim() > 2) {
+    batchCheckErrors(info, "cholesky_cuda");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "cholesky_cuda");
+  }
+  return self_working_copy;
 }
+
+// The same MAGMA/cuSOLVER dispatch logic is used here as in _cholesky_helper_cuda
+// This function is for cholesky_stub that is used for linalg_cholesky_ex
+// while _cholesky_helper_cuda is used for legacy torch.cholesky
+void cholesky_kernel(const Tensor& input, const Tensor& info) {
+  bool upper = false;
+#ifdef USE_CUSOLVER
+  if (batchCount(input) == 1 || !use_magma_) {
+    cholesky_helper_cusolver(input, upper, info);
+  } else {
+    cholesky_helper_magma(input, upper, info);
+  }
+#else
+  cholesky_helper_magma(input, upper, info);
+#endif // USE_CUSOLVER
+}
+
+REGISTER_DISPATCH(cholesky_stub, &cholesky_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
