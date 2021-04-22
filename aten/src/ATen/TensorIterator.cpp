@@ -758,35 +758,6 @@ void TensorIteratorBase::select_all_keeping_dim(int start_dim, IntArrayRef indic
   }
 }
 
-void TensorIteratorBase::build_ternary_float_op(
-    const Tensor& out, const Tensor& a, const Tensor& b, const Tensor& c) {
-  build(TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .add_output(out)
-    .add_input(a)
-    .add_input(b)
-    .add_input(c)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true)
-    .promote_integer_inputs_to_float(true));
-}
-
-void TensorIteratorBase::build_ternary_op(
-    const Tensor& out, const Tensor& a, const Tensor& b, const Tensor& c) {
-  build(TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .add_output(out)
-    .add_input(a)
-    .add_input(b)
-    .add_input(c)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true));
-}
-
 // Helper to construct a binary op that promotes integer inputs to float.
 void TensorIteratorBase::build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b) {
   build(TensorIteratorConfig()
@@ -844,20 +815,6 @@ void TensorIteratorBase::build_unary_op(const Tensor& out, const Tensor& a) {
       .cast_common_dtype_to_outputs(false)
       .enforce_safe_casting_to_output(false)
       .check_all_same_dtype(true));
-}
-
-TensorIterator TensorIterator::ternary_op(
-    Tensor& out, const Tensor& a, const Tensor& b, const Tensor& c) {
-  TensorIterator iter;
-  iter.build_ternary_op(out, a, b, c);
-  return iter;
-}
-
-TensorIterator TensorIterator::ternary_float_op(
-    Tensor& out, const Tensor& a, const Tensor& b, const Tensor& c) {
-  TensorIterator iter;
-  iter.build_ternary_float_op(out, a, b, c);
-  return iter;
 }
 
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
