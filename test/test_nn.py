@@ -1460,6 +1460,10 @@ class TestNN(NNTestCase):
         module_list.extend(s.modules())
         check()
 
+        # verify the right exception is thrown when trying to "forward" through a ModuleList
+        self.assertRaises(NotImplementedError, module_list)
+        self.assertRaises(NotImplementedError, module_list, torch.rand(1, 3))
+
     def test_ModuleDict(self):
         modules = OrderedDict([
             ('act', nn.ReLU()),
@@ -1552,6 +1556,10 @@ class TestNN(NNTestCase):
         self.assertEqual(len(module_dict), 0)
         modules.clear()
         check()
+
+        # verify the right exception is thrown when trying to "forward" through a ModuleDict
+        self.assertRaises(NotImplementedError, module_dict)
+        self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
     def test_ParameterList(self):
         def make_param():
@@ -10607,6 +10615,16 @@ class TestNNInit(TestCase):
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1)
                 init.kaiming_normal_(tensor)
 
+    def test_kaiming_uniform_warning_on_0element_tensor(self):
+        tensor = torch.empty(0, 1)
+        with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op"):
+            _ = init.kaiming_uniform_(tensor)
+
+    def test_kaiming_normal_warning_on_0element_tensor(self):
+        tensor = torch.empty(0, 1)
+        with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op"):
+            _ = init.kaiming_normal_(tensor)
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_uniform(self):
         for use_a in [True, False]:
@@ -12212,6 +12230,27 @@ class TestNNDeviceType(NNTestCase):
             mod = torch.nn.ReflectionPad2d(2)
             inp = torch.randn(3, 0, 10, 10, device=device, dtype=dtype)
             mod(inp)
+
+    @onlyCUDA   # Test if CPU and GPU results match
+    def test_ReflectionPad2d_large(self, device):
+        shapes = ([2, 65736, 6, 6], [65736, 2, 6, 6])
+        pad = (1, 2, 3, 4)
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+
+            out = F.pad(x, pad, mode='reflect')
+            ref_out = F.pad(ref_x, pad, mode='reflect')
+
+            self.assertEqual(out, ref_out)
+
+            g = torch.randn_like(out)
+            ref_g = g.cpu()
+
+            out.backward(g)
+            ref_out.backward(ref_g)
+
+            self.assertEqual(x.grad, ref_x.grad)
 
 
     @onlyOnCPUAndCUDA
