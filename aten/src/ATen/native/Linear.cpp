@@ -646,10 +646,11 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   auto result_dtype = result_tmp.scalar_type();
   auto output_tensor_dtype = result.scalar_type();
   auto output_device = result.device();
-  auto input_device = input1.device();
+  auto input1_device = input1.device();
+  auto input2_device = input2.device();
   // check if the input & output tensors are on the same device.
   TORCH_CHECK(
-    output_device == input_device,
+    output_device == input1_device == input2_device,
     "tensordot: Expected the output and input tensors to be on the "
     "same device, but got output on ", output_device, " and inputs on ",
     input_device);
