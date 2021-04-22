@@ -741,12 +741,16 @@
     CUDA: _bincount_cuda
 
 - func: bitwise_not(Tensor self) -> Tensor
+  structured_delegate: bitwise_not.out
   variants: function, method
 
 - func: bitwise_not_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: bitwise_not.out
   variants: method
 
 - func: bitwise_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: bitwise_not_out
 
@@ -1531,6 +1535,7 @@
     QuantizedCPU, QuantizedCUDA: empty_per_channel_affine_quantized
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
   device_guard: False
   dispatch:
@@ -1717,16 +1722,16 @@
   variants: method
 
 - func: frac(Tensor self) -> Tensor
+  structured_delegate: frac.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: frac
 
 - func: frac_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: frac.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: frac_
 
 - func: frac.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: frac_out
 
@@ -3012,16 +3017,16 @@
   device_guard: False
 
 - func: round(Tensor self) -> Tensor
+  structured_delegate: round.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: round
 
 - func: round_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: round.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: round_
 
 - func: round.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU: round_out
     CUDA: round_out
@@ -3090,16 +3095,16 @@
     CPU, CUDA: hardshrink_backward
 
 - func: rsqrt(Tensor self) -> Tensor
+  structured_delegate: rsqrt.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: rsqrt
 
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: rsqrt.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: rsqrt_
 
 - func: rsqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: rsqrt_out
 
@@ -4010,11 +4015,13 @@
     QuantizedCPU, QuantizedCUDA: quantized_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: resize_as_
 
 - func: resize_as_sparse_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
@@ -4262,11 +4269,13 @@
     SparseCPU, SparseCUDA: new_with_dims_and_tensor_sparse
 
 - func: sparse_resize_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_resize_
 
 - func: sparse_resize_and_clear_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_resize_and_clear_
@@ -5032,9 +5041,6 @@
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: digamma.out
-  variants: method
-
-- func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   variants: method
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
@@ -5804,6 +5810,11 @@
   dispatch:
     CompositeExplicitAutograd: polygamma
 
+- func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CompositeExplicitAutograd: polygamma_
+
 - func: erfinv(Tensor self) -> Tensor
   structured_delegate: erfinv.out
   variants: method, function
@@ -5819,16 +5830,16 @@
     CPU, CUDA: erfinv_out
 
 - func: i0(Tensor self) -> Tensor
+  structured_delegate: i0.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: i0
 
 - func: i0_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: i0.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: i0_
 
 - func: i0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: i0_out
 
@@ -7439,6 +7450,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool2d_out_cpu
     CUDA: adaptive_max_pool2d_out_cuda
@@ -7446,9 +7458,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d(Tensor self, int[2] output_size) -> (Tensor, Tensor)
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool2d_cpu
-    CUDA: adaptive_max_pool2d_cuda
+  structured_delegate: adaptive_max_pool2d.out
 
 - func: adaptive_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -7465,6 +7475,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool3d_out_cpu
     CUDA: adaptive_max_pool3d_out_cuda
@@ -7472,9 +7483,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d(Tensor self, int[3] output_size) -> (Tensor, Tensor)
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool3d_cpu
-    CUDA: adaptive_max_pool3d_cuda
+  structured_delegate: adaptive_max_pool3d.out
 
 - func: adaptive_max_pool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -8636,6 +8645,12 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg_lstsq
+
+- func: linalg_lstsq.out(Tensor self, Tensor b, float? cond=None, *, str? driver=None, Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values) -> (Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_lstsq_out
 
 - func: _lstsq_helper_(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float cond, str driver_name) -> Tensor(a!)
   variants: function
