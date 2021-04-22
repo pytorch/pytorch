@@ -63,7 +63,9 @@ jobs:
       - name: Ensure no non-breaking spaces
         if: always()
         run: |
-          (! git --no-pager grep -In $'\u00a0' -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
+          # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
+          # does not support the '\u000a' syntax (which is relevant for local linters)
+          (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
       - name: Ensure canonical include
         if: always()
         run: |
