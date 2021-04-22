@@ -11,7 +11,10 @@ if %errorlevel% neq 0 ( exit /b %errorlevel% )
 %1\python.exe test/run_test.py --verbose -i distributed/test_c10d_nccl
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
 
-%1\python test/run_test.py --verbose -i distributed/test_c10d_spawn
+%1\python test/run_test.py --verbose -i distributed/test_c10d_spawn_gloo
+if %errorlevel% neq 0 ( exit /b %errorlevel% )
+
+%1\python test/run_test.py --verbose -i distributed/test_c10d_spawn_nccl
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
 
 %1\python.exe test/run_test.py --verbose -i distributed/test_data_parallel
