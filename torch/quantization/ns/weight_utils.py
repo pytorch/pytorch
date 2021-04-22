@@ -31,7 +31,7 @@ def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
     ):
         return mod[0].weight.detach()
     else:
-        return mod._weight_bias()[0]  # type: ignore
+        return mod._weight_bias()[0]  # type: ignore[operator]
 
 def get_linear_mod_weight(mod: nn.Module) -> torch.Tensor:
     if isinstance(mod, nn.Linear):
@@ -39,7 +39,7 @@ def get_linear_mod_weight(mod: nn.Module) -> torch.Tensor:
     elif isinstance(mod, nni.LinearReLU):
         return mod[0].weight.detach()
     else:
-        return mod._weight_bias()[0]  # type: ignore
+        return mod._weight_bias()[0]  # type: ignore[operator]
 
 def get_lstm_mod_weights(mod: nn.Module) -> List[torch.Tensor]:
     # TODO(future PR): make more generic, handle everything
@@ -68,7 +68,7 @@ def get_conv_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
         weight_node = return_first_non_observer_node(weight_arg_node, gm)
         assert isinstance(weight_node, Node)
         assert weight_node.op == 'get_attr'
-        weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore
+        weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore[arg-type]
         return weight.detach()
     else:
         assert node.target in (
@@ -78,7 +78,7 @@ def get_conv_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
         qconv_state_node = node.args[1]
         assert isinstance(qconv_state_node, Node)
         assert qconv_state_node.op == 'get_attr'
-        qconv_state_obj = getattr_from_fqn(gm, qconv_state_node.target)  # type: ignore
+        qconv_state_obj = getattr_from_fqn(gm, qconv_state_node.target)  # type: ignore[arg-type]
         return qconv_state_obj.weight()
 
 def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
@@ -98,7 +98,7 @@ def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
             weight_node = weight_arg_node.args[0]
             assert isinstance(weight_node, Node)
             assert weight_node.op == 'get_attr'
-            weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore
+            weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore[arg-type]
             return weight.detach()
         else:
             # weight -> to(torch.float16) -> dequantize -> linear
@@ -112,7 +112,7 @@ def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
             weight_node = to_fp16_node.args[0]
             assert isinstance(weight_node, Node)
             assert weight_node.op == 'get_attr'
-            weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore
+            weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore[arg-type]
             # return the weight with fp16 cast
             return weight.detach().to(target_dtype)
 
@@ -122,7 +122,7 @@ def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
         packed_weight_node = node.args[1]
         assert isinstance(packed_weight_node, Node)
         assert packed_weight_node.op == 'get_attr'
-        packed_weight = getattr_from_fqn(gm, packed_weight_node.target)  # type: ignore
+        packed_weight = getattr_from_fqn(gm, packed_weight_node.target)  # type: ignore[arg-type]
         # TODO(future PR): why does packed_weight.unpack() not work?
         # TODO(future PR): discuss if we even need to unpack, or if the
         #   caller can handle the unpacking
