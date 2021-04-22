@@ -6,6 +6,7 @@ import sys
 import threading
 import traceback
 from enum import Enum
+from typing import List
 
 import torch
 import torch.distributed as dist
@@ -180,7 +181,7 @@ def deserialize(binary_data, tensor_table):
 
 
 class _TensorExtractor(pickle.Pickler):
-    def __init__(self, *args, tensors, **kwargs):
+    def __init__(self, *args, tensors: List[torch.Tensor], **kwargs):
         super().__init__(*args, **kwargs)
         self.tensors = tensors
 
@@ -199,7 +200,7 @@ def _extract_tensors(obj):
 
     It extracts the tensors contained in the given object, through pickling.
     """
-    tensors = []
+    tensors: List[torch.Tensor] = []
     extractor = _TensorExtractor(io.BytesIO(), protocol=-1, tensors=tensors)
     extractor.dump(obj)
     return tensors
