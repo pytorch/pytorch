@@ -83,6 +83,10 @@ TORCH_META_FUNC(neg)(const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(logit) (const Tensor& self, c10::optional<double> eps) {
+  build_unary_float_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -132,6 +136,10 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
+
+TORCH_IMPL_FUNC(logit_out) (const Tensor& self, c10::optional<double> eps, Tensor& result) {
+  logit_stub(device_type(), *this, Scalar(eps ? eps.value() : -1.0));
+}
 
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
@@ -416,20 +424,6 @@ Tensor& arctanh_(Tensor& self) { return self.atanh_(); }
 Tensor& square_out(const Tensor& self, Tensor& result) { return at::pow_out(result, self, 2); }
 Tensor square(const Tensor& self) { return at::pow(self, 2); }
 Tensor& square_(Tensor& self) { return self.pow_(2); }
-
-Tensor& logit_out(const Tensor& self,
-    c10::optional<double> eps,
-    Tensor& result) {
-  return unary_op_impl_float_out(
-      result, self, logit_stub, Scalar(eps ? eps.value() : -1.0));
-}
-Tensor logit(const Tensor& self, c10::optional<double> eps) {
-  return unary_op_impl_float(
-      self, logit_stub, Scalar(eps ? eps.value() : -1.0));
-}
-Tensor& logit_(Tensor& self, c10::optional<double> eps) {
-  return at::logit_out(self, self, eps);
-}
 
 Tensor& special_logit_out(const Tensor& self, c10::optional<double> eps, Tensor& result) {
   return at::logit_out(result, self, eps);

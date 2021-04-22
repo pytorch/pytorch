@@ -3432,16 +3432,16 @@
     CPU, CUDA: sigmoid_out
 
 - func: logit(Tensor self, float? eps=None) -> Tensor
+  structured_delegate: logit.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: logit
 
 - func: logit_(Tensor(a!) self, float? eps=None) -> Tensor(a!)
+  structured_delegate: logit.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: logit_
 
 - func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: logit_out
 
