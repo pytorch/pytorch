@@ -13794,7 +13794,8 @@ class TestNNDeviceType(NNTestCase):
             expected = ctcloss_reference(log_probs, targets.cuda(), input_lengths, target_lengths).float()
 
             with torch.backends.cudnn.flags(enabled=False):
-                res2 = torch.nn.functional.ctc_loss(log_probs_ref, targets.cuda().long(), input_lengths, target_lengths, zero_infinity=zero_infinity)
+                res2 = torch.nn.functional.ctc_loss(log_probs_ref, targets.cuda().long(), input_lengths, target_lengths,
+                                                    zero_infinity=zero_infinity)
                 res2.backward()
 
             self.assertEqual(res, expected)
