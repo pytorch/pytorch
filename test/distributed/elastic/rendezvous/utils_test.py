@@ -4,10 +4,15 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import threading
+import time
 import socket
+from datetime import timedelta
+from typing import List
 from unittest import TestCase
 
 from torch.distributed.elastic.rendezvous.utils import (
+    _PeriodicTimer,
     _matches_machine_hostname,
     _parse_rendezvous_config,
     parse_rendezvous_endpoint,
@@ -236,3 +241,103 @@ class UtilsTest(TestCase):
         for host in hosts:
             with self.subTest(host=host):
                 self.assertFalse(_matches_machine_hostname(host))
+
+
+class PeriodicTimerTest(TestCase):
+    def test_start_can_be_called_only_once(self):
+        timer = _PeriodicTimer(timedelta(seconds=1), lambda: None)
+
+        timer.start()
+
+        with self.assertRaisesRegex(RuntimeError, r"^The timer has already started.$"):
+            timer.start()
+
+        timer.cancel()
+
+    def test_cancel_can_be_called_multiple_times(self):
+        timer = _PeriodicTimer(timedelta(seconds=1), lambda: None)
+
+        timer.start()
+
+        timer.cancel()
+        timer.cancel()
+
+    def test_cancel_stops_background_thread(self):
+        timer = _PeriodicTimer(timedelta(seconds=1), lambda: None)
+
+        timer.start()
+
+        self.assertTrue(any(t.name == "PeriodicTimer" for t in threading.enumerate()))
+
+        timer.cancel()
+
+        self.assertTrue(all(t.name != "PeriodicTimer" for t in threading.enumerate()))
+
+    def test_delete_stops_background_thread(self):
+        timer = _PeriodicTimer(timedelta(seconds=1), lambda: None)
+
+        timer.start()
+
+        self.assertTrue(any(t.name == "PeriodicTimer" for t in threading.enumerate()))
+
+        del timer
+
+        self.assertTrue(all(t.name != "PeriodicTimer" for t in threading.enumerate()))
+
+    def test_timer_calls_background_thread_at_regular_intervals(self):
+        begin_time = time.monotonic()
+
+        # Call our function every 200ms.
+        call_interval = 0.2
+
+        # Keep the log of intervals between each consecutive call.
+        actual_call_intervals: List[float] = []
+
+        # Keep the number of times the function was called.
+        call_count = 0
+
+        # In order to prevent a flaky test instead of asserting that the
+        # function was called an exact number of times we use a lower bound
+        # that is guaranteed to be true for a correct implementation.
+        min_required_call_count = 4
+
+        timer_stop_event = threading.Event()
+
+        def log_call(self):
+            nonlocal begin_time, call_count
+
+            actual_call_intervals.append(time.monotonic() - begin_time)
+
+            call_count += 1
+            if call_count == min_required_call_count:
+                timer_stop_event.set()
+
+            begin_time = time.monotonic()
+
+        timer = _PeriodicTimer(timedelta(seconds=call_interval), log_call, self)
+
+        timer.start()
+
+        # Although this is theoretically non-deterministic, if our timer, which
+        # has a 200ms call interval, does not get called 4 times in 60 seconds,
+        # there is very likely something else going on.
+        timer_stop_event.wait(60)
+
+        timer.cancel()
+
+        self.longMessage = False
+
+        self.assertGreaterEqual(
+            call_count,
+            min_required_call_count,
+            f"The function has been called {call_count} time(s) but expected to be called at least "
+            f"{min_required_call_count} time(s).",
+        )
+
+        for actual_call_interval in actual_call_intervals:
+            self.assertGreaterEqual(
+                actual_call_interval,
+                call_interval,
+                f"The interval between two function calls was {actual_call_interval} second(s) but "
+                f"expected to be at least {call_interval} second(s).",
+            )

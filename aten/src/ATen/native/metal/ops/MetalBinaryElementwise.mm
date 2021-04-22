@@ -96,7 +96,7 @@ Tensor& binaryElementwiseShaderKernel_(
   [X2 markRead];
   MetalTensorImpl* impl = (MetalTensorImpl*)input1.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
-  implStorage.texture()->copyFromTexture(Y);
+  implStorage.texture()->setTexture(Y);
   return input1;
 }
 
@@ -142,13 +142,11 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes().vec();
   }
-  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
   MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
   TORCH_CHECK(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
-  MPSImage* Y = mt.texture()->image();
+  MPSImage* Y = createTemporaryImage(cb1, outputSize);
   T* kernel = [[T alloc] initWithDevice:[MPSCNNContext sharedInstance].device];
   kernel.primaryStrideInPixelsY = X1.height == 1 ? 0 : 1;
   kernel.primaryStrideInPixelsX = X1.width == 1 ? 0 : 1;
@@ -160,13 +158,12 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
                destinationImage:Y];
   MetalTensorImpl* impl = (MetalTensorImpl*)input1.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
-  implStorage.texture()->copyFromTexture(Y);
+  implStorage.texture()->setTexture(Y);
   return input1;
 }
 
 Tensor add_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
-  TORCH_CHECK(input1.dim() == input2.dim());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNAdd>(input1, input2_);
@@ -178,7 +175,6 @@ Tensor add_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alph
 
 Tensor& add__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
-  TORCH_CHECK(input1.dim() == input2.dim());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNAdd>(input1, input2_);
@@ -202,7 +198,6 @@ Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alph
 
 Tensor& sub__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
-  TORCH_CHECK(input1.dim() == input2.dim());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNSubtract>(input1, input2_);
@@ -214,7 +209,6 @@ Tensor& sub__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
 
 Tensor mul_Tensor(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(input1.is_metal());
-  TORCH_CHECK(input1.dim() == input2.dim());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNMultiply>(input1, input2_);
@@ -226,7 +220,6 @@ Tensor mul_Tensor(const Tensor& input1, const Tensor& input2) {
 
 Tensor& mul__Tensor(Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(input1.is_metal());
-  TORCH_CHECK(input1.dim() == input2.dim());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNMultiply>(input1, input2_);
@@ -238,7 +231,6 @@ Tensor& mul__Tensor(Tensor& input1, const Tensor& input2) {
 
 Tensor div_Tensor(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(input1.is_metal());
-  TORCH_CHECK(input1.dim() == input2.dim());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNDivide>(input1, input2_);
@@ -250,7 +242,6 @@ Tensor div_Tensor(const Tensor& input1, const Tensor& input2) {
 
 Tensor& div__Tensor(Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(input1.is_metal());
-  TORCH_CHECK(input1.dim() == input2.dim());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNDivide>(input1, input2_);
