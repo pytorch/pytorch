@@ -85,13 +85,12 @@ namespace {
 Tensor _fw_primal(const Tensor & self, int64_t level) {
   auto& self_ = unpack(self, "self", 0);
   std::shared_ptr<Identity> grad_fn;
-  assert_no_inference_tensor(self);
   if (compute_requires_grad( self )) {
     grad_fn = std::make_shared<Identity>();
     grad_fn->set_next_edges(collect_next_edges( self ));
   }
   auto tmp = ([&]() {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     return self_.alias();
   })();
   std::function<at::Tensor(const at::Tensor&)> func=nullptr;
@@ -123,7 +122,6 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   auto& src_ = unpack(src, "src", 1);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  assert_no_inference_tensor(self, src);
   requires_grad &= isDifferentiableType(self.scalar_type());
   check_inplace(self, requires_grad);
   if (requires_grad) {
@@ -133,7 +131,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     grad_fn->src_device = src.device();
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
   rebase_history(self , std::move(grad_fn));
@@ -158,18 +156,17 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   return self;
 }
 
-Tensor& resize_(
+const Tensor& resize_(
     c10::DispatchKeySet ks,
-    Tensor& self,
+    const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
-  assert_no_inference_tensor(self);
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::resize_(ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
   }
 
@@ -180,19 +177,18 @@ Tensor& resize_(
   return self;
 }
 
-Tensor& resize_as_(
+const Tensor& resize_as_(
     c10::DispatchKeySet ks,
-    Tensor& self,
+    const Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
-  assert_no_inference_tensor(self);
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::resize_as_(ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
   }
 
@@ -205,7 +201,6 @@ Tensor& resize_as_(
 
 Tensor detach(const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
-  assert_no_inference_tensor(self);
   std::function<at::Tensor(const at::Tensor&)> func=nullptr;
   auto result = as_view(/* base */ self, /* output */ self, /* is_bw_differentiable */ false,
                         /* is_fw_differentiable */ true, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT,
@@ -223,7 +218,6 @@ Tensor detach(const Tensor & self) {
 
 Tensor & detach_(Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
-  assert_no_inference_tensor(self);
   if (self.is_view()) {
     // NB: is_view() ==> get_autograd_meta()
     auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));

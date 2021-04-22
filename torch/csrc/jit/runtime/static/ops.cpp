@@ -3,6 +3,7 @@
 #include <ATen/CPUFunctions.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/IndexingUtils.h>
@@ -136,7 +137,8 @@ bool canRunNatively(Node* n) {
       "prim::ListConstruct",
       "prim::ListUnpack",
       "prim::TupleConstruct",
-      "prim::DictConstruct"};
+      "prim::DictConstruct",
+      "aten::__getitem__"};
   auto str = std::string(n->kind().toQualString());
   if (!native_nodes.count(str)) {
     return false;
@@ -159,7 +161,7 @@ bool inputsCanRunOutOfPlace(Node* n) {
   return true;
 }
 
-bool canOptimizeConstruct(Node* n) {
+bool isOptimizableContainerType(Node* n) {
   const auto& type = n->output()->type();
   if (type->kind() == TypeKind::ListType) {
     const auto& list_type = type->expectRef<ListType>();
@@ -184,7 +186,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim_ListConstruct,
     [](Node* n) -> SROperator {
       const auto& type = n->output()->type()->expectRef<ListType>();
-      bool can_optimize = canOptimizeConstruct(n);
+      bool can_optimize = isOptimizableContainerType(n);
       return [can_optimize, &type](ProcessedNode* p_node) {
         const auto& out_l = p_node->Output(0);
         if (!out_l.isNone() && can_optimize) {
@@ -204,7 +206,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim::TupleConstruct,
     prim_TupleConstruct,
     [](Node* n) -> SROperator {
-      bool can_optimize = canOptimizeConstruct(n);
+      bool can_optimize = isOptimizableContainerType(n);
       return [can_optimize](ProcessedNode* p_node) {
         const auto& out_l = p_node->Output(0);
         if (!out_l.isNone() && can_optimize) {
@@ -534,7 +536,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     auto& out_t = p_node->Output(0).toTensor();
     if (!te->supports(in0_t)) {
       fastResizeToZero(out_t);
-      at::native::tanh_out(in0_t, out_t);
+      at::cpu::tanh_out(out_t, in0_t);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
@@ -555,7 +557,7 @@ REGISTER_OPERATOR_FUNCTOR(
         auto& out_t = p_node->Output(0).toTensor();
         if (!te->supports(in0_t)) {
           fastResizeToZero(out_t);
-          at::native::sigmoid_out(in0_t, out_t);
+          at::cpu::sigmoid_out(out_t, in0_t);
         } else {
           at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
           (*te)(
@@ -910,6 +912,14 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       // put output back
       p_node->Output(0) = std::move(stack[0]);
     };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::__getitem__")) {
+    return [](ProcessedNode* p_node) {
+      auto dict = p_node->Input(0).toGenericDict();
+      auto key = p_node->Input(1);
+      auto value = dict.find(key);
+      TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
+      p_node->Output(0) = value->value();
+    };
   } else if (n->kind() == prim::ListConstruct) {
     return [](ProcessedNode* p_node) {
       // prepare inputs
@@ -1021,9 +1031,10 @@ REGISTER_OPERATOR_FUNCTOR(
     aten_embedding_bag,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
+        // TODO: Support only 9 args once the old signature has been removed.
         TORCH_CHECK(
-            p_node->inputs().size() == 8,
-            "Expected number of inputs are 8, but got " +
+            p_node->inputs().size() == 8 || p_node->inputs().size() == 9,
+            "Expected number of inputs is 8 or 9, but got " +
                 std::to_string(p_node->inputs().size()));
 
         const auto& weight = p_node->Input(0).toTensor();
@@ -1034,6 +1045,14 @@ REGISTER_OPERATOR_FUNCTOR(
         auto sparse = p_node->Input(5).toBool();
         auto per_sample_weights = p_node->Input(6).toOptional<at::Tensor>();
         auto include_last_offset = p_node->Input(7).toBool();
+        c10::optional<int64_t> padding_idx;
+        if (p_node->inputs().size() == 9) {
+          if (p_node->Input(8).isNone()) {
+            padding_idx = c10::nullopt;
+          } else {
+            padding_idx = p_node->Input(8).toInt();
+          }
+        }
 
         at::native::check_arguments(
             weight,
@@ -1073,7 +1092,8 @@ REGISTER_OPERATOR_FUNCTOR(
             indices,
             offsets,
             mode,
-            per_sample_weights);
+            per_sample_weights,
+            padding_idx.value_or(-1));
 
         if (p_node->Output(2).isNone()) {
           p_node->Output(2) = at::empty(offsets.sizes(), offsets.options());
@@ -1105,9 +1125,30 @@ REGISTER_OPERATOR_FUNCTOR(
             offsets,
             mode,
             per_sample_weights,
-            include_last_offset);
+            include_last_offset,
+            padding_idx.value_or(-1));
       };
     });
 
+REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    c10::optional<std::string> rounding_mode = c10::nullopt;
+    if (p_node->inputs().size() > 2) {
+      rounding_mode = p_node->Input(2).toOptional<std::string>();
+    }
+
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+
+    const auto& in1_t = p_node->Input(1).isTensor()
+        ? p_node->Input(1).toTensor()
+        : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
+    at::cpu::div_out(out_t, in0_t, in1_t, rounding_mode);
+  };
+});
 } // namespace jit
 } // namespace torch

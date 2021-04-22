@@ -17,6 +17,7 @@ import time
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from enum import IntFlag
+from multiprocessing import synchronize
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Union
 
 import torch.multiprocessing as mp
@@ -26,6 +27,9 @@ from torch.distributed.elastic.multiprocessing.redirects import (
     redirect_stdout,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
+
+IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 
 
 log = logging.getLogger(__name__)
@@ -263,6 +267,13 @@ class _nullcontext(AbstractContextManager):
         pass
 
 
+def get_std_cm(std_rd: str, redirect_fn):
+    if IS_WINDOWS or IS_MACOS or not std_rd:
+        return _nullcontext()
+    else:
+        return redirect_fn(std_rd)
+
+
 def _wrap(
     local_rank: int,
     fn: Callable,
@@ -271,7 +282,7 @@ def _wrap(
     stdout_redirects: Dict[int, str],  # redirect file for stdout (to console if None)
     stderr_redirects: Dict[int, str],  # redirect file for stderr (to console if None)
     ret_vals: Dict[int, mp.SimpleQueue],
-    queue_finished_reading_event: mp.Event,
+    queue_finished_reading_event: synchronize.Event,
 ) -> None:
     # get the per-rank params up front so we fail fast if no mapping is found
     args_ = args[local_rank]
@@ -281,8 +292,8 @@ def _wrap(
     stdout_rd = stdout_redirects[local_rank]
     stderr_rd = stderr_redirects[local_rank]
 
-    stdout_cm = redirect_stdout(stdout_rd) if stdout_rd else _nullcontext()
-    stderr_cm = redirect_stderr(stderr_rd) if stderr_rd else _nullcontext()
+    stdout_cm = get_std_cm(stdout_rd, redirect_stdout)
+    stderr_cm = get_std_cm(stderr_rd, redirect_stderr)
 
     for k, v in env_.items():
         os.environ[k] = v
@@ -370,7 +381,7 @@ class MultiprocessContext(PContext):
             # torch.mp.ProcessContext Throws an Exception if some/all of
             # worker processes failed
             # timeout < 0 checks worker status and return immediately
-            # Join will never return success since we use mp.Event to wait
+            # Join will never return success since we use synchronize.Event to wait
             # for all processes to finish.
             self._pc.join(-1)
 

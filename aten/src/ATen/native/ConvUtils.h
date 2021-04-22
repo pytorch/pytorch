@@ -89,9 +89,20 @@ static inline bool cudnn_conv_use_channels_last(const at::Tensor& input, const a
     return false;
   }
   long cudnn_version = detail::getCUDAHooks().versionCuDNN();
-  return (cudnn_version >= 7603) &&
-      ((input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) ||
-      (weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast));
+  auto input_memory_format = input.suggest_memory_format();
+  auto weight_memory_format = weight.suggest_memory_format();
+
+  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) && (
+    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
+    (weight_memory_format == at::MemoryFormat::ChannelsLast)
+  );
+
+  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) && (
+    (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
+    (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
+  );
+
+  return can_use_cudnn_channels_last_2d || can_use_cudnn_channels_last_3d;
 }
 
 }} // namespace at::native

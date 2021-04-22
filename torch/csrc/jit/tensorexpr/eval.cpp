@@ -6,8 +6,10 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_TRIGGER(simple_ir_eval_executed);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
 
 template <typename T>
@@ -51,8 +53,10 @@ inline c10::Half div_value(c10::Half lhs, c10::Half rhs) {
   return lhs / rhs;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class SimpleIREvaluatorImpl : public IRVisitor {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   SimpleIREvaluatorImpl() = default;
 
   ~SimpleIREvaluatorImpl() override = default;
@@ -431,6 +435,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     const std::vector<SrcType>& src_values = v.as_vec<SrcType>();
     std::vector<DstType> dst_values(src_values.size());
     for (int i = 0; i < src_dtype.lanes(); ++i) {
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       dst_values[i] = static_cast<DstType>(src_values[i]);
     }
     return dst_values;
@@ -580,6 +585,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   TORCH_API void visit(const IfThenElse* v) override {
     v->condition()->accept(this);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     bool cond_v;
     switch (value_.dtype().scalar_type()) {
 #define TYPE_CASE(Type, Name)   \
@@ -612,8 +618,6 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
     flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
-    v->mask()->accept(this);
-    std::vector<int> mask = value().as_vec<int>();
     ScalarType v_sdtype = v->dtype().scalar_type();
     switch (v_sdtype) {
 #define TYPE_CASE(Type, Name)                   \
@@ -621,9 +625,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     Type* ptr##Name = static_cast<Type*>(ptr);  \
     std::vector<Type> v(index.size());          \
     for (size_t i = 0; i < index.size(); i++) { \
-      if (mask[i]) {                            \
-        v[i] = ptr##Name[index[i]];             \
-      }                                         \
+      v[i] = ptr##Name[index[i]];               \
     }                                           \
     value_ = Value(v);                          \
   } break;
@@ -646,12 +648,6 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
     flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
-    v->mask()->accept(this);
-    std::vector<int> mask = value().as_vec<int>();
-    if (index.size() != mask.size()) {
-      throw malformed_input("mask size mismatch in Store", v);
-    }
-
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
 
     switch (v_sdtype) {
@@ -664,9 +660,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }                                                           \
     Type* ptr##Name = static_cast<Type*>(ptr);                  \
     for (size_t i = 0; i < index.size(); i++) {                 \
-      if (mask[i]) {                                            \
-        ptr##Name[index[i]] = value[i];                         \
-      }                                                         \
+      ptr##Name[index[i]] = value[i];                           \
     }                                                           \
   } break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
@@ -708,6 +702,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
     for (const Expr* a : v->args()) {
       a->accept(this);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t val;
       if (value().dtype() == kLong) {
         val = value().as<int64_t>();
@@ -800,6 +795,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       dim->accept(this);
       total_byte_size *= value_.as<int>();
     }
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
     std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
     auto iter = buffer_mapping_.find(buffer_var);
@@ -979,7 +975,7 @@ SimpleIREvaluator::SimpleIREvaluator(
   expand_intrinsics();
 }
 
-SimpleIREvaluator::~SimpleIREvaluator() {}
+SimpleIREvaluator::~SimpleIREvaluator() = default;
 
 void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
   if (args.size() != buffer_args().size()) {

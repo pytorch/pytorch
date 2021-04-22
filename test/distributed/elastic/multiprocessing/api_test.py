@@ -144,13 +144,11 @@ def echo_large(size: int) -> Dict[int, str]:
         out[idx] = f"test{idx}"
     return out
 
-
 def dummy_compute() -> torch.Tensor:
     """
     returns a predefined size random Tensor
     """
     return torch.rand(100, 100)
-
 
 def redirects() -> List[Std]:
     return [

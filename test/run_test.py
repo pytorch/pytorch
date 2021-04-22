@@ -29,6 +29,7 @@ except ImportError:
 
 
 TESTS = [
+    'test_import_time',
     'test_public_bindings',
     'test_type_hints',
     'test_autograd',
@@ -40,14 +41,16 @@ TESTS = [
     'test_cpp_extensions_aot_no_ninja',
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
-    'distributed/test_c10d',
+    'distributed/test_c10d_common',
+    'distributed/test_c10d_gloo',
+    'distributed/test_c10d_nccl',
     'distributed/test_jit_c10d',
-    'distributed/test_c10d_spawn',
+    'distributed/test_c10d_spawn_gloo',
+    'distributed/test_c10d_spawn_nccl',
     'test_cuda',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
-    'test_dataset',
     'test_datapipe',
     'distributed/test_data_parallel',
     'distributed/test_distributed_fork',
@@ -109,11 +112,13 @@ TESTS = [
     'test_tensorexpr_pybind',
     'test_openmp',
     'test_profiler',
+    "distributed/test_launcher",
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
-    'test_jit_py3',
+    'distributed/rpc/cuda/test_tensorpipe_agent',
     'test_determination',
     'test_futures',
     'test_fx',
@@ -181,7 +186,9 @@ WINDOWS_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
+    'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/test_distributed_fork',
     'distributed/pipeline/sync/skip/test_api',
     'distributed/pipeline/sync/skip/test_gpipe',
@@ -212,7 +219,9 @@ ROCM_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
+    'distributed/rpc/cuda/test_tensorpipe_agent',
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
@@ -264,7 +273,9 @@ TARGET_DET_LIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/test_distributed_fork',
     'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
+    'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
     'distributed/test_distributed_spawn',
     'test_cuda',
@@ -276,9 +287,12 @@ TARGET_DET_LIST = [
     'test_utils',
     'test_multiprocessing',
     'test_tensorboard',
-    'distributed/test_c10d',
+    'distributed/test_c10d_common',
+    'distributed/test_c10d_gloo',
+    'distributed/test_c10d_nccl',
     'distributed/test_jit_c10d',
-    'distributed/test_c10d_spawn',
+    'distributed/test_c10d_spawn_gloo',
+    'distributed/test_c10d_spawn_nccl',
     'test_quantization',
     'test_pruning_op',
     'test_determination',
@@ -374,7 +388,7 @@ def get_stripped_CI_job() -> str:
     return job
 
 
-def calculate_job_times(reports: List[Report]) -> Dict[str, float]:
+def calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
     # an entry will be like ("test_file_name" -> (current_avg, # values))
     jobs_to_times: Dict[str, Tuple[float, int]] = dict()
     for report in reports:
@@ -402,7 +416,7 @@ def calculate_job_times(reports: List[Report]) -> Dict[str, float]:
 def pull_job_times_from_S3() -> Dict[str, float]:
     if HAVE_BOTO3:
         ci_job_prefix = get_stripped_CI_job()
-        s3_reports: List[Report] = get_previous_reports_for_branch('origin/nightly', ci_job_prefix)
+        s3_reports: List["Report"] = get_previous_reports_for_branch('origin/nightly', ci_job_prefix)
     else:
         print('Uh oh, boto3 is not found. Either it is not installed or we failed to import s3_stat_parser.')
         print('If not installed, please install boto3 for automatic sharding and test categorization.')

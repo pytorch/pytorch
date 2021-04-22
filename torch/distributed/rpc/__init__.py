@@ -1,5 +1,6 @@
 import logging
 import threading
+import warnings
 
 from typing import Generator, Tuple
 import torch
@@ -61,7 +62,7 @@ if is_available():
         _DEFAULT_RPC_TIMEOUT_SEC,
     )  # noqa: F401
     from torch._C._distributed_c10d import Store
-    from .api import *  # noqa: F401
+    from .api import *  # noqa: F401,F403
     from .options import TensorPipeRpcBackendOptions  # noqa: F401
     from .backend_registry import BackendType
     from .server_process_global_profiler import (
@@ -153,10 +154,13 @@ if is_available():
             backend = BackendType.TENSORPIPE  # type: ignore[attr-defined]
 
         if backend == BackendType.PROCESS_GROUP:  # type: ignore[attr-defined]
-            logger.warning(
+            warnings.warn(
                 "RPC was initialized with the PROCESS_GROUP backend which is "
                 "deprecated and slated to be removed and superseded by the TENSORPIPE "
-                "backend. It is recommended to migrate to the TENSORPIPE backend."
+                "backend. It is recommended to migrate to the TENSORPIPE backend. "
+                "PyTorch v1.9 will be the last release that carries PROCESS_GROUP "
+                "RPC backend. If you have concerns or suggestions please comment in "
+                "https://github.com/pytorch/pytorch/issues/55615"
             )
 
         if rpc_backend_options is None:
