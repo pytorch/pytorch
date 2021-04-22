@@ -270,7 +270,7 @@ Visual Studio upgrades are very often. Sometimes, there're regressions in some n
 It'd best to use the same Visual Studio Version [16.8.5](https://github.com/pytorch/pytorch/blob/master/.circleci/scripts/vs_install.ps1) as PyTorch CI's.
 You can use Visual Studio Enterprise, Professional or Community though PyTorch CI uses Visual Studio BuildTools.
 
-If you want to build legacy python code, please refert to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#build-legacy-code)
+If you want to build legacy python code, please refert to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
 Build with CPU
 

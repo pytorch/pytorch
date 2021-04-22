@@ -33,7 +33,7 @@
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
-  - [Building on legacy code and CUDA](#build-legacy-code)
+  - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
 - [Running clang-tidy](#running-clang-tidy)
 - [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
 - [Building PyTorch with ASAN](#building-pytorch-with-asan)
