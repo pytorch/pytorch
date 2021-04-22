@@ -29,8 +29,8 @@ except ImportError:
 
 
 TESTS = [
-    'test_import_time',
     'test_public_bindings',
+    'test_import_time',
     'test_type_hints',
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
