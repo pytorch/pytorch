@@ -747,7 +747,6 @@ kernel void split_channels(texture2d_array<half, access::read> in_arr[[texture(0
                            texture2d_array<half, access::write> out2_arr[[texture(2), function_constant(split_channels_out2_is_arr)]],
                            texture2d<half, access::write> out2_tex[[texture(2),function_constant(split_channels_out2_is_tex)]],
                            ushort3 gid[[thread_position_in_grid]]) {
-
     ushort W,H;
     if(split_channels_in_is_arr) {
         W = in_arr.get_width();
@@ -766,7 +765,6 @@ kernel void split_channels(texture2d_array<half, access::read> in_arr[[texture(0
     half4 tmp2(0.0, 0.0, 0.0, 0.0);
     half4 in41 = split_channels_in_is_arr ? in_arr.read(gid.xy, gid.z) : in_tex.read(gid.xy);
     half4 in42 = split_channels_in_is_arr ? in_arr.read(gid.xy, gid.z+1) : half4(0,0,0,0);
-
     if(gid.z < s1 - 1) {
         if(split_channels_out1_is_arr) {
             out1_arr.write(in41, gid.xy, gid.z);
