@@ -21,7 +21,7 @@
 
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 constexpr auto kProcessGroupDefaultTimeout =
-    std::chrono::milliseconds(10 * 1000);
+    std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
 
@@ -174,7 +174,9 @@ class ProcessGroup : public torch::CustomClassHolder {
   // extend this struct and define its options if it wants to provide more
   // config options (beyond basic ones defined here) to end user.
   struct Options : torch::CustomClassHolder {
-    explicit Options(std::chrono::milliseconds timeout, std::string backend)
+    explicit Options(
+        std::string backend,
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
         : timeout(timeout), backend(backend) {}
     virtual ~Options() = default;
 
