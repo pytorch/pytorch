@@ -651,7 +651,7 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
         ((1,), (2, 2), (2, 3), True),
         ((), (2, 2), (2, 3), True)
     ]
-    test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore
+    test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[misc]
     inputs = tuple(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
                                args=(make_tensor(shape_b, device, dtype,
                                                  requires_grad=requires_grad),
