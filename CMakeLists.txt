@@ -324,7 +324,7 @@ if(WIN32)
 endif()
 
 if(LINUX AND USE_DISTRIBUTED)
-  find_package(OpenSSL REQUIRED)
+  find_package(OpenSSL 1.1 REQUIRED EXACT)
 endif()
 
 # Linux distributions do not want too many embedded sources, in that sense we
