@@ -98,17 +98,8 @@ class ProcessGroupGloo : public ProcessGroup {
    public:
     GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
 
-    void setUint(const std::string& key, const std::vector<uint8_t>& value) {
-      store_->set(key, value);
-    }
-
     void set(const std::string& key, const std::vector<uint8_t>& value) override {
-      std::vector<uint8_t> tmp(value.begin(), value.end());
-      store_->set(key, tmp);
-    }
-
-    std::vector<uint8_t> getUint(const std::string& key) {
-      return store_->get(key);
+      store_->set(key, value);
     }
 
     std::vector<uin8_t> get(const std::string& key) override {
