@@ -1,6 +1,6 @@
 from typing import Dict, Any
 
-from torch.fx import (  # type: ignore
+from torch.fx import (
     GraphModule,
     Node,
     map_arg
@@ -17,7 +17,7 @@ from .pattern_utils import (
     get_default_fusion_patterns,
 )
 
-from .fusion_patterns import *  # noqa: F401
+from .fusion_patterns import *  # noqa: F401,F403
 
 from .quantization_types import Pattern
 

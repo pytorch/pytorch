@@ -112,9 +112,11 @@ class TestGradients(TestCase):
                 return variant.__wrapped__ is op.get_inplace()
             return variant is op.get_inplace()
 
-        samples = op.sample_inputs(device, dtype, requires_grad=True,
-                                   for_inplace_variant=is_inplace(variant))
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
+            if sample.broadcasts_input and is_inplace(variant):
+                continue
+
             # Note on TensorList inputs
             #
             # gradcheck does not support TensorList inputs so here we pass TensorList
@@ -242,13 +244,11 @@ class TestCommon(JitCommonTestCase):
 
         inplace_variants = tuple(filter(None, inplace_ops))
         variants = tuple(filter(None, variants))
-        outplace_variants = tuple(set(variants) - set(inplace_variants))
 
         _requires_grad = (op.supports_autograd and
                           (dtype.is_floating_point or op.supports_complex_autograd))
 
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad,
-                                   for_inplace_variant=False)
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
 
         def _test_consistency_helper(samples, variants):
             for sample in samples:
@@ -287,6 +287,14 @@ class TestCommon(JitCommonTestCase):
                     # Note: copies the to-be-modified input when testing the inplace variant
                     tensor.grad = None
                     cloned = clone_input_helper(sample.input) if variant in inplace_ops else sample.input
+
+                    if variant in inplace_ops and sample.broadcasts_input:
+                        with self.assertRaises(RuntimeError):
+                            variant_forward = variant(cloned,
+                                                      *sample.args,
+                                                      **sample.kwargs)
+                        continue
+
                     variant_forward = variant(cloned,
                                               *sample.args,
                                               **sample.kwargs)
@@ -298,7 +306,7 @@ class TestCommon(JitCommonTestCase):
                         variant_forward.sum().backward()
                         self.assertEqual(expected_grad, tensor.grad)
 
-        _test_consistency_helper(samples, outplace_variants)
+        _test_consistency_helper(samples, variants)
 
         def _test_inplace_preserve_storage(samples, variants):
             for sample in samples:
@@ -319,16 +327,14 @@ class TestCommon(JitCommonTestCase):
                     variant_forward = variant(cloned,
                                               *sample.args,
                                               **sample.kwargs)
-# TODO Support non-tensor outputs if they exist for inplace ops
+                    # TODO Support non-tensor outputs if they exist for inplace ops
                     if (isinstance(variant_forward, torch.Tensor)):
                         self.assertEqual(data_ptr, variant_forward.data_ptr(), atol=0, rtol=0)
                     else:
                         self.assertTrue(False, "Non-tensor outputs for inplace ops are not supported")
 
         if len(inplace_ops) > 0:
-            inplace_samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad,
-                                               for_inplace_variant=True)
-            _test_consistency_helper(inplace_samples, inplace_variants)
+            inplace_samples = list(filter(lambda sample: not sample.broadcasts_input, samples))
             _test_inplace_preserve_storage(inplace_samples, inplace_variants)
 
     # Tests that the forward and backward passes of operations produce the
