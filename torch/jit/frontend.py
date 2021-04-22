@@ -452,7 +452,7 @@ def build_ignore_context_manager(ctx, stmt):
     ignore_func_str = ast.unparse(ignore_function)
     ignore_func_str += "\nglobals()[\"{}\"] = {}".format(ignore_function_name, ignore_function_name)
     ignore_func_str += "\nglobals()[\"{}\"]._torchscript_modifier = FunctionModifiers.IGNORE".format(ignore_function_name)
-    exec(ignore_func_str)  # noqa P204
+    exec(ignore_func_str)  # noqa: P204
 
     # build the statements as:
     # <out_1>, <out_2>, ... = torch.jit.frontend.<func>(<in_1>, <in_2>)
@@ -651,7 +651,7 @@ class StmtBuilder(Builder):
         # Handle ignore context manager
         if is_torch_jit_ignore_context_manager(stmt):
             if sys.version_info < (3, 9):
-                raise NotSupportedError("torch.jit.ignore context manager is only supported in 3.9")
+                raise NotSupportedError(r, "torch.jit.ignore context manager is only supported in 3.9")
             assign_ast = build_ignore_context_manager(ctx, stmt)
             return build_stmt(ctx, assign_ast)
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
