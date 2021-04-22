@@ -36,7 +36,7 @@ def native_function_manager(g: Union[
     else:
         f = g
     with context(f'in native_functions.yaml line {f.loc}:\n  {f.func}'):
-        with local.parametrize():
+        with local.parametrize(use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors):
             yield
 
 # Given a function that operates on NativeFunction, wrap it into a new function
