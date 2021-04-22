@@ -11,7 +11,7 @@ import queue
 from dataclasses import dataclass
 from torch._utils import ExceptionWrapper
 from typing import Union
-from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS
+from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS, HAS_NUMPY
 
 if IS_WINDOWS:
     import ctypes
@@ -25,7 +25,7 @@ if IS_WINDOWS:
             self.manager_pid = os.getppid()
 
             # mypy cannot detect this code is windows only
-            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)  # type: ignore
+            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)  # type: ignore[attr-defined]
             self.kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
             self.kernel32.OpenProcess.restype = HANDLE
             self.kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
@@ -36,7 +36,7 @@ if IS_WINDOWS:
             self.manager_handle = self.kernel32.OpenProcess(SYNCHRONIZE, 0, self.manager_pid)
 
             if not self.manager_handle:
-                raise ctypes.WinError(ctypes.get_last_error())  # type: ignore
+                raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
 
             self.manager_dead = False
 
@@ -104,7 +104,7 @@ def get_worker_info():
        set up each worker process differently, for instance, using ``worker_id``
        to configure the ``dataset`` object to only read a specific fraction of a
        sharded dataset, or use ``seed`` to seed other libraries used in dataset
-       code (e.g., NumPy).
+       code.
     """
     return _worker_info
 
@@ -120,7 +120,7 @@ class _ResumeIteration(object):
     pass
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
-                 auto_collation, collate_fn, drop_last, seed, init_fn, worker_id,
+                 auto_collation, collate_fn, drop_last, base_seed, init_fn, worker_id,
                  num_workers, persistent_workers):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
@@ -134,8 +134,13 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
         signal_handling._set_worker_signal_handlers()
 
         torch.set_num_threads(1)
+        seed = base_seed + worker_id
         random.seed(seed)
         torch.manual_seed(seed)
+        if HAS_NUMPY:
+            import numpy as np
+            ss = np.random.SeedSequence([worker_id, base_seed])
+            np.random.seed(ss.generate_state(4))
 
         global _worker_info
         _worker_info = WorkerInfo(id=worker_id, num_workers=num_workers,
