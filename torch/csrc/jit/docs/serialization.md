@@ -3,20 +3,24 @@
 This document explains the TorchScript serialization format, and the anatomy
 of a call to `torch::jit::save()` or `torch::jit::load()`.
 
-  - [Overview](#overview)
-    - [Design Notes](#design-notes)
-  - [`code/`: How code is serialized](#code-how-code-is-serialized)
-    - [Printing code objects as Python source](#printing-code-objects-as-python-source)
-    - [Placing the source code in the archive](#placing-the-source-code-in-the-archive)
-  - [How data is serialized](#how-data-is-serialized)
-    - [`data.pkl`: How module object state is serialized](#datapkl-how-module-object-state-is-serialized)
-    - [`data/`: How tensors are serialized](#tensors-how-tensors-are-serialized)
-  - [`constants.pkl`: Constants in code](#constantspkl-constants-in-code)
-  - [`torch:jit::load()`](#torchjitload)
-  - [`__getstate__` and `__setstate__`](#getstate-and-setstate)
-  - [Appendix: `CompilationUnit` and code object ownership](#appendix-compilationunit-and-code-object-ownership)
-    - [`CompilationUnit` ownership semantics](#compilationunit-ownership-semantics)
-    - [Code object naming](#code-object-naming)
+<!-- toc -->
+
+- [Overview](#overview)
+  - [Design Notes](#design-notes)
+- [`code/`: How code is serialized](#code-how-code-is-serialized)
+  - [Printing code objects as Python source](#printing-code-objects-as-python-source)
+  - [Placing the source code in the archive](#placing-the-source-code-in-the-archive)
+- [How data is serialized](#how-data-is-serialized)
+  - [`data.pkl`: How module object state is serialized](#datapkl-how-module-object-state-is-serialized)
+  - [`data/`: How tensors are serialized](#data-how-tensors-are-serialized)
+- [`constants.pkl`: Constants in code](#constantspkl-constants-in-code)
+- [`torch:jit::load()`](#torchjitload)
+- [`__getstate__` and `__setstate__`](#__getstate__-and-__setstate__)
+- [Appendix: `CompilationUnit` and code object ownership](#appendix-compilationunit-and-code-object-ownership)
+  - [`CompilationUnit` ownership semantics](#compilationunit-ownership-semantics)
+  - [Code object naming](#code-object-naming)
+
+<!-- tocstop -->
 
 ## Overview
 
