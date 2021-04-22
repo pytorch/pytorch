@@ -22,7 +22,8 @@ from typing_extensions import TypedDict
 
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    from tools.stats_utils.s3_stat_parser import (get_previous_reports_for_branch, Report, HAVE_BOTO3)
+    from tools.stats_utils.s3_stat_parser import (get_previous_reports_for_branch, Report)
+    HAVE_BOTO3 = True
 except ImportError:
     print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
     HAVE_BOTO3 = False
