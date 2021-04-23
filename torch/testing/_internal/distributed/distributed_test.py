@@ -127,7 +127,7 @@ CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
 def get_profiling_event(postfix, profiler):
     event_list = (
         profiler.events()
-        if isinstance(profiler, torch.profiler.profiler.profile)
+        if isinstance(profiler, torch.profiler.profile)
         else profiler.function_events
     )
     return [
@@ -960,11 +960,11 @@ class DistributedTest:
             self._barrier()
 
         # SEND RECV
-        def _test_send_recv(self, profiler_cls):
+        def _test_send_recv(self, profiler_ctx):
             rank = dist.get_rank()
             send_size = rank + 1
             tensor = _build_tensor(send_size)
-            ctx = profiler_cls if profiler_cls is not None else suppress()
+            ctx = profiler_ctx if profiler_ctx is not None else suppress()
             with ctx as prof:
                 for src in range(0, dist.get_world_size()):
                     if src == rank:
@@ -981,7 +981,7 @@ class DistributedTest:
                         dist.recv(output_tensor, src)
                         self.assertEqual(output_tensor, expected_tensor)
 
-            if profiler_cls is not None:
+            if profiler_ctx is not None:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                     for event_name in [f"{backend}:send", f"{backend}:recv"]:
@@ -1000,13 +1000,12 @@ class DistributedTest:
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl send/recv tested by test_send_recv_nccl")
         def test_send_recv(self):
-            self._test_send_recv(profiler_cls=None)
+            self._test_send_recv(profiler_ctx=None)
 
         @unittest.skipIf(BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl")
         def test_send_recv_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
-            self._test_send_recv(profiler_cls=autograd_profiler_ctx)
-            print("all asserts passed")
+            self._test_send_recv(profiler_ctx=autograd_profiler_ctx)
 
         @unittest.skipIf(BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl")
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode causes hang")
@@ -1016,17 +1015,17 @@ class DistributedTest:
         )
         def test_send_recv_torch_profiler(self):
             torch_profiler_ctx = _create_torch_profiler()
-            return self._test_send_recv(profiler_cls=torch_profiler_ctx)
+            return self._test_send_recv(profiler_ctx=torch_profiler_ctx)
 
         # SEND RECV ANY SOURCE
-        def _test_send_recv_any_source(self, profiler_cls):
+        def _test_send_recv_any_source(self, profiler_ctx):
             rank = dist.get_rank()
             send_recv_size = 10
             tensor = _build_tensor(send_recv_size, value=rank)
             recv_ranks = list()
             irecv_ranks = list()
 
-            ctx = profiler_cls if profiler_cls is not None else suppress()
+            ctx = profiler_ctx if profiler_ctx is not None else suppress()
             with ctx as prof:
                 for dst in range(0, dist.get_world_size()):
                     if dst == rank:
@@ -1056,7 +1055,7 @@ class DistributedTest:
                         dist.send(tensor, dst)  # recv
                         dist.send(tensor, dst)  # irecv
 
-            if profiler_cls is not None:
+            if profiler_ctx is not None:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                     for event_name in [f"{backend}:send", f"{backend}:recvAnySource"]:
@@ -1086,14 +1085,14 @@ class DistributedTest:
             BACKEND == "nccl", "Nccl does not support send/recv from any source"
         )
         def test_send_recv_any_source(self):
-            self._test_send_recv_any_source(profiler_cls=None)
+            self._test_send_recv_any_source(profiler_ctx=None)
 
         @unittest.skipIf(
             BACKEND == "nccl", "Nccl does not support send/recv from any source"
         )
         def test_send_recv_any_source_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
-            self._test_send_recv_any_source(profiler_cls=autograd_profiler_ctx)
+            self._test_send_recv_any_source(profiler_ctx=autograd_profiler_ctx)
 
         @unittest.skipIf(
             BACKEND == "nccl", "Nccl does not support send/recv from any source"
@@ -1105,15 +1104,15 @@ class DistributedTest:
         )
         def test_send_recv_any_source_torch_profiler(self):
             torch_profiler_ctx = _create_torch_profiler()
-            return self._test_send_recv_any_source(profiler_cls=torch_profiler_ctx)
+            return self._test_send_recv_any_source(profiler_ctx=torch_profiler_ctx)
 
         # SEND RECV WITH TAG
-        def _test_send_recv_with_tag(self, profiler_cls):
+        def _test_send_recv_with_tag(self, profiler_ctx):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             send_recv_size = 10
             tensor = _build_tensor(send_recv_size, value=rank)
-            ctx = profiler_cls if profiler_cls is not None else suppress()
+            ctx = profiler_ctx if profiler_ctx is not None else suppress()
             with ctx as prof:
                 for dst in range(0, world_size):
                     if dst == rank:
@@ -1128,7 +1127,7 @@ class DistributedTest:
                         # Send mode
                         dist.send(tensor, dst, tag=rank)
 
-            if profiler_cls is not None:
+            if profiler_ctx is not None:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                     for event_name in [f"{backend}:send", f"{backend}:recv"]:
@@ -1143,12 +1142,12 @@ class DistributedTest:
 
         @unittest.skipIf(BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl")
         def test_send_recv_with_tag(self):
-            self._test_send_recv_with_tag(profiler_cls=None)
+            self._test_send_recv_with_tag(profiler_ctx=None)
 
         @unittest.skipIf(BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl")
         def test_send_recv_with_tag_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
-            return self._test_send_recv_with_tag(profiler_cls=autograd_profiler_ctx)
+            return self._test_send_recv_with_tag(profiler_ctx=autograd_profiler_ctx)
 
         @unittest.skipIf(BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl")
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
@@ -1158,13 +1157,13 @@ class DistributedTest:
         )
         def test_send_recv_with_tag_torch_profiler(self):
             torch_profiler_ctx = _create_torch_profiler()
-            return self._test_send_recv_with_tag(profiler_cls=torch_profiler_ctx)
+            return self._test_send_recv_with_tag(profiler_ctx=torch_profiler_ctx)
 
         # ISEND
-        def _test_isend(self, profiler_cls):
+        def _test_isend(self, profiler_ctx):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
-            ctx = profiler_cls if profiler_cls is not None else suppress()
+            ctx = profiler_ctx if profiler_ctx is not None else suppress()
             with ctx as prof:
                 if rank == 0:
                     requests = [
@@ -1181,7 +1180,7 @@ class DistributedTest:
 
                 self._barrier()
 
-            if profiler_cls is not None:
+            if profiler_ctx is not None:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                     expected_event_name = f"{backend}:send" if rank == 0 else f"{backend}:recv"
@@ -1203,12 +1202,12 @@ class DistributedTest:
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
         def test_isend(self):
-            self._test_isend(profiler_cls=None)
+            self._test_isend(profiler_ctx=None)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
         def test_isend_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
-            self._test_isend(profiler_cls=autograd_profiler_ctx)
+            self._test_isend(profiler_ctx=autograd_profiler_ctx)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
@@ -1218,7 +1217,7 @@ class DistributedTest:
         )
         def test_isend_torch_profiler(self):
             torch_profiler_ctx = _create_torch_profiler()
-            self._test_isend(profiler_cls=torch_profiler_ctx)
+            self._test_isend(profiler_ctx=torch_profiler_ctx)
 
         # IRECV
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support irecv")
@@ -4260,7 +4259,7 @@ class DistributedTest:
                     net.zero_grad()
                     torch.cuda.synchronize(device=self.rank)
 
-        def _test_ddp_profiling(self, profiler_cls):
+        def _test_ddp_profiling(self, profiler_ctx):
             torch.cuda.set_device(self.rank)
             batch = 3
             dim = 10
@@ -4271,9 +4270,9 @@ class DistributedTest:
             net = torch.nn.parallel.DistributedDataParallel(
                 model.cuda(self.rank), device_ids=[self.rank]
             )
-            profiler_cls_copy = copy.deepcopy(profiler_cls)
+            profiler_ctx_copy = copy.deepcopy(profiler_ctx)
 
-            with profiler_cls as prof:
+            with profiler_ctx as prof:
                 for i in range(num_iters):
                     loss = net(inp).sum()
                     loss.backward()
@@ -4303,7 +4302,7 @@ class DistributedTest:
                 loss = net(inp).sum()
                 loss.backward()
             # Now enable the profiler.
-            with profiler_cls_copy as prof:
+            with profiler_ctx_copy as prof:
                 loss = net(inp).sum()
                 loss.backward()
 
@@ -4317,7 +4316,7 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         def test_ddp_profiling_autograd_profiler(self):
             autograd_profiler_ctx = torch.autograd.profiler.profile()
-            return self._test_ddp_profiling(profiler_cls=autograd_profiler_ctx)
+            return self._test_ddp_profiling(profiler_ctx=autograd_profiler_ctx)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -4333,7 +4332,7 @@ class DistributedTest:
             torch_profiler_ctx = torch.profiler.profile(
                 activities=[cpu_act, cuda_act]
             )
-            self._test_ddp_profiling(profiler_cls=torch_profiler_ctx)
+            self._test_ddp_profiling(profiler_ctx=torch_profiler_ctx)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
