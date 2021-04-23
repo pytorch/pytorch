@@ -1971,12 +1971,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
   return work;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_base(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
   throw std::runtime_error(
-      "no support for allgather_base in Gloo process group");
+      "no support for _allgather_base in Gloo process group");
 }
 
 namespace {
