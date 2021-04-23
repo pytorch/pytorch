@@ -76,12 +76,12 @@ class TestSparseCSR(TestCase):
                                     size, dtype=dtype, device=device)
 
     @onlyCPU
-    @dtypes(torch.double)
-    def test_sparse_csr_print(self, device, dtype):
+    def test_sparse_csr_print(self, device):
         shape_nnz = [
+            ((10, 10), 10),
+            ((100, 10), 10),
             ((1000, 10), 10)
         ]
-
         printed = []
         for shape, nnz in shape_nnz:
             values_shape = torch.Size((nnz,))
@@ -92,20 +92,21 @@ class TestSparseCSR(TestCase):
             printed.append("# crow_indices shape: {}".format(crow_indices_shape))
             printed.append("# col_indices shape: {}".format(col_indices_shape))
             printed.append("# values_shape: {}".format(values_shape))
-
-            x = self.genSparseCSRTensor(shape, nnz, device=device, dtype=dtype, index_dtype=torch.int64)
-
-            printed.append("# sparse tensor")
-            printed.append(str(x))
-            printed.append("# _crow_indices")
-            printed.append(str(x.crow_indices()))
-            printed.append("# _col_indices")
-            printed.append(str(x.col_indices()))
-            printed.append("# _values")
-            printed.append(str(x.values()))
-            printed.append('')
-
-            self.assertEqual(len(printed) > 0, True)
+            for index_dtype in [torch.int32, torch.int64]:
+                for dtype in torch.testing.floating_types():
+                    printed.append("########## {}/{} ##########".format(dtype, index_dtype))
+                    x = self.genSparseCSRTensor(shape, nnz, device=device, dtype=torch.float32, index_dtype=torch.int64)
+                    printed.append("# sparse tensor")
+                    printed.append(str(x))
+                    printed.append("# _crow_indices")
+                    printed.append(str(x.crow_indices()))
+                    printed.append("# _col_indices")
+                    printed.append(str(x.col_indices()))
+                    printed.append("# _values")
+                    printed.append(str(x.values()))
+                    printed.append('')
+                printed.append('')
+        self.assertExpected('\n'.join(printed))
 
     @onlyCPU
     def test_sparse_csr_from_dense(self, device):
