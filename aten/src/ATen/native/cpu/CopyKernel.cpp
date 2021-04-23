@@ -84,8 +84,8 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
           ScalarType::Bool, ScalarType::BFloat16,dtype, "copy_kernel", [&] {
             cpu_kernel_vec(
                 iter,
-                [=](scalar_t a) -> scalar_t { return a; },
-                [=](Vec256<scalar_t> a) { return a; });
+                [=](scalar_t a) -> scalar_t { return -a; },
+                [=](Vec256<scalar_t> a) { return a.neg(); });
           });
     }
     }

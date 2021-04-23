@@ -325,7 +325,7 @@ Tensor neg_view(const Tensor& self) {
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
     auto real_tensor = at::view_as_real_physical(self);
-    auto true_real_tensor = self.is_conj() ? real_tensor.neg_view() : real_tensor;
+    auto true_real_tensor = self.is_conj() ? neg_view(real_tensor) : real_tensor;
     return at::select(true_real_tensor, real_tensor.dim() - 1, 1);
   } else {
     TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
@@ -337,6 +337,9 @@ Tensor imag(const Tensor& self) {
 Tensor resolve_neg(const Tensor& self) {
   if (!self.is_neg()) { return self; }
   auto result = at::empty_like(self, self.options());
+  // should empty and other tensor constructors propagate the neg bit?
+  // possibly empty_like
+  result.set_neg(false);
   // negation is handled in `copy_()`
   return result.copy_(self);
 }
@@ -344,6 +347,7 @@ Tensor resolve_neg(const Tensor& self) {
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
   auto result = at::empty_like(self, self.options());
+  result.set_conj(false);
   // conjugation is handled in `copy_()`
   return result.copy_(self);
 }
