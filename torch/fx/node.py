@@ -477,6 +477,27 @@ class Node:
         return None
 
 
+    def replace_input_with(self, old_input: 'Node', new_input: 'Node'):
+        """
+        Loop through input nodes of ``self``, and if `old_input` is one
+        of those, replace `old_input` node with new input node `new_input`.
+
+        Args:
+
+            old_input (Node): The old input node to be replaced.
+            new_input (Node): The new input node to replace `old_input`.
+
+        """
+        def maybe_replace_node(n : Node) -> Node:
+            return new_input if n == old_input else n
+
+        new_args = map_arg(self.args, maybe_replace_node)
+        new_kwargs = map_arg(self.kwargs, maybe_replace_node)
+        assert isinstance(new_args, tuple)
+        assert isinstance(new_kwargs, dict)
+        self.__update_args_kwargs(new_args, new_kwargs)
+
+
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
     assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
