@@ -332,25 +332,25 @@
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
 - name: clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
-  min: grad * (self < min).to(grad.dtype())
-  max: grad * (self > max).to(grad.dtype())
+  min: where(self < min, grad, at::scalar_tensor(0., grad.options()))
+  max: where(self > max, grad, at::scalar_tensor(0., grad.options()))
 
 - name: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
 
 - name: clamp_min(Tensor self, Scalar min) -> Tensor
-  self: grad * (self >= min).to(grad.dtype())
+  self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
 
 - name: clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
-  self: grad * (self >= min).to(grad.dtype())
-  min: grad * (self < min).to(grad.dtype())
+  self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
+  min: where(self < min, grad, at::scalar_tensor(0., grad.options()))
 
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
-  self: grad * (self <= max).to(grad.dtype())
+  self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
 
 - name: clamp_max.Tensor(Tensor self, Tensor max) -> Tensor
-  self: grad * (self <= max).to(grad.dtype())
-  max: grad * (self > max).to(grad.dtype())
+  self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
+  max: where(self > max, grad, at::scalar_tensor(0., grad.options()))
 
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
