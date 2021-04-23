@@ -2246,7 +2246,7 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     # Matrix operations
     inputs.append(SampleInput([A], args=("ij->i",)))                    # col sum
     inputs.append(SampleInput([A, B], args=("ij,kj->ik",)))             # matmul
-    inputs.append(SampleInput([A, E], args=("ij,ab->ijab",)))           # matrix outer product
+    inputs.append(SampleInput([A, E], args=("ij,Ab->ijAb",)))           # matrix outer product
 
     # Tensor operations
     inputs.append(SampleInput([C, D], args=("aij,ajk->aik",)))          # batch matmul
