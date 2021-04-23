@@ -184,6 +184,18 @@ std::string getExceptionMsgFromExceptionPtr(
   }
 }
 
+std::vector<c10::DeviceIndex> getIndicesOfDevices(
+    const std::vector<c10::Device>& devices) {
+  std::vector<c10::DeviceIndex> deviceIndices;
+  deviceIndices.reserve(devices.size());
+  for (const at::Device& device : devices) {
+    TORCH_INTERNAL_ASSERT(device.is_cuda());
+    deviceIndices.push_back(device.index());
+  }
+  return deviceIndices;
+}
+
+
 } // namespace
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
@@ -1114,7 +1126,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   {
     at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
     work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
-        c10::ListType::create(c10::TensorType::get()));
+        c10::ListType::create(c10::TensorType::get()),
+        getIndicesOfDevices(devices));
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
@@ -1211,7 +1224,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   if (opType == OpType::RECV) {
     at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
     work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
-        c10::ListType::create(c10::TensorType::get()));
+        c10::ListType::create(c10::TensorType::get()),
+        getIndicesOfDevices(devices));
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
