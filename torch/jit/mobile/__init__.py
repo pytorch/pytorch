@@ -115,7 +115,8 @@ def _backport_for_lite_interpreter(f_input, f_output, map_location=None):
 
     map_location = validate_map_location(map_location)
 
-    if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)) and (isinstance(f_output, str) or isinstance(f_output, pathlib.Path)):
+    if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)) and (
+            isinstance(f_output, str) or isinstance(f_output, pathlib.Path)):
         cpp_module = torch._C._backport_for_lite_interpreter(f_input, f_output, map_location)
     # else:
     #     cpp_module = torch._C._backport_for_lite_interpreter_from_buffer(f.read(), map_location)

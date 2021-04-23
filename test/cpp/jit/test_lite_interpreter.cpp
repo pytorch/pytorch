@@ -634,19 +634,40 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   AT_ASSERT(version_v5 == 5);
 }
 
+TEST(LiteInterpreterTest, BackPortByteCodeModelV4) {
+  // Load check in model: sequence.ptl
+  std::string filePath(__FILE__);
+  auto test_model_file_v4 =
+      filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file_v4.append("script_module_v4.ptl");
+  auto version = torch::jit::_get_bytecode_version(test_model_file_v4);
+  AT_ASSERT(version == 4);
+
+  std::ostringstream oss;
+  bool isSuccess = torch::jit::_backport_for_mobile(test_model_file_v4, oss);
+  AT_ASSERT(!isSuccess);
+}
+
 TEST(LiteInterpreterTest, BackPortByteCodeModel) {
   // Load check in model: sequence.ptl
   std::string filePath(__FILE__);
-  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("script_module_v5.ptl");
-  //  torch::jit::_backport_for_mobile(testModelFile);
+  auto test_model_file_v5 =
+      filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file_v5.append("script_module_v5.ptl");
+  //  torch::jit::_backport_for_mobile(test_model_file_v5);
   //
-  auto version = torch::jit::_get_bytecode_version(
-      "/Users/chenlai/Documents/pytorch/data/prod_example.pkl");
+  //  auto version = torch::jit::_get_bytecode_version(
+  //      "/Users/chenlai/Documents/pytorch/data/prod_example.pkl");
+  auto version = torch::jit::_get_bytecode_version(test_model_file_v5);
   std::cout << "version is " << version;
-  torch::jit::_backport_for_mobile(
-      "/Users/chenlai/Documents/pytorch/data/prod_example.pkl",
-      "/Users/chenlai/Documents/pytorch/data/prod_example_backport.pkl");
+  //  bool sucess_1 = torch::jit::_backport_for_mobile(test_model_file_v5,
+  //      "/Users/chenlai/Documents/pytorch/data/script_module_v5_backport.pkl");
+  std::ostringstream oss;
+  bool success_2 = torch::jit::_backport_for_mobile(test_model_file_v5, oss);
+
+  std::istringstream iss(oss.str());
+  auto backport_version = torch::jit::_get_bytecode_version(iss);
+  std::cout << "backport version: " << backport_version;
 
   //    Module m = load(testModelFile);
   //  std::string output_5 = "output_5.ptl";
