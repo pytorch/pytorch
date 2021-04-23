@@ -255,7 +255,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     dim3 grid;                                                            \
     TORCH_INTERNAL_ASSERT(getGridFromTiles(inputSlices, grid), "Too many slices to sort"); \
                                                                           \
-    dim3 block(std::min(at::cuda::ATenCeilDiv(sliceSize, (int64_t) C10_WARP_SIZE)*(int64_t) C10_WARP_SIZE, 1024L)); \
+    dim3 block(std::min(at::cuda::ATenCeilDiv(sliceSize, (int64_t) C10_WARP_SIZE)*(int64_t) C10_WARP_SIZE, (int64_t) 1024); \
                                                                           \
     /* This is used as a template parameter to calculate indices. */      \
     /* We only specialize it if all collapsed dim sizes are the */        \
