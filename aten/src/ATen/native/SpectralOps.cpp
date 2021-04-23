@@ -624,7 +624,8 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
             const bool normalized, const optional<bool> onesidedOpt,
             const optional<bool> return_complexOpt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& window = c10::value_or_else(window_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
+  const Tensor& window = *window_maybe_owned;
 
   #define REPR(SS) \
     SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
@@ -778,7 +779,8 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
              const bool center, const bool normalized, const c10::optional<bool> onesidedOpt,
              const optional<int64_t> lengthOpt, const bool return_complex) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& window = c10::value_or_else(window_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
+  const Tensor& window = *window_maybe_owned;
 
   #define REPR(SS) \
     SS << "istft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
