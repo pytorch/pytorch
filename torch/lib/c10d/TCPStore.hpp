@@ -96,29 +96,32 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 class TCPStoreWorkerDaemon : public BackgroundThread {
  public:
   explicit TCPStoreWorkerDaemon(int listenSocket);
-  // Adds a callback to run key change
-  void addCallback(
-      std::string key,
-      std::function<
-          void(c10::optional<std::string>, c10::optional<std::string>)> cb);
-  std::condition_variable& getCallbackRegisteredCondVar() {
-    return _callbackRegisteredCondVar;
+  // Set the callback to run key change
+  void setCallback(std::string key, WatchKeyCallback cb);
+  void waitForCallbackRegistration() {
+    // Block until callback has been registered successfully
+    std::unique_lock<std::mutex> callbackRegistrationLock(
+        callbackRegistrationMutex_);
+    callbackRegisteredCV_.wait(
+        callbackRegistrationLock, [&] { return callbackRegisteredData_; });
+
+    // Reset payload for next callback
+    callbackRegisteredData_ = false;
   }
-  bool getCallbackRegisteredData() const {
-    return _callbackRegisteredData;
-  }
-  void setCallbackRegisteredData(bool condition) {
-    _callbackRegisteredData = condition;
+  void setCallbackRegistered() {
+    callbackRegisteredData_ = true;
+    callbackRegisteredCV_.notify_one();
   }
 
  private:
   void run();
   void callbackHandler(int socket);
   // List of callbacks map each watched key
-  std::unordered_map<std::string, WatchKeyCallback> _keyToCallbacks;
-  std::mutex _keyToCallbacksMutex;
-  std::condition_variable _callbackRegisteredCondVar;
-  bool _callbackRegisteredData = false;
+  std::unordered_map<std::string, WatchKeyCallback> keyToCallbacks_;
+  std::mutex keyToCallbacksMutex_;
+  std::mutex callbackRegistrationMutex_;
+  std::condition_variable callbackRegisteredCV_;
+  bool callbackRegisteredData_ = false;
 };
 
 class TCPStore : public Store {
@@ -147,6 +150,10 @@ class TCPStore : public Store {
   bool deleteKey(const std::string& key) override;
 
   // NOTE: calling other TCPStore APIs inside the callback is NOT threadsafe
+  // watchKey() is a blocking operation. It will register the socket on
+  // TCPStoreMasterDaemon and the callback on TCPStoreWorkerDaemon. It will
+  // return once it has verified the callback is registered on both background
+  // threads. Only one thread can call watchKey() at a time.
   void watchKey(const std::string& key, WatchKeyCallback callback) override;
 
   bool check(const std::vector<std::string>& keys) override;
@@ -176,7 +183,6 @@ class TCPStore : public Store {
       const std::chrono::milliseconds& timeout);
 
   std::mutex watchKeyMutex;
-  std::mutex callbackRegistrationMutex;
   bool isServer_;
   int storeSocket_ = -1;
   int listenSocket_ = -1;

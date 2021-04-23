@@ -710,6 +710,10 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 
 void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
+  // Bump collective counter
+  if (sequenceNum_) {
+    sequenceNum_->increment();
+  }
   workQueue_.push_back(std::move(work));
   lock.unlock();
 
@@ -1053,7 +1057,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // TODO: This is a massive hack!  There is some confusion about
     // Variable/Tensor inside the body of this function.  Turning off
     // grad smooths over the confusion for now.  This fixes
-    // test/test_c10d.py ProcessGroupGlooTest.test_sparse_allreduce_basics
+    // test/test_c10d_gloo.py ProcessGroupGlooTest.test_sparse_allreduce_basics
     //
     // The correct fix is to stop allocating tensors that are not variables,
     // but to conveniently do this c10d must depend on torch not ATen

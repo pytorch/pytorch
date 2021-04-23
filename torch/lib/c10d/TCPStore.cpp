@@ -109,11 +109,11 @@ TCPStoreWorkerDaemon::TCPStoreWorkerDaemon(int listenSocket)
   daemonThread_ = std::thread(&TCPStoreWorkerDaemon::run, this);
 }
 
-void TCPStoreWorkerDaemon::addCallback(
+void TCPStoreWorkerDaemon::setCallback(
     std::string key,
     WatchKeyCallback callback) {
-  const std::lock_guard<std::mutex> lock(_keyToCallbacksMutex);
-  _keyToCallbacks[key] = callback;
+  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex_);
+  keyToCallbacks_[key] = callback;
 }
 
 // Runs all the callbacks that the worker has registered
@@ -121,8 +121,7 @@ void TCPStoreWorkerDaemon::callbackHandler(int socket) {
   auto watchResponse = tcputil::recvValue<WatchResponseType>(socket);
   if (watchResponse == WatchResponseType::KEY_CALLBACK_REGISTERED) {
     // Notify the waiting "watchKey" operation to return
-    setCallbackRegisteredData(true);
-    getCallbackRegisteredCondVar().notify_one();
+    setCallbackRegistered();
     return;
   }
   std::string key = tcputil::recvString(socket);
@@ -142,8 +141,8 @@ void TCPStoreWorkerDaemon::callbackHandler(int socket) {
   } else {
     newValue = std::string(newValueVec.begin(), newValueVec.end());
   }
-  const std::lock_guard<std::mutex> lock(_keyToCallbacksMutex);
-  _keyToCallbacks.at(key)(currentValue, newValue);
+  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex_);
+  keyToCallbacks_.at(key)(currentValue, newValue);
 }
 
 #ifdef _WIN32
@@ -733,19 +732,12 @@ void TCPStore::watchKey(const std::string& key, WatchKeyCallback callback) {
   // Register callback with TCPStoreMasterDaemon to call TCPStoreWorkerDaemon on
   // key change
   std::string regKey = regularPrefix_ + key;
-  tcpStoreWorkerDaemon_->addCallback(regKey, callback);
+  tcpStoreWorkerDaemon_->setCallback(regKey, callback);
   tcputil::sendValue<QueryType>(listenSocket_, QueryType::WATCH_KEY);
   tcputil::sendString(listenSocket_, regKey);
 
   // Block until callback has been registered successfully
-  std::unique_lock<std::mutex> callbackRegistrationLock(
-      callbackRegistrationMutex);
-  tcpStoreWorkerDaemon_->getCallbackRegisteredCondVar().wait(
-      callbackRegistrationLock,
-      [&] { return tcpStoreWorkerDaemon_->getCallbackRegisteredData(); });
-
-  // Reset payload for next callback
-  tcpStoreWorkerDaemon_->setCallbackRegisteredData(false);
+  tcpStoreWorkerDaemon_->waitForCallbackRegistration();
 }
 
 int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {

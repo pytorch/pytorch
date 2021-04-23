@@ -45,7 +45,7 @@ def git(args: List[str]) -> List[str]:
     return [line.strip() for line in lines]
 
 
-def find_changed_files(merge_base: str = "origin/master") -> List[str]:
+def find_changed_files() -> List[str]:
     untracked = []
 
     for line in git(["status", "--porcelain"]):
@@ -60,7 +60,8 @@ def find_changed_files(merge_base: str = "origin/master") -> List[str]:
     cached = git(["diff", "--cached", "--name-only"])
 
     # Committed
-    diff_with_origin = git(["diff", "--name-only", "--merge-base", merge_base, "HEAD"])
+    merge_base = git(["merge-base", "origin/master", "HEAD"])[0]
+    diff_with_origin = git(["diff", "--name-only", merge_base, "HEAD"])
 
     # De-duplicate
     all_files = set(untracked + cached + modified + diff_with_origin)
@@ -163,14 +164,25 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    changed_files = None
+    relevant_files = None
+
     if args.changed_only:
-        changed_files = []
-        for f in find_changed_files():
-            for file_filter in args.file_filter:
-                if f.endswith(file_filter):
-                    changed_files.append(f)
-                    break
+        changed_files: Optional[List[str]] = None
+        try:
+            changed_files = find_changed_files()
+        except Exception:
+            # If the git commands failed for some reason, bail out and use the whole list
+            print(
+                "Could not query git for changed files, falling back to testing all files instead",
+                file=sys.stderr
+            )
+        if changed_files is not None:
+            relevant_files = []
+            for f in changed_files:
+                for file_filter in args.file_filter:
+                    if f.endswith(file_filter):
+                        relevant_files.append(f)
+                        break
 
     if args.step is None and args.all_steps_after is None:
         raise RuntimeError("1+ --steps or --all-steps-after must be provided")
@@ -193,7 +205,10 @@ def main() -> None:
     else:
         relevant_steps = grab_all_steps_after(args.all_steps_after, job)
 
-    asyncio.run(run_steps(relevant_steps, args.job, changed_files))  # type: ignore[attr-defined]
+    if sys.version_info > (3, 7):
+        asyncio.run(run_steps(relevant_steps, args.job, relevant_files))
+    else:
+        raise RuntimeError("Only Python >3.7 is supported")
 
 
 if __name__ == "__main__":

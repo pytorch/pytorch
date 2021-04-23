@@ -174,8 +174,9 @@ def maybe_insert_observer_for_special_module(
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
         standalone_module_input_idxs = \
             observed_standalone_module._standalone_module_input_quantized_idxs.int().tolist()
+        preserved_attributes = set(sm_prepare_config_dict.get("preserved_attributes", []))
         observed_standalone_module = ObservedStandaloneGraphModule(
-            observed_standalone_module, observed_standalone_module.graph)
+            observed_standalone_module, observed_standalone_module.graph, preserved_attributes)
         parent_name, name = _parent_name(node.target)
         setattr(modules[parent_name], name,
                 observed_standalone_module)
@@ -863,7 +864,8 @@ class Quantizer:
             self.modules)
 
         self.save_state(model)
-        model = ObservedGraphModule(model, observed_graph)
+        preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
+        model = ObservedGraphModule(model, observed_graph, preserved_attributes)
         if is_standalone_module:
             assert result_node is not None
             assert isinstance(result_node.args[0], Node), \
@@ -1258,7 +1260,8 @@ class Quantizer:
         # removes qconfig and activation_post_process modules
         if _remove_qconfig_flag:
             _remove_qconfig(model)
-        model = QuantizedGraphModule(model, act_post_process_removed_graph)
+        preserved_attributes = set(convert_custom_config_dict.get("preserved_attributes", []))
+        model = QuantizedGraphModule(model, act_post_process_removed_graph, preserved_attributes)
         return model
 
     # Trace back from the weight node util we hit getattr, reconstruct the
@@ -1310,7 +1313,7 @@ class Quantizer:
             else:
                 # copy other nodes
                 env[node.name] = folded_graph.node_copy(node, load_arg)
-        quantized = QuantizedGraphModule(quantized_root, folded_graph)
+        quantized = QuantizedGraphModule(quantized_root, folded_graph, quantized_root.preserved_attr_names)
         return quantized
 
     def _fold_quant_dequant(self, quantized: QuantizedGraphModule) -> QuantizedGraphModule:
