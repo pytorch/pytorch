@@ -1563,6 +1563,19 @@ void LoopNest::reorderAxis(For* a, For* b) {
   For* last = internal_axes.front();
   Stmt* newInner = body;
 
+  s = inner;
+  while (s != outer) {
+    if (auto cond = dynamic_cast<Cond*>(s->get_parent())) {
+      if (s == cond->true_stmt()) {
+        newInner = cond->cloneWithNewBody(newInner);
+      } else {
+        // s is the false branch of Cond
+        newInner = cond->cloneWithNewBodies(new Block({}), newInner);
+      }
+    }
+    s = s->get_parent();
+  }
+
   // This is the major complexity in loop reordering: handling statements not in
   // the straight line of the reorder. To handle this we partition the tree into
   // the section before the critical path and after the critical path.
@@ -1749,6 +1762,12 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
+void LoopNest::unroll(For* f) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  Stmt* unrolled;
+  unroll(f, &unrolled);
+}
+
 bool LoopNest::normalize(For* f) {
   if (!f) {
     throw malformed_input("normalize attempted on null loop");
@@ -1853,6 +1872,12 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
       normalized_loops[0]->loop_options());
   p->replace_stmt(normalized_loops[0], *flattened);
   return true;
+}
+
+bool LoopNest::flatten(const std::vector<For*>& loops) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* flattened;
+  return flatten(loops, &flattened);
 }
 
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
