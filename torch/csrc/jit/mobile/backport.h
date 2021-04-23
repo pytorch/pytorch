@@ -20,7 +20,7 @@ TORCH_API int64_t _get_bytecode_version(std::istream& in);
 TORCH_API int64_t _get_bytecode_version(const std::string& filename);
 
 TORCH_API int64_t
-_get_bytecode_version(std::unique_ptr<ReadAdapterInterface> rai);
+_get_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai);
 
 } // namespace jit
 } // namespace torch

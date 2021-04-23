@@ -24,6 +24,11 @@ TypePtr parseType(const std::string& pythonStr);
 namespace torch {
 namespace jit {
 
+using caffe2::serialize::IStreamAdapter;
+using caffe2::serialize::PyTorchStreamReader;
+using caffe2::serialize::PyTorchStreamWriter;
+using caffe2::serialize::ReadAdapterInterface;
+
 namespace {
 
 TypePtr resolveTypeName(
@@ -52,7 +57,7 @@ TypePtr resolveTypeName(
 c10::IValue readArchive(
     const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> compilation_unit,
-    std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& stream_reader) {
+    std::unique_ptr<PyTorchStreamReader>& stream_reader) {
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
@@ -158,7 +163,7 @@ c10::IValue readArchive(
   return unpickler.parse_ivalue();
 }
 
-void check_zip_file(std::unique_ptr<ReadAdapterInterface>& rai) {
+void check_zip_file(std::shared_ptr<ReadAdapterInterface>& rai) {
   std::array<uint8_t, 2> first_short{};
   static constexpr uint8_t first_slot = 0x80;
   static constexpr uint8_t second_slot = 0x02;
@@ -179,7 +184,7 @@ void check_zip_file(std::unique_ptr<ReadAdapterInterface>& rai) {
 
 std::vector<IValue> get_bytecode_vals(
     std::shared_ptr<mobile::CompilationUnit>& mobile_compilation_unit,
-    std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader) {
+    std::unique_ptr<PyTorchStreamReader>& reader) {
   std::vector<IValue> bytecode_vals;
   bytecode_vals = readArchive("bytecode", mobile_compilation_unit, reader)
                       .toTuple()
@@ -188,11 +193,6 @@ std::vector<IValue> get_bytecode_vals(
 }
 
 } // namespace
-
-using caffe2::serialize::IStreamAdapter;
-using caffe2::serialize::PyTorchStreamReader;
-using caffe2::serialize::PyTorchStreamWriter;
-using caffe2::serialize::ReadAdapterInterface;
 
 int64_t _get_bytecode_version(std::istream& in) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
@@ -204,11 +204,10 @@ int64_t _get_bytecode_version(const std::string& filename) {
   return _get_bytecode_version(std::move(rai));
 }
 
-int64_t _get_bytecode_version(std::unique_ptr<ReadAdapterInterface> rai) {
+int64_t _get_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
   check_zip_file(rai);
   auto mobile_compilation_unit = std::make_shared<mobile::CompilationUnit>();
-  auto reader = torch::make_unique<caffe2::serialize::PyTorchStreamReader>(
-      std::move(rai));
+  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   auto bvals = get_bytecode_vals(mobile_compilation_unit, reader);
   if (!bvals.empty() && bvals[0].isInt()) {
     int64_t model_version = bvals[0].toInt();
