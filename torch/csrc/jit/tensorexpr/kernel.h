@@ -179,7 +179,6 @@ class TORCH_API TensorExprKernel {
   }
 
  private:
-
   enum BackendType {
     kUninitialized,
     kSimpleIREval,
@@ -224,11 +223,9 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeSoftmax(const torch::jit::Value* v, bool log_softmax);
 
-
   Tensor* computeCatWoConditionals(const torch::jit::Value* v);
 
   Tensor* computeConv2d(const torch::jit::Value* v);
-
 
   Tensor* computeValue(const torch::jit::Value* v);
 
