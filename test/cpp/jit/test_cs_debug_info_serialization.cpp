@@ -10,9 +10,9 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
-#include <torch/csrc/jit/serialization/inlined_callstack_serialization.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
@@ -61,7 +61,7 @@ bool validate_debug_info(
   return true;
 }
 
-TEST(InlineCSSerializaitionTest, TwoSubmodules) {
+TEST(CSDebugInfoSerializaitionTest, TwoSubmodules) {
   std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
   Module a("A", cu);
   a.define(R"JIT(
@@ -97,37 +97,26 @@ TEST(InlineCSSerializaitionTest, TwoSubmodules) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      int64_t debug_handle{-1};
       source_range_tags[n->sourceRange()] = source_range_tag;
       source_range_map[source_range_tag] = n->sourceRange();
       source_range_tag++;
+      debug_handle_manager.getNextDebugHandleForInlinedCallStackPtr(n);
       if (n->callstack().has_value()) {
-        debug_handle_manager.getNextDebugHandleForInlinedCallStackPtr(
-            n->sourceRange(), n->callstack().value());
-        if (n->callstack().value()) {
-          for (const auto& e : n->callstack().value()->vec()) {
-            auto sr = std::get<1>(e);
-            source_range_tags[sr] = source_range_tag;
-            source_range_map[source_range_tag] = sr;
-            source_range_tag++;
-          }
+        for (const auto& e : n->callstack().value()->vec()) {
+          auto sr = std::get<1>(e);
+          source_range_tags[sr] = source_range_tag;
+          source_range_map[source_range_tag] = sr;
+          source_range_tag++;
         }
-      } else {
-        debug_handle_manager.getNextDebugHandleForInlinedCallStackPtr(
-            n->sourceRange(), c10::intrusive_ptr<InlinedCallStack>());
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
       }
     }
   }
   auto debug_handle_cs_ptr_map = debug_handle_manager.getCallStackPtrMap();
-  InlinedCallStackPickler inlined_cs_pickler;
+  CallStackDebugInfoPickler cs_debug_info_pickler;
   auto cs_data =
-      inlined_cs_pickler.pickle(debug_handle_cs_ptr_map, source_range_tags);
+      cs_debug_info_pickler.pickle(debug_handle_cs_ptr_map, source_range_tags);
   at::DataPtr data_ptr(cs_data.data(), DeviceType::CPU);
-  InlinedCallStackUnpickler unpickler;
-  // We wont really find any types
+  CallStackDebugInfoUnpickler unpickler;
   auto deserialized_cs_map = unpickler.unpickle(
       std::move(data_ptr), cs_data.size(), source_range_map, cu);
   for (const auto& it : debug_handle_cs_ptr_map) {
