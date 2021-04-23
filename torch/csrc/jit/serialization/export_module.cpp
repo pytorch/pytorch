@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/method.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -32,6 +33,7 @@ namespace jit {
 
 static constexpr const char* kArchiveNameConstants = "constants";
 static constexpr const char* kArchiveNameBytecode = "bytecode";
+static constexpr uint64_t kBytecodeVersionV4 = 0x4L;
 
 char const* toString(OpCode op);
 
@@ -568,13 +570,14 @@ class ScriptModuleSerializer {
 
   void writeByteCode(const Module& module, bool save_mobile_debug_info) {
     std::vector<c10::IValue> elements;
-    elements.emplace_back(
-        static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+    const uint64_t bytecode_version = overwrite_bytecode_version_.has_value()
+        ? overwrite_bytecode_version_.value()
+        : caffe2::serialize::kProducedBytecodeVersion;
+    elements.emplace_back(static_cast<int64_t>(bytecode_version));
     c10::optional<std::vector<c10::IValue>> debug_info_elements;
     if (save_mobile_debug_info) {
       debug_info_elements = std::vector<c10::IValue>();
-      debug_info_elements->emplace_back(
-          static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+      debug_info_elements->emplace_back(static_cast<int64_t>(bytecode_version));
     }
 
     moduleMethodsTuple(
@@ -622,6 +625,26 @@ class ScriptModuleSerializer {
   // key: tensor, value: pair(arhive_name, index)
   TensorIndexMap tensors_archive_table_;
 
+  // Introduce tensors_archive_table writer and reader here to avoid
+  // duplicate tensors. The tensors from tensors_archive_table_writers_
+  // will be stored in tensors_archive_table_. Currently only tensors from
+  // `constant` archive is in the writer list.
+
+  // Only archive in tensors_archive_table_writers_ set can write tensors to
+  // tensors_archive_table_.
+  std::unordered_set<std::string> tensors_archive_table_writers_ = {
+      kArchiveNameConstants};
+  // Only archive in tensors_archive_table_readers_ set can use
+  // tensors_archive_table_ as the storage root key. If the tensor exist in
+  // tensors_archive_table_, the storage root key will be {achive_name}/{index},
+  // instead of {index}. The corresponding tensors won't be exported again.
+  // Currently, only archive `bytecode` uses tensors_archive_table_. If another
+  // archive registers in tensors_archive_table_readers_, please be careful with
+  // forward compatiblity breakage.
+  std::unordered_set<std::string> tensors_archive_table_readers_ = {
+      kArchiveNameBytecode};
+  at::optional<uint64_t> overwrite_bytecode_version_;
+
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
   TypeNameUniquer type_name_uniquer_;
@@ -664,6 +687,31 @@ void ExportModule(
     bool bytecode_format,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(writer_func);
+  serializer.serialize(
+      module, extra_files, bytecode_format, save_mobile_debug_info);
+}
+
+void BackPortByteCode(
+    const Module& module,
+    const std::string& filename,
+    const uint64_t input_bytecode_version,
+    const ExtraFilesMap& extra_files,
+    bool bytecode_format,
+    bool save_mobile_debug_info) {
+  const uint64_t output_bytecode_version = input_bytecode_version - 1;
+  ScriptModuleSerializer serializer(filename);
+  serializer.serialize(
+      module, extra_files, bytecode_format, save_mobile_debug_info);
+}
+
+void BackPortByteCodeToVersion(
+    const Module& module,
+    const std::string& filename,
+    const uint64_t to_version,
+    const ExtraFilesMap& extra_files,
+    bool bytecode_format,
+    bool save_mobile_debug_info) {
+  ScriptModuleSerializer serializer(filename);
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
 }

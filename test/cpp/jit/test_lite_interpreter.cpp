@@ -634,6 +634,37 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   AT_ASSERT(version_v5 == 5);
 }
 
+TEST(LiteInterpreterTest, BackPortByteCodeModel) {
+  // Load check in model: sequence.ptl
+  std::string filePath(__FILE__);
+  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  testModelFile.append("script_module_v5.ptl");
+  //  torch::jit::_backport_for_mobile(testModelFile);
+  //
+  auto version = torch::jit::_get_bytecode_version(
+      "/Users/chenlai/Documents/pytorch/data/prod_example.pkl");
+  std::cout << "version is " << version;
+  torch::jit::_backport_for_mobile(
+      "/Users/chenlai/Documents/pytorch/data/prod_example.pkl",
+      "/Users/chenlai/Documents/pytorch/data/prod_example_backport.pkl");
+
+  //    Module m = load(testModelFile);
+  //  std::string output_5 = "output_5.ptl";
+  //  m._backport_for_mobile(testModelFile, output_5);
+  //  mobile::Module m_5 = _load_for_mobile(output_5);
+  //  m_5.forward(std::vector<IValue>({IValue(1)}));
+  //  mobile::Module bc = _load_for_mobile(testModelFile);
+
+  //  Module m =
+  //  load("/Users/chenlai/Documents/pytorch/models/265868112-4d43a58c-a960-4381-ae02-8c80a514f0d6-model.ptl");
+  //  std::vector<IValue> inputs;
+  //  inputs.push_back(at::ones(-0.1));
+  //  inputs.push_back(at::ones(-0.1));
+  //  auto tup = at::ivalue::Tuple::create({at::ones(1), at::ones(1)});
+  //  IValue iv(tup);
+  //  m.forward(std::vector<c10::IValue>{iv});
+}
+
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
   a.define(R"JIT(
