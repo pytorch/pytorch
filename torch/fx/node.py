@@ -4,12 +4,13 @@ from .immutable_collections import immutable_dict, immutable_list
 import torch
 import builtins
 import types
+from torch.fx.operator_schemas import normalize_function, normalize_module
 
 if TYPE_CHECKING:
     from .graph import Graph
 
 BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor]
-base_types = BaseArgumentTypes.__args__  # type: ignore
+base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]
 
@@ -127,7 +128,7 @@ class Node:
         # The public API for this is `all_input_nodes`, this private attribute
         # should not be accessed directly.
         self._input_nodes : Dict[Node, None] = {}
-        self.__update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore
+        self.__update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore[arg-type]
 
         # All of the nodes that use the value produced by this Node
         # Note one user may correspond to several uses, e.g. the node fo ``x + x``
@@ -233,7 +234,7 @@ class Node:
         """
         # DO NOT CALL `__update_args_kwargs` directly. The correct way to
         # set `args` is via direct assignment, i.e. `node.args = new_args`
-        self.__update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore
+        self.__update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore[arg-type]
 
     @property
     def kwargs(self) -> Dict[str, Argument]:
@@ -256,7 +257,7 @@ class Node:
         """
         # DO NOT CALL `__update_args_kwargs` directly. The correct way to
         # set `args` is via direct assignment, i.e. `node.kwargs = new_kwargs`
-        self.__update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
+        self.__update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore[arg-type]
 
     @property
     def all_input_nodes(self) -> List['Node']:
@@ -442,6 +443,39 @@ class Node:
             return getattr(target_mod, "_is_impure", False)
 
         return False
+
+    def normalized_arguments(
+            self, root : torch.nn.Module, arg_types : Optional[Tuple[Any]] = None,
+            kwarg_types : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """
+        Returns normalized arguments to Python targets. This means that
+        `args/kwargs` will be matched up to the module/functional's
+        signature and return exclusively kwargs in positional order.
+        Also populates default values. Does not support positional-only
+        parameters or varargs parameters.
+
+        Supports module calls.
+
+        May require `arg_types` and `kwarg_types` in order to disambiguate overloads.
+
+        Args:
+            root (torch.nn.Module): Module upon which to resolve module targets.
+            arg_types (Optional[Tuple[Any]]): Tuple of arg types for the args
+            kwarg_types (Optional[Dict[str, Any]]): Dict of arg types for the kwargs
+
+        Returns:
+
+            Returns normalized_kwargs, or `None` if not successful.
+        """
+        if self.op == 'call_function':
+            assert callable(self.target)
+            return normalize_function(self.target, self.args, self.kwargs, arg_types, kwarg_types)  # type: ignore[arg-type]
+        elif self.op == 'call_module':
+            assert isinstance(self.target, str)
+            return normalize_module(root, self.target, self.args, self.kwargs)  # type: ignore[arg-type]
+
+        return None
+
 
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """

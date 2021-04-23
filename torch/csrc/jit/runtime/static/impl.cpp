@@ -38,7 +38,7 @@ void OptimizeGraph(
 #ifdef FBCODE_CAFFE2
   if (opts.enable_out_variant) {
     ReplaceWithCopy(graph);
-    FuseSigridTransformsListUnpack(graph);
+    FuseListUnpack(graph);
   }
 #endif
   ConstantPropagation(graph);
@@ -57,7 +57,8 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
     VLOG(1) << "output: %" << output->debugName()
             << " has type: " << output->type()->repr_str();
     auto kind = output->node()->kind();
-    if (kind == prim::TupleConstruct || kind == prim::ListConstruct) {
+    if (kind == prim::TupleConstruct || kind == prim::ListConstruct ||
+        kind == prim::DictConstruct) {
       for (Value* input : output->node()->inputs()) {
         const auto& type = input->type();
         TORCH_CHECK(
@@ -65,13 +66,6 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
             "Static Runtime expects output type as List or Tuple of Tensor, but got List or Tuple of ",
             type->repr_str());
       }
-    } else {
-      const auto& type = output->type();
-      TORCH_CHECK(
-          type->cast<TensorType>() != nullptr ||
-              type->cast<NoneType>() != nullptr,
-          "Static Runtime expects output type as None or Tensor, but got ",
-          type->repr_str());
     }
   }
 }
@@ -473,6 +467,12 @@ std::pair<std::shared_ptr<Graph>, c10::optional<c10::FunctionSchema>>
 PrepareForStaticModule(
     const torch::jit::Module& m,
     const StaticModuleOptions& opts) {
+  VLOG(1) << "StaticModuleOptions: cleanup_activations "
+          << opts.cleanup_activations << ", enable_out_variant "
+          << opts.enable_out_variant << ", optimize_memory"
+          << opts.optimize_memory << ", optimize_graph_output_memory"
+          << opts.optimize_graph_output_memory;
+
   auto module = m.copy();
   module.eval();
 
@@ -987,8 +987,10 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
     auto& pnode = nodes_[n];
     for (size_t i = 0; i < pnode.outputs().size(); i++) {
       const IValue* ival = &pnode.Output(i);
-      const std::string error_msg = "Output " + c10::to_string(i) +
-          " of node " + c10::to_string(n) + " was not cleaned up";
+      const Value* val = pnode.node()->output(i);
+      const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
+          val->debugName() + " of node " + c10::to_string(n) +
+          " was not cleaned up";
       if (output_ivalues.count(ival) == 0) {
         // check for intermediates
         if (!ival->isNone()) {
@@ -998,7 +1000,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
           if (ival->isTensor()) {
             const auto& t = ival->toTensor();
             if (t.defined()) {
-              const auto* storage_impl = t.storage().unsafeGetStorageImpl();
+              auto* storage_impl = t.storage().unsafeGetStorageImpl();
               TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
             }
           }
@@ -1014,43 +1016,35 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
 }
 
 static void assign_storage_to_managed_tensors(
-    const StaticRuntime* runtime,
+    StaticRuntime* runtime,
     const std::unordered_set<const Value*>& managed_tensor_values,
     const std::unordered_map<const Value*, std::vector<const Value*>>&
         value_to_same_storage_values,
-    std::vector<std::pair<size_t, std::vector<c10::StorageImpl*>>>&
-        managed_storage) {
+    std::vector<std::pair<size_t, std::vector<at::Tensor*>>>& managed_tensors) {
   // map Value to index to managed_storage, where multiple values can
   // map to the same index (i.e., sharing the same storage)
   std::unordered_map<const Value*, size_t> value_to_storage_idx;
-  // the StorageImpls of Tensor views should not be managed
-  std::unordered_set<c10::StorageImpl*> managed_storage_impls;
 
   // Snapshot of the current memory state
-  for (const auto& pnode : runtime->nodes()) {
+  for (auto& pnode : runtime->nodes()) {
     for (auto i = 0; i < pnode.outputs().size(); ++i) {
-      const auto& ival = pnode.outputs()[i];
+      auto& ival = pnode.Output(i);
       const auto* val = pnode.node()->outputs()[i];
       if (managed_tensor_values.count(val)) {
         TORCH_CHECK(ival.isTensor());
-        auto* impl = ival.toTensor().storage().unsafeGetStorageImpl();
-
-        auto didInsert = managed_storage_impls.insert(impl).second;
-        if (!didInsert) {
-          continue;
-        }
+        at::Tensor* tensor = &ival.toTensor();
 
         if (value_to_storage_idx.count(val)) {
-          managed_storage[value_to_storage_idx.at(val)].second.emplace_back(
-              impl);
+          managed_tensors[value_to_storage_idx[val]].second.emplace_back(
+              tensor);
         } else {
           auto p =
-              std::make_pair<size_t, std::vector<c10::StorageImpl*>>(0, {impl});
-          managed_storage.emplace_back(std::move(p));
+              std::make_pair<size_t, std::vector<at::Tensor*>>(0, {tensor});
+          managed_tensors.emplace_back(std::move(p));
           // first of a group, update the value_to_storage_idx map with the
           // index
           if (value_to_same_storage_values.count(val)) {
-            auto storage_idx = managed_storage.size() - 1;
+            auto storage_idx = managed_tensors.size() - 1;
             for (const auto* v : value_to_same_storage_values.at(val)) {
               value_to_storage_idx[v] = storage_idx;
             }
@@ -1125,7 +1119,7 @@ MemoryPlanner::MemoryPlanner(
         runtime,
         managed_tensor_values,
         value_to_same_storage_values,
-        managed_tensor_storage_);
+        managed_tensors_);
   }
 }
 
@@ -1151,18 +1145,19 @@ void MemoryPlanner::allocate() {
   uint8_t* start = static_cast<uint8_t*>(buffer_.get());
 
   reused_tensors_ = 0;
-  for (const auto& ms : managed_tensor_storage_) {
+  for (const auto& ms : managed_tensors_) {
     auto tensor_size = ms.first;
     if (tensor_size == 0) {
       continue;
     }
-    const auto& impls = ms.second;
+    const auto& tensors = ms.second;
     DCHECK_LE(offset + tensor_size, managed_bytes_);
     void* src = static_cast<void*>(start + offset);
 
-    for (auto& impl : impls) {
-      impl->set_data_ptr_noswap(at::DataPtr(src, src, nullptr, impl->device()));
-      impl->set_nbytes(tensor_size);
+    for (auto* tensor : tensors) {
+      tensor->storage().set_data_ptr_noswap(
+          at::DataPtr(src, src, nullptr, tensor->device()));
+      tensor->storage().set_nbytes(tensor_size);
       reused_tensors_++;
     }
     reused_tensors_--;
@@ -1177,12 +1172,13 @@ void MemoryPlanner::deallocate() {
 
   // free memory used by outputs of ops in out variants
   // but keep the TensorImpl and StorageImpl around
-  for (auto& ms : managed_tensor_storage_) {
-    const auto& impls = ms.second;
-    size_t max = 0;
-    for (auto& impl : impls) {
-      size_t current_size = compute_aligned_tensor_size(impl->nbytes());
-      impl->reset();
+  for (auto& ms : managed_tensors_) {
+    const auto& tensors = ms.second;
+    size_t max = ms.first;
+    for (auto& tensor : tensors) {
+      size_t current_size =
+          compute_aligned_tensor_size(tensor->storage().nbytes());
+      tensor->storage().unsafeGetStorageImpl()->reset();
       max = std::max(max, current_size);
     }
     // Static runtime does not know the size of tensors statically, so we use
@@ -1212,14 +1208,10 @@ ProcessedNode::ProcessedNode(
 
   if (enable_out_variant && canRunOutOfPlace(node)) {
     fn_ = getOutOfPlaceOperation(node);
-    std::ostringstream ss;
-    node->print(ss, 0, nullptr, false);
-    VLOG(1) << "Switch to out variant for node: " << ss.str();
+    VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
   } else if (canRunNatively(node)) {
     native_fn_ = getNativeOperation(node);
-    std::ostringstream ss;
-    node->print(ss, 0, nullptr, false);
-    VLOG(1) << "Switch to native impl for node: " << ss.str();
+    VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
   } else if (
       node->kind() != prim::ListConstruct &&
       node->kind() != prim::TupleConstruct &&
@@ -1227,10 +1219,7 @@ ProcessedNode::ProcessedNode(
     const Operator& op = node->getOperator();
     TORCH_CHECK(op.hasOperation());
     op_ = op.getOperation(node);
-
-    std::ostringstream ss;
-    node->print(ss, 0, nullptr, false);
-    VLOG(1) << "Fallback interpreter for node: " << ss.str();
+    VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
 

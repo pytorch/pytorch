@@ -41,9 +41,12 @@ TESTS = [
     'test_cpp_extensions_aot_no_ninja',
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
-    'distributed/test_c10d',
+    'distributed/test_c10d_common',
+    'distributed/test_c10d_gloo',
+    'distributed/test_c10d_nccl',
     'distributed/test_jit_c10d',
-    'distributed/test_c10d_spawn',
+    'distributed/test_c10d_spawn_gloo',
+    'distributed/test_c10d_spawn_nccl',
     'test_cuda',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
@@ -62,6 +65,7 @@ TESTS = [
     'test_linalg',
     'test_logging',
     'test_mkldnn',
+    'test_module_init',
     'test_multiprocessing',
     'test_multiprocessing_spawn',
     'distributed/test_nccl',
@@ -109,6 +113,7 @@ TESTS = [
     'test_tensorexpr_pybind',
     'test_openmp',
     'test_profiler',
+    "distributed/test_launcher",
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
@@ -283,9 +288,12 @@ TARGET_DET_LIST = [
     'test_utils',
     'test_multiprocessing',
     'test_tensorboard',
-    'distributed/test_c10d',
+    'distributed/test_c10d_common',
+    'distributed/test_c10d_gloo',
+    'distributed/test_c10d_nccl',
     'distributed/test_jit_c10d',
-    'distributed/test_c10d_spawn',
+    'distributed/test_c10d_spawn_gloo',
+    'distributed/test_c10d_spawn_nccl',
     'test_quantization',
     'test_pruning_op',
     'test_determination',
@@ -1027,6 +1035,49 @@ def export_S3_test_times(test_times_filename: str, test_times: Dict[str, float])
         json.dump(job_times_json, file, indent='    ', separators=(',', ': '))
         file.write('\n')
 
+
+def query_changed_test_files() -> List[str]:
+    cmd = ["git", "diff", "--name-only", "origin/master", "HEAD"]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    if proc.returncode != 0:
+        raise RuntimeError("Unable to get changed files")
+
+    lines = proc.stdout.decode().strip().split("\n")
+    lines = [line.strip() for line in lines]
+    return lines
+
+
+def reorder_tests(tests: List[str]) -> List[str]:
+    try:
+        changed_files = query_changed_test_files()
+    except Exception:
+        # If unable to get changed files from git, quit without doing any sorting
+        return tests
+
+    prefix = f"test{os.path.sep}"
+    changed_tests = [f for f in changed_files if f.startswith(prefix) and f.endswith(".py")]
+    changed_tests = [f[len(prefix):] for f in changed_tests]
+    changed_tests = [f[:-len(".py")] for f in changed_tests]
+
+    bring_to_front = []
+    the_rest = []
+
+    for test in tests:
+        if test in changed_tests:
+            bring_to_front.append(test)
+        else:
+            the_rest.append(test)
+
+    sorted_tests = bring_to_front + the_rest
+
+    if len(sorted_tests) != len(tests):
+        # Something went wrong, bail out without doing any sorting
+        return tests
+
+    return sorted_tests
+
+
 def main():
     options = parse_args()
 
@@ -1064,6 +1115,9 @@ def main():
             if determine_target(TARGET_DET_LIST + slow_tests, test, touched_files, options)
         ]
         sys.path.remove('test')
+
+
+    selected_tests = reorder_tests(selected_tests)
 
     has_failed = False
     failure_messages = []
