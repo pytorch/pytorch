@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/variant.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -14,6 +15,22 @@ namespace tensorexpr {
 bool conv2dIsSupported(const Node* node);
 // Returns true if the TE fuser supports this matmul.
 bool matmulIsSupported(const Node* node);
+template <typename T>
+inline std::vector<int64_t> bufferSizes(const T& t) {
+  std::vector<int64_t> sizes;
+  for (size_t i = 0; i < t->ndim(); i++) {
+    sizes.push_back(dynamic_cast<const IntImm*>(t->dim(i))->value());
+  }
+  return sizes;
+}
+using ArgNone = c10::monostate;
+using ArgValue = c10::variant<
+    tensorexpr::BufHandle,
+    tensorexpr::VarHandle,
+    double,
+    int64_t,
+    bool,
+    ArgNone>;
 
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
@@ -76,8 +93,13 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> broadcastShapes(
       std::vector<std::vector<ExprHandle>> shapes);
 
+  ExprHandle constant(const ArgValue& v);
   ExprHandle constant(const torch::jit::Value* v);
   ExprHandle broadcast(const Buf* b, const std::vector<ExprHandle>& axes);
+  ExprHandle broadcastBufTemp( // TODO(chilli): switch over to this when
+                               // finished refactoring
+      BufHandle b,
+      const std::vector<ExprHandle>& axes);
   ExprHandle chunk(
       const Buf* b,
       size_t chunkIdx,
@@ -85,6 +107,7 @@ class TORCH_API TensorExprKernel {
       int64_t chunks,
       const std::vector<ExprHandle>& axes);
 
+  std::vector<ExprHandle> valueShape(const ArgValue& v);
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
 
   bool checkTypes(const ScalarType highType, const int typeConstraints);
@@ -93,7 +116,15 @@ class TORCH_API TensorExprKernel {
       std::vector<ExprHandle>& inputs,
       int typeConstraints = kAllTypes);
 
+  ExprHandle demoteOutput(
+      const ExprHandle& e,
+      const c10::optional<at::ScalarType> type);
   ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
+  ArgValue jitToArgValue(const torch::jit::Value* v) const;
+
+  ExprHandle tensorOrConstant(
+      const ArgValue& v,
+      const std::vector<ExprHandle>& axes);
 
   ExprHandle tensorOrConstant(
       const torch::jit::Value* v,
@@ -104,6 +135,14 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
       const int checkParamTypes = kAllTypes);
+
+  Tensor* computeTwoOperand(
+      const std::string& name,
+      const std::vector<ArgValue> inputValues,
+      const c10::optional<at::ScalarType> outputTensorType,
+      const std::vector<ExprHandle> outputShape,
+      const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+          innerExpr);
 
   Tensor* computeTwoOperand(
       const std::string& name,

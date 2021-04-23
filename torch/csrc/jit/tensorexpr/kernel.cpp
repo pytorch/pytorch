@@ -266,6 +266,12 @@ static std::vector<ExprHandle> computeIndicesToBroadcast(
   return bcast;
 }
 
+ExprHandle TensorExprKernel::broadcastBufTemp(
+    BufHandle b,
+    const std::vector<ExprHandle>& axes) {
+  return b.load(computeIndicesToBroadcast(
+      axes, ExprVectorToExprHandleVector(b.node()->dims())));
+}
 ExprHandle TensorExprKernel::broadcast(
     const Buf* b,
     const std::vector<ExprHandle>& axes) {
@@ -320,6 +326,45 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
       throw unsupported_dtype();
   }
   return e;
+}
+
+ArgValue TensorExprKernel::jitToArgValue(const torch::jit::Value* v) const {
+  auto ti = bufs_.find(v);
+  if (ti != bufs_.end()) {
+    return BufHandle(ti->second);
+  }
+  if (v->node()->kind() == prim::Constant) {
+    const auto val = toIValue(v).value();
+    if (val.isDouble()) {
+      return val.toDouble();
+    } else if (val.isInt()) {
+      return val.toInt();
+    } else if (val.isBool()) {
+      return val.toBool();
+    } else if (val.isNone()) {
+      // This is just a placeholder so we don't throw.  None-handling
+      // is operator-specific and should be handled properly in
+      // the operator-specific lowering code.
+      return ArgNone();
+    } else {
+      throw unsupported_dtype();
+    }
+  }
+
+  if (!scalars_.count(v)) {
+    throw malformed_input("no scalar in Constant");
+  }
+
+  return ArgValue(scalars_.at(v));
+}
+
+ExprHandle TensorExprKernel::tensorOrConstant(
+    const ArgValue& v,
+    const std::vector<ExprHandle>& axes) {
+  if (auto b = c10::get_if<BufHandle>(&v)) {
+    return broadcastBufTemp(*b, axes);
+  }
+  return constant(v);
 }
 
 ExprHandle TensorExprKernel::tensorOrConstant(
@@ -547,6 +592,23 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
   }
 }
 
+ExprHandle TensorExprKernel::constant(const ArgValue& v) {
+  if (auto s = c10::get_if<tensorexpr::VarHandle>(&v)) {
+    return *s;
+  } else if (auto d = c10::get_if<double>(&v)) {
+    return DoubleImm::make(*d);
+  } else if (auto i = c10::get_if<int64_t>(&v)) {
+    return LongImm::make(*i);
+  } else if (auto b = c10::get_if<bool>(&v)) {
+    return BoolImm::make(*b);
+  } else if (c10::get_if<ArgNone>(&v)) {
+    // This is just a placeholder so we don't throw.  None-handling
+    // is operator-specific and should be handled properly in
+    // the operator-specific lowering code.
+    return IntImm::make(0);
+  }
+  throw unsupported_dtype();
+}
 ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   if (v->node()->kind() == prim::Constant) {
     const auto val = toIValue(v).value();
@@ -647,6 +709,44 @@ void TensorExprKernel::promoteInputs(
 
 ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
+    const c10::optional<at::ScalarType> type) {
+  if (!type.has_value()) {
+    return e;
+  }
+  if (*type == static_cast<at::ScalarType>(e.dtype().scalar_type())) {
+    return e;
+  }
+
+  switch (*type) {
+// NOLINTNEXTLINE
+#define TYPE_CASE(Type, Name) \
+  case at::ScalarType::Name:  \
+    return cast<Type>(e);
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    case at::ScalarType::Bool:
+      return cast<bool>(e);
+    default:
+      throw unsupported_dtype();
+  }
+
+  return e;
+}
+
+c10::optional<at::ScalarType> getOutputType(const torch::jit::Value* v) {
+  if (v->type()->kind() != TypeKind::TensorType) {
+    return c10::optional<at::ScalarType>();
+  }
+
+  if (!v->isCompleteTensor()) {
+    return c10::nullopt;
+  }
+
+  return v->type()->castRaw<TensorType>()->scalarType();
+}
+
+ExprHandle TensorExprKernel::demoteOutput(
+    const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
     return e;
@@ -743,6 +843,13 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(
   return ExprVectorToExprHandleVector(it->second->dims());
 }
 
+std::vector<ExprHandle> TensorExprKernel::valueShape(const ArgValue& v) {
+  if (auto b = c10::get_if<tensorexpr::BufHandle>(&v)) {
+    return ExprVectorToExprHandleVector(b->node()->dims());
+  }
+  return {};
+}
+
 Tensor* TensorExprKernel::computeOneOperand(
     const std::string& name,
     const torch::jit::Value* v,
@@ -787,6 +894,30 @@ Tensor* TensorExprKernel::computeTwoOperand(
         promoteInputs(inputs);
         ExprHandle compute = innerExpr(inputs[0], inputs[1]);
         return demoteOutput(compute, n->output());
+      });
+}
+
+Tensor* TensorExprKernel::computeTwoOperand(
+    const std::string& name,
+    const std::vector<ArgValue> inputValues,
+    const c10::optional<at::ScalarType> outputTensorType,
+    const std::vector<ExprHandle> outputShape,
+    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+        innerExpr) {
+  return Compute(
+      name,
+      c10::fmap<DimArg>(outputShape),
+      [this, inputValues, outputTensorType, innerExpr](
+          const std::vector<VarHandle>& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        std::vector<ExprHandle> inputs = {
+            tensorOrConstant(inputValues[0], indices),
+            tensorOrConstant(inputValues[1], indices),
+        };
+
+        promoteInputs(inputs);
+        ExprHandle compute = innerExpr(inputs[0], inputs[1]);
+        return demoteOutput(compute, outputTensorType);
       });
 }
 
@@ -979,8 +1110,18 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::mul: {
+      std::vector<ArgValue> argInputs;
+      for (auto inp : v->node()->inputs()) {
+        argInputs.push_back(jitToArgValue(inp));
+      }
+      auto outputType = getOutputType(v->node()->output());
+      auto outputShape = inferSizesForValue(v);
       return computeTwoOperand(
-          "aten_mul", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+          "aten_mul",
+          argInputs,
+          outputType,
+          outputShape,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return boolToInteger(lhs) * boolToInteger(rhs);
           });
     } break;
@@ -1737,6 +1878,62 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   }
 }
 
+// Return the (lower, upper) loop bounds if they are constants, else nullopt.
+c10::optional<std::pair<int64_t, int64_t>> loopBounds(const For* loop) {
+  auto start = IRSimplifier::simplify(loop->start());
+  auto stop = IRSimplifier::simplify(loop->stop());
+  if (!start->isConstant() || !stop->isConstant()) {
+    return c10::nullopt;
+  }
+  return c10::make_optional(
+      std::make_pair(immediateAs<int64_t>(start), immediateAs<int64_t>(stop)));
+}
+
+// True if all the loops in this vector have equal bounds.
+bool loopBoundsAllEqual(const std::vector<For*>& loops) {
+  auto bounds = loopBounds(loops[0]);
+  if (!bounds) {
+    return false;
+  }
+  for (auto const& loop : loops) {
+    auto next = loopBounds(loop);
+    if (!next) {
+      return false;
+    }
+    if (bounds->first != next->first || bounds->second != next->second) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Recursively fuse all the loops with matching bounds in `st`.  Stops fusing
+// at any level containing non-loops or non-matching bounds.  The restriction
+// on matching bounds exists to avoid inserting conditionals on the loop
+// indices where none would be needed, which would significantly complicate
+// vectorization.
+void fuseAllLoops(Stmt* st) {
+  if (auto block = dynamic_cast<tensorexpr::Block*>(st)) {
+    std::vector<For*> loopsToFuse;
+    for (auto stmt : *block) {
+      auto loop = dynamic_cast<For*>(stmt);
+      if (!loop) {
+        // Block contains something that's not a loop.  Quit.
+        return;
+      }
+      loopsToFuse.push_back(loop);
+    }
+    if (!loopBoundsAllEqual(loopsToFuse)) {
+      return;
+    }
+    For* fusedLoop;
+    if (!LoopNest::fuseLoops(loopsToFuse, &fusedLoop)) {
+      return;
+    }
+    fuseAllLoops(fusedLoop->body());
+  }
+}
+
 Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
@@ -1753,12 +1950,22 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
     root_stmt->accept(block_analysis.get());
   }
 
-  // inlining output & intermediate buffers can duplicate computation.
-  // it slows down cpu code generation but is enabled on gpu because it avoids
-  // difficult synchronization logic across blocks.
-  bool allow_duplicated_work =
-      (backendType == kCudaCodeGen || backendType == kBlockCodeGen);
-  l.inlineIntermediateBufs(allow_duplicated_work);
+  // Inlining output & intermediate buffers can duplicate computation.
+  // Duplicating work can slow down the program if it's not ameliorated in some
+  // way, but we've empirically found that:
+  // - On CPU, LLVM's CSE does a good job as long as you horizontally fuse
+  //   output loops.
+  // - On GPU, there's enough compute to hide the extra work, and inlining
+  //   avoids synchronizing between kernels.
+  l.inlineIntermediateBufs(/*allow_duplicated_work=*/true);
+
+  // Fuse loops "horizontally".  This pass allows us to combine loops that
+  // write to different output buffers, as long as they have the same bounds.
+  if (backendType == kLLVMCodeGen) {
+    GRAPH_DEBUG("after inline", *l.root_stmt());
+    fuseAllLoops(l.root_stmt());
+    GRAPH_DEBUG("after fuse", *l.root_stmt());
+  }
 
   if (backendType == kCudaCodeGen) {
     for (auto buf : bufOutputs_) {
