@@ -1372,6 +1372,30 @@ std::tuple<Tensor, Tensor> pack_hidden<std::tuple<Tensor, Tensor>>(const Tensor&
   return std::make_tuple(hx, cx);
 }
 
+/**
+ * Note [DropoutState and CUDA graph capture]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * (1) Telling a capturing stream to wait on an event recorded in a non-capturing stream is an error.
+ * (2) Telling a non-capturing stream to wait on an event recorded during capture is also an error.
+ *
+ * So DropoutState's usage syncs could error if an RNN with dropout is called in an uncaptured region
+ * then called in a captured region (triggering 1), or called in a captured region then called
+ # in an uncaptured region (triggering 2).
+ *
+ * To prevent 1 and 2, lock() only syncs on the last usage event if it was recorded in the same
+ * capture state as the current state (which also means the same graph, if capture is in progress).
+ *
+ * The solution should be safe as long as capture obeys the following restrictions:
+ *  - Only one capture may be underway at a time in a given process.
+ *  - While a capture is underway, no calls to eager ops on noncapturing streams (on any thread)
+ *    may interleave with the captured ops.
+ *
+ * TODO: As people experiment with capture, keep an eye out for use cases that might need to
+ * relax those restrictions.
+ *
+ * See https://github.com/pytorch/pytorch/pull/56433 for more discussion.
+ */
+
 struct DropoutState {
   // Both buffer and event are lazily instantiated when a dropout state is needed
   // for the first time. Note that in this case needed != used, as we don't need
@@ -1398,20 +1422,19 @@ struct DropoutState {
     mutex.lock();
     if (event) {
 #if CUDA_VERSION >= 11000
+      // See Note [DropoutState and CUDA graph capture]
       cudaStreamCaptureStatus status;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
                                              &status,
-                                             &capture_id_last_unlock));
+                                             &capture_id_last_lock));
       if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
         capture_id_last_lock = 0;
       }
-      // Only wait on the last usage if we're not capturing this call in a CUDA graph
-      // or if we're in the same capture as the last usage.
       if (capture_id_last_lock == capture_id_last_unlock) {
-#endif
         event->block(cuda::getCurrentCUDAStream());
-#if CUDA_VERSION >= 11000
       }
+#else
+      event->block(cuda::getCurrentCUDAStream());
 #endif
     }
   }
@@ -1420,6 +1443,7 @@ struct DropoutState {
     if (event) {
       event->record();
 #if CUDA_VERSION >= 11000
+      // See Note [DropoutState and CUDA graph capture]
       cudaStreamCaptureStatus status;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
                                              &status,
