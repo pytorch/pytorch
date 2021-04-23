@@ -345,10 +345,13 @@ void NodeToONNX(
     }
 
     py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
-    py::object is_registered_op = onnx_registry.attr("is_registered_op")("prim_PythonOp", "", opset_version);
-    if (!py::hasattr(pyobj, "symbolic") && (!PyObject_IsTrue(is_registered_op.ptr()))) {
+    py::object is_registered_op = onnx_registry.attr("is_registered_op")(
+        "prim_PythonOp", "", opset_version);
+    if (!py::hasattr(pyobj, "symbolic") &&
+        (!PyObject_IsTrue(is_registered_op.ptr()))) {
       // Simply clone the node, unless either
-      // 1. The torch.autograd.Function class of this node object has `symbolic` method defined.
+      // 1. The torch.autograd.Function class of this node object has `symbolic`
+      // method defined.
       // 2. Custom export symbolic is registered for prim::PythonOp.
       cloneNode(op);
       return;
@@ -388,7 +391,10 @@ void NodeToONNX(
       onnx_registry.attr("register_op")(
           op->name(), pyobj.attr("symbolic"), "", opset_version);
       py::object raw_output = onnx.attr("_run_symbolic_method")(
-          new_block->owningGraph(), op->name(), pyobj.attr("symbolic"), py_symbolic_args);
+          new_block->owningGraph(),
+          op->name(),
+          pyobj.attr("symbolic"),
+          py_symbolic_args);
 
       processSymbolicOutput(op->name(), op, raw_output);
     } else {
