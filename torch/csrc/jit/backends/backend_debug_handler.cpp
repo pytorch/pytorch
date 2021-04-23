@@ -10,10 +10,15 @@ thread_local BackendDebugHandleManager* debug_handle_manager_ptr{nullptr};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<DebugHandleType> BackendDebugHandleManager::unique_debug_handle_{0};
 
-DebugHandleType BackendDebugHandleManager::
-    getNextDebugHandleForInlinedCallStackPtr(
-        const SourceRange& range,
-        const InlinedCallStackPtr& cs_ptr) {
+int64_t BackendDebugHandleManager::getNextDebugHandleForInlinedCallStackPtr(
+    const Node* node) {
+  const SourceRange& range = node->sourceRange();
+  InlinedCallStackPtr cs_ptr;
+  if (node->callstack().has_value()) {
+    cs_ptr = node->callstack().value();
+  } else {
+    cs_ptr = c10::intrusive_ptr<InlinedCallStack>();
+  }
   DebugHandleType debug_handle = unique_debug_handle_;
   handles_to_inlined_callstack_ptrs_[debug_handle] =
       std::make_pair(range, cs_ptr);

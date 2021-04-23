@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/mobile/debug_info.h>
-#include <torch/csrc/jit/serialization/inlined_callstack_serialization.h>
+#include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
 #include <ATen/core/ivalue.h>
@@ -21,13 +21,13 @@ namespace {
 // will be TopM(A).MyModule(B).SomeModule(C).Conv2d(conv)
 // Source level stack information will be from model source code.
 std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy(
-    const DebugInfoPair& sr_callstack) {
+    const DebugInfoPair& source_callstack) {
   constexpr size_t kSourceRange = 1;
   constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
 
-  const SourceRange& range = sr_callstack.first;
-  InlinedCallStackPtr callstack_ptr = sr_callstack.second;
+  const SourceRange& range = source_callstack.first;
+  InlinedCallStackPtr callstack_ptr = source_callstack.second;
   std::string module_info;
   if (!callstack_ptr) {
     // If not cs then top level node
@@ -70,14 +70,14 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
 }
 
 std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
-    const std::vector<DebugInfoPair>& sr_callstacks,
+    const std::vector<DebugInfoPair>& source_callstacks,
     const std::string& root_scope_string,
     const std::string& top_module_type_name) {
   std::string stack_trace;
   std::vector<StackEntry> stack_entries;
   std::string module_info =
       root_scope_string + "(" + top_module_type_name + ")";
-  for (const auto& debug_info : sr_callstacks) {
+  for (const auto& debug_info : source_callstacks) {
     auto debug_info_pair = getStackTraceWithModuleHierarchy(debug_info);
     auto entries = std::move(debug_info_pair.first);
     stack_entries.insert(stack_entries.end(), entries.begin(), entries.end());
@@ -128,7 +128,7 @@ MobileDebugTable::MobileDebugTable(
     size_t callstack_data_size{0};
     std::tie(callstack_data, callstack_data_size) =
         reader->getRecord(callstack_debug_file);
-    InlinedCallStackUnpickler unpickler;
+    CallStackDebugInfoUnpickler unpickler;
     callstack_ptr_map_ = unpickler.unpickle(
         std::move(callstack_data), callstack_data_size, source_range_map, cu);
   }

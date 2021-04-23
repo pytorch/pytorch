@@ -54,20 +54,15 @@ generate_debug_handles(const std::shared_ptr<Graph>& graph) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      DebugHandleType debug_handle{-1};
-      if (dbg_handle_manager_ptr) {
-        if (n->callstack().has_value()) {
-          debug_handle =
-              dbg_handle_manager_ptr->getNextDebugHandleForInlinedCallStackPtr(
-                  n->sourceRange(), n->callstack().value());
-        } else {
-          // If node has no callstack, it is the top level node.
-          // In that case just save source range.
-          debug_handle =
-              dbg_handle_manager_ptr->getNextDebugHandleForInlinedCallStackPtr(
-                  n->sourceRange(), c10::intrusive_ptr<InlinedCallStack>());
-        }
-      }
+      // Note now we make having a valid debug_handle_manager a must.
+      // This avoids silently failing when say some code change results in
+      // to_backend not creating appropriate debug_handle_manager to
+      // be used with backend's preprocess function.
+      TORCH_CHECK(
+          dbg_handle_manager_ptr,
+          "Valid debug handle manager must be available.");
+      DebugHandleType debug_handle =
+          dbg_handle_manager_ptr->getNextDebugHandleForInlinedCallStackPtr(n);
       node_to_debug_handles.emplace(n, debug_handle);
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);

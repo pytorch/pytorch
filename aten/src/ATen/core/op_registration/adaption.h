@@ -12,11 +12,13 @@
  * To remove the hacky wrapper, the C++ function is changed to take
  * optional<Tensor> and unwrap the Tensor value at the beginning of
  * the function, e.g.:
- *   > const Tensor& weight =
-     >     c10::value_or_else(weight_opt, [] {returnTensor();});
+ *   > c10::MaybeOwned<Tensor> weight_maybe_owned =
+ *   >     at::borrow_from_optional_tensor(weight_opt);
+ *   > const Tensor& weight = *weight_maybe_owned;
  *
- * We may want make the kernel handle optional directly without going through
- * the creation of a default constructed tensor.
+ * We may want to make the kernel handle optional directly without
+ * going through the creation of a default-constructed Tensor in
+ * at::borrow_from_optional_tensor.
  */
 
 /*
