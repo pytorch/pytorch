@@ -24,8 +24,13 @@ from typing import Sequence, List, Union
 #     arguments.
 #
 
-def name(func: FunctionSchema) -> str:
-    return cpp.name(func)
+def name(func: FunctionSchema, *, append_overload_name=False) -> str:
+    name = cpp.name(func)
+    if append_overload_name and func.name.overload_name != '':
+        # This isn't an important characteristic of the dispatcher API, and could be removed if we want to further unify
+        # The dispatcher and C++ API's. There happen to be a few places in the codegen where we need to guarantee name uniqueness.
+        name = f'{name}_{func.name.overload_name}'
+    return name
 
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     # This is a faux amis.  If it makes sense in the future to add

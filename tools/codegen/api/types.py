@@ -406,11 +406,15 @@ class DispatcherSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
+    prefix: str
+
+    append_overload_name: bool
+
     def arguments(self) -> List[Binding]:
         return dispatcher.arguments(self.func)
 
     def name(self) -> str:
-        return dispatcher.name(self.func)
+        return self.prefix + dispatcher.name(self.func, append_overload_name=self.append_overload_name)
 
     def decl(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(a.decl() for a in self.arguments())
@@ -440,8 +444,8 @@ class DispatcherSignature:
         return f'{self.returns_type().cpp_type()} ({dispatcher_args_types_str})'
 
     @staticmethod
-    def from_schema(func: FunctionSchema) -> 'DispatcherSignature':
-        return DispatcherSignature(func)
+    def from_schema(func: FunctionSchema, *, prefix: str = '', append_overload_name: bool = False) -> 'DispatcherSignature':
+        return DispatcherSignature(func, prefix, append_overload_name)
 
 @dataclass(frozen=True)
 class NativeSignature:

@@ -6,7 +6,7 @@ import re
 from tools.codegen.context import method_with_native_function
 from tools.codegen.utils import Target, mapMaybe
 from tools.codegen.model import (Argument, ExternalBackendFunction,
-                                 ExternalBackendFunctionsGroup, SchemaKind,
+                                 ExternalBackendFunctionsGroup,
                                  assert_never, Return, is_generic_dispatch_key,
                                  ListType, OptionalType, BaseType, BaseTy, Variant)
 from tools.codegen.api.types import DispatcherSignature, CppSignatureGroup
@@ -102,7 +102,7 @@ def xla_tensor_creation_api(
 #     do not have full aten coverage.
 #     For operators not implemented by the external backend, our codegen
 #     will register these fallbacks instead.
-#   - Why do we generate fallback for ALL aten ops, including ops that
+#   - Why do we generate fallback for ALL (non-composite) aten ops, including ops that
 #     external backends have already implemented?
 #     Many external backend kernels only work with specific input shapes,
 #     and are written to call into a cpu fallback when given inputs
@@ -117,41 +117,6 @@ class GenExternalAtenFallback:
 
     @method_with_native_function
     def __call__(self, g: Union[ExternalBackendFunctionsGroup, ExternalBackendFunction]) -> List[str]:
-
-        def gen_out_wrapper(g: ExternalBackendFunctionsGroup) -> Optional[str]:
-            dispatcher_sig = DispatcherSignature.from_schema(g.out.native_function.func)
-            name = dispatcher_sig.name()
-
-            dispatcher_order_args = dispatcher.jit_arguments(g.out.native_function.func)
-            tensors = [a for a in dispatcher_order_args if a.type == BaseType(BaseTy.Tensor)]
-            print_args_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensors])
-
-            func_name = f'AtenXlaTypeDefault::{name}'
-            functional_result_name = f'{name}_tmp'
-            return_names = cpp.return_names(g.out.native_function)
-            if len(return_names) > 1:
-                updates = '\n  '.join(
-                    f'at::_copy_from_and_resize(std::get<{i}>({functional_result_name}), {ret_name});'
-                    for i, ret_name in enumerate(return_names))
-                returns = f'{dispatcher_sig.returns_type().cpp_type()}({", ".join(return_names)})'
-            else:
-                ret_name = return_names[0]
-                updates = f'at::_copy_from_and_resize({functional_result_name}, {ret_name});'
-                returns = ret_name
-
-            functional_sig = DispatcherSignature.from_schema(g.functional.native_function.func)
-
-            return f"""\
-{dispatcher_sig.defn(name=func_name)} {{
-  XLA_FN_TRACK(3);
-  TF_VLOG(3) << "XLA {name} :"{print_args_str};
-  auto {functional_result_name} = AtenXlaType::{functional_sig.name()}({", ".join(a.name for a in functional_sig.arguments())});
-  {updates}
-  return {returns};
-}}
-
-"""
-
         def gen_unstructured_external(f: ExternalBackendFunction) -> Optional[str]:
             if not requires_backend_wrapper(f):
                 return None
@@ -174,8 +139,6 @@ class GenExternalAtenFallback:
                     return device_like[0].name
                 raise AssertionError("Need a tensor-like or device argument in order to determine the output device")
 
-            # XLA appears to have used the dispatcher convention to write their kernel signatures,
-            # probably because they based their signatures off of our RegistrationDeclarations.h
             dispatcher_sig = DispatcherSignature.from_schema(f.native_function.func)
             name = dispatcher_sig.name()
             args = dispatcher_sig.arguments()
@@ -184,23 +147,16 @@ class GenExternalAtenFallback:
                 return f"  static {dispatcher_sig.decl()};"
 
             elif self.target is Target.REGISTRATION:
-                if f.metadata is not None:
-                    # xla has their own kernel: register it
-                    namespace = 'AtenXlaType'
-                else:
-                    # xla doesn't have a kernel: register the cpu fallback (or codegen'd out kernel).
-                    namespace = 'AtenXlaTypeDefault'
-                payload = f"static_cast<{dispatcher_sig.ptr_type()}>(&{namespace}::{name})"
+                # This codegen is only responsible for registering CPU fallback kernels
+                # We also skip registrations if there is a functional backend kernel,
+                # because we generate out/inplace wrappers in that case (handled in register_dispatch_key.py).
+                if f.metadata is not None or (isinstance(g, ExternalBackendFunctionsGroup) and g.functional.metadata is not None):
+                    return ''
+                payload = f"static_cast<{dispatcher_sig.ptr_type()}>(&AtenXlaTypeDefault::{name})"
                 return f'  m.impl("{f.native_function.func.name}", {payload});\n'
 
             if self.target is not Target.NAMESPACED_DEFINITION:
                 assert_never(self.target)
-
-            # Instead of generating a CPU fallback, the xla codegen generates out wrappers for a few hardcoded operators.
-            # TODO: we should generate out wrappers for ALL valid out kernels; not just ones in xla's hardcoded list
-            if f.native_function.func.kind() is SchemaKind.out and str(f.native_function.func.name.name) in _FN_OUT \
-                    and isinstance(g, ExternalBackendFunctionsGroup):
-                return gen_out_wrapper(g)
 
             # Everything below here is where we generate the CPU fallback.
             dispatcher_order_args = dispatcher.jit_arguments(f.native_function.func)

@@ -1451,11 +1451,19 @@ class ExternalBackendFunctionsGroup:
                     f"variant, {str(f.native_function.func.name)} will be generated for you " \
                     "and doesn't need to live in the yaml."
 
-    def functions(self) -> Iterator[ExternalBackendFunction]:
-        yield self.out
-        yield self.functional
-        if self.inplace is not None:
-            yield self.inplace
+    def functions(self, *, functional_first: bool = False) -> Iterator[ExternalBackendFunction]:
+        if not functional_first:
+            yield self.out
+            yield self.functional
+            if self.inplace is not None:
+                yield self.inplace
+        else:
+            # When we generate out/inplace wrappers for unstructured kernels, we need the functional kernel
+            # to be defined before we can generate the other two wrappers.
+            yield self.functional
+            yield self.out
+            if self.inplace is not None:
+                yield self.inplace
 
 
 # Helper functions for parsing argument lists (both inputs and returns)
