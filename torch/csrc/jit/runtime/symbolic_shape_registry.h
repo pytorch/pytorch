@@ -8,7 +8,8 @@
 namespace torch {
 namespace jit {
 
-TORCH_API c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(const FunctionSchema& schema);
+TORCH_API c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
+    const FunctionSchema& schema);
 
 } // namespace jit
 } // namespace torch
