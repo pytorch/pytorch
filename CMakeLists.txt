@@ -589,15 +589,7 @@ if(NOT IOS AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES M
   set(PROTOBUF_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
   set(CAFFE2_CUSTOM_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
 endif()
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-endif()
+
 # ---[ Misc checks to cope with various compiler modes
 include(cmake/MiscCheck.cmake)
 
@@ -814,15 +806,7 @@ endif()
 if(EMSCRIPTEN)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-implicit-function-declaration -DEMSCRIPTEN -s DISABLE_EXCEPTION_CATCHING=0")
 endif()
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-endif()
+
 if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0.0)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
 endif()
@@ -910,15 +894,6 @@ endif()
 
 # ---[ Make configuration files for cmake to allow dependent libraries
 # easier access to Caffe2.
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-endif()
 if((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
   message(WARNING
       "Generated cmake files are only fully tested if one builds "
@@ -1006,14 +981,4 @@ caffe2_print_configuration_summary()
 # ---[ Torch Deploy
 if(USE_DEPLOY)
   add_subdirectory(torch/csrc/deploy)
-endif()
-
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-  set_source_files_properties(native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
 endif()
