@@ -471,6 +471,143 @@ Tensor _cholesky_helper_cuda_cusolver(const Tensor& self, bool upper) {
   return self_working_copy;
 }
 
+
+template<typename scalar_t>
+inline static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, const Tensor& A_column_major_copy, bool upper, Tensor& infos) {
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  const int64_t n = self_working_copy.size(-2);
+  const int64_t nrhs = self_working_copy.size(-1);
+  const int64_t lda = std::max<int64_t>(1, n);
+  const int64_t batch_size = batchCount(self_working_copy);
+  const int64_t self_matrix_stride = matrixStride(self_working_copy);
+  scalar_t* self_working_copy_ptr = self_working_copy.data_ptr<scalar_t>();
+
+  const scalar_t* A_ptr = A_column_major_copy.data_ptr<scalar_t>();
+  const int64_t A_matrix_stride = matrixStride(A_column_major_copy);
+  const int64_t ldb = std::max<int64_t>(1, A_column_major_copy.size(-1));
+
+  int* infos_ptr = infos.data_ptr<int>();
+
+#ifdef USE_CUSOLVER_64_BIT
+  cusolverDnParams_t params;
+  cudaDataType datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
+  TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    at::cuda::solver::xpotrs(
+      handle, params, uplo, n, nrhs, datatype,
+      A_ptr + i * A_matrix_stride,
+      lda, datatype,
+      self_working_copy_ptr + i * self_matrix_stride,
+      ldb,
+      infos_ptr
+    );
+  }
+
+  TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
+#else // USE_CUSOLVER_64_BIT
+  int n_32 = cuda_int_cast(n, "n");
+  int nrhs_32 = cuda_int_cast(nrhs, "nrhs");
+  int lda_32 = cuda_int_cast(lda, "lda");
+  int ldb_32 = cuda_int_cast(ldb, "ldb");
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    at::cuda::solver::potrs<scalar_t>(
+      handle, uplo, n_32, nrhs_32,
+      A_ptr + i * A_matrix_stride,
+      lda_32,
+      self_working_copy_ptr + i * self_matrix_stride,
+      ldb_32,
+      infos_ptr
+    );
+  }
+#endif // USE_CUSOLVER_64_BIT
+}
+
+
+// This code path is only dispatched to if MAGMA is not linked in the pytorch build.
+// cusolverDn<t>potrsBatched only supports nrhs == 1
+template<typename scalar_t>
+inline static void apply_cholesky_cusolver_potrsBatched(Tensor& self_working_copy, const Tensor& A_column_major_copy, bool upper, Tensor& infos) {
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  const int64_t n = self_working_copy.size(-2);
+  const int64_t nrhs = self_working_copy.size(-1);
+  const int64_t lda = std::max<int64_t>(1, n);
+  const int64_t batch_size = batchCount(self_working_copy);
+  const int64_t self_matrix_stride = matrixStride(self_working_copy);
+  scalar_t* self_working_copy_ptr = self_working_copy.data_ptr<scalar_t>();
+
+  const scalar_t* A_ptr = A_column_major_copy.data_ptr<scalar_t>();
+  const int64_t A_matrix_stride = matrixStride(A_column_major_copy);
+  const int64_t ldb = std::max<int64_t>(1, A_column_major_copy.size(-1));
+
+  int* infos_ptr = infos.data_ptr<int>();
+
+  auto self_ptr_array = get_device_pointers<scalar_t>(self_working_copy);
+  auto A_ptr_array = get_device_pointers<scalar_t>(A_column_major_copy);
+
+  at::cuda::solver::potrsBatched(
+    handle, uplo,
+    cuda_int_cast(n, "n"),
+    cuda_int_cast(nrhs, "nrhs"),
+    reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr()),
+    cuda_int_cast(lda, "lda"),
+    reinterpret_cast<scalar_t**>(self_ptr_array.data_ptr()),
+    cuda_int_cast(ldb, "ldb"),
+    infos_ptr,
+    cuda_int_cast(batch_size, "batch_size")
+  );
+}
+
+Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A, bool upper) {
+  const int64_t batch_size = batchCount(self);
+  at::Tensor infos = at::zeros({1}, self.options().dtype(at::kInt));
+  at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
+  at::Tensor A_column_major_copy = cloneBatchedColumnMajor(A);
+
+  const int64_t nrhs = self_working_copy.size(-1);
+
+  // cusolverDn<t>potrsBatched only supports nrhs == 1
+  if (batch_size > 1 && nrhs == 1) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrs_batched", [&] {
+      apply_cholesky_cusolver_potrsBatched<scalar_t>(self_working_copy, A_column_major_copy, upper, infos);
+    });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrs", [&] {
+      apply_cholesky_cusolver_potrs<scalar_t>(self_working_copy, A_column_major_copy, upper, infos);
+    });
+  }
+
+  // info from potrs and potrsBatched only report if the i-th parameter is wrong, not about the matrix singularity, etc.
+  // So we don't need to check it all the time.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.item().toInt() == 0);
+
+  return self_working_copy;
+}
+
+
+void _cholesky_inverse_cusolver_potrs_based(Tensor& result, Tensor& infos, bool upper) {
+  at::Tensor input_working_copy = cloneBatchedColumnMajor(result);
+  at::Tensor infos_gpu = at::zeros({1}, result.options().dtype(at::kInt));
+  result.fill_(0);
+  result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_cuda_potri", [&] {
+    apply_cholesky_cusolver_potrs<scalar_t>(result, input_working_copy, upper, infos_gpu);
+  });
+
+  // Debug only: info of cusolver potrs only check if the i-th parameter is wrong
+  // Function argument `infos` is a CPU tensor, the following copy will cause a device-host sync.
+  // infos.copy_(infos_gpu);
+}
+
+Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, bool upper) {
+  _cholesky_inverse_cusolver_potrs_based(result, infos, upper);
+  return result;
+}
+
+
 /*
   The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
   from a sequence of elementary reflectors, such as produced by the geqrf function.
@@ -479,17 +616,15 @@ Tensor _cholesky_helper_cuda_cusolver(const Tensor& self, bool upper) {
   * `self` - Tensor with the directions of the elementary reflectors below the diagonal,
               it will be overwritten with the result
   * `tau` - Tensor containing the magnitudes of the elementary reflectors
-  * `infos` - Tensor to store cuSOLVER's error codes
   * `n_columns` - The number of columns of Q to be computed
 
   For further details, please see the cuSOLVER documentation for ORGQR and UNGQR.
 */
 template <typename scalar_t>
-inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+inline static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
-  auto infos_data = infos.data_ptr<int>();
   auto self_matrix_stride = matrixStride(self);
   auto batchsize = cuda_int_cast(batchCount(self), "batch size");
   auto m = cuda_int_cast(self.size(-2), "m");
@@ -515,10 +650,12 @@ inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos,
   at::cuda::solver::orgqr_buffersize<scalar_t>(
     at::cuda::getCurrentCUDASolverDnHandle(), m, n, k, self_data, lda, tau_data, &lwork);
 
+  auto info = at::zeros({1}, self.options().dtype(at::kInt));
+  auto info_data = info.data_ptr<int>();
+
   for (auto i = decltype(batchsize){0}; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
-    int* info_working_ptr = &infos_data[i];
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
     // allocate workspace storage
@@ -532,15 +669,19 @@ inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos,
       tau_working_ptr,
       static_cast<scalar_t*>(work_data.get()),
       lwork,
-      info_working_ptr
+      info_data
     );
+
+    // info from orgqr only reports if the i-th parameter is wrong
+    // so we don't need to check it all the time
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.item().toInt() == 0);
   }
 }
 
-// This is a type dispatching helper function for 'apply_orgqr_cusolver'
-Tensor& orgqr_helper_cuda_lib(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+// This is a type dispatching helper function for 'apply_orgqr'
+Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau, int64_t n_columns) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "orgqr_cuda", [&]{
-    apply_orgqr_cusolver<scalar_t>(result, tau, infos, n_columns);
+    apply_orgqr<scalar_t>(result, tau, n_columns);
   });
   return result;
 }

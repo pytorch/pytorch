@@ -12,31 +12,38 @@ class NnapiModule(torch.nn.Module):
     """
 
     comp: Optional[torch.classes._nnapi.Compilation]
+    weights: List[torch.Tensor]
+    out_templates: List[torch.Tensor]
 
     def __init__(
-            self,
-            ser_model: torch.Tensor,
-            weights: List[torch.Tensor],
-            inp_mem_fmts: List[int],
-            out_mem_fmts: List[int],
-            out_templates: List[torch.Tensor]):
+        self,
+        shape_compute_module: torch.nn.Module,
+        ser_model: torch.Tensor,
+        weights: List[torch.Tensor],
+        inp_mem_fmts: List[int],
+        out_mem_fmts: List[int],
+    ):
         super().__init__()
+        self.shape_compute_module = shape_compute_module
         self.ser_model = ser_model
         self.weights = weights
         self.inp_mem_fmts = inp_mem_fmts
         self.out_mem_fmts = out_mem_fmts
-        self.out_templates = out_templates
+        self.out_templates = []
         self.comp = None
 
     @torch.jit.export
-    def init(self):
+    def init(self, args: List[torch.Tensor]):
         assert self.comp is None
+        self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)
         self.weights = [w.contiguous() for w in self.weights]
         comp = torch.classes._nnapi.Compilation()
         comp.init(self.ser_model, self.weights)
         self.comp = comp
 
     def forward(self, args: List[torch.Tensor]) -> List[torch.Tensor]:
+        if self.comp is None:
+            self.init(args)
         comp = self.comp
         assert comp is not None
         outs = [torch.empty_like(out) for out in self.out_templates]
@@ -68,120 +75,62 @@ class NnapiModule(torch.nn.Module):
         return outs
 
 
-class NnapiInitWrapper(torch.nn.Module):
-    """Wrapper module to ensure NNAPI init is called."""
-    def __init__(self, nnapi_module):
-        super().__init__()
-        self.nnapi_module = nnapi_module
-
-    def forward(self, args: List[torch.Tensor]) -> List[torch.Tensor]:
-        return self.nnapi_module(args)
-
-    @torch.jit.export
-    def __getstate__(self):
-        return self.nnapi_module
-
-    @torch.jit.export
-    def __setstate__(self, nnapi_module):
-        self.training = False
-        self.nnapi_module = nnapi_module
-        self.nnapi_module.init()
-
-
-class ListWrapper(torch.nn.Module):
-    """NNAPI list-ifying wrapper.
-
-    NNAPI always expects a list of inputs.  This module provides a
-    single-tensor input interface for models that want it.
-    """
-    def __init__(self, mod):
-        super().__init__()
-        self.mod = mod
-
-    def forward(self, t: torch.Tensor) -> List[torch.Tensor]:
-        return self.mod([t])
-
-class DelistWrapper(torch.nn.Module):
-    """NNAPI de-list-ifying wrapper.
-
-    NNAPI always provides a list of outputs.  This module provides a
-    single-tensor output interface for models that want it.
-    """
-    def __init__(self, mod):
-        super().__init__()
-        self.mod = mod
-
-    def forward(self, ts: List[torch.Tensor]) -> torch.Tensor:
-        outs = self.mod(ts)
-        assert len(outs) == 1
-        return outs[0]
-
-class ListDelistWrapper(torch.nn.Module):
-    """NNAPI list-ifying and de-list-ifying wrapper.
-
-    NNAPI always expects a list of inputs and provides a list of outputs.
-    This module provides a single-tensor input/output interface
-    for models that want it.
-    """
-    def __init__(self, mod):
-        super().__init__()
-        self.mod = mod
-
-    def forward(self, t: torch.Tensor) -> torch.Tensor:
-        outs = self.mod([t])
-        assert len(outs) == 1
-        return outs[0]
-
-
-def _condensed_zeros_like(t):
-    """Get a small-storage deterministic tensor with the same shape and dtype as t
-
-    Similar to `torch.zeros(1, dtype=out.dtype).expand(out.shape)`,
-    but this works with quantized dtypes as well.
-
-    Similar to `torch.empty(1, dtype=out.dtype).expand(out.shape)`,
-    but always returns the same data.
-    """
-
-    ret = torch.empty_like(t).flatten()[1].clone().expand(t.shape)
-    assert ret.storage().size() == 1
-    ret.storage()[0] = 0
-    return ret
-
-
 def convert_model_to_nnapi(model, inputs):
     model = torch.jit.freeze(model)
 
     if isinstance(inputs, torch.Tensor):
         inputs = [inputs]
-        list_inputs = True
-    else:
-        list_inputs = False
 
-    outputs = model(*inputs)
+    ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines, retval_count = serialize_model(model, inputs)
+    ser_model_tensor = torch.tensor(ser_model, dtype=torch.int32)
 
-    if isinstance(outputs, torch.Tensor):
-        outputs = [outputs]
-        delist_outputs = True
-    else:
-        delist_outputs = False
+    # We have to create a new class here every time this function is called
+    # because module.define adds a method to the *class*, not the instance.
+    class ShapeComputeModule(torch.nn.Module):
+        """Code-gen-ed module for tensor shape computation
 
-    ser_model, used_weights, inp_mem_fmts, out_mem_fmts = serialize_model(model, inputs)
-    ser_model_tensor = torch.tensor(list(ser_model), dtype=torch.uint8)
+        module.prepare will mutate ser_model according to the computed operand
+        shapes, based on the shapes of args.  Returns a list of output templates.
+        """
+        pass
+    shape_compute_module = torch.jit.script(ShapeComputeModule())
+    real_shape_compute_lines = [
+        "def prepare(self, ser_model: torch.Tensor, args: List[torch.Tensor]) -> List[torch.Tensor]:\n",
+    ] + [
+        f"    {line}\n" for line in shape_compute_lines
+    ]
+    shape_compute_module.define("".join(real_shape_compute_lines))
 
-    out_templates = [_condensed_zeros_like(out) for out in outputs]
-    nnapi_model = NnapiInitWrapper(NnapiModule(
+    nnapi_model = NnapiModule(
+        shape_compute_module,
         ser_model_tensor,
         used_weights,
         inp_mem_fmts,
-        out_mem_fmts,
-        out_templates))
+        out_mem_fmts)
 
-    if list_inputs and delist_outputs:
-        nnapi_model = ListDelistWrapper(nnapi_model)
-    elif list_inputs:
-        nnapi_model = ListWrapper(nnapi_model)
-    elif delist_outputs:
-        nnapi_model = DelistWrapper(nnapi_model)
+    class NnapiInterfaceWrapper(torch.nn.Module):
+        """NNAPI list-ifying and de-list-ifying wrapper.
 
-    return torch.jit.script(nnapi_model)
+        NNAPI always expects a list of inputs and provides a list of outputs.
+        This module allows us to accept inputs as separate arguments.
+        It returns results as either a single tensor or tuple,
+        matching the original module.
+        """
+        def __init__(self, mod):
+            super().__init__()
+            self.mod = mod
+
+    wrapper_model_py = NnapiInterfaceWrapper(nnapi_model)
+    wrapper_model = torch.jit.script(wrapper_model_py)
+    # TODO: Maybe make these names match the original.
+    arg_list = ", ".join(f"arg_{idx}" for idx in range(len(inputs)))
+    if retval_count < 0:
+        ret_expr = "retvals[0]"
+    else:
+        ret_expr = "".join(f"retvals[{idx}], " for idx in range(retval_count))
+    wrapper_model.define(
+        f"def forward(self, {arg_list}):\n"
+        f"    retvals = self.mod([{arg_list}])\n"
+        f"    return {ret_expr}\n"
+    )
+    return wrapper_model

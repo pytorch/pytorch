@@ -295,7 +295,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
-      .def("_jit_pass_fold_convbn", &FoldConvBatchNorm)
+      .def(
+          "_jit_pass_fold_convbn",
+          [](Module& module) { return FoldConvBatchNorm(module); })
       .def(
           "_jit_onnx_list_model_parameters",
           [](Module& module) { return list_module_parameters(module); })
@@ -629,6 +631,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def("_jit_set_texpr_reductions_enabled", &setTexprReductionsEnabled)
       .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
+      .def("_jit_set_texpr_parallel_cpu_enabled", &setTexprParallelCPUEnabled)
+      .def("_jit_texpr_parallel_cpu_enabled", &texprParallelCPUEnabled)
       .def(
           "_jit_set_te_generate_block_code",
           [](bool gen_block_code) {

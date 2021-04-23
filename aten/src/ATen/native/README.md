@@ -365,46 +365,6 @@ you're a function that simply does not interact with any devices. In
 that case, code generation of the device guard can be disabled by adding
 `device_guard: False` to your function definition.
 
-### `matches_jit_signature`
-
-```
-matches_jit_signature: False
-```
-
-This will indicate that the func syntax does not follow the JIT signature schema.
-If you are a triggering an assert related to JIT signature compliance
-try adding this field and setting it to False. In general, this serves as a means
-of tracking an ongoing schema unification with the goal of aligning func syntax
-with other components of PyTorch in order to reduce overall complexity.
-If you find yourself having to set this field to False add @gchanan to your PR's
-set of reviewers.
-
-### `use_c10_dispatcher`
-
-```
-use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
-```
-
-This will indicate that the operator implementation is still using a legacy operator signature.
-For any new ops, please don't set this.
-The new, non-legacy operator signature requires the operator function signature to be aligned with the
-function schema in native_functions.yaml, i.e.
-- out arguments have to be in the end of the argument list instead of in the beginning
-- TensorOptions are taken as separate arguments
-```
-  const c10::optional<ScalarType>& dtype,
-  const c10::optional<Layout>& layout,
-  const c10::optional<Device>& device,
-  const c10::optional<bool>& pin_memory
-```
-  instead of one `TensorOptions` argument
-- optional tensors are taken as `const c10::optional<Tensor>&` instead of `Tensor`
-Some of our kernels are still written in a legacy way, not doing those things,
-and need an adapter to work with the dispatcher calling convention. For those, we use
-`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` to codegenerate a corresponding
-adapter around them in the operator registration call. Over time, we will migrate all
-those kernels to the new calling convention and hacky_wrapper will die.
-
 ### `manual_kernel_registration`
 
 ```

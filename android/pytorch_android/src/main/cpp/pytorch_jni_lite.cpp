@@ -17,14 +17,8 @@ namespace pytorch_jni {
 namespace {
 
 struct LiteJITCallGuard {
-  // VariableType dispatch is not included in default mobile build. We need set
-  // this guard globally to avoid dispatch error (only for dynamic dispatch).
-  // Thanks to the unification of Variable class and Tensor class it's no longer
-  // required to toggle the NonVariableTypeMode per op - so it doesn't hurt to
-  // always set NonVariableTypeMode for inference only use case.
-  // TODO: avoid having to set this guard for custom mobile build with mobile
-  // interpreter.
-  torch::AutoNonVariableTypeMode non_var_guard{true};
+  // Inference only workload.
+  c10::InferenceMode guard;
 };
 
 } // namespace
@@ -41,14 +35,46 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
   static facebook::jni::local_ref<jhybriddata> initHybrid(
       facebook::jni::alias_ref<jclass>,
       facebook::jni::alias_ref<jstring> modelPath,
+      facebook::jni::alias_ref<
+          facebook::jni::JMap<facebook::jni::JString, facebook::jni::JString>>
+          extraFiles,
       jint device) {
-    return makeCxxInstance(modelPath, device);
+    return makeCxxInstance(modelPath, extraFiles, device);
   }
 
-  PytorchJni(facebook::jni::alias_ref<jstring> modelPath, jint device) {
+  PytorchJni(
+      facebook::jni::alias_ref<jstring> modelPath,
+      facebook::jni::alias_ref<
+          facebook::jni::JMap<facebook::jni::JString, facebook::jni::JString>>
+          extraFiles,
+      jint device) {
     LiteJITCallGuard guard;
-    module_ = torch::jit::_load_for_mobile(std::move(modelPath->toStdString()));
+    std::unordered_map<std::string, std::string> extra_files;
+    const auto has_extra = extraFiles && extraFiles->size() > 0;
+    if (has_extra) {
+      for (const auto& e : *extraFiles) {
+        extra_files[e.first->toStdString()] = "";
+      }
+    }
     deviceType_ = deviceJniCodeToDeviceType(device);
+    module_ = torch::jit::_load_for_mobile(
+        std::move(modelPath->toStdString()), deviceType_, extra_files);
+    torch::jit::_load_extra_only_for_mobile(
+        std::move(modelPath->toStdString()), deviceType_, extra_files);
+    if (has_extra) {
+      static auto putMethod =
+          facebook::jni::JMap<facebook::jni::JString, facebook::jni::JString>::
+              javaClassStatic()
+                  ->template getMethod<facebook::jni::alias_ref<jobject>(
+                      facebook::jni::alias_ref<jobject>,
+                      facebook::jni::alias_ref<jobject>)>("put");
+      for (const auto& ef : extra_files) {
+        putMethod(
+            extraFiles,
+            facebook::jni::make_jstring(ef.first),
+            facebook::jni::make_jstring(ef.second));
+      }
+    }
   }
 
   static void registerNatives() {

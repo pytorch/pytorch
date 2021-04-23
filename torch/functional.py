@@ -480,13 +480,13 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     expression:
 
     .. math::
-        X[m, \omega] = \sum_{k = 0}^{\text{win\_length-1}}%
+        X[\omega, m] = \sum_{k = 0}^{\text{win\_length-1}}%
                             \text{window}[k]\ \text{input}[m \times \text{hop\_length} + k]\ %
                             \exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right),
 
     where :math:`m` is the index of the sliding window, and :math:`\omega` is
-    the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
-    :attr:`onesided` is the default value ``True``,
+    the frequency :math:`0 \leq \omega < \text{n\_fft}` for ``onesided=False``,
+    or :math:`0 \leq \omega < \lfloor \text{n\_fft} / 2 \rfloor + 1` for ``onesided=True``.
 
     * :attr:`input` must be either a 1-D time sequence or a 2-D batch of time
       sequences.
@@ -941,23 +941,23 @@ if TYPE_CHECKING:
     # There's no good way to use this type annotation without breaking JIT
     # overloads. So leave untyped for mypy for now.
 else:
-    @overload  # noqa: 749
-    def tensordot(a, b, dims: int = 2, out: Optional[torch.Tensor] = None):  # noqa: 749
+    @overload
+    def tensordot(a, b, dims: int = 2, out: Optional[torch.Tensor] = None):
         pass
 
-    @overload  # noqa: 749
-    def tensordot(a, b, dims: Tuple[List[int], List[int]], out: Optional[torch.Tensor] = None):  # noqa: 749
+    @overload
+    def tensordot(a, b, dims: Tuple[List[int], List[int]], out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
-    @overload  # noqa: 749
-    def tensordot(a, b, dims: List[List[int]], out: Optional[torch.Tensor] = None):  # noqa: 749
+    @overload
+    def tensordot(a, b, dims: List[List[int]], out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
-    @overload  # noqa: 749
-    def tensordot(a, b, dims: torch.Tensor, out: Optional[torch.Tensor] = None):  # noqa: 749
+    @overload
+    def tensordot(a, b, dims: torch.Tensor, out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
-def tensordot(a, b, dims= 2, out: Optional[torch.Tensor] = None):  # noqa: 749
+def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     r"""Returns a contraction of a and b over multiple dimensions.
 
     :attr:`tensordot` implements a generalized matrix product.
@@ -1294,28 +1294,28 @@ if TYPE_CHECKING:
 else:
     # TODO: type dim as BroadcastingList when
     # https://github.com/pytorch/pytorch/issues/33782 is fixed
-    @overload  # noqa: 749
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    @overload
+    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
         # type: (Tensor, str, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload  # noqa: 749
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    @overload
+    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload  # noqa: 749
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    @overload
+    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, Optional[number], Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload  # noqa: 749
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    @overload
+    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, str, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
 
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     .. warning::
@@ -1470,17 +1470,19 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             else:
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore
 
-def chain_matmul(*matrices):
+def chain_matmul(*matrices, out=None):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
     using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
     of arithmetic operations (`[CLRS]`_). Note that since this is a function to compute the product, :math:`N`
     needs to be greater than or equal to 2; if equal to 2 then a trivial matrix-matrix product is returned.
     If :math:`N` is 1, then this is a no-op - the original matrix is returned as is.
 
+    .. warning::
+        :func:`torch.chain_matmul` is deprecated, use :func:`torch.linalg.multi_dot` instead.
 
     Args:
         matrices (Tensors...): a sequence of 2 or more 2-D tensors whose product is to be determined.
-
+        out (Tensor, optional): the output tensor. Ignored if :attr:`out` = ``None``.
 
     Returns:
         Tensor: if the :math:`i^{th}` tensor was of dimensions :math:`p_{i} \times p_{i + 1}`, then the product

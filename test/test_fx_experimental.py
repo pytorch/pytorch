@@ -21,18 +21,21 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionerConfig,
     PartitionMode
 )
-from torch.fx.experimental.fuser import fuse
+import torch.fx.experimental.optimization as optimization
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.fx.passes.shape_prop import extract_tensor_metadata
 
 try:
     from torchvision.models import resnet18
+    import torchvision.models
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+skipIfNoMkldnn = unittest.skipIf(not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()), "no MKLDNN")
 
 
 def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
@@ -40,7 +43,6 @@ def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> Graph
         root if isinstance(root, torch.nn.Module) else torch.nn.Module(),
         RewritingTracer().trace(root),
     )
-
 
 class TestFXExperimental(JitTestCase):
     def test_serialize_graph(self):
@@ -73,16 +75,14 @@ class TestFXExperimental(JitTestCase):
         # Fix for now to add type/shape to output
         for node in traced.graph.nodes:
             if node.op == "output":
-                node.shape = a.shape
-                node.dtype = a.dtype
+                node.meta['tensor_meta'] = extract_tensor_metadata(a)
         for mod in module_with_submodules.modules():
             if isinstance(mod, GraphModule):
                 for node in mod.graph.nodes:
-                    node.shape = a.shape
-                    node.dtype = a.dtype
+                    node.meta['tensor_meta'] = extract_tensor_metadata(a)
         for node in module_with_submodules.graph.nodes:
-            node.shape = a.shape
-            node.dtype = a.dtype
+            node.meta['tensor_meta'] = extract_tensor_metadata(a)
+
 
         weights1 = {}
         weights2 = {}
@@ -120,9 +120,9 @@ class TestFXExperimental(JitTestCase):
         )
         result = graph_manipulation.serialize_tensor_quantization(q_tensor)
         result2 = graph_manipulation.serialize_tensor_quantization(q_tensor_channel)
-        assert result["q_scheme"] == "torch.per_tensor_affine"
+        assert result["qscheme"] == "torch.per_tensor_affine"
         assert result["q_scale"] == 1.0
-        assert result2["q_scheme"] == "torch.per_channel_affine"
+        assert result2["qscheme"] == "torch.per_channel_affine"
         assert len(result2["q_per_channel_scales"]) == 2
 
     def test_find_single_partition(self):
@@ -577,7 +577,7 @@ class TestFXExperimental(JitTestCase):
     def test_conv_bn_fusion(self):
         rn18 = resnet18().eval()
         traced = symbolic_trace(rn18)
-        fused = fuse(traced)
+        fused = optimization.fuse(traced)
 
         self.assertTrue(all(not isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules()))
 
@@ -726,6 +726,11 @@ terrible spacing
         partition_counter = 0
         NPARTITIONS = 3
 
+        # Add some random meta info to make sure it is kept around.
+        for node in my_module_traced.graph.nodes:
+            if node.op != "output":
+                node.meta["test_meta_info"] = True
+
         def mod_partition(node: Node):
             nonlocal partition_counter
             partition = partition_counter % NPARTITIONS
@@ -734,6 +739,17 @@ terrible spacing
 
         # split module in module with submodules
         module_with_submodules = split_module(my_module_traced, my_module, mod_partition)
+
+        # Check that test_meta_info was still on all nodes.
+        submodules = dict(module_with_submodules.named_modules())
+        for node in module_with_submodules.graph.nodes:
+            if node.op == "call_module":
+                submod = submodules[node.target]
+                self.assertTrue(isinstance(submod, torch.fx.GraphModule))
+                for submod_node in submod.graph.nodes:
+                    if submod_node.op != "output":
+                        stored_op = submod_node.meta.get("test_meta_info")
+                        self.assertTrue(stored_op is not None and stored_op)
 
         x = torch.rand(3, 4)
         y = torch.rand(3, 4)
@@ -1092,7 +1108,7 @@ class {test_classname}(torch.nn.Module):
                 self.rhs = rhs
 
             def forward(self, a, b, c, d, e):
-                s = torch.Tensor((0))
+                s = torch.tensor([])
                 matmuls = []
 
                 # For some reason using a list comprehension or for-loop for this
@@ -1159,6 +1175,67 @@ class {test_classname}(torch.nn.Module):
         # Basic graph structure check; the number of matrix multiplcations should not have changed.
         self.assertEqual(_count_matmuls(module), 2)
         self.assertEqual(_count_matmuls(opt_module), 2)
+
+    @skipIfNoMkldnn
+    def test_prepare_for_inference_cpu(self):
+        import torch.nn as nn
+
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                layers = []
+                layers2 = []
+                for _ in range(10):
+                    layers.append(nn.Conv2d(3, 3, 1))
+                    layers.append(nn.BatchNorm2d(3))
+                    layers.append(nn.ReLU())
+
+                    layers2.append(nn.Conv2d(3, 3, 1))
+                    layers2.append(nn.BatchNorm2d(3))
+                    layers2.append(nn.ReLU())
+                self.model = nn.Sequential(*layers)
+                self.model2 = nn.Sequential(*layers2)
+
+            def forward(self, x):
+                return self.model(x) + self.model2(x)
+
+
+        N, C, H, W, = 1, 3, 224, 224
+        inp = torch.randn(N, C, H, W)
+        with torch.no_grad():
+            model = Foo().eval()
+            optimized_model = optimization.prepare_for_inference(model)
+            torch.testing.assert_allclose(model(inp), optimized_model(inp))
+
+    @skipIfNoTorchVision
+    @skipIfNoMkldnn
+    def test_prepare_for_inference_cpu_torchvision(self):
+        models = [
+            torchvision.models.resnet18,
+            torchvision.models.resnet50,
+            torchvision.models.densenet121,
+            torchvision.models.shufflenet_v2_x1_0,
+            torchvision.models.vgg16,
+            torchvision.models.mobilenet_v2,
+            torchvision.models.mnasnet1_0,
+            torchvision.models.resnext50_32x4d
+        ]
+        with torch.no_grad():
+            for model_type in models:
+                model = model_type()
+                C, H, W, = 3, 224, 224
+                inp = torch.randn(3, C, H, W)
+                model(inp)
+                model.eval()
+                inp = torch.randn(1, C, H, W)
+                heuristic = optimization.gen_mkl_autotuner(inp, iters=0, warmup=0)
+                optimized_model = optimization.prepare_for_inference(model)
+
+                orig_out = model(inp)
+                new_out = optimized_model(inp)
+                torch.testing.assert_allclose(orig_out, new_out)
+
+
 
 if __name__ == "__main__":
     run_tests()

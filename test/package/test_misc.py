@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import inspect
 from io import BytesIO
 from sys import version_info
@@ -133,6 +134,46 @@ class TestMisc(PackageTestCase):
         packaged_src = inspect.getsourcelines(packaged_class)
         regular_src = inspect.getsourcelines(regular_class)
         self.assertEqual(packaged_src, regular_src)
+
+    def test_dunder_package_present(self):
+        """
+        The attribute '__torch_package__' should be populated on imported modules.
+        """
+        import package_a.subpackage
+
+        buffer = BytesIO()
+        obj = package_a.subpackage.PackageASubpackageObject()
+
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.save_pickle("obj", "obj.pkl", obj)
+
+        buffer.seek(0)
+        pi = PackageImporter(buffer)
+        mod = pi.import_module(
+            "package_a.subpackage"
+        )
+        self.assertTrue(hasattr(mod, "__torch_package__"))
+
+    def test_dunder_package_works_from_package(self):
+        """
+        The attribute '__torch_package__' should be accessible from within
+        the module itself, so that packaged code can detect whether it's
+        being used in a packaged context or not.
+        """
+        import package_a.use_dunder_package as mod
+
+        buffer = BytesIO()
+
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.save_module(mod.__name__)
+
+        buffer.seek(0)
+        pi = PackageImporter(buffer)
+        imported_mod = pi.import_module(
+            mod.__name__
+        )
+        self.assertTrue(imported_mod.is_from_package())
+        self.assertFalse(mod.is_from_package())
 
 
 if __name__ == "__main__":

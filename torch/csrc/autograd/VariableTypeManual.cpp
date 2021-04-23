@@ -7,6 +7,7 @@
 #include <ATen/TracerMode.h>
 #include <ATen/RedispatchFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 using namespace at;
@@ -18,7 +19,7 @@ std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::
   std::vector<DeprecatedTypeProperties*> res;
   res.reserve(backends.size());
   for (auto p : backends) {
-    for (int64_t s = 0; s < static_cast<int64_t>(ScalarType::NumOptions); s++) {
+    for(const auto s : c10::irange(static_cast<int64_t>(ScalarType::NumOptions))) {
       auto& type = getDeprecatedTypeProperties(static_cast<Backend>(p), static_cast<ScalarType>(s));
       res.emplace_back(&type);
     }
@@ -133,7 +134,6 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
-  increment_version(self);
   rebase_history(self , std::move(grad_fn));
 
   if (isDifferentiableType(self.scalar_type()) &&
@@ -282,4 +282,22 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
 }
 
 }  // namespace
-}}} // namespace torch::autograd::VariableType
+}} // namespace autograd::VariableType
+
+namespace InplaceOrView {
+  Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
+    {
+      at::AutoDispatchBelowInplaceOrView guard;
+      at::redispatch::copy_(ks & c10::after_InplaceOrView_keyset, self, src, non_blocking);
+    }
+    torch::autograd::increment_version(self);
+    return self;
+  }
+
+  namespace {
+    TORCH_LIBRARY_IMPL(aten, InplaceOrView, m) {
+      m.impl("copy_", torch::dispatch(DispatchKey::InplaceOrView, TORCH_FN(InplaceOrView::copy_)));
+    }
+  } // namespace
+} // namespace InplaceOrView
+} // namespace torch

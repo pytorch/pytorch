@@ -83,9 +83,11 @@ inline void fastResizeToZero(at::Tensor& t) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(checkResizedDataPtr(t));
 }
 
+bool opIsRegistered(const c10::Symbol& op_name);
+
 bool canRunOutOfPlace(Node* n);
 bool canReuseInputsOutputs(Node* n);
-bool canOptimizeConstruct(Node* n);
+bool isOptimizableContainerType(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 

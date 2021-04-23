@@ -115,34 +115,6 @@ __device__ T reduceBlock(T* smem,
   return threadVal;
 }
 
-
-// Block-wide reduction where each thread locally reduces N
-// values before letting a single warp take over - assumes
-// threadVals is in registers, not shared memory
-//
-// If smem is not used again, there is no need to __syncthreads before this
-// call. However, if smem will be used, e.g., this function is called in a loop,
-// then __syncthreads is needed either before or afterwards to prevent non-0
-// threads overriding smem in the next loop before num-0 thread reads from it.
-template <typename T, typename ReduceOp, int N>
-__device__ T reduceBlockWithNThreadLocalReductions(T *smem,
-                         T threadVals[N],
-                         const unsigned int numVals,
-                         ReduceOp reduceOp,
-                         T init) {
-  int offset = threadIdx.x * N;
-  T local = offset < numVals ? threadVals[0] : init;
-
-  #pragma unroll
-  for (int i = 1; i < N; ++i) {
-    ++offset;
-    T next = offset < numVals ? threadVals[i] : init;
-    local = reduceOp(local, next);
-  }
-
-  return reduceBlock<T, ReduceOp>(smem, blockDim.x < numVals ? blockDim.x : numVals, local, reduceOp, init);
-}
-
 // Make sure the given tensor doesn't have too many dimensions
 void THCCheckTensorDims(THCState* state, THCudaTensor* tensor, int arg);
 

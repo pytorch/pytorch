@@ -9,6 +9,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -77,7 +78,7 @@ at::Tensor& flatten_copy_out(
 
   std::vector<int64_t> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
-  for (int64_t i = 0; i < start_dim; i++) {
+  for (const auto i : c10::irange(start_dim)) {
     shape.push_back(self.sizes()[i]);
   }
   shape.push_back(slice_numel);
@@ -106,6 +107,11 @@ namespace jit {
 
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
+bool opIsRegistered(const c10::Symbol& op_name) {
+  const std::string name(op_name.toQualString());
+  return SROperatorRegistry()->Has(name);
+}
+
 bool canRunOutOfPlace(Node* n) {
   auto op_name = std::string(n->kind().toQualString());
   return SROperatorRegistry()->Has(op_name);
@@ -130,7 +136,8 @@ bool canRunNatively(Node* n) {
       "prim::ListConstruct",
       "prim::ListUnpack",
       "prim::TupleConstruct",
-      "prim::DictConstruct"};
+      "prim::DictConstruct",
+      "aten::__getitem__"};
   auto str = std::string(n->kind().toQualString());
   if (!native_nodes.count(str)) {
     return false;
@@ -153,7 +160,7 @@ bool inputsCanRunOutOfPlace(Node* n) {
   return true;
 }
 
-bool canOptimizeConstruct(Node* n) {
+bool isOptimizableContainerType(Node* n) {
   const auto& type = n->output()->type();
   if (type->kind() == TypeKind::ListType) {
     const auto& list_type = type->expectRef<ListType>();
@@ -178,7 +185,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim_ListConstruct,
     [](Node* n) -> SROperator {
       const auto& type = n->output()->type()->expectRef<ListType>();
-      bool can_optimize = canOptimizeConstruct(n);
+      bool can_optimize = isOptimizableContainerType(n);
       return [can_optimize, &type](ProcessedNode* p_node) {
         const auto& out_l = p_node->Output(0);
         if (!out_l.isNone() && can_optimize) {
@@ -198,7 +205,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim::TupleConstruct,
     prim_TupleConstruct,
     [](Node* n) -> SROperator {
-      bool can_optimize = canOptimizeConstruct(n);
+      bool can_optimize = isOptimizableContainerType(n);
       return [can_optimize](ProcessedNode* p_node) {
         const auto& out_l = p_node->Output(0);
         if (!out_l.isNone() && can_optimize) {
@@ -519,7 +526,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       at::native::threshold_out(in0_t, 0, 0, out_t);
     } else {
-      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       int64_t nn = in0_t.numel();
       te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
@@ -536,9 +543,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     auto& out_t = p_node->Output(0).toTensor();
     if (!te->supports(in0_t)) {
       fastResizeToZero(out_t);
-      at::native::tanh_out(in0_t, out_t);
+      at::cpu::tanh_out(out_t, in0_t);
     } else {
-      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       int64_t nn = in0_t.numel();
       te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
@@ -558,9 +565,9 @@ REGISTER_OPERATOR_FUNCTOR(
         auto& out_t = p_node->Output(0).toTensor();
         if (!te->supports(in0_t)) {
           fastResizeToZero(out_t);
-          at::native::sigmoid_out(in0_t, out_t);
+          at::cpu::sigmoid_out(out_t, in0_t);
         } else {
-          at::native::resize_as_(out_t, in0_t, c10::nullopt);
+          at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
           int64_t nn = in0_t.numel();
           te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
         }
@@ -587,7 +594,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       at::native::logit_out(in0_t, in1_d, out_t);
     } else {
-      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       int64_t nn = in0_t.numel();
       te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
@@ -601,7 +608,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    at::native::resize_as_(out_t, in0_t, c10::nullopt);
+    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
     at::native::copy_(out_t, in0_t, false);
   };
 });
@@ -656,7 +663,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
-        return at::native::embedding_bag_byte_rowwise_offsets_out(
+        return at::native::embedding_bag_4bit_rowwise_offsets_out(
             out_t,
             weight,
             indices,
@@ -914,6 +921,14 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       // put output back
       p_node->Output(0) = std::move(stack[0]);
     };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::__getitem__")) {
+    return [](ProcessedNode* p_node) {
+      auto dict = p_node->Input(0).toGenericDict();
+      auto key = p_node->Input(1);
+      auto value = dict.find(key);
+      TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
+      p_node->Output(0) = value->value();
+    };
   } else if (n->kind() == prim::ListConstruct) {
     return [](ProcessedNode* p_node) {
       // prepare inputs
@@ -1025,9 +1040,10 @@ REGISTER_OPERATOR_FUNCTOR(
     aten_embedding_bag,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
+        // TODO: Support only 9 args once the old signature has been removed.
         TORCH_CHECK(
-            p_node->inputs().size() == 8,
-            "Expected number of inputs are 8, but got " +
+            p_node->inputs().size() == 8 || p_node->inputs().size() == 9,
+            "Expected number of inputs is 8 or 9, but got " +
                 std::to_string(p_node->inputs().size()));
 
         const auto& weight = p_node->Input(0).toTensor();
@@ -1038,6 +1054,14 @@ REGISTER_OPERATOR_FUNCTOR(
         auto sparse = p_node->Input(5).toBool();
         auto per_sample_weights = p_node->Input(6).toOptional<at::Tensor>();
         auto include_last_offset = p_node->Input(7).toBool();
+        c10::optional<int64_t> padding_idx;
+        if (p_node->inputs().size() == 9) {
+          if (p_node->Input(8).isNone()) {
+            padding_idx = c10::nullopt;
+          } else {
+            padding_idx = p_node->Input(8).toInt();
+          }
+        }
 
         at::native::check_arguments(
             weight,
@@ -1077,7 +1101,8 @@ REGISTER_OPERATOR_FUNCTOR(
             indices,
             offsets,
             mode,
-            per_sample_weights);
+            per_sample_weights,
+            padding_idx.value_or(-1));
 
         if (p_node->Output(2).isNone()) {
           p_node->Output(2) = at::empty(offsets.sizes(), offsets.options());
@@ -1109,7 +1134,8 @@ REGISTER_OPERATOR_FUNCTOR(
             offsets,
             mode,
             per_sample_weights,
-            include_last_offset);
+            include_last_offset,
+            padding_idx.value_or(-1));
       };
     });
 

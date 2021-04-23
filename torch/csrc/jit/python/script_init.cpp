@@ -1497,8 +1497,17 @@ void initJitScriptBindings(PyObject* module) {
               << "Torchscript does not support class inheritance.";
         }
         auto cu = get_python_cu();
-        const auto classname = c10::QualifiedName(qualifiedName);
-        auto classType = ClassType::create(classname, cu);
+        auto classname = c10::QualifiedName(qualifiedName);
+        if (cu->get_type(classname) != nullptr) {
+          classname = cu->mangle(classname);
+        }
+
+        auto classType = ClassType::create(
+            classname,
+            cu,
+            /* is_module = */ false,
+            /* doc_string = */ "",
+            getUnresolvedClassAttributes(classDef));
         cu->register_type(classType);
         std::vector<ResolverPtr> methodRcbs, propRcbs;
         std::vector<Def> methodDefs;
@@ -1552,6 +1561,7 @@ void initJitScriptBindings(PyObject* module) {
               default_it->second));
           ++defs_it;
         }
+        return classType;
       });
   m.def(
       "_jit_script_interface_compile",
@@ -1559,11 +1569,15 @@ void initJitScriptBindings(PyObject* module) {
          const ClassDef& classDef,
          const ResolutionCallback& rcb,
          bool is_module) {
+        auto cu = get_python_cu();
+        auto className = c10::QualifiedName(qualifiedName);
+        if (cu->get_type(className) != nullptr) {
+          className = cu->mangle(className);
+        }
+
         get_python_cu()->define_interface(
-            c10::QualifiedName(qualifiedName),
-            classDef,
-            pythonResolver(rcb),
-            is_module);
+            className, classDef, pythonResolver(rcb), is_module);
+        return className.qualifiedName();
       });
 
   py::class_<torch::jit::ErrorReport::CallStack>(
