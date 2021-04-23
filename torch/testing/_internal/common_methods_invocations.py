@@ -637,7 +637,7 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
                                                    requires_grad=requires_grad),
                                        args=(arg,),
                                        kwargs=dict(alpha=alpha),
-                                       broadcasts_input=broadcasts_input))       
+                                       broadcasts_input=broadcasts_input))
     return tuple(samples)
 
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
