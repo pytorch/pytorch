@@ -3135,13 +3135,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_inplace_autograd=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           sample_inputs_func=sample_inputs_addmm,
-           skips=(
-               # addmm_ resizes input tensor if it's not the correct size, but it shouldn't.
-               # Reference: https://github.com/pytorch/pytorch/issues/56233
-               SkipInfo('TestCommon', 'test_variant_consistency_eager', device_type='cpu'),
-           )
-           ),
+           sample_inputs_func=sample_inputs_addmm),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
            variant_test_name='decomposed',
@@ -3153,13 +3147,7 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
-           sample_inputs_func=partial(sample_inputs_addmm, alpha=1, beta=1),
-           skips=(
-               # addmm_ resizes input tensor if it's not the correct size, but it shouldn't.
-               # Reference: https://github.com/pytorch/pytorch/issues/56233
-               SkipInfo('TestCommon', 'test_variant_consistency_eager', device_type='cpu'),
-           )
-           ),
+           sample_inputs_func=partial(sample_inputs_addmm, alpha=1, beta=1)),
     OpInfo('addmv',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
