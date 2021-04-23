@@ -114,21 +114,22 @@ void ThreadPool::main_loop(std::size_t index) {
         LOG(ERROR) << "Exception in thread pool task: unknown";
       }
 
-      // Update status of empty, maybe
-      // Need to recover the lock first
-      lock.lock();
+    } // Destruct tasks before taking the lock
 
-      // Increment count, indicating thread is available.
-      ++available_;
-      if (tasks_.empty() && available_ == total_) {
-        complete_ = true;
-        completed_.notify_one();
-      }
+    // Update status of empty, maybe
+    // Need to recover the lock first
+    lock.lock();
 
-      // Deliberately hold the lock on the backedge, so this thread has an
-      // opportunity to acquire a new task before another thread acquires
-      // the lock.
+    // Increment count, indicating thread is available.
+    ++available_;
+    if (tasks_.empty() && available_ == total_) {
+      complete_ = true;
+      completed_.notify_one();
     }
+
+    // Deliberately hold the lock on the backedge, so this thread has an
+    // opportunity to acquire a new task before another thread acquires
+    // the lock.
   } // while running_
 }
 
