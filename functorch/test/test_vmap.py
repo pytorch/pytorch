@@ -765,6 +765,7 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg):
             vmap(completely_unrelated_backward)(y)
 
+    @unittest.expectedFailure
     def test_grad_unsupported_interaction(self):
         input_tensor = torch.randn(3, requires_grad=True)
         err_msg = 'autograd.grad.* called inside torch.vmap'
@@ -2134,7 +2135,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
              in_dims=(2, 0))
 
     # TODO: reenable the random op failures
-    @unittest.expectedFailure
     def test_no_random_op_support(self):
         B0 = 2
 
