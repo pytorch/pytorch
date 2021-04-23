@@ -2952,6 +2952,10 @@ class TestAutograd(TestCase):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
+    def test_sinc(self):
+        a = torch.Tensor([0.0, 1.0], dtype=torch.double).requires_grad_()
+        gradcheck(torch.sinc, a)
+
     def test_igamma(self):
         # 1e-3 offset to avoid zeros
         # NOTE: derivative for s is not implemented
