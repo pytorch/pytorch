@@ -560,7 +560,7 @@ void initTensorExprBindings(PyObject* module) {
             argInputs.push_back(py::cast<double>(inp));
           } else if (py::isinstance<py::int_>(inp)) {
             argInputs.push_back(py::cast<int64_t>(inp));
-          } else if (py::isinstance<py::none>(inp)){
+          } else if (py::isinstance<py::none>(inp)) {
             argInputs.push_back(ArgNone());
           } else {
             throw std::runtime_error("nyi");
