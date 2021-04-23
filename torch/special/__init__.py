@@ -248,8 +248,8 @@ Similar to SciPy's `scipy.special.xlog1py`.
 """ + r"""
 
 Args:
-    input (Number or Tensor)
-    other (Number or Tensor)
+    input (Number or Tensor) : Multiplier
+    other (Number or Tensor) : Argument
 
 .. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
 
