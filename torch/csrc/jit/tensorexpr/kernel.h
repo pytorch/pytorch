@@ -68,10 +68,6 @@ Tensor* computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape);
 
-ExprHandle tensorOrConstant(
-    const ArgValue& v,
-    const std::vector<ExprHandle>& axes);
-
 Tensor* computeOneOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
@@ -130,6 +126,14 @@ Tensor* computeMatmul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType);
+
+Tensor* computeSum(
+    const std::vector<ArgValue> inputs,
+    const c10::optional<ScalarType>& outputType);
+
+ExprHandle tensorOrConstant(
+    const ArgValue& v,
+    const std::vector<ExprHandle>& axes);
 
 void promoteInputs(
     std::vector<ExprHandle>& inputs,
@@ -220,7 +224,6 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::vector<ExprHandle>& axes);
 
-  Tensor* computeSum(const torch::jit::Value* v);
 
   Tensor* computeSoftmax(const torch::jit::Value* v, bool log_softmax);
 
@@ -255,12 +258,6 @@ class TORCH_API TensorExprKernel {
     bool keepdim;
     c10::optional<Dtype> dtype;
   };
-
-  // Get the reduction info for the given node, based on properties and inputs.
-  ReductionInfo getReductionInfo(const torch::jit::Node* node);
-
-  // Get the reduction axes for the given node, based on properties and inputs.
-  std::vector<int64_t> getReductionAxes(const torch::jit::Node* node);
 
  private:
   struct UnpackedTensorOptions {
