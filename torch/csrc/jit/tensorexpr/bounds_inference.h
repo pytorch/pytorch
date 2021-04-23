@@ -17,6 +17,7 @@ class Stmt;
 
 enum C10_API_ENUM TensorAccessKind { kLoad, kStore, kMutate };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API TensorAccessBoundsInfo {
   TensorAccessKind kind;
   std::vector<const Expr*> start;

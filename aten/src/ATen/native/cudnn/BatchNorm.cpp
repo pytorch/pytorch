@@ -240,8 +240,9 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   // TODO: Is it worth it to have a contiguous call or maybe we should go with
   // whatever format is given here.
 
+  auto grad_output_contig = grad_output_t.contiguous(input_t.suggest_memory_format());
   TensorArg input{ input_t, "input", 1 },
-            grad_output{ grad_output_t.contiguous(input_t.suggest_memory_format()), "grad_output", 2 },
+            grad_output{ grad_output_contig, "grad_output", 2 },
             weight{ weight_t, "weight", 3 },
             save_mean{ save_mean_t, "save_mean", 4 },
             save_var{ save_var_t, "save_var", 5 },

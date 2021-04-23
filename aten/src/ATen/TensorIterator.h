@@ -73,7 +73,7 @@ struct DimCounter {
 struct TORCH_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
   OperandInfo() {}
-  explicit OperandInfo(Tensor t) : tensor(std::move(t)) {
+  explicit OperandInfo(Tensor&& t) : tensor(std::move(t)) {
     if (tensor.defined()) {
       device = tensor.device();
       target_dtype = tensor.scalar_type();

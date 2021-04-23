@@ -136,12 +136,19 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     sub_data_shape = sym_help._slice_helper(
         g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[maxsize])
     values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
+    # Check if values is a singular value and expand accordingly
+    rank = sym_help._get_tensor_rank(values)
+    if rank is not None and rank == 0:
+        values = expand(g, values, values_shape, None)
     values = g.op("Reshape", values, values_shape)
 
+    dtype = self.type().scalarType()
+    if dtype is not None and dtype != values.type().scalarType():
+        values = g.op("Cast", values, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+
     if accumulate:
-        dtype = self.type().scalarType()
-        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-        dtype = sym_help.scalar_type_to_pytorch_type[dtype]
         zeros = g.op("ConstantOfShape", g.op("Shape", self), value_t=torch.tensor([0], dtype=dtype))
         result = g.op("ScatterND", zeros, index, values)
         result = add(g, self, result)
@@ -439,13 +446,13 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
-def det(g, self):
+def linalg_det(g, self):
     return g.op("Det", self)
 
 
 def logdet(g, input):
     from torch.onnx.symbolic_opset9 import log
-    return log(g, det(g, input))
+    return log(g, linalg_det(g, input))
 
 
 def arange(g, *args):
@@ -747,7 +754,7 @@ def flatten(g, input, start_dim, end_dim):
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i', 'i')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
@@ -756,9 +763,12 @@ def embedding_bag(g,
                   mode,
                   sparse,
                   per_sample_weights,
-                  include_last_offset):
+                  include_last_offset,
+                  padding_idx):
     if scale_grad_by_freq and sym_help._training_mode:
         return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
+    if padding_idx is not None and padding_idx >= 0:
+        raise RuntimeError('embedding_bag with padding_idx')
 
     loop_condition = g.op("Constant", value_t=torch.tensor(1))
     loop_condition = g.op("Cast", loop_condition, to_i=9)

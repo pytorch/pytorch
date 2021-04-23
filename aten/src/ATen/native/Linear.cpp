@@ -1,9 +1,11 @@
 #include <ATen/ATen.h>
+#include <ATen/native/Resize.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
+#include <c10/util/MaybeOwned.h>
 
 #include <array>
 #include <cctype>
@@ -16,23 +18,25 @@ namespace at { namespace native {
 
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  auto bias = bias_opt.has_value()
+    ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
+    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
 
   if (input.is_mkldnn()) {
-    return at::mkldnn_linear(input, weight, bias);
+    return at::mkldnn_linear(input, weight, *bias);
   }
 #if defined(C10_MOBILE)
-  if (xnnpack::use_linear(input, weight, bias)) {
-    return xnnpack::linear(input, weight, bias);
+  if (xnnpack::use_linear(input, weight, *bias)) {
+    return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input.dim() == 2 && bias.defined()) {
+  if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
-    return at::addmm(bias, input, weight.t());
+    return at::addmm(*bias, input, weight.t());
   }
   auto output = at::matmul(input, weight.t());
-  if (bias.defined()) {
-    output.add_(bias);
+  if (bias->defined()) {
+    output.add_(*bias);
   }
   return output;
 }
@@ -638,9 +642,26 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
 }
 
 Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
-  result.copy_(at::native::tensordot(input1, input2, dims1, dims2));
+  Tensor result_tmp = at::native::tensordot(input1, input2, dims1, dims2);
+  auto result_dtype = result_tmp.scalar_type();
+  auto output_tensor_dtype = result.scalar_type();
+  auto output_device = result.device();
+  auto input_device = input1.device();
+  // check if the input & output tensors are on the same device.
+  TORCH_CHECK(
+    output_device == input_device,
+    "tensordot: Expected the output and input tensors to be on the "
+    "same device, but got output on ", output_device, " and inputs on ",
+    input_device);
+  // check if the computed result has the same dtype as the out tensor
+  //   (because tensordot does not support type promotion)
+  TORCH_CHECK(
+    result_dtype == output_tensor_dtype, "tensordot",
+    ": Expected the output tensor to have dtype ", result_dtype,
+    ", but got an output tensor with dtype ", output_tensor_dtype);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
-
 
 }}  // namespace at::native

@@ -187,7 +187,18 @@ class ModelTest(PackageTestCase):
 
         i = PackageImporter(f1)
         loaded = i.load_pickle("model", "pickled")
-        torch.jit.script(loaded)
+
+        # Model should script successfully.
+        scripted = torch.jit.script(loaded)
+
+        # Scripted model should save and load successfully.
+        f2 = BytesIO()
+        torch.jit.save(scripted, f2)
+        f2.seek(0)
+        loaded = torch.jit.load(f2)
+
+        input = torch.rand(1, 3, 224, 224)
+        self.assertTrue(torch.allclose((loaded(input)), resnet(input)))
 
 
 if __name__ == "__main__":

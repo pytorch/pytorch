@@ -13,7 +13,7 @@ import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
 from ._file_structure_representation import Folder, _create_folder_from_file_list
-from ._glob_group import GlobPattern
+from .glob_group import GlobPattern
 from ._importlib import (
     _calc___package__,
     _normalize_line_endings,
@@ -217,7 +217,8 @@ class PackageImporter(Importer):
     def id(self):
         """
         Returns internal identifier that torch.package uses to distinguish PackageImporter instances.
-        Looks like:
+        Looks like::
+
             <torch_package_0>
         """
         return self._mangler.parent_name()
@@ -259,6 +260,7 @@ class PackageImporter(Importer):
         ns["__file__"] = mangled_filename
         ns["__cached__"] = None
         ns["__builtins__"] = self.patched_builtins
+        ns["__torch_package__"] = True
 
         # Add this module to our private global registry. It should be unique due to mangling.
         assert module.__name__ not in _package_imported_modules

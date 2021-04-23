@@ -176,7 +176,7 @@ struct BoxedKernelWrapper<
     DispatchKeySet dispatchKeySet,
     Args... args
   ) {
-    torch::jit::Stack stack = boxArgs(args...);
+    torch::jit::Stack stack = boxArgs<Args...>(std::forward<Args>(args)...);
     (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
 
     return guts::if_constexpr<!std::is_same<void, Result>::value>(
@@ -217,7 +217,7 @@ struct BoxedKernelWrapper<
     DispatchKeySet dispatchKeySet,
     at::Tensor& outArg, OtherArgs... otherArgs
   ) {
-    torch::jit::Stack stack = boxArgs(outArg, otherArgs...);
+    torch::jit::Stack stack = boxArgs<at::Tensor&, OtherArgs...>(outArg, std::forward<OtherArgs>(otherArgs)...);
     (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
@@ -255,7 +255,7 @@ struct BoxedKernelWrapper<
     DispatchKeySet dispatchKeySet,
     FirstArg firstArg, RestArgs... restArgs
   ) {
-    torch::jit::Stack stack = boxArgs(firstArg, restArgs...);
+    torch::jit::Stack stack = boxArgs<FirstArg, RestArgs...>(std::forward<FirstArg>(firstArg), std::forward<RestArgs>(restArgs)...);
     (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
@@ -263,6 +263,8 @@ struct BoxedKernelWrapper<
       "but instead returned ", stack.size(), " values."
     );
 
+    // reusing restArgs after it has been forwarded here is ok because we know
+    // that the last element is of type `Tensor&`.
     return std::get<sizeof...(RestArgs) - 1>(std::tuple<RestArgs...>{restArgs...});
   }
 };
@@ -293,7 +295,7 @@ struct BoxedKernelWrapper<
     using ArgTuple = std::tuple<Args...>;
     constexpr int RetCount = std::tuple_size<Result>();
 
-    torch::jit::Stack stack = boxArgs(args...);
+    torch::jit::Stack stack = boxArgs<Args...>(std::forward<Args>(args)...);
     (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == RetCount,
@@ -301,7 +303,9 @@ struct BoxedKernelWrapper<
       "but instead returned ", stack.size(), " values."
     );
 
-    auto result = guts::tuple_take<ArgTuple, -RetCount>(ArgTuple{args...});
+    // reusing args after it has been forwarded here is ok because we know
+    // that the last RetCount elements are of type `Tensor&`.
+    auto result = guts::tuple_take<ArgTuple, -RetCount>(ArgTuple{std::forward<Args>(args)...});
     static_assert(
         std::is_same<Result, decltype(result)>::value,
         "The parameter list of an op returning a tuple of Tensor references "

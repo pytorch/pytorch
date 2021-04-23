@@ -268,7 +268,7 @@ class ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual void monitoredBarrier(
-      const BarrierOptions& /* unused */) {
+      const BarrierOptions& /* unused */, bool /* unused */ = false ) {
     auto backendName = getBackendName();
     throw std::runtime_error(
         c10::str("ProcessGroup ",

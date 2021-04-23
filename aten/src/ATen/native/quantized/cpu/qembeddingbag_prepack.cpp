@@ -125,16 +125,89 @@ namespace {
 // Note - This is a temporary pack function for embedding bag which quantizes
 // and packs the float weight tensor. In the next step it will be replaced by a
 // quantize and pack function once we support FP scale and FP zero_point
+//
+// Python example examining a packed 8bit zero_point and scale:
+//
+// >> x = torch.from_numpy(np.array([[[10, 20], [30, 40]],[[50, 60], [70, 80]]], dtype=np.float32))
+// >> x_packed = torch.ops.quantized.embedding_bag_byte_prepack(x)
+//
+// # Pull out and examine packed scales, zero_points and values
+// >> zero_points = x_packed[:,:,-4:].numpy()
+// >> scales = x_packed[:,:,-8:-4].numpy()
+// >> values = x_packed[:,:,:-8].numpy()
+//
+// >> zero_points
+// array([[[  0,   0,  32,  65],
+//        [  0,   0, 240,  65]],
+//
+//       [[  0,   0,  72,  66],
+//        [  0,   0, 140,  66]]], dtype=uint8)
+//
+// >> scales
+// array([[[161, 160,  32,  61],
+//        [161, 160,  32,  61]],
+//
+//       [[161, 160,  32,  61],
+//        [161, 160,  32,  61]]], dtype=uint8)
+// >> values
+// array([[[  0, 255],
+//        [  0, 255]],
+//
+//       [[  0, 255],
+//        [  0, 255]]], dtype=uint8)
+//
+// # Convert 4 byte packed scales and zero_points to float
+// # and apply against values in order to recover unquantized values.
+// def bytes2float(arr):
+//    packed_hex = bytearray(arr)
+//    return struct.unpack('f', packed_hex)
+//
+// >> float_zero_points = np.apply_along_axis(bytes2float, 2, zero_points)
+// >> float_zero_points
+// array([[[10.],
+//         [30.]],
+//
+//        [[50.],
+//         [70.]]])
+// >> float_scales = np.apply_along_axis(bytes2float, 2, scales)
+// >> float_scales
+// array([[[0.03921569],
+//        [0.03921569]],
+//
+//       [[0.03921569],
+//        [0.03921569]]])
+// >> values *  float_scales + float_zero_points
+// array([[[10.        , 20.00000035],
+//         [30.        , 40.00000035]],
+//
+//        [[50.        , 60.00000035],
+//         [70.        , 80.00000035]]])
 Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
-  int64_t embedding_rows = weight.size(0);
-  int64_t embedding_cols = weight.size(1);
+  // The "last" dimension of an N-Dimensioned batch of embedding bags is
+  // quantization channel. E.g. for a 2D embedding bag, this has
+  // [ row, col ] dimensions, for batched of embedding bags, dimensions might be
+  // [ batch, row, col ].
+  //
+  // Python Batched Embedding Example:
+  // weights = torch.from_numpy((np.random.random_sample((
+  //          2, 10, 3)).squeeze() + 1).astype(np.float32))
+  // assert(weights.size() == torch.Size([2, 10, 3]))
+  // # NOTE: 8 bytes (columns) are added due to fp32 zero_point and scales
+  // packed_weights = torch.ops.quantized.embedding_bag_byte_prepack(weights)
+  // assert(packed_weights.size() == torch.Size([2, 10, 11]))
+
+  const auto weight_sizes = weight.sizes();
+  const auto cols_dim = weight_sizes.size() - 1;
+  const int32_t embedding_rows = c10::size_to_dim_(cols_dim, weight_sizes);
+  const int32_t embedding_cols = weight_sizes[cols_dim];
+  // Add 8 bytes per column to store FP32 scale and zero_point per row.
+  const int32_t output_columns = embedding_cols + 2 * sizeof(float);
   Tensor weight_contig = weight.contiguous(weight.suggest_memory_format());
 
   const float* weight_data = weight_contig.data_ptr<float>();
-  std::vector<int64_t> output_shape = {
-      embedding_rows,
-      embedding_cols +
-          8}; // extra 8 bytes to store FP scale and zero_point per row.
+  // Adjust output dimensions to account for FP32 scale and zero_points.
+  std::vector<int64_t> output_shape = weight_sizes.vec();
+  output_shape[cols_dim] = output_columns;
 
   // Allocate output packed weights
   auto output = at::empty(
@@ -144,16 +217,17 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   auto* output_data = output.data_ptr<uint8_t>();
 
 #ifdef USE_FBGEMM
+
   at::parallel_for(
       0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
         for (int64_t row = start_idx; row < end_idx; ++row) {
           fbgemm::FloatToFused8BitRowwiseQuantizedSBFloat(
             weight_data + row * embedding_cols, 1,
-              embedding_cols, output_data + row * output_shape[1]);
+              embedding_cols, output_data + row * output_columns);
         }
       });
+
 #else
-  size_t output_columns = output_shape[1];
   constexpr float kEpsilon = 1e-8f;
   for (std::size_t row = 0; row < embedding_rows; ++row) {
     const float* input_row = weight_data + row * embedding_cols;
@@ -180,6 +254,7 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   return output;
 }
 
+// TODO: Extend support to N-D batched embeddings, similar to qembeddingbag_byte_prepack
 Tensor _qembeddingbag_nbit_prepack_helper(
     const Tensor& weight,
     int bit_width,
