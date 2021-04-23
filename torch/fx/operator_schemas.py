@@ -33,7 +33,7 @@ _type_eval_globals = {'Tensor' : torch.Tensor, 'Device' : torch.device, 'Layout'
                       'number' : numbers.Number, 'Future' : torch.jit.Future,
                       'AnyEnumType' : enum.Enum, 'QScheme' : torch.qscheme,
                       '__torch__': _FakeGlobalNamespace(), 'NoneType': type(None),
-                      't': typing.TypeVar('t')} 
+                      't': typing.TypeVar('t')}
 for k in dir(typing):
     _type_eval_globals[k] = getattr(typing, k)
 
