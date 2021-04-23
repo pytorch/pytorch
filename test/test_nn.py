@@ -12095,6 +12095,24 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaises(ValueError):
             torch.nn.InstanceNorm1d(10)(x).to(device)
 
+    def test_instancenorm_raises_error_for_single_spatial_element_during_training(self, device):
+        BATCH_SIZE = 10
+        NUM_CHANNELS = 3
+        norms = [torch.nn.InstanceNorm1d, torch.nn.InstanceNorm2d, torch.nn.InstanceNorm3d]
+        for i, norm in enumerate(norms):
+            m = norm(NUM_CHANNELS, track_running_stats=True)
+            m.to(device)
+
+            # Create an appropriately-sized input with a single spatial element.
+            input = torch.randn(BATCH_SIZE, NUM_CHANNELS, *[1 for _ in range(i + 1)],
+                                device=device)
+            with self.assertRaises(ValueError):
+                m(input)
+
+            # Single spatial element should be fine in eval.
+            m.eval()
+            m(input)
+
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
 
