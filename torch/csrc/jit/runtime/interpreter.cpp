@@ -617,12 +617,14 @@ struct CodeImpl {
       OpCode op;
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
-      } else if (drop) {
-        op = DROPR;
       } else if (moved) {
         op = MOVE;
       } else {
         op = LOAD;
+      }
+
+      if (drop) {
+        op = DROPR;
       }
       insertInstruction(op, reg);
     }
