@@ -14,7 +14,6 @@ on:
   workflow_dispatch:
 
 env:
-  GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
   BUILD_ENVIRONMENT: !{{ build_environment }}
   DOCKER_IMAGE_BASE: !{{ docker_image_base }}
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2

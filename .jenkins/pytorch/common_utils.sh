@@ -54,11 +54,7 @@ function file_diff_from_base() {
   set +e
   git fetch origin master --quiet
   set -e
-  if [[ -n "${GITHUB_ACTIONS}" ]]; then
-    git diff --name-only "${GITHUB_BASE_SHA}" "${GITHUB_SHA}" > "$1"
-  else
-    git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
-  fi
+  git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
 }
 
 function get_bazel() {
