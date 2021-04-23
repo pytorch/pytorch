@@ -32,7 +32,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      record_function, emit_nvtx)
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
-from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests,
@@ -4281,6 +4281,30 @@ class TestAutograd(TestCase):
             jacobians, reentrant, correct_grad_sizes, correct_grad_types = get_analytical_jacobian((a,), outputs)
         self.assertFalse(reentrant)
 
+    def test_gradcheck_custom_error(self):
+        from torch.autograd.gradcheck import GradcheckError
+
+        def check(fast_mode):
+            def fn(x):
+                y = x.clone()
+                y.register_hook(lambda x: x + 1e-2)
+                return y
+            x = torch.ones(2, 2, requires_grad=True)
+            with self.assertRaisesRegex(GradcheckError, 'Jacobian mismatch for output 0 with respect to input 0'):
+                gradcheck(fn, (x,), fast_mode=fast_mode)
+            with self.assertRaisesRegex(RuntimeError, 'Jacobian mismatch for output 0 with respect to input 0'):
+                gradcheck(fn, (x,), fast_mode=fast_mode)
+            self.assertFalse(gradcheck(fn, (x,), raise_exception=False, fast_mode=fast_mode))
+
+            def fn2(x):
+                raise RuntimeError("Not a GradcheckError!")
+            # Checks that when raise_exception=False, non-GradcheckErrors are not caught by gradcheck
+            with self.assertRaisesRegex(RuntimeError, "Not a GradcheckError!"):
+                gradcheck(fn2, (x,), fast_mode=fast_mode, raise_exception=False)
+
+        check(fast_mode=True)
+        check(fast_mode=False)
+
     def test_version_counter(self):
         x = torch.randn(1, 2)
 
@@ -4585,6 +4609,11 @@ for shape in [(1,), ()]:
         self.assertEqual(out.grad_fn._saved_dim, 0)                       # int64_t -> int
         self.assertIsInstance(out.grad_fn._saved_dim, int)
 
+        out.sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
+            out.grad_fn._saved_tensors
+        self.assertEqual(out.grad_fn._saved_dim, 0)
+
         a = torch.ones(2, 2, requires_grad=True)
         indices = torch.tensor([0, 1])
         out = a[:, indices]
@@ -4646,6 +4675,19 @@ for shape in [(1,), ()]:
         out = torch.tanh(a)
         self.assertEqual(out, out.grad_fn._saved_result)                  # saved variable when output
 
+        a = torch.randn(3, 5, requires_grad=True)
+        b = torch.tensor([1, 0, 4])
+        loss = nn.NLLLoss()
+        out = loss(a, b)
+        self.assertIsNone(out.grad_fn._saved_weight)
+        loss = nn.NLLLoss(weight=torch.ones((5,)))
+        out = loss(a, b)
+        self.assertEqual(out.grad_fn._saved_weight, torch.ones((5,)))     # c10:optional<Tensor> -> Tensor?
+
+        out.sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
+            out.grad_fn._saved_weight
+
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
@@ -4690,9 +4732,10 @@ for shape in [(1,), ()]:
         inp_change_err = "Output {} of UnbindBackward is a view and is being modified inplace."
         run_test(grad_mode=True, requires_grad=True, is_view=True,
                  should_raise_tuple=(None, inp_change_err.format("0"), inp_change_err.format("1")))
-        leaf_grad_err = "A view was created in no_grad mode and is being modified inplace"
+        grad_mode_err = "A view was created in no_grad mode and is being modified inplace"
+        leaf_grad_err = "a leaf Variable that requires grad is being used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,
-                 should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
+                 should_raise_tuple=(leaf_grad_err, grad_mode_err, grad_mode_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
 
@@ -5367,29 +5410,18 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-separate_complex_tests = ['view_as_real', 'div', 'pow', '__rdiv__', 'add', 'sub']
+separate_complex_tests = ['view_as_real', 'div', '__rdiv__', 'sub']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
-
-complex_list_filter = []
-
-# TODO: Add back 'sgn' to complex_list; removed because of Windows test failure with 11.2
-# See: https://github.com/pytorch/pytorch/issues/51980
-if _get_torch_cuda_version() != (11, 2):
-    complex_list_filter.append('sgn')
 
 # allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
                 'expand', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'zero_',
-                'eq_', 'ne_', 'add', '__radd__', 'sum', 'mul',
-                '__rmul__', 'dot', 'vdot', 'matmul',
-                'bmm', 'mv', 'ger', 'diagonal', 'fill_', 'sub',
-                'mean', 'inverse', 'linalg.tensorinv', 'matrix_exp',
-                'narrow', 'swapaxes', 'swapdims', 'tensor_split',
-                'baddbmm'] + complex_list_filter + separate_complex_tests
+                '__radd__', 'mul', '__rmul__', 'diagonal', 'fill_', 'sub', 'narrow',
+                'swapaxes', 'swapdims', 'tensor_split'] + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([

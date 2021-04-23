@@ -71,6 +71,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         torch.avg_pool1d,
         torch._C._nn.avg_pool2d,
         torch._C._nn.avg_pool3d,
+        torch.cat,
         torch.chunk,
         torch.clamp,
         torch.flatten,
