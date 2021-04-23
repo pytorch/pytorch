@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/serialization/inlined_callstack_serialization.h>
+#include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
@@ -62,7 +62,7 @@ c10::IValue InlinedCallStackSerializer::serialize_module_instance_info(
   return c10::ivalue::Tuple::create(std::move(elements));
 }
 
-std::vector<char> InlinedCallStackPickler::pickle(
+std::vector<char> CallStackDebugInfoPickler::pickle(
     const std::unordered_map<int64_t, DebugInfoPair>& callstack_ptrs,
     const SourceRangeTagMap& source_range_tags) {
   std::vector<c10::IValue> ivalues;
@@ -70,39 +70,9 @@ std::vector<char> InlinedCallStackPickler::pickle(
     int64_t debug_handle = it.first;
     std::vector<c10::IValue> elements;
     /*
-     * Each debug handle is serialized as a tuple of 3 elements
+     * Debug handles and debug info (source range + inlinded callstack)
+     * are serialized as a tuple of 3 elements
      * {debug_handle, source_range_tag, serialized_callstack}
-     * Here source range tag is for the last node.
-     * Callstack of a node contains only function call information.
-     * Last entry in the callstack tree is the last function call
-     * in the callstack.
-     * Thus it does not contain TOS node, which does not call any
-     * other function.
-     * For example:
-     * class M(nn.Module):
-     *   def __init__(self):
-     *     ...
-     *   def forward(self, x):
-     *     return x * 2
-     * class N(nn.Module):
-     *   def __init__(self):
-     *     self.m = M()
-     *   def forward(self, x):
-     *     return self.m(x) + 3
-     *
-     * In this case after inlining, node for aten::mul will
-     * have one entry in callstack, that points to line
-     * self.m(x) + 3.
-     * aten::mul itself is at `return x * 2`.
-     * Inlinined callstack nodes do not contain that source range.
-     * Thus the TOS source range is not part of it.
-     * This is gotten by looking the inlined node's node->sourceRange.
-     * In jit's interpreter callstack is formed by finally appending
-     * node->sourceRange on top of what we get from inlinedCallStack.
-     * For lite interpreter and delegated backend etc, the source of
-     * truth is going to be inlinedcallstack.
-     * In order to get TOS node's source range we serialized the
-     * correponding source_range_tag separately.
      */
     elements.reserve(3);
     elements.emplace_back(debug_handle);
@@ -184,11 +154,12 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
   return ModuleInstanceInfo(type_ptr, instance_name);
 }
 
-ska::flat_hash_map<int64_t, DebugInfoPair> InlinedCallStackUnpickler::unpickle(
-    at::DataPtr&& data,
-    size_t size,
-    const ska::flat_hash_map<int64_t, SourceRange>& source_range_map,
-    const std::shared_ptr<CompilationUnit>& cu) {
+ska::flat_hash_map<int64_t, DebugInfoPair> CallStackDebugInfoUnpickler::
+    unpickle(
+        at::DataPtr&& data,
+        size_t size,
+        const ska::flat_hash_map<int64_t, SourceRange>& source_range_map,
+        const std::shared_ptr<CompilationUnit>& cu) {
   auto ival = jit::unpickle(reinterpret_cast<const char*>(data.get()), size);
   ska::flat_hash_map<int64_t, DebugInfoPair> callstack_ptrs;
   auto& ivalues = ival.toTuple()->elements();

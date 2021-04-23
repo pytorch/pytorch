@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/mobile/debug_info.h>
-#include <torch/csrc/jit/serialization/inlined_callstack_serialization.h>
+#include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
 #include <ATen/core/ivalue.h>
@@ -21,15 +21,15 @@ namespace {
 // will be TopM(A).MyModule(B).SomeModule(C).Conv2d(conv)
 // Source level stack information will be from model source code.
 std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
-    const DebugInfoPair& sr_callstack,
+    const DebugInfoPair& source_callstack,
     const std::string& root_scope_string,
     const std::string& top_module_type_name) {
   constexpr size_t kSourceRange = 1;
   constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
 
-  const SourceRange& range = sr_callstack.first;
-  InlinedCallStackPtr callstack_ptr = sr_callstack.second;
+  const SourceRange& range = source_callstack.first;
+  InlinedCallStackPtr callstack_ptr = source_callstack.second;
   std::string module_info =
       root_scope_string + "(" + top_module_type_name + ")";
   if (!callstack_ptr) {
@@ -116,7 +116,7 @@ MobileDebugTable::MobileDebugTable(
     size_t callstack_data_size{0};
     std::tie(callstack_data, callstack_data_size) =
         reader->getRecord(callstack_debug_file);
-    InlinedCallStackUnpickler unpickler;
+    CallStackDebugInfoUnpickler unpickler;
     callstack_ptr_map_ = unpickler.unpickle(
         std::move(callstack_data), callstack_data_size, source_range_map, cu);
   }
