@@ -12,19 +12,16 @@
 namespace at {
 namespace native {
 
-constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
-constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
-
 template <typename scalar_t, typename IndexType>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
-__global__ void
-kernel_pointwise_flip_apply2(const cuda::detail::TensorInfo<scalar_t, IndexType> in_tensor_info,
-                          cuda::detail::TensorInfo<scalar_t, IndexType> out_tensor_info,
-                          IndexType N,
-                          int flip_dim,
-                          IndexType total_dims) {
+__global__ void kernel_pointwise_flip_apply2(
+    const cuda::detail::TensorInfo<scalar_t, IndexType> in_tensor_info,
+    cuda::detail::TensorInfo<scalar_t, IndexType> out_tensor_info,
+    IndexType N,
+    int flip_dim,
+    IndexType total_dims) {
   for (IndexType linear_index = blockIdx.x * blockDim.x + threadIdx.x; linear_index < N; linear_index += gridDim.x * blockDim.x) {
     IndexType dst_offset = 0;
     if (flip_dim == 0) {
@@ -41,10 +38,17 @@ kernel_pointwise_flip_apply2(const cuda::detail::TensorInfo<scalar_t, IndexType>
 }
 
 template <typename scalar_t>
-__global__
-void flip_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N, int64_t* flip_dims, int64_t flip_dims_size,
-                      int64_t* strides, int64_t* strides_contiguous, int64_t* shape, int64_t total_dims) {
-
+C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
+__global__ void flip_cuda_kernel(
+    scalar_t* in_tensor,
+    scalar_t* out_tensor,
+    int64_t N,
+    int64_t* flip_dims,
+    int64_t flip_dims_size,
+    int64_t* strides,
+    int64_t* strides_contiguous,
+    int64_t* shape,
+    int64_t total_dims) {
   int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_index >= N) {
     return;
@@ -73,7 +77,7 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
   const int64_t flip_dims_size = dims.size(), total_dims = in_tensor.dim(), N = in_tensor.numel();
   flip_check_errors(total_dims, flip_dims_size, dims);
 
-  int64_t block_size = 512;
+  int64_t block_size = cuda::getApplyBlockSize();
   dim3 dim_block(block_size);
   dim3 dim_grid((N + block_size - 1) / block_size);
 
@@ -139,13 +143,16 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
 }
 
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
-__global__
-void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
-                      int64_t roll_dim, int64_t start,
-                      int64_t size, int64_t stride, int64_t total_dims) {
+C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
+__global__ void roll_cuda_kernel(
+    scalar_t* in_tensor,
+    scalar_t* out_tensor,
+    int64_t N,
+    int64_t roll_dim,
+    int64_t start,
+    int64_t size,
+    int64_t stride,
+    int64_t total_dims) {
   int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_index >= N) {
     return;

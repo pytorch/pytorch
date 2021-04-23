@@ -19,8 +19,13 @@ if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *old-gradcheck* ]]; then
+  export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
+  export COVERAGE_RCFILE="$PWD/.coveragerc" # coverage config file needed for plug-ins and settings to work
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -115,7 +120,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
-if [ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
+# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
+# CIRCLE_PULL_REQUEST comes from CircleCI
+# GITHUB_HEAD_REF comes from Github Actions
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
+if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
 fi
