@@ -6,6 +6,7 @@ set -eux
 
 # If you edit this allowlist, please edit the one in clang_format_all.py as well
 find . -type f \
+  -path './c10/*' -or \
   -path './torch/csrc/jit/*' -or \
   -path './test/cpp/jit/*' -or \
   -path './test/cpp/tensorexpr/*' \
