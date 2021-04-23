@@ -93,11 +93,13 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   output_shape.insert(output_shape.end(), {r1, r2});
 
   Tensor result;
-  if (r1 == 0 || r2 == 0) {
+  if (r1 == 0 || r2 == 0 || expand_batch_product == 0) {
     result = at::empty(output_shape, x1.options());
   } else if (c1 == 0) {
     result = at::zeros(output_shape, x1.options());
   } else if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
+    // See Note [cdist relies on cdist_impl redispatching]
+    // Keep the condition above in sync with the condition at the Note
     Tensor dist = (expand_batch_product == 1) ? at::_euclidean_dist(x1, x2) :
                   at::_euclidean_dist(tensor1_expanded, tensor2_expanded);
     result = dist.view(output_shape);
@@ -117,6 +119,10 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
     NoNamesGuard guard;
     int64_t r1 = x1.size(-2);
     int64_t r2 = x2.size(-2);
+    // Special case for empty input: always call the version with explicit autograd to ensure the graph is properly connected
+    if (x1.numel() == 0 || x2.numel() == 0) {
+        return at::_cdist_forward(x1, x2, p, compute_mode);
+    }
     int64_t mode = compute_mode.value_or(0);
     // Note [cdist relies on cdist_impl redispatching]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -161,6 +167,14 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& _x1, const Tensor& _x2,
   std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
   tensor2_expand_size.insert(tensor2_expand_size.end(), {r2, c2});
 
+  // Compute the linearized batch size
+  const int64_t batch_product = c10::multiply_integers(expand_batch_portion);
+
+  // Gracefully handle empty Tensors
+  if (r1 == 0 || r2 == 0 || c1 == 0 || batch_product == 0) {
+    return at::zeros_like(_x1, _x1.options());
+  }
+
   Tensor x1 = _x1;
   if (tensor1_expand_size != x1.sizes()) {
     x1 = x1.expand(tensor1_expand_size).contiguous();
@@ -180,9 +194,6 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& _x1, const Tensor& _x2,
   TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X1 got: ", device1);
   auto device2 = x2.device().type();
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X2 got: ", device2);
-
-  // Compute the linearized batch size
-  const int64_t batch_product = c10::multiply_integers(expand_batch_portion);
 
   Tensor grad_x1 =
       at::empty({batch_product, n, m}, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
