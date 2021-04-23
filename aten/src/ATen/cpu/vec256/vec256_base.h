@@ -202,6 +202,17 @@ public:
     }
     return mask;
   }
+  Vec256<T> isnan() const {
+    Vec256<T> vec;
+    for (int64_t i = 0; i != size(); i++) {
+      if (_isnan(values[i])) {
+        std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));
+      } else {
+        std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));
+      }
+    }
+    return vec;
+  }
   Vec256<T> map(T (*f)(T)) const {
     Vec256<T> ret;
     for (int64_t i = 0; i != size(); i++) {
@@ -591,15 +602,6 @@ Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
-template <typename T>
-inline T maximum(const T& a, const T& b) {
-  T c = (a > b) ? a : b;
-  if (_isnan(a)) {
-    c = a;
-  }
-  return c;
-}
-
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <class T,
@@ -630,15 +632,6 @@ Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
       // ternary operator above.
       c[i] = a[i];
     }
-  }
-  return c;
-}
-
-template <typename T>
-inline T minimum(const T& a, const T& b) {
-  T c = (a < b) ? a : b;
-  if (_isnan(a)) {
-    c = a;
   }
   return c;
 }
