@@ -217,7 +217,7 @@ enum class DispatchKey : uint8_t {
   AutogradXPU,
   AutogradMLC,
   AutogradNestedTensor, // lives out of tree at
-                        // https://github.com/pytorch/nestedtensor
+  // https://github.com/pytorch/nestedtensor
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
   AutogradPrivateUse1,
@@ -276,7 +276,7 @@ enum class DispatchKey : uint8_t {
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
   CompositeImplicitAutograd, // registered at
-                             // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
+  // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
   CompositeExplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeExplicitAutograd.cpp
 
