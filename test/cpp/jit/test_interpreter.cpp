@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <ATen/Parallel.h>
-#include "test/cpp/jit/test_utils.h"
-#include "torch/jit.h"
-#include "torch/script.h"
-#include "torch/torch.h"
+#include <c10/core/DeviceType.h>
+#include <test/cpp/jit/test_utils.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/jit.h>
+#include <torch/script.h>
+#include <torch/torch.h>
 
 namespace torch {
 namespace jit {
@@ -141,6 +143,34 @@ TEST(InterpreterTest, Basic_CUDA) {
 
   ASSERT_TRUE(exactlyEqual(outputs[0], hx));
   ASSERT_TRUE(exactlyEqual(outputs[1], cx));
+}
+
+TEST(InterpreterTest, IgnorableArgsInSchema) {
+  auto graph = build_mobile_export_analysis_graph();
+  MobileCode function(graph, "");
+  auto op_to_specified_args = function.op_to_num_specified_args();
+  ASSERT_TRUE(op_to_specified_args.size() == 2);
+  ASSERT_TRUE(op_to_specified_args["aten::slice.Tensor"] == 4);
+  ASSERT_TRUE(op_to_specified_args["aten::slice.str"] == 1);
+  auto graph_vararg = build_mobile_export_analysis_graph_with_vararg();
+  MobileCode function_vararg(graph_vararg, "");
+  auto op_to_specified_args_vararg = function_vararg.op_to_num_specified_args();
+  // should never register it
+  ASSERT_TRUE(
+      op_to_specified_args_vararg.find("prim::tolist") ==
+      op_to_specified_args_vararg.end());
+
+  auto graph_nested = build_mobile_export_analysis_graph_nested();
+  MobileCode function_nested(graph_nested, "");
+  auto op_to_specified_args_nested = function_nested.op_to_num_specified_args();
+  ASSERT_TRUE(op_to_specified_args_nested["aten::slice.Tensor"] == 4);
+  ASSERT_TRUE(op_to_specified_args_nested["aten::slice.str"] == 1);
+
+  auto graph_non_const = build_mobile_export_analysis_graph_non_const();
+  MobileCode function_non_const(graph_non_const, "");
+  auto op_to_specified_args_non_const =
+      function_non_const.op_to_num_specified_args();
+  ASSERT_TRUE(op_to_specified_args_non_const["aten::conv2d"] == 6);
 }
 
 TEST(InterpreterTest, runAsyncBasicTest) {
