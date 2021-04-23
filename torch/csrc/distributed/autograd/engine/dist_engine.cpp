@@ -390,7 +390,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
   // execute after the original future is completed). This ensures we return a
   // future that waits for all gradient accumulation to finish.
   auto accumulateGradFuture =
-      std::make_shared<c10::ivalue::Future>(c10::NoneType::create());
+      std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
 
   futureGrads->addCallback(
       [autogradContext, outputEdges, accumulateGradFuture, &futureGrads]() {
@@ -469,7 +469,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
 
     // Build the 'uber' future that waits for everything.
     auto callbackFuture =
-        std::make_shared<c10::ivalue::Future>(c10::NoneType::create());
+        std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
 
     accumulateGradFuture->addCallback([autogradContext,
                                        callbackFuture,
@@ -519,7 +519,7 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
           /*node_task*/ NodeTask(graphTask, sendFunction, InputBuffer(0)),
           /*incrementOutstandingTasks*/ false);
     });
-    auto fut = std::make_shared<c10::ivalue::Future>(c10::NoneType::create());
+    auto fut = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
     fut->markCompleted(c10::IValue());
     return fut;
   }
