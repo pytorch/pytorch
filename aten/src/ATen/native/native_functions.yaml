@@ -1849,28 +1849,19 @@
   variants: method
 
 - func: frac(Tensor self) -> Tensor
-<<<<<<< dest:   3125c7966ced - wxie: Allow opt out device_guard for structura...
   structured_delegate: frac.out
-=======
   common_device_guard: False   # TensorIterator
->>>>>>> source: 957f8b60ae2d c10_opt - wxie: [RFC] Unify device check and gua...
   variants: function, method
 
 - func: frac_(Tensor(a!) self) -> Tensor(a!)
-<<<<<<< dest:   3125c7966ced - wxie: Allow opt out device_guard for structura...
   structured_delegate: frac.out
-=======
   common_device_guard: False   # TensorIterator
->>>>>>> source: 957f8b60ae2d c10_opt - wxie: [RFC] Unify device check and gua...
   variants: function, method
 
 - func: frac.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-<<<<<<< dest:   3125c7966ced - wxie: Allow opt out device_guard for structura...
   structured: True
   structured_inherits: TensorIteratorBase
-=======
   common_device_guard: False   # TensorIterator
->>>>>>> source: 957f8b60ae2d c10_opt - wxie: [RFC] Unify device check and gua...
   dispatch:
     CPU, CUDA: frac_out
 
@@ -3207,28 +3198,19 @@
   common_device_guard: False
 
 - func: round(Tensor self) -> Tensor
-<<<<<<< dest:   3125c7966ced - wxie: Allow opt out device_guard for structura...
   structured_delegate: round.out
-=======
   common_device_guard: False   # TensorIterator
->>>>>>> source: 957f8b60ae2d c10_opt - wxie: [RFC] Unify device check and gua...
   variants: function, method
 
 - func: round_(Tensor(a!) self) -> Tensor(a!)
-<<<<<<< dest:   3125c7966ced - wxie: Allow opt out device_guard for structura...
   structured_delegate: round.out
-=======
   common_device_guard: False   # TensorIterator
->>>>>>> source: 957f8b60ae2d c10_opt - wxie: [RFC] Unify device check and gua...
   variants: function, method
 
 - func: round.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-<<<<<<< dest:   3125c7966ced - wxie: Allow opt out device_guard for structura...
   structured: True
   structured_inherits: TensorIteratorBase
-=======
   common_device_guard: False   # TensorIterator
->>>>>>> source: 957f8b60ae2d c10_opt - wxie: [RFC] Unify device check and gua...
   dispatch:
     CPU: round_out
     CUDA: round_out
@@ -3303,28 +3285,19 @@
     CPU, CUDA: hardshrink_backward
 
 - func: rsqrt(Tensor self) -> Tensor
-<<<<<<< dest:   3125c7966ced - wxie: Allow opt out device_guard for structura...
   structured_delegate: rsqrt.out
-=======
   common_device_guard: False   # TensorIterator
->>>>>>> source: 957f8b60ae2d c10_opt - wxie: [RFC] Unify device check and gua...
   variants: function, method
 
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
-<<<<<<< dest:   3125c7966ced - wxie: Allow opt out device_guard for structura...
   structured_delegate: rsqrt.out
-=======
   common_device_guard: False   # TensorIterator
->>>>>>> source: 957f8b60ae2d c10_opt - wxie: [RFC] Unify device check and gua...
   variants: function, method
 
 - func: rsqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-<<<<<<< dest:   3125c7966ced - wxie: Allow opt out device_guard for structura...
   structured: True
   structured_inherits: TensorIteratorBase
-=======
   common_device_guard: False   # TensorIterator
->>>>>>> source: 957f8b60ae2d c10_opt - wxie: [RFC] Unify device check and gua...
   dispatch:
     CPU, CUDA: rsqrt_out
 
