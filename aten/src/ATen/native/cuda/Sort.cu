@@ -61,36 +61,6 @@ void fillSliceWithIndex(Tensor& t,
   }
 }
 
-std::tuple<Tensor &,Tensor &> small_sort_out_cuda(const Tensor &self,
-                                                  c10::optional<bool> stable,
-                                                  Tensor &values,
-                                                  Tensor &indices,
-                                                  int dim, bool order) {
-
-  // How large are the slices that we are sorting?
-  int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
-  // FIXME: the k/v inplace sort along slice only works for size <=
-  // 2048 at the moment
-  // Workaround:
-  int maxSliceSize;
-  if (values.element_size() >= 8) {
-    maxSliceSize = 1024;
-  } else {
-    maxSliceSize = 2048;
-  }
-
-  if (sliceSize <= maxSliceSize) {
-    // Fill `indices` (the values) with the
-    // slice-relative index.
-  } else {
-    // This should be unreachable due to size threshold dispatching in cuda sort
-    TORCH_INTERNAL_ASSERT(false);
-  }
-
-  return std::tuple<Tensor &, Tensor &>(values, indices);
-}
-
-
 // In alignment with default sort on a c++ map, this function
 // will permute key and value tensors identically, and
 // in such a way that the 'key' tensor is ordered numerically
