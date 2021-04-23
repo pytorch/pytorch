@@ -32,7 +32,8 @@ from torch.testing._internal.common_utils import \
      make_symmetric_pd_matrices,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed, SEED,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_warn_once)
+     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_warn_once,
+     GRADCHECK_NONDET_TOL,)
 
 from distutils.version import LooseVersion
 
@@ -185,6 +186,10 @@ class OpInfo(object):
                  gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs),  # wrapper function for gradcheck
                  check_batched_grad=True,  # check batched grad when doing gradcheck
                  check_batched_gradgrad=True,  # check batched grad grad when doing gradgradcheck
+                 gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
+                 gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
+                                            # When set to None, defers to the default value provided by the wrapper
+                                            # function around gradcheck (testing._internal.common_utils.gradcheck)
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -236,6 +241,8 @@ class OpInfo(object):
         self.gradcheck_wrapper = gradcheck_wrapper
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
+        self.gradcheck_nondet_tol = gradcheck_nondet_tol
+        self.gradcheck_fast_mode = gradcheck_fast_mode
 
         self.supports_sparse = supports_sparse
 
@@ -3127,6 +3134,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            supports_inplace_autograd=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_addmm,
            skips=(
                # addmm_ resizes input tensor if it's not the correct size, but it shouldn't.
@@ -3135,7 +3143,7 @@ op_db: List[OpInfo] = [
            )
            ),
     OpInfo('addmm',
-           # When alpha=beta=1 as compile-time constants, the JIT will decompose addmm into mm and add.
+           # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
            variant_test_name='decomposed',
            dtypes=floating_and_complex_types_and(torch.float16),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -3143,6 +3151,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            supports_inplace_autograd=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            sample_inputs_func=partial(sample_inputs_addmm, alpha=1, beta=1),
            skips=(
@@ -3251,7 +3260,8 @@ op_db: List[OpInfo] = [
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),),
-           sample_inputs_func=sample_inputs_addr),
+           sample_inputs_func=sample_inputs_addr,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('addcmul',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -3535,15 +3545,19 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out',
                         dtypes=[torch.float32]),
            ),
-           sample_inputs_func=sample_inputs_cumprod),
+           # gradgradcheck fails in fast_mode=True: #56275
+           sample_inputs_func=sample_inputs_cumprod,
+           gradcheck_fast_mode=False),
     OpInfo('cummax',
            dtypesIfCPU=all_types_and(torch.bool),
            dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-           sample_inputs_func=partial(sample_inputs_cumulative_ops, supports_dtype_kwargs=False)),
+           sample_inputs_func=partial(sample_inputs_cumulative_ops, supports_dtype_kwargs=False),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('cummin',
            dtypesIfCPU=all_types_and(torch.bool),
            dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-           sample_inputs_func=partial(sample_inputs_cumulative_ops, supports_dtype_kwargs=False)),
+           sample_inputs_func=partial(sample_inputs_cumulative_ops, supports_dtype_kwargs=False),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     UnaryUfuncInfo('deg2rad',
                    ref=np.radians,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -3802,6 +3816,7 @@ op_db: List[OpInfo] = [
            op=torch.inverse,
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_linalg_invertible,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -3907,7 +3922,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
-           sample_inputs_func=sample_inputs_linalg_matrix_power,),
+           sample_inputs_func=sample_inputs_linalg_matrix_power,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('linalg.multi_dot',
            # Need this lambda because gradcheck does not work with TensorList inputs
            aten_name='linalg_multi_dot',
@@ -3918,7 +3934,8 @@ op_db: List[OpInfo] = [
            # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           sample_inputs_func=sample_inputs_linalg_multi_dot,),
+           sample_inputs_func=sample_inputs_linalg_multi_dot,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -4240,7 +4257,8 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out',
                         dtypes=[torch.float32]),
            ),
-           sample_inputs_func=sample_inputs_prod),
+           sample_inputs_func=sample_inputs_prod,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
@@ -4592,6 +4610,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_invertible,
            check_batched_gradgrad=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # linalg_inv does not correctly warn when resizing out= inputs
@@ -4796,6 +4815,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            check_batched_grad=False,
            check_batched_gradgrad=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False,
            sample_inputs_func=sample_inputs_linalg_invertible,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
@@ -4807,6 +4827,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_gather,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            ),
     OpInfo('index_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -4818,14 +4839,17 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
            supports_out=False,
-           sample_inputs_func=sample_inputs_index_copy),
+           sample_inputs_func=sample_inputs_index_copy,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_index_select),
+           sample_inputs_func=sample_inputs_index_select,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
-           sample_inputs_func=sample_inputs_index_add),
+           sample_inputs_func=sample_inputs_index_add,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -4948,7 +4972,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
-           sample_inputs_func=sample_inputs_take_along_dim),
+           sample_inputs_func=sample_inputs_take_along_dim,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     ShapeFuncInfo('tile',
                   ref=np.tile,
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
