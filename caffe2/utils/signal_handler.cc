@@ -54,5 +54,5 @@ REGISTER_CAFFE2_INIT_FUNCTION(
     " caffe2_print_stacktraces is set.");
 
 } // namespace internal
-#endif // defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
 } // namespace caffe2
+#endif // defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)

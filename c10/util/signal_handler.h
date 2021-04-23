@@ -1,6 +1,5 @@
 #pragma once
 
-#include <pthread.h>
 #include <atomic>
 #include <csignal>
 #include <mutex>
@@ -13,6 +12,10 @@
 #elif defined(__linux__) && !defined(C10_DISABLE_SIGNAL_HANDLERS)
 #define C10_SUPPORTS_FATAL_SIGNAL_HANDLERS
 #define C10_SUPPORTS_SIGNAL_HANDLER
+#endif
+
+#if defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+#include <pthread.h>
 #endif
 
 namespace c10 {
