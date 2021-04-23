@@ -19,8 +19,8 @@ class Pool(multiprocessing.pool.Pool):
     serializing the underlying data."""
 
     def _setup_queues(self):
-        self._inqueue = SimpleQueue()
-        self._outqueue = SimpleQueue()
+        self._inqueue = SimpleQueue(ctx=self._ctx)
+        self._outqueue = SimpleQueue(ctx=self._ctx)
         self._quick_put = self._inqueue._writer.send
         self._quick_get = self._outqueue._reader.recv
 
@@ -35,7 +35,7 @@ class Pool(multiprocessing.pool.Pool):
                     self._initargs, self._maxtasksperchild)
             if hasattr(self, '_wrap_exception'):
                 args += (self._wrap_exception,)
-            w = self.Process(target=clean_worker, args=args)
+            w = self.Process(ctx=self._ctx, target=clean_worker, args=args)
             self._pool.append(w)
             w.name = w.name.replace('Process', 'PoolWorker')
             w.daemon = True
