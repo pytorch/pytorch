@@ -2932,7 +2932,8 @@ class TestLinalg(TestCase):
 
             gradcheck(func, [root, b, upper])
             # TODO(#50743): the following fails with batched grad testing
-            gradgradcheck(func, [root, b, upper], atol=1e-3, check_batched_grad=False)
+            # TODO(#56235): disabling temporarily
+            # gradgradcheck(func, [root, b, upper], atol=1e-3, check_batched_grad=False)
 
         for (a_size, b_size), upper in itertools.product([((3, 3), (3, 4)), ((3, 3), (3, 2)),
                                                           ((2, 3, 3), (2, 3, 4)), ((2, 3, 3), (2, 3, 2))],
