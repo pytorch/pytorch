@@ -268,7 +268,6 @@ static std::vector<ExprHandle> computeIndicesToBroadcast(
   return bcast;
 }
 
-
 std::vector<int64_t> bufferSizes(const Buf* b) {
   std::vector<int64_t> sizes;
   for (size_t i = 0; i < b->ndim(); i++) {
@@ -853,8 +852,7 @@ Tensor* tensorexpr::computeTwoOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [inputValues, outputType, innerExpr](
-          const std::vector<VarHandle>& axes) {
+      [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[0], indices),
@@ -877,8 +875,7 @@ Tensor* tensorexpr::computeTwoOperandWithAlpha(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [inputValues, outputType, innerExpr](
-          const std::vector<VarHandle>& axes) {
+      [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[0], indices),
@@ -903,8 +900,7 @@ Tensor* tensorexpr::computeConditionWithTwoOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [inputValues, outputType, innerExpr](
-          const std::vector<VarHandle>& axes) {
+      [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[1], indices),
@@ -961,8 +957,7 @@ Tensor* tensorexpr::computeFourOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [inputValues, outputType, innerExpr](
-          const std::vector<VarHandle>& axes) {
+      [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[0], indices),
@@ -1985,7 +1980,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::conv2d: {
       return computeConv2d(v);
     }
-
 
     default: {
       throw std::runtime_error("Unhandled node kind");
