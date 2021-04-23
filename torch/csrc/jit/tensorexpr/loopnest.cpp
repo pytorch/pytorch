@@ -1313,13 +1313,91 @@ std::vector<For*> LoopNest::distributeLoopOverInnerLoops(For* loop) {
   return distributeLoop(loop, loopsSet);
 }
 
+bool areEqual(const Expr* expr1, const Expr* expr2) {
+  auto diff = IRSimplifier::simplify(new Sub(expr1, expr2));
+  return diff->isConstant() && (immediateAs<int>(diff) == 0);
+};
+
+bool areEqual(
+    const std::vector<const Expr*>& expr_list1,
+    const std::vector<const Expr*>& expr_list2) {
+  if (expr_list1.size() != expr_list2.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < expr_list1.size(); ++i) {
+    if (!areEqual(expr_list1[i], expr_list2[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool LoopNest::hasLoopCarriedDependence(For* loop) {
   analysis::MemDependencyChecker analyzer;
   loop->accept(&analyzer);
+  // High-level algorithm to check if two accesses to a buffer, A and B, one of
+  // which is a Store, result in a loop-carried dependence:
+  //   1. If the index expressions are equal in A and B, then that is a
+  //      loop-independent dependence.
+  //   2. If the index expressions are not equal in A and B:
+  //       a) if the bounds on the accesses overlap, then this is a
+  //          loop-carried dependence.
+  //       b) if the bounds on the accesses do not overlap, then there is no
+  //          dependence.
+  //
+  // Implementation:
+  // For every pair of statements, S1 and S2, in the loop:
+  //  * Get the loads and stores in S1 and S2.
+  //  * For every store in S1 and load in S2 to the same buffer, if the index
+  //    expressions are not equal and there is an overlap in accesses, return
+  //    true to indicate a loop-carried dependence.
+  //  * For every load in S1 and store in S2 to the same buffer, if the index
+  //    expressions are not equal and there is an overlap in accesses, return
+  //    true to indicate a loop-carried dependence.
+  //  * For every store in S1 and store in S2 to the same buffer, if the index
+  //    expressions are not equal and there is an overlap in accesses, return
+  //    true to indicate a loop-carried dependence.
   for (auto it1 = loop->body()->begin(); it1 != loop->body()->end(); ++it1) {
     for (auto it2 = std::next(it1); it2 != loop->body()->end(); ++it2) {
-      if (hasPartialOverlap(analyzer, *it2, *it1)) {
-        return true;
+      auto aStores = NodeFinder<Store>::find(*it1);
+      auto aLoads = NodeFinder<Load>::find(*it1);
+      auto bStores = NodeFinder<Store>::find(*it2);
+      auto bLoads = NodeFinder<Load>::find(*it2);
+      // ReadAfterWrite
+      for (auto& aStore : aStores) {
+        for (auto& bLoad : bLoads) {
+          if (aStore->buf() == bLoad->buf()) {
+            if (!areEqual(aStore->indices(), bLoad->indices())) {
+              if (isOverlapping(analyzer, aStore, bLoad)) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+      // WriteAfterRead
+      for (auto& bStore : bStores) {
+        for (auto& aLoad : aLoads) {
+          if (bStore->buf() == aLoad->buf()) {
+            if (!areEqual(bStore->indices(), aLoad->indices())) {
+              if (isOverlapping(analyzer, bStore, aLoad)) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+      // WriteAfterWrite
+      for (auto& aStore : aStores) {
+        for (auto& bStore : bStores) {
+          if (aStore->buf() == bStore->buf()) {
+            if (!areEqual(aStore->indices(), bStore->indices())) {
+              if (isOverlapping(analyzer, aStore, bStore)) {
+                return true;
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -1370,10 +1448,6 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
   }
 
   // Check if bounds are the same for all the loops.
-  auto are_bounds_equal = [](const Expr* bound1, const Expr* bound2) {
-    auto diff = IRSimplifier::simplify(new Sub(bound1, bound2));
-    return diff->isConstant() && (immediateAs<int>(diff) == 0);
-  };
   auto first_loop = loops.front();
   auto first_loop_start = IRSimplifier::simplify(first_loop->start());
   auto first_loop_stop = IRSimplifier::simplify(first_loop->stop());
@@ -1381,10 +1455,10 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
     auto curr_loop = loops[i];
     auto curr_loop_start = IRSimplifier::simplify(curr_loop->start());
     auto curr_loop_stop = IRSimplifier::simplify(curr_loop->stop());
-    if (!are_bounds_equal(curr_loop_start, first_loop_start)) {
+    if (!areEqual(curr_loop_start, first_loop_start)) {
       return false;
     }
-    if (!are_bounds_equal(curr_loop_stop, first_loop_stop)) {
+    if (!areEqual(curr_loop_stop, first_loop_stop)) {
       return false;
     }
   }
