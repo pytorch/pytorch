@@ -97,7 +97,6 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
   }
 }
 
-bool should_use_small_sort(const Tensor &self, int64_t dim);
 void sortKeyValueInplace(Tensor& key,
                          Tensor& value,
                          int dim, bool dir);
