@@ -239,7 +239,7 @@ Computes ``input * log1p(other)`` with the following cases.
 .. math::
     \text{out}_{i} = \begin{cases}
         \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
-        0 & \text{if } \text{input}_{i} = 0.0 \\
+        0 & \text{if } \text{input}_{i} = 0.0 \text{ and } \text{other}_{i} != \text{NaN} \\
         \text{input}_{i} * \text{log1p}(\text{other}_{i})& \text{otherwise}
     \end{cases}
 
