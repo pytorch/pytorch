@@ -64,11 +64,10 @@ class TestSymbolicShapeAnalysis(JitTestCase):
     def test_shared_shape_graph(self):
         @torch.jit.script
         def foo(x, y):
-            return x * y, x / y, x > y
+            return x * y, x / y
 
         mul_node = foo.graph.findNode("aten::mul")
         div_node = foo.graph.findNode("aten::div")
-        torch._C._jit_pass_inline(foo.graph)
 
         mul_graph = torch._C._jit_shape_compute_graph_for_node(mul_node)
         div_graph = torch._C._jit_shape_compute_graph_for_node(div_node)
