@@ -14,6 +14,7 @@ on:
   workflow_dispatch:
 
 env:
+  GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
   BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
