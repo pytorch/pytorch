@@ -560,15 +560,14 @@ void initTensorExprBindings(PyObject* module) {
             argInputs.push_back(py::cast<double>(inp));
           } else if (py::isinstance<py::int_>(inp)) {
             argInputs.push_back(py::cast<int64_t>(inp));
-          } else if (py::isinstance<py::none>(inp)){
+          } else if (py::isinstance<py::none>(inp)) {
             argInputs.push_back(ArgNone());
           } else {
             throw std::runtime_error("nyi");
           }
-          // argInputs.push_back(inp.)
         }
         return computeOperandValue(
-            op, argInputs, outputType.scalar_type(), outputShape);
+            op, argInputs, outputShape, outputType.scalar_type());
       });
 
   using TSGraph = std::shared_ptr<Graph>;
