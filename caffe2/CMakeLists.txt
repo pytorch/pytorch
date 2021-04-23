@@ -343,6 +343,7 @@ if(NOT TORCH_INSTALL_LIB_DIR)
 endif()
 
 
+
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(USE_DISTRIBUTED)
 
@@ -1732,18 +1733,10 @@ if(BUILD_PYTHON)
     endif()
   endif()
 
-#   if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0.0)
-#   string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
-# endif()
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
-  # set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  # set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  # set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  # set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
-  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-  # set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-endif()
+    # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+    set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  endif()
   # Allow different install locations for libcaffe2
   # For setuptools installs (that all build Python), install libcaffe2 into
   # site-packages, alongside the torch libraries. The pybind11 library needs
