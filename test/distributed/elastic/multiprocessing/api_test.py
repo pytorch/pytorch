@@ -17,6 +17,7 @@ import unittest
 from itertools import product
 from typing import Dict, List
 from unittest import mock
+from unittest.mock import patch
 
 import torch
 import torch.multiprocessing as mp
@@ -54,7 +55,8 @@ class RunProcResultsTest(unittest.TestCase):
         pr_fail = RunProcsResult(failures={0: fail0})
         self.assertTrue(pr_fail.is_failed())
 
-    def test_get_failures(self):
+    @patch("torch.distributed.elastic.multiprocessing.errors.log")
+    def test_get_failures(self, log_mock):
         with mock.patch("time.time", side_effect=[3, 2, 1]):
             error_file0 = os.path.join(self.test_dir, "error0.json")
             error_file1 = os.path.join(self.test_dir, "error1.json")
@@ -144,11 +146,13 @@ def echo_large(size: int) -> Dict[int, str]:
         out[idx] = f"test{idx}"
     return out
 
+
 def dummy_compute() -> torch.Tensor:
     """
     returns a predefined size random Tensor
     """
     return torch.rand(100, 100)
+
 
 def redirects() -> List[Std]:
     return [
