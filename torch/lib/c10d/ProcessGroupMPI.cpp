@@ -890,12 +890,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
   return enqueue(std::move(entry), "mpi:barrier", c10::nullopt);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather_base(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
   throw std::runtime_error(
-      "no support for allgather_base in MPI process group");
+      "no support for _allgather_base in MPI process group");
 }
 
 } // namespace c10d
