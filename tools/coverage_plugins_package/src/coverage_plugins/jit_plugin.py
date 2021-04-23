@@ -10,11 +10,12 @@ marked as covered.
 
 from coverage import CoveragePlugin, CoverageData
 from inspect import ismodule, isclass, ismethod, isfunction, iscode, getsourcefile, getsourcelines
+from time import time
 
 # All coverage stats resulting from this plug-in will be in a separate .coverage file that should be merged later with
 # `coverage combine`. The convention seems to be .coverage.dotted.suffix based on the following link:
 # https://coverage.readthedocs.io/en/coverage-5.5/cmd.html#combining-data-files-coverage-combine
-cov_data = CoverageData(basename='.coverage.jit')
+cov_data = CoverageData(basename=f'.coverage.jit.{time()}')
 
 
 def is_not_builtin_class(obj):
