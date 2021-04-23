@@ -2054,6 +2054,18 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_sequence_num_set_gloo_new_group(self):
         self._test_sequence_num_set_new_group(backend="gloo")
 
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_sequence_num_incremented_gloo_default(self):
+        self._test_sequence_num_incremented_default_group("gloo")
+
+    @skip_if_lt_x_gpu(4)
+    @requires_gloo()
+    def test_sequence_num_incremented_gloo_subgroup(self):
+        if self.world_size < 4:
+            return unittest.skip("Test requires world_size of at least 4")
+        self._test_sequence_num_incremented_subgroup("gloo")
+
     @requires_gloo()
     def test_gloo_barrier_device_ids(self):
         store = c10d.FileStore(self.file_name, self.world_size)
