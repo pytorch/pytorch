@@ -10,7 +10,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
 if not _IS_MONKEYTYPE_INSTALLED:
-    print("monkeytype is not installed. Skipping tests for Profile-Directed Typing ", file=sys.stderr)
+    print("monkeytype is not installed. Skipping tests for Profile-Directed Typing", file=sys.stderr)
     JitTestCase = object  # type: ignore[misc, assignment] # noqa: F811
 
 if __name__ == "__main__":
@@ -28,14 +28,31 @@ class TestPDT(JitTestCase):
         def test_sum(a, b):
             return a + b
 
+        make_global(test_sum)
+        scripted_fn_add = torch.jit._script_pdt(test_sum, example_inputs=[(3, 4)])
+        self.assertEqual(scripted_fn_add(10, 2), test_sum(10, 2))
+
         def test_sub(a, b):
             return a - b
+
+        make_global(test_sub)
+        scripted_fn_sub = torch.jit._script_pdt(test_sub, example_inputs=[(3.9, 4.10)])
+        self.assertEqual(scripted_fn_sub(6.5, 2.9), test_sub(6.5, 2.9))
 
         def test_mul(a, b):
             return a * b
 
+        make_global(test_mul)
+        scripted_fn_mul = torch.jit._script_pdt(test_mul, example_inputs=[(-10, 9)])
+        self.assertEqual(scripted_fn_mul(-1, 3), test_mul(-1, 3))
+
         def test_args_complex(real, img):
             return torch.complex(real, img)
+
+        make_global(test_args_complex)
+        scripted_fn_complex = torch.jit._script_pdt(test_args_complex, example_inputs=[(torch.rand(3, 4), torch.rand(3, 4))])
+        arg1, arg2 = torch.rand(3, 4), torch.rand(3, 4)
+        self.assertEqual(scripted_fn_complex(arg1, arg2), test_args_complex(arg1, arg2))
 
         def test_bool(a):
             if a:
@@ -43,29 +60,19 @@ class TestPDT(JitTestCase):
             else:
                 return 0
 
+        make_global(test_bool)
+        scripted_fn_bool = torch.jit._script_pdt(test_bool, example_inputs=[(True,)])
+        self.assertEqual(scripted_fn_bool(True), test_bool(True))
+
         def test_str(a):
             if a == "":
                 return False
             else:
                 return True
 
-        make_global(test_sum, test_sub, test_mul, test_args_complex, test_bool, test_str)
-
-        scripted_fn_add = torch.jit._script_pdt(test_sum, example_inputs=[(3, 4)])
-        scripted_fn_sub = torch.jit._script_pdt(test_sub, example_inputs=[(3.9, 4.10)])
-        scripted_fn_mul = torch.jit._script_pdt(test_mul, example_inputs=[(-10, 9)])
-        scripted_fn_bool = torch.jit._script_pdt(test_bool, example_inputs=[(True,)])
+        make_global(test_str)
         scripted_fn_str = torch.jit._script_pdt(test_str, example_inputs=[("",)])
-        scripted_fn_complex = torch.jit._script_pdt(test_args_complex, example_inputs=[(torch.rand(3, 4), torch.rand(3, 4))])
-
-        self.assertEqual(scripted_fn_add(10, 2), test_sum(10, 2))
-        self.assertEqual(scripted_fn_sub(6.5, 2.9), test_sub(6.5, 2.9))
-        self.assertEqual(scripted_fn_mul(-1, 3), test_mul(-1, 3))
-        self.assertEqual(scripted_fn_bool(True), test_bool(True))
         self.assertEqual(scripted_fn_str("abc"), test_str("abc"))
-
-        arg1, arg2 = torch.rand(3, 4), torch.rand(3, 4)
-        self.assertEqual(scripted_fn_complex(arg1, arg2), test_args_complex(arg1, arg2))
 
     def test_pdt_list_and_tuple(self):
         def test_list_and_tuple(a):
@@ -99,8 +106,8 @@ class TestPDT(JitTestCase):
 
         make_global(test_dict)
 
-        _input = {'foo' : True, 'bar': False}
-        scripted_fn = torch.jit._script_pdt(test_dict, example_inputs=[(input,)])
+        inp = {'foo' : True, 'bar': False}
+        scripted_fn = torch.jit._script_pdt(test_dict, example_inputs=[(inp,)])
         self.assertEqual(scripted_fn({'foo' : False, 'bar': True}, ), test_dict({'foo' : False, 'bar': True}, ))
 
     def test_pdt_dict_1(self):
@@ -109,8 +116,8 @@ class TestPDT(JitTestCase):
 
         make_global(test_dict_int_list)
 
-        input = {0 : [True, False], 1: [False, True]}
-        scripted_fn = torch.jit._script_pdt(test_dict_int_list, example_inputs=[(input,)])
+        inp = {0 : [True, False], 1: [False, True]}
+        scripted_fn = torch.jit._script_pdt(test_dict_int_list, example_inputs=[(inp,)])
         self.assertEqual(scripted_fn({0 : [False, False], 1: [True, True]}, ),
                          test_dict_int_list({0 : [False, False], 1: [True, True]}, ))
 
