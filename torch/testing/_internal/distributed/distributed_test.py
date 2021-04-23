@@ -4323,9 +4323,6 @@ class DistributedTest:
                         StopIteration,
                         "Detected at least one rank that exhausted inputs. Throwing StopIteration across all ranks.",
                     )
-
-                if self.rank == 0:
-                    print("GOT expected assert for StopIteration.")
             else:
                 exception_ctx = suppress()
             with exception_ctx:
