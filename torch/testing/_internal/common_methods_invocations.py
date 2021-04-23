@@ -941,8 +941,12 @@ def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
         ((2, 3, 5), (2, 3, 5)),
         ((1, 2, 3), (1, 2, 3)),
         ((1, 1), (S, 1)),
-        # TODO enable that as this causes "Floating point exception (core dumped)"
-        # ((0, 5), (4, 5)),
+        ((0, 5), (4, 5)),
+        ((4, 5), (0, 5)),
+        ((0, 4, 5), (3, 5)),
+        ((4, 5), (0, 3, 5)),
+        ((0, 4, 5), (1, 3, 5)),
+        ((1, 4, 5), (0, 3, 5)),
         # Using S here would make this one test take 9s
         ((small_S, small_S, small_S + 1, 2), (small_S, small_S, small_S + 2, 2)),
         ((small_S, 1, 1, small_S), (1, small_S, small_S)),
