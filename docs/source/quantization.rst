@@ -392,11 +392,11 @@ tutorial
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Quantization types supported by FX Graph Mode can be classified in two ways:
 
-1.
-- Post Training Quantization (apply quantization after training, quantization parameters are calculated based on sample calibration data)
-- Quantization Aware Training (simulate quantization during training so that the quantization parameters can be learned together with the model using training data)
+1. Post Training Quantization (apply quantization after training, quantization parameters are calculated based on sample calibration data)
+2. Quantization Aware Training (simulate quantization during training so that the quantization parameters can be learned together with the model using training data)
 
-2.
+And then each of these two may include any or all of the following types:
+
 - Weight Only Quantization (only weight is statically quantized)
 - Dynamic Quantization (weight is statically quantized, activation is dynamically quantized)
 - Static Quantization (both weight and activations are statically quantized)
