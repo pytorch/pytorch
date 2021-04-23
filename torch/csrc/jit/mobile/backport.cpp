@@ -159,13 +159,15 @@ c10::IValue readArchive(
 }
 
 void check_zip_file(std::unique_ptr<ReadAdapterInterface>& rai) {
-  uint8_t first_short[2];
+  std::array<uint8_t , 2> first_short;
+  static constexpr uint8_t first_slot = 0x80;
+  static constexpr uint8_t second_slot = 0x02;
   rai->read(
       /*pos=*/0,
       /*buf=*/&first_short,
       /*n=*/2,
       /*what=*/"checking archive");
-  if (first_short[0] == 0x80 && first_short[1] == 0x02) {
+  if (first_short[0] == first_slot && first_short[1] == second_slot) {
     // NB: zip files by spec can start with any data, so technically they might
     // start with 0x80 0x02, but in practice zip files start with a file entry
     // which begins with 0x04034b50. Furthermore, PyTorch will never produce zip
@@ -177,7 +179,6 @@ void check_zip_file(std::unique_ptr<ReadAdapterInterface>& rai) {
 
 std::vector<IValue> get_bytecode_vals(
     std::shared_ptr<mobile::CompilationUnit>& mobile_compilation_unit,
-    std::shared_ptr<CompilationUnit>& compilation_unit,
     std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader) {
   std::vector<IValue> bytecode_vals;
   bytecode_vals = readArchive("bytecode", mobile_compilation_unit, reader)
@@ -206,11 +207,10 @@ int64_t _get_bytecode_version(const std::string& filename) {
 int64_t _get_bytecode_version(std::unique_ptr<ReadAdapterInterface> rai) {
   check_zip_file(rai);
   auto mobile_compilation_unit = std::make_shared<mobile::CompilationUnit>();
-  auto compilation_unit = std::make_shared<CompilationUnit>();
   auto reader = torch::make_unique<caffe2::serialize::PyTorchStreamReader>(
       std::move(rai));
   auto bvals =
-      get_bytecode_vals(mobile_compilation_unit, compilation_unit, reader);
+      get_bytecode_vals(mobile_compilation_unit, reader);
   if (!bvals.empty() && bvals[0].isInt()) {
     int64_t model_version = bvals[0].toInt();
     return model_version;
