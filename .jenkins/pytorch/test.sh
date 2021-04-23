@@ -244,7 +244,7 @@ test_distributed() {
 
     MPIEXEC=$(command -v mpiexec)
     if [[ ! -z "$MPIEXEC" ]]; then
-      MPICMD="${MPI_EXEC} -np 2 build/bin/ProcessGroupMPITest"
+      MPICMD="${MPIEXEC} -np 2 build/bin/ProcessGroupMPITest"
       eval "$MPICMD"
     fi
     build/bin/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
