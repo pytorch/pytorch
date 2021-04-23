@@ -932,10 +932,30 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad, **kwargs):
             args=(shape,)) for size, shape in test_cases)
 
 def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
-    return (SampleInput(
-        make_tensor((S, 21, 2), device, dtype, requires_grad=requires_grad),
-        args=(make_tensor((S, 22, 2), device, dtype, requires_grad=requires_grad),)),)
+    test_cases = (
+        ((S, S, 2), (S, S + 1, 2)),
+        ((S, S), (S, S)),
+        ((S, S, S), (S, S, S)),
+        ((3, 5), (3, 5)),
+        ((2, 3, 5), (2, 3, 5)),
+        ((1, 2, 3), (1, 2, 3)),
+        ((1, 1), (S, 1)),
+        # TODO enable that as this causes "Floating point exception (core dumped)"
+        # ((0, 5), (4, 5)),
+        # TODO enable that as this causes https://github.com/pytorch/pytorch/issues/55370
+        # ((S, S, 21, 2), (S, S, 22, 2))
+    )
 
+    samples = []
+    for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+        for p in [0, 1, 2, 3, 0.5, 1.5, 2.5, float("inf")]:
+            for t1_size, t2_size in test_cases:
+                # The args should never be non-contiguous as this is not supported in the backward
+                samples.append(SampleInput(
+                    make_tensor(t1_size, device, dtype, requires_grad=requires_grad, noncontiguous=False),
+                    args=(make_tensor(t2_size, device, dtype, requires_grad=requires_grad, noncontiguous=False), p, cm)))
+
+    return samples
 
 def sample_inputs_comparison_ops(self, device, dtype, requires_grad, **kwargs):
     test_cases = (
