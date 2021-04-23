@@ -357,22 +357,16 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   /**
-   * Explicitly mark the future as completed with the output value.
-   */
-  void markCompleted(IValue value) {
-    markCompletedWithDataPtrs(std::move(value));
-  }
-
-  /**
-   * Explicitly mark the future as completed with the output value and DataPtrs.
-   * The data_ptrs contains storage pointers for all tensors in IValue, which
-   * will be passed to preMarkCompletedHook. Some subclass, like CUDAFuture,
-   * uses these DataPtrs to synchronize CUDA streams. You only need to provide
-   * data_ptrs when 1) DataPtrs cannot be extracted through
-   * IValue::getSubValues() or 2) customized DataPtrs extraction is more
+   * Explicitly mark the future as completed with the output value. Optionally,
+   * the storage pointers for all tensors in IValue can be passed as well, and
+   * it will be passed to preMarkCompletedHook. Some subclass, like CUDAFuture,
+   * uses these DataPtrs to synchronize CUDA streams. If data_ptrs isn't given
+   * the subclass will attempt to extract it from the value, if it needs. Thus
+   * one only needs to provide data_ptrs when 1) DataPtrs cannot be extracted
+   * through IValue::getSubValues() or 2) customized DataPtrs extraction is more
    * efficient.
    */
-  void markCompletedWithDataPtrs(
+  void markCompleted(
       IValue value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
           data_ptrs = c10::nullopt) {
@@ -382,7 +376,13 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
         "Attempting to mark a completed Future as complete again. Note that "
         "a Future can only be marked completed once.");
 
-    preMarkCompletedHook(value, std::move(data_ptrs));
+    try {
+      preMarkCompletedHook(value, std::move(data_ptrs));
+    } catch (const std::exception&) {
+      setErrorInternal(std::current_exception(), lock);
+      return;
+    }
+
     // Only set value_ and completed_ flag once preMarkCompletedHook has
     // returned successfully to allow for proper error propagation.
     value_ = std::move(value);
