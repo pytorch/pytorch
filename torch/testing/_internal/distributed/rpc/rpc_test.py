@@ -5660,7 +5660,6 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         model_dst = worker_name(1)
         out_relay = worker_name(2)
 
-
         if self.rank == 0:
             # for 1) model construction 2) forward execution
             options.set_device_map(model_dst, {local_device: remote_device})
