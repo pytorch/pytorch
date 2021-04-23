@@ -227,8 +227,8 @@ void sortKeyValueInplace(Tensor& key,
 }
 
 // We perform a vectorized segmented sort in cub with inputs larger
-// than 2048 elements. Otherwise, we do an inplace bitonic sort (see
-// sortKeyValueInplace).
+// than 1024/2048 elements in the selected dimension.
+// Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
 // Large sort algorithm:.
 // Say we are sorting a (2, 3) tensor. We have in flattened form:
 // values       0.4 1.2 5.3 6.2 1.3 2.3
@@ -257,6 +257,9 @@ void sortKeyValueInplace(Tensor& key,
 std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
   // this algorithm is always stable
   TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
+  TensorArg self_arg{self, "self", 1}, values_arg{values, "values", 2}, indices_arg{indices, "indices", 3};
+  checkAllSameGPU("small_sort", {self_arg, values_arg, indices_arg});
+
   bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
   int64_t numel = self.numel();
   int64_t ndim = self.dim();
@@ -268,12 +271,9 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   // use inplace algorithm for smaller input sizes without stable=True
   if (should_use_small_sort(self, dim) && !stable.value()) {
     // from thc: sorted->values, indices->indices, input->self
-    TensorArg self_arg{self, "self", 1}, values_arg{values, "values", 2}, indices_arg{indices, "indices", 3};
-    checkAllSameGPU("small_sort", {self_arg, values_arg, indices_arg});
-    at::maybe_wrap_dim(dim, self);
 
     if (!values.defined()) {
-      values = at::empty_like(self, self.options());
+      values = at::empty_like(self);
     }
     if (!indices.defined()) {
       indices = at::empty_like(self, self.options().dtype(kLong));
