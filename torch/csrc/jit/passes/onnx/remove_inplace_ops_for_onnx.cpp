@@ -776,6 +776,11 @@ void InplaceConverter::convertGetSetAttrToInplaceOps(Block* block) {
   replaceAttrWithInplaceOps(block, attr_name_value_map, attr_node_fullname_map);
 }
 
+bool isSpecialMappedOp(Node* n) {
+  return n->matches(
+          "aten::index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)");
+}
+
 // Convert inplace ops to outplace version, and record the associated new alias
 // in ValueTracker.
 void InplaceConverter::convertInplaceOpsAndTrackAlias(Block* block) {
@@ -800,7 +805,7 @@ void InplaceConverter::convertInplaceOpsAndTrackAlias(Block* block) {
         }
       } else if (nkind == aten::insert || nkind == aten::append) {
         std::tie(orig_data, new_out) = PrepareListAppendAndInsertForONNX(n);
-      } else if (mr_->inplaceOpVariant(n)) {
+      } else if (mr_->inplaceOpVariant(n) || isSpecialMappedOp(n)) {
         std::tie(orig_data, new_out) = PrepareInplaceOpsInBlocksForONNX(n);
       } else if (nkind == aten::pop) {
         std::tie(orig_data, new_out) = PrepareListPopForONNX(n);
