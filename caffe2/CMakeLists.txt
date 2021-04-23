@@ -33,7 +33,15 @@ else()
     set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
   endif()
 endif()
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
 set(AT_PARALLEL_OPENMP 0)
 set(AT_PARALLEL_NATIVE 0)
 set(AT_PARALLEL_NATIVE_TBB 0)
@@ -79,7 +87,15 @@ if(INTERN_BUILD_ATEN_OPS)
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h)
   add_library(aten_op_header_gen INTERFACE)
   add_dependencies(aten_op_header_gen __aten_op_header_gen)
-
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
@@ -100,7 +116,15 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
 endif()
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
 # ---[ Caffe2 build
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
@@ -121,7 +145,15 @@ add_subdirectory(utils)
 if(BUILD_CAFFE2 OR (NOT USE_FBGEMM))
   add_subdirectory(perfkernels)
 endif()
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
 # Skip modules that are not used by libtorch mobile yet.
 if(BUILD_CAFFE2 AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   add_subdirectory(contrib)
@@ -164,7 +196,15 @@ endif()
 if(NOT BUILD_CAFFE2)
   add_subdirectory(proto)
 endif()
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
 # Advanced: if we have allow list specified, we will do intersections for all
 # main lib srcs.
 if(CAFFE2_ALLOWLISTED_FILES)
@@ -192,7 +232,15 @@ if(BUILD_SPLIT_CUDA)
     endif()
   endforeach()
 endif()
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
 if(PRINT_CMAKE_DEBUG_INFO)
   message(STATUS "CPU sources: ")
   foreach(tmp ${Caffe2_CPU_SRCS})
@@ -284,7 +332,15 @@ if(PRINT_CMAKE_DEBUG_INFO)
   endforeach()
 
 endif()
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
 if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   # ---[ List of libraries to link with
   add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
@@ -341,7 +397,15 @@ endif()
 if(NOT TORCH_INSTALL_LIB_DIR)
   set(TORCH_INSTALL_LIB_DIR lib)
 endif()
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
 
 
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
@@ -524,10 +588,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
-      set_source_files_properties(../torch/csrc/jit/serialization/export.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+      set_source_files_properties(../../torch/csrc/jit/serialization/export.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
 
       # TODO: Delete this when https://github.com/pytorch/pytorch/issues/35026 is fixed
-      set_source_files_properties(../torch/csrc/autograd/record_function_ops.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+      set_source_files_properties(../../torch/csrc/autograd/record_function_ops.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     endif()
   endif()
   list(APPEND TORCH_SRCS ${LIBTORCH_CMAKE_SRCS})
@@ -541,15 +605,15 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
+    set_source_files_properties(../${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
     # Force -Werror on several files
-    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/mkldnn/Pooling.cpp PROPERTIES COMPILE_FLAGS "-Werror")
+    set_source_files_properties(../${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/mkldnn/Pooling.cpp PROPERTIES COMPILE_FLAGS "-Werror")
   endif()
   # Disable certain warnings for GCC-9.X
   if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
     # See https://github.com/pytorch/pytorch/issues/38856
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
+    set_source_files_properties(../${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
+    set_source_files_properties(../${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
   endif()
 
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
@@ -597,7 +661,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
       )
     else()
-      set_source_files_properties(
+      set_source_files_properties(../
         ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
         PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
       )
@@ -634,7 +698,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       list(APPEND Caffe2_GPU_SRCS
         ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
     endif()
-    set_source_files_properties(
+    set_source_files_properties(../
       ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
       PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
     )
@@ -815,7 +879,7 @@ endif()
 
 if(USE_ROCM)
   filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
-  set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  set_source_files_properties(../${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 endif()
 
 # Compile exposed libraries.
@@ -985,10 +1049,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${CMAKE_BINARY_DIR}/aten/src)
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/RNN.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+      set_source_files_properties(../${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+      set_source_files_properties(../${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/RNN.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+      set_source_files_properties(../${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+      set_source_files_properties(../${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     endif()
 
 if(USE_TBB)
@@ -1732,7 +1796,15 @@ if(BUILD_PYTHON)
       set(PY_EXT_SUFFIX ".so")
     endif()
   endif()
-
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
   # Allow different install locations for libcaffe2
   # For setuptools installs (that all build Python), install libcaffe2 into
   # site-packages, alongside the torch libraries. The pybind11 library needs
@@ -1910,4 +1982,13 @@ if(BUILD_PYTHON)
   # Caffe2 proto files
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
+endif()
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-error=attributes)
+  set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  set_source_files_properties(../native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
 endif()
