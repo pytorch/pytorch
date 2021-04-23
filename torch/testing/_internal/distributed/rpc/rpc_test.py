@@ -5694,7 +5694,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             # see https://github.com/pytorch/pytorch/issues/54771
             rref = rpc.remote(model_dst, MyConvNetForMNIST, args=(remote_device,))
             for _ in range(20):
-                rref_input = RRef(torch.randn(100, 1, 28, 28).to(local_device))
+                rref_input = RRef(torch.randn(200, 1, 28, 28).to(local_device))
                 rref_out = rref.remote().forward(rref_input, True)
                 out = rpc.remote(
                     out_relay,
