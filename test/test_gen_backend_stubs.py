@@ -56,15 +56,6 @@ supported:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(output_error, '''You must provide a value for "cpp_namespace"''')
 
-    def test_empty_supported(self):
-        yaml_str = '''\
-backend: XLA
-cpp_namespace: torch_xla
-supported:
-'''
-        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertExpectedInline(output_error, '''expected "supported" to be a list, but got: None (of type <class 'NoneType'>)''')
-
     # supported is a single item (it should be a list)
     def test_nonlist_supported(self):
         yaml_str = '''\
@@ -82,7 +73,7 @@ cpp_namespace: torch_xla
 supported:
 - abs_BAD'''
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertExpectedInline(output_error, '''Found an invalid operator name: abs_BAD. For the list of valid operator names, see https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/native_functions.yaml''')
+        self.assertExpectedInline(output_error, '''Found an invalid operator name: abs_BAD''')
 
     # unrecognized extra yaml key
     def test_unrecognized_key(self):
@@ -93,7 +84,7 @@ supported:
 - abs
 invalid_key: invalid_val'''
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertExpectedInline(output_error, ''' contains unexpected keys: invalid_key. Only the following keys are supported: backend, cpp_namespace, supported, autograd''')
+        self.assertExpectedInline(output_error, ''' contains unexpected keys: invalid_key. Only the following keys are supported: backend, cpp_namespace, supported, autograd''')  # noqa: B950
 
 
 if __name__ == '__main__':
