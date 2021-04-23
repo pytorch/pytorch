@@ -9,6 +9,7 @@
 #include <functorch/csrc/VmapTransforms.h>
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/Constants.h>
+#include <functorch/csrc/BatchRulesHelper.h>
 
 namespace at {
 namespace functorch {
@@ -358,22 +359,6 @@ std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntAr
   auto result = at::tensor_split(self_physical.tensor(), indices, dim_physical);
   self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
-}
-
-Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::unsqueeze(self, dim);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  // NB: unsqueeze has some special handling of its `dim` argument so we can't call
-  // self_physical.getPhysicalDim directly. In particular, native::unsqueeze
-  // wraps the dim to (the logical dimension) + 1, so we need to do that here too.
-  // https://github.com/pytorch/pytorch/blob/b623bdeabb0aa8da44285d303246e7f8ac06c2a9/aten/src/ATen/native/TensorShape.cpp#L1413
-  auto dim_physical =
-      self_physical.numBatchDims() + maybe_wrap_dim(dim, /*logical_dim*/self.dim() + 1);
-  auto result = self_physical.tensor().unsqueeze(dim_physical);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
 // Checks if the batch dims in `bdims` appear at the front of the tensor.
@@ -727,18 +712,6 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto size_physical = self_physical.getPhysicalShape(size);
   auto result = self_physical.tensor().view(size_physical);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
-Tensor flatten_batching_rule(const Tensor& self, int64_t start_dim, int64_t end_dim) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::flatten(self, start_dim, end_dim);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto start_dim_physical = self_physical.getPhysicalDim(start_dim);
-  auto end_dim_physical = self_physical.getPhysicalDim(end_dim);
-  auto result = self_physical.tensor().flatten(start_dim, end_dim);
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
@@ -1424,21 +1397,6 @@ std::tuple<Tensor,optional<int64_t>> unwrap_and_call2(const Tensor& tensor, opti
   return {Func(tensor), batch_dim};
 }
 
-static Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_dim) {
-  if (!maybe_batch_dim.has_value()) {
-    return tensor;
-  }
-  return tensor.movedim(maybe_batch_dim.value(), 0);
-}
-
-static int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim) {
-  int64_t result = tensor.dim();
-  if (maybe_batch_dim.has_value()) {
-    result -= 1;
-  }
-  return result;
-}
-
 static Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, int64_t logical_rank) {
   if (!has_bdim) {
     return tensor;
@@ -1628,7 +1586,6 @@ TORCH_LIBRARY_IMPL(aten, BatchedOutOfTree, m) {
   m.impl("_log_softmax", _log_softmax_batching_rule);
   m.impl("is_complex", native::is_complex);
   m.impl("conj", native::conj);
-  m.impl("flatten.using_ints", flatten_batching_rule);
   m.impl("cross_entropy_loss", native::cross_entropy_loss);
 // 
 //   // inplace operations
@@ -1669,7 +1626,6 @@ TORCH_LIBRARY_IMPL(aten, BatchedOutOfTree, m) {
   m.impl("transpose.int", transpose_int_batching_rule);
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("unfold", unfold_batching_rule);
-  m.impl("unsqueeze", unsqueeze_batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
   m.impl("view", view_batching_rule);
   m.impl("view_as", native::view_as); // composite wrt autograd
@@ -1827,6 +1783,7 @@ TORCH_LIBRARY_IMPL(aten, BatchedOutOfTree, m) {
 // //   COMPARISON_POINTWISE(ne);
 // // 
 // #undef COMPARISON_POINTWISE
+#undef VMAP_SUPPORT
 }
 
 }
