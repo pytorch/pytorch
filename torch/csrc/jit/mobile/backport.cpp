@@ -161,6 +161,34 @@ c10::IValue readArchive(
   return unpickler.parse_ivalue();
 }
 
+TensorIndexMap get_tensors_archive_table(const std::string& archive_name, const IValue& value){
+  std::vector<char> data;
+  TensorIndexMap tensors_archive_table;
+  TypeNameUniquer type_name_uniquer;
+  // Vector to capture the run-time class types during pickling the IValues
+  std::vector<c10::ClassTypePtr> memoizedClassTypes;
+  Pickler data_pickle(
+      [&](const char* buf, size_t size) {
+        data.insert(data.end(), buf, buf + size);
+      },
+      nullptr,
+      [&](const c10::ClassTypePtr& t) {
+        return type_name_uniquer.getUniqueName(t);
+      },
+      &memoizedClassTypes);
+  data_pickle.protocol();
+  data_pickle.pushIValue(value);
+  data_pickle.stop();
+
+  const auto tensor_candidates = data_pickle.tensorData();
+  for (size_t tensor_index = 0; tensor_index < tensor_candidates.size();
+       tensor_index++) {
+    tensors_archive_table[tensor_candidates[tensor_index]] =
+        std::make_pair(kArchiveNameConstants, tensor_index);
+  }
+  return tensors_archive_table;
+}
+
 void writeArchive(
     std::unique_ptr<PyTorchStreamWriter>& writer,
     const std::string& archive_name,
@@ -232,6 +260,33 @@ void writeArchive(
   //  }
 }
 
+void check_zip_file(std::unique_ptr<ReadAdapterInterface>& rai) {
+  uint8_t first_short[2];
+  rai->read(
+      /*pos=*/0,
+      /*buf=*/&first_short,
+      /*n=*/2,
+      /*what=*/"checking archive");
+  if (first_short[0] == 0x80 && first_short[1] == 0x02) {
+    // NB: zip files by spec can start with any data, so technically they might
+    // start with 0x80 0x02, but in practice zip files start with a file entry
+    // which begins with 0x04034b50. Furthermore, PyTorch will never produce zip
+    // files that do not start with the file entry, so it is relatively safe to
+    // perform this check.
+    TORCH_CHECK(false, "file issue");
+  }
+}
+
+std::vector<IValue> get_bytecode_vals(
+    std::shared_ptr<mobile::CompilationUnit>& mobile_compilation_unit,
+    std::shared_ptr<CompilationUnit>& compilation_unit,
+    std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader
+    ) {
+  std::vector<IValue> bytecode_vals;
+  bytecode_vals = readArchive("bytecode", mobile_compilation_unit, reader).toTuple()->elements();
+  return bytecode_vals;
+}
+
 } // namespace
 
 using caffe2::serialize::IStreamAdapter;
@@ -297,36 +352,33 @@ void _backport_for_mobile_impl(
     std::unique_ptr<PyTorchStreamWriter> writer) {
   std::cout << "backporting..." << std::endl;
 
-  // Verify that we're loading a zip archive and not a torch.save pickle archive
-  // (marked by the 0x80 0x02 bytes at the start)
-  uint8_t first_short[2];
-  rai->read(
-      /*pos=*/0,
-      /*buf=*/&first_short,
-      /*n=*/2,
-      /*what=*/"checking archive");
-  if (first_short[0] == 0x80 && first_short[1] == 0x02) {
-    // NB: zip files by spec can start with any data, so technically they might
-    // start with 0x80 0x02, but in practice zip files start with a file entry
-    // which begins with 0x04034b50. Furthermore, PyTorch will never produce zip
-    // files that do not start with the file entry, so it is relatively safe to
-    // perform this check.
-    TORCH_CHECK(false, "file issue");
-  }
+  check_zip_file(rai);
+
   auto reader = torch::make_unique<caffe2::serialize::PyTorchStreamReader>(
       std::move(rai));
-  c10::optional<std::vector<IValue>> bvals;
-  auto mcu = std::make_shared<mobile::CompilationUnit>();
+  std::vector<IValue> bvals;
+  auto mobile_compilation_unit = std::make_shared<mobile::CompilationUnit>();
   auto compilation_unit = std::make_shared<CompilationUnit>();
-  bvals = readArchive("bytecode", mcu, reader).toTuple()->elements();
+  bvals = get_bytecode_vals(mobile_compilation_unit, compilation_unit, reader);
 
-  auto it = reader->getAllRecords();
+  auto records = reader->getAllRecords();
   auto it_2 = reader->version();
+  for(auto record: records) {
+    if (record.find(kArchiveNameBytecode) != std::string::npos) {
+      std::cout << "found bytecode archive, skipping" << '\n';
+    } else {
+      auto data_ptr = reader->getRecord(record);
+      auto data = std::get<0>(data_ptr).get();
+      auto size = std::get<1>(data_ptr);
+      writer->writeRecord(record,  data, size) ;
+      std::cout << "copying " << record << std::endl;
+    }
+  }
 
   std::cout << "pass bytecode " << std::endl;
 
   c10::optional<std::vector<IValue>> ts_vals;
-  ts_vals = readArchive("constants", mcu, reader).toTuple()->elements();
+  ts_vals = readArchive("constants", mobile_compilation_unit, reader).toTuple()->elements();
 
   std::cout << "pass constatns " << std::endl;
   const auto ivalue_constants = ts_vals.value();
@@ -335,9 +387,9 @@ void _backport_for_mobile_impl(
   auto file_name = "output_test.pkl";
 
   auto constants_data = c10::ivalue::Tuple::create(std::move(ivalue_constants));
-  auto bytecode_data = c10::ivalue::Tuple::create(std::move(bvals.value()));
-
-  writeArchive(writer, "constants", constants_data, tensors_archive_table);
+  auto bytecode_data = c10::ivalue::Tuple::create(std::move(bvals));
+  tensors_archive_table = get_tensors_archive_table(kArchiveNameConstants, constants_data);
+//  writeArchive(writer, "constants", constants_data, tensors_archive_table);
   writeArchive(writer, "bytecode", bytecode_data, tensors_archive_table, true);
 }
 
@@ -352,35 +404,20 @@ int64_t _get_bytecode_version(const std::string& filename) {
 }
 
 int64_t _get_bytecode_version(std::unique_ptr<ReadAdapterInterface> rai) {
-  uint8_t first_short[2];
-  rai->read(
-      /*pos=*/0,
-      /*buf=*/&first_short,
-      /*n=*/2,
-      /*what=*/"checking archive");
-  if (first_short[0] == 0x80 && first_short[1] == 0x02) {
-    // NB: zip files by spec can start with any data, so technically they might
-    // start with 0x80 0x02, but in practice zip files start with a file entry
-    // which begins with 0x04034b50. Furthermore, PyTorch will never produce zip
-    // files that do not start with the file entry, so it is relatively safe to
-    // perform this check.
-    TORCH_CHECK(false, "file issue");
-  }
+  auto mobile_compilation_unit = std::make_shared<mobile::CompilationUnit>();
+  auto compilation_unit = std::make_shared<CompilationUnit>();
   auto reader = torch::make_unique<caffe2::serialize::PyTorchStreamReader>(
       std::move(rai));
-  std::vector<IValue> bvals;
-  auto mcu = std::make_shared<mobile::CompilationUnit>();
-  auto compilation_unit = std::make_shared<CompilationUnit>();
-  bvals = readArchive("bytecode", mcu, reader).toTuple()->elements();
-
+  auto bvals = get_bytecode_vals(mobile_compilation_unit, compilation_unit, reader);
   if (!bvals.empty() && bvals[0].isInt()) {
     int64_t model_version = bvals[0].toInt();
     return model_version;
   }
   TORCH_WARN("Fail to get bytecode version.");
-  ;
   return -1;
 }
+
+
 
 } // namespace jit
 } // namespace torch
