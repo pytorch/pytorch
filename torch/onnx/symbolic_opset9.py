@@ -3113,7 +3113,8 @@ def index_add(g, self, dim, index, other):
                                            ends=new_shape_ends)
         other = expand_as(g, other, new_shape)
     else:
-        raise NotImplementedError("index_add does NOT support duplicated value in 'index' parameter yet.")
+        raise NotImplementedError("ONNX export does NOT support exporting 'index_add_()' function with " +
+                                  "duplicated values in 'index' parameter yet.")
 
     for i in range(dim):
         index = sym_help._unsqueeze_helper(g, index, [0])
