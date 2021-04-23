@@ -252,8 +252,7 @@ struct TypedIValue : public std::pair<IValue, TypePtr> {
 inline TypedIValue toDictKeyIValue(py::handle key) {
   if (py::isinstance<py::str>(key)) {
     return TypedIValue(
-        ConstantString::create(py::cast<std::string>(key)),
-        StringType::get());
+        ConstantString::create(py::cast<std::string>(key)), StringType::get());
   } else if (py::isinstance<py::int_>(key)) {
     return TypedIValue(py::cast<int64_t>(key), IntType::get());
   } else if (py::isinstance<py::float_>(key)) {
