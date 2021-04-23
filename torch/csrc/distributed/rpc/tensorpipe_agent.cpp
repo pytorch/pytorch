@@ -980,7 +980,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   ClientPipe& clientPipe = it->second;
 
   auto futureResponseMessage = std::make_shared<AtomicJitFuture>(
-      reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
+      devices_, reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
   uint64_t messageId = nextMessageID_++;
   requestMessage.setId(messageId);
 
