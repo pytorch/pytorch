@@ -2,6 +2,7 @@ import torch
 import operator
 import unittest
 import sys
+import math
 from typing import Callable, Dict, Union, List
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
@@ -12,6 +13,8 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 from torch.fx.passes.split_module import split_module
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
@@ -23,10 +26,11 @@ from torch.fx.experimental.partitioner_utils import (
 )
 import torch.fx.experimental.optimization as optimization
 from torch.fx.experimental import merge_matmul
-from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
+from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.fx.passes.shape_prop import extract_tensor_metadata
+from torch.fx.operator_schemas import _torchscript_type_to_python_type, normalize_function, normalize_module
+from torch.fx.passes.shape_prop import extract_tensor_metadata, ShapeProp
 
 try:
     from torchvision.models import resnet18
@@ -826,24 +830,26 @@ terrible spacing
         input = torch.randn(5, 3, 224, 224)
         ref_outs = traced(input)
 
+        ShapeProp(traced).propagate(input)
         traced = NormalizeArgs(traced).transform()
 
-        test_outs = traced(input)
-        self.assertEqual(test_outs, ref_outs)
 
         modules = dict(traced.named_modules())
+
         for node in traced.graph.nodes:
-            if node.op == 'call_function' and node.target.__module__ == 'torch.nn.functional':
+            if node.op == 'call_function' and node.target != operator.add:
                 self.assertEqual(len(node.args), 0)
-            if node.op == 'call_module':
+            elif node.op == 'call_module':
                 submod_class = modules[node.target].__class__
                 nn_class = getattr(torch.nn, submod_class.__name__)
                 if submod_class == nn_class:
                     self.assertEqual(len(node.args), 0)
+        traced(input)
+        self.assertEqual(traced(input), ref_outs)
 
     def test_normalize_modules_exhaustive(self):
         """
-        Exhaustively test `NormalizeArgs` on all standard
+        Exhaustively test `Node.normalized_arguments` on all standard
         torch.nn Module classes
         """
         for test_params in module_tests + new_module_tests:
@@ -892,8 +898,23 @@ class {test_classname}(torch.nn.Module):
             test_instance = gbls[test_classname](mod)
             traced = symbolic_trace(test_instance)
 
-            # Now actually test arg normalization!
-            traced = NormalizeArgs(traced).transform()
+            # Use `Node.normalized_arguments` to get a new set of arguments
+            # to feed to the Module. Then, rewrite the node to only take
+            # in those arguments as kwargs
+            modules = dict(traced.named_modules())
+            for node in traced.graph.nodes:
+                if node.op == 'call_module':
+                    submod_class = modules[node.target].__class__
+                    nn_class = getattr(torch.nn, submod_class.__name__)
+                    if submod_class == nn_class:
+                        normalized_args = node.normalized_arguments(traced)
+                        normalized_args2 = normalize_module(traced, node.target, node.args, node.kwargs)
+                        assert(normalized_args == normalized_args2)
+                        assert normalized_args
+                        node.args = ()
+                        node.kwargs = normalized_args
+
+            traced.recompile()
 
             # These Modules have an RNG in their forward, so testing
             # correctness by comparing outputs is not correct. Skip that
@@ -904,7 +925,7 @@ class {test_classname}(torch.nn.Module):
             if mod.__class__.__name__ not in stochastic_modules:
                 self.assertEqual(traced(*inputs), mod(*inputs))
 
-            # Ensure all args/kwargs are normalized into kwargs
+            traced = NormalizeArgs(symbolic_trace(test_instance)).transform()
             modules = dict(traced.named_modules())
             for node in traced.graph.nodes:
                 if node.op == 'call_module':
@@ -912,6 +933,8 @@ class {test_classname}(torch.nn.Module):
                     nn_class = getattr(torch.nn, submod_class.__name__)
                     if submod_class == nn_class:
                         self.assertEqual(len(node.args), 0)
+
+
 
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
@@ -1236,6 +1259,106 @@ class {test_classname}(torch.nn.Module):
                 torch.testing.assert_allclose(orig_out, new_out)
 
 
+class TestNormalizeOperators(JitTestCase):
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_normalize_operator_exhaustive(self, device, dtype, op):
+        # Unsupported input types
+        if op.name in {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma'}:
+            return
+        # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
+        fx_fail = {'stack', 'hstack', 'vstack', 'dstack',
+                   'linalg.multi_dot'}
+        print(op.name)
+        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in sample_inputs_itr:
+            unsupported_arg_type = False
+            arg_values = [sample_input.input] + list(sample_input.args)
+            kwarg_values = sample_input.kwargs
+            arg_types = []
+            kwarg_types = {}
+
+            def jit_infer_type(v):
+                inferred_arg_type = torch._C._jit_try_infer_type(v)
+                assert inferred_arg_type.success()
+                t = _torchscript_type_to_python_type(inferred_arg_type.type())
+                return t
+
+            for v in arg_values:
+                if isinstance(v, torch.Tensor):
+                    arg_types.append(type(v))
+                else:
+                    if isinstance(v, complex):
+                        # Complex type not supported in FX
+                        unsupported_arg_type = True
+                    arg_types.append(jit_infer_type(v))
+
+            for k, v in kwarg_values.items():
+                if isinstance(v, torch.Tensor):
+                    kwarg_types[k] = type(v)
+                else:
+                    if isinstance(v, complex):
+                        # Complex type not supported in FX
+                        unsupported_arg_type = True
+                    kwarg_types[k] = jit_infer_type(v)
+
+            if unsupported_arg_type:
+                continue
+            # Test normalize_function by itself
+            ref_out = op.op(*arg_values, **kwarg_values)
+            norm_kwargs = normalize_function(op.op, arg_values, kwarg_values, arg_types, kwarg_types)
+            test_out = op.op(**norm_kwargs)
+            self.assertEqual(test_out, ref_out)
+
+            # Test normalized_arguments as part of FX
+            if op.name in fx_fail:
+                continue
+            param_names = []
+            param_values = []
+            fx_args = []
+            for idx, v in enumerate(arg_values):
+                if isinstance(v, torch.Tensor):
+                    param_names.append(f"arg_{idx}")
+                    param_values.append(v)
+                    fx_args.append(param_names[-1])
+                else:
+                    fx_args.append(f'{repr(v)}')
+
+            for k, v in kwarg_values.items():
+                if isinstance(v, torch.Tensor):
+                    param_names.append(k)
+                    param_values.append(v)
+                    fx_args.append(k)
+                else:
+                    fx_args.append(f'{k} = {repr(v)}')
+
+            code = f"""
+class TestModule(torch.nn.Module):
+    def forward(self, {', '.join(param_names)}):
+        return torch.{op.name}({', '.join(fx_args)})
+            """
+
+            g = {'torch': torch, 'inf' : math.inf}
+            exec(code, g)
+            TestModule = g['TestModule']
+
+
+            m = TestModule()
+            traced = torch.fx.symbolic_trace(m)
+            ref_out = traced(*param_values)
+
+            for node in traced.graph.nodes:
+                if node.op == 'call_function':
+                    normalized_args = node.normalized_arguments(traced, arg_types, kwarg_types)
+                    assert normalized_args
+                    node.args = ()
+                    node.kwargs = normalized_args
+            traced.recompile()
+
+            test_out = traced(*param_values)
+            self.assertEqual(test_out, ref_out)
+
+instantiate_device_type_tests(TestNormalizeOperators, globals())
 
 if __name__ == "__main__":
     run_tests()

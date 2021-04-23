@@ -492,7 +492,7 @@ void ProcessGroupGloo::RecvWork::abort() {
 }
 
 ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
-    : ProcessGroup::Options(timeout, GLOO_BACKEND_NAME), threads(2) {}
+    : ProcessGroup::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
 
 namespace {
 
@@ -1053,11 +1053,11 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // TODO: This is a massive hack!  There is some confusion about
     // Variable/Tensor inside the body of this function.  Turning off
     // grad smooths over the confusion for now.  This fixes
-    // test/test_c10d.py ProcessGroupGlooTest.test_sparse_allreduce_basics
+    // test/test_c10d_gloo.py ProcessGroupGlooTest.test_sparse_allreduce_basics
     //
     // The correct fix is to stop allocating tensors that are not variables,
     // but to conveniently do this c10d must depend on torch not ATen
-    at::AutoDispatchBelowAutograd _no_grad(true);
+    at::AutoDispatchBelowAutograd guard;
     auto input = tensors[0];
 
     // Perform local reduction if we have multiple inputs.

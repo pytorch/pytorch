@@ -6,6 +6,12 @@ on:
     - master
   pull_request:
 
+# note [local lint]
+# LOCAL_FILES in the jobs below is intended to be filled by local (i.e. on a
+# developer's machine) job in tools/actions_local_runner.py to pass only the
+# changed files to whatever tool is consuming the files. This helps speed up
+# local lints while keeping the linting code unified between local / CI.
+
 jobs:
   quick-checks:
     runs-on: ubuntu-18.04
@@ -47,22 +53,30 @@ jobs:
         run: |
           (! git --no-pager grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
+        if: always()
         run: |
           (! git --no-pager grep -In '[[:blank:]]$' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above lines have trailing spaces; please remove them"; false))
       - name: Ensure no tabs
+        if: always()
         run: |
           (! git --no-pager grep -In $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above lines have tabs; please convert them to spaces"; false))
       - name: Ensure no non-breaking spaces
+        if: always()
         run: |
-          (! git --no-pager grep -In $'\u00a0' -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
+          # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
+          # does not support the '\u000a' syntax (which is relevant for local linters)
+          (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
       - name: Ensure canonical include
+        if: always()
         run: |
           (! git --no-pager grep -In $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above lines have include with quotes; please convert them to #include <xxxx>"; false))
       - name: Ensure no unqualified noqa
+        if: always()
         run: |
           # shellcheck disable=SC2016
           (! git --no-pager grep -InP '# noqa(?!: [A-Z]+\d{3})' -- '**.py' ':(exclude)caffe2' || (echo 'The above lines have unqualified `noqa`; please convert them to `noqa: XXXX`'; false))
       - name: Ensure no unqualified type ignore
+        if: always()
         run: |
           # shellcheck disable=SC2016
           (! git --no-pager grep -InP '# type:\s*ignore(?!\[)' -- '**.py' ':(exclude)test/test_jit.py' || (echo 'The above lines have unqualified `type: ignore`; please convert them to `type: ignore[xxxx]`'; false))
@@ -70,6 +84,7 @@ jobs:
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
       - name: Ensure C++ source files are not executable
+        if: always()
         run: |
           # shellcheck disable=SC2016
           (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format|gradlew)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
@@ -82,6 +97,7 @@ jobs:
           set -eux
           python torch/testing/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
       - name: Ensure no direct cub include
+        if: always()
         run: |
           (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
 
@@ -128,15 +144,15 @@ jobs:
         uses: actions/checkout@v2
       - name: Install markdown-toc
         run: npm install -g markdown-toc
-      - name: Regenerate ToCs
+      - name: Regenerate ToCs and check that they didn't change
         run: |
           set -eux
           export PATH=~/.npm-global/bin:"$PATH"
           for FILE in $(git grep -Il '<!-- toc -->' -- '**.md'); do
             markdown-toc --bullets='-' -i "$FILE"
           done
-      - name: Assert that regenerating the ToCs didn't change them
-        run: .github/scripts/report_git_status.sh
+
+          .github/scripts/report_git_status.sh
 
   flake8-py3:
     runs-on: ubuntu-18.04
@@ -164,9 +180,13 @@ jobs:
           pip install -r requirements-flake8.txt
           flake8 --version
       - name: Run flake8
+        env:
+          # See note [local lint]
+          LOCAL_FILES: ""
         run: |
           set -eux
-          flake8 | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
+          # shellcheck disable=SC2086
+          flake8 $LOCAL_FILES | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
       - name: Translate annotations
         if: github.event_name == 'pull_request'
         env:
@@ -342,6 +362,10 @@ jobs:
           time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
           time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
       - name: Run mypy
+        env:
+          # See note [local lint]
+          LOCAL_FILES: ""
         run: |
           set -eux
-          for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+          # shellcheck disable=SC2086
+          for CONFIG in mypy*.ini; do mypy --config="$CONFIG" $LOCAL_FILES; done
