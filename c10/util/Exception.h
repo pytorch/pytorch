@@ -142,7 +142,7 @@ namespace Warning {
 
 /// Issue a warning with a given message. Dispatched to the current
 /// warning handler.
-C10_API void warn(SourceLocation source_location,
+C10_API void warn(const SourceLocation& source_location,
     const std::string& msg,
     bool verbatim);
 /// Sets the global warning handler. This is not thread-safe, so it should
