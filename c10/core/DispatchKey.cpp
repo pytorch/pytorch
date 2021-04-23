@@ -126,6 +126,25 @@ const char* toString(DispatchKey t) {
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
 
+    // Note [Out-of-tree vmap+grad prototype]
+    // The following keys are used in the implementation of the out-of-tree
+    // composable functions transforms (vmap+grad) prototype that lives at
+    // https://github.com/zou3519/functorch
+    // We plan on eventually upstreaming the prototype into core, at which
+    // point it will have a different design that should use fewer keys.
+    case DispatchKey::Python:
+      return "Python";
+    case DispatchKey::DynamicLayerBackMode:
+      return "DynamicLayerBackMode";
+    case DispatchKey::DynamicLayerFrontMode:
+      return "DynamicLayerFrontMode";
+    case DispatchKey::GradWrapper:
+      return "GradWrapper";
+    case DispatchKey::VmapModeOutOfTree:
+      return "VmapModeOutOfTree";
+    case DispatchKey::BatchedOutOfTree:
+      return "BatchedOutOfTree";
+
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
   }
