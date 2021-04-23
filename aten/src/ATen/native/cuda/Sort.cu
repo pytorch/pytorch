@@ -37,7 +37,6 @@ namespace at { namespace native {
 
 bool should_use_small_sort(const Tensor &self, int64_t dim) {
   int64_t ndim = self.dim();
-  dim = maybe_wrap_dim(dim, ndim);
   int64_t nsort = self.sizes()[dim];
   int64_t threshold;
   if (self.scalar_type() == kLong || self.scalar_type() == kDouble) {
