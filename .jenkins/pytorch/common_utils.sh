@@ -55,7 +55,7 @@ function file_diff_from_base() {
   git fetch origin master --quiet
   set -e
   if [[ -n "${GITHUB_ACTIONS}" ]]; then
-    git diff --name-only "$(git merge-base origin/master "${GITHUB_SHA}") ${GITHUB_SHA}" > "$1"
+    git diff --name-only "${GITHUB_BASE_REF}" "${GITHUB_HEAD_REF}" > "$1"
   else
     git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
   fi
