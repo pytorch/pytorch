@@ -23,7 +23,7 @@ struct TORCH_API EmbeddingOptions {
   TORCH_ARG(int64_t, embedding_dim);
   /// If specified, the entries at `padding_idx` do not contribute to the
   /// gradient; therefore, the embedding vector at `padding_idx` is not updated
-  /// during training, i.e. it remains as a fixed “pad”. For a newly constructed
+  /// during training, i.e. it remains as a fixed "pad". For a newly constructed
   /// Embedding, the embedding vector at `padding_idx` will default to all
   /// zeros, but can be updated to another value to be used as the padding vector.
   TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
@@ -48,7 +48,7 @@ struct TORCH_API EmbeddingFromPretrainedOptions {
   TORCH_ARG(bool, freeze) = true;
   /// If specified, the entries at `padding_idx` do not contribute to the
   /// gradient; therefore, the embedding vector at `padding_idx` is not updated
-  /// during training, i.e. it remains as a fixed “pad”.
+  /// during training, i.e. it remains as a fixed "pad".
   TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
@@ -74,7 +74,7 @@ namespace functional {
 struct TORCH_API EmbeddingFuncOptions {
   /// If specified, the entries at `padding_idx` do not contribute to the
   /// gradient; therefore, the embedding vector at `padding_idx` is not updated
-  /// during training, i.e. it remains as a fixed “pad”.
+  /// during training, i.e. it remains as a fixed "pad".
   TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
@@ -125,7 +125,7 @@ struct TORCH_API EmbeddingBagOptions {
   TORCH_ARG(bool, include_last_offset) = false;
   /// If specified, the entries at `padding_idx` do not contribute to the
   /// gradient; therefore, the embedding vector at padding_idx is not updated
-  /// during training, i.e. it remains as a fixed “pad”. For a newly constructed
+  /// during training, i.e. it remains as a fixed "pad". For a newly constructed
   /// EmbeddingBag, the embedding vector at `padding_idx` will default to all
   /// zeros, but can be updated to another value to be used as the padding vector.
   /// Note that the embedding vector at `padding_idx` is excluded from the reduction.
@@ -158,7 +158,7 @@ struct TORCH_API EmbeddingBagFromPretrainedOptions {
   TORCH_ARG(bool, include_last_offset) = false;
   /// If specified, the entries at `padding_idx` do not contribute to the
   /// gradient; therefore, the embedding vector at padding_idx is not updated
-  /// during training, i.e. it remains as a fixed “pad”. Note that the embedding
+  /// during training, i.e. it remains as a fixed "pad". Note that the embedding
   /// vector at `padding_idx` is excluded from the reduction.
   TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
 };
@@ -201,7 +201,7 @@ struct TORCH_API EmbeddingBagFuncOptions {
   TORCH_ARG(bool, include_last_offset) = false;
   /// If specified, the entries at `padding_idx` do not contribute to the
   /// gradient; therefore, the embedding vector at padding_idx is not updated
-  /// during training, i.e. it remains as a fixed “pad”. Note that the embedding
+  /// during training, i.e. it remains as a fixed "pad". Note that the embedding
   /// vector at `padding_idx` is excluded from the reduction.
   TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
 };
