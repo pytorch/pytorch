@@ -2262,7 +2262,7 @@ inline void inferGroupInputs(
   for (auto v : getAllInputs(sg)) {
     if (auto tv = dynamic_cast<TensorView*>(v)) {
       for (auto id : tv->getRootDomain()) {
-        auto extent = id->rawExtent();
+        auto extent = id->extent();
         copyValue(extent, ee, local_ee);
       }
     } else if (v != nullptr && v->isAnInt()) {

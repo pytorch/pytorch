@@ -192,7 +192,7 @@ kir::Val* getVectorizeExtent(
 
     // We now know it's safe to extend the vectorization domain to these
     // axes. It shouldn't matter whether producer or consumer is used.
-    auto consumer_extent = gpu_lower->lowerValue(consumer_root_id->rawExtent());
+    auto consumer_extent = gpu_lower->lowerValue(consumer_root_id->extent());
     if (extent == nullptr) {
       extent = consumer_extent;
     } else {

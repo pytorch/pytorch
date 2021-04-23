@@ -194,7 +194,7 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
 
     bool before_reduction = true;
     for (auto id : tv->getRootDomain()) {
-      auto inferred_dim_size = evaluator.evaluate(id->rawExtent());
+      auto inferred_dim_size = evaluator.evaluate(id->extent());
       TORCH_INTERNAL_ASSERT(
           inferred_dim_size.has_value(), "Error inferring dimension size.");
 

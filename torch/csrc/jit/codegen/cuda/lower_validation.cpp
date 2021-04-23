@@ -230,12 +230,12 @@ class VectorizeValidator : public OptInDispatch {
     auto fusion = FusionGuard::getCurFusion();
 
     TORCH_CHECK(
-        v_id->rawExtent()->isConstScalar(),
+        v_id->extent()->isConstScalar(),
         "Vectorizing a domain requires a constant size.");
 
     ExpressionEvaluator const_expr_eval(fusion);
 
-    auto vector_size_optional = const_expr_eval.evaluate(v_id->rawExtent());
+    auto vector_size_optional = const_expr_eval.evaluate(v_id->extent());
 
     TORCH_CHECK(
         vector_size_optional.has_value(),

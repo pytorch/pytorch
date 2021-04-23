@@ -160,7 +160,7 @@ class ReductionSizeMapper : private IterVisitor {
     int64_t reduction_elements = 1;
     for (auto id : tv->getMaybeRFactorDomain()) {
       if (id->isReduction()) {
-        auto inferred_extent = expr_eval_.evaluate(id->rawExtent());
+        auto inferred_extent = expr_eval_.evaluate(id->extent());
         TORCH_INTERNAL_ASSERT(
             inferred_extent.has_value(),
             "Couldn't figure out what the dimensions of a tensorview is in evaluation for validation. ",
@@ -216,7 +216,7 @@ ExpressionEvaluator bindInputsAndLaunchParams(
     // Roughly taken from executor.cpp/computeLaunchParams
     auto tv = val->as<TensorView>();
     for (auto id : tv->domain()->domain()) {
-      if (!(id->isThread() && id->rawExtent()->definition() == nullptr)) {
+      if (!(id->isThread() && id->extent()->definition() == nullptr)) {
         continue;
       }
 
@@ -224,7 +224,7 @@ ExpressionEvaluator bindInputsAndLaunchParams(
         continue;
       }
 
-      auto extent = id->rawExtent();
+      auto extent = id->extent();
       auto inferred_extent = expr_eval.evaluate(extent);
       auto p_type = id->getParallelType();
 

@@ -29,7 +29,7 @@ static TensorView* setupLayerNorm(
     const int axis = input->nDims() - 1 - idx;
     reduction_axes[idx] = axis;
     broadcast_mask[axis] = true;
-    num_features = mul(num_features, input->domain()->domain()[axis]->rawExtent());
+    num_features = mul(num_features, input->domain()->domain()[axis]->extent());
   }
 
   // Reduction

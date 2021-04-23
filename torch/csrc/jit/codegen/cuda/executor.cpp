@@ -289,7 +289,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
     for (auto id : tv->domain()->domain()) {
       if (id->isThread() && !id->isBroadcast()) {
         // TODO(kir): we should rewrite this logic based on the Kernel object
-        auto kir_extent = lowered_.lowerValue(id->rawExtent());
+        auto kir_extent = lowered_.lowerValue(id->extent());
         const auto it = parallel_iter_extents.find(id->getParallelType());
         if (it != parallel_iter_extents.end()) {
           it->second.push_back(kir_extent);

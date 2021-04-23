@@ -31,7 +31,7 @@ TensorView::TensorView(TensorDomain* domain, DataType dtype, MemoryType mtype)
     // Mark the size-1 axes as broadcast to support implicit broadcast semantic
     for (auto* id : domain_->domain()) {
       if (!id->isBroadcast() && !id->isReduction() &&
-          id->rawExtent()->isOneInt()) {
+          id->extent()->isOneInt()) {
         id->convertToBroadcast();
       }
     }

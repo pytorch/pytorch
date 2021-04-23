@@ -321,7 +321,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
         }
 
         ExpressionEvaluator expr_eval(id->fusion());
-        auto vector_size_optional = expr_eval.evaluate(id->rawExtent());
+        auto vector_size_optional = expr_eval.evaluate(id->extent());
 
         TORCH_INTERNAL_ASSERT(
             vector_size_optional.has_value(),

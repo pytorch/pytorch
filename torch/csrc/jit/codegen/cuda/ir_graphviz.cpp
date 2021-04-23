@@ -77,7 +77,7 @@ class IrNodeLabel : private OptInConstDispatch {
     if (!id->start()->isZeroInt()) {
       label_ << IrNodeLabel::gen(id->start()) << " : ";
     }
-    label_ << IrNodeLabel::gen(id->rawExtent());
+    label_ << IrNodeLabel::gen(id->extent());
     label_ << ")";
   }
 
@@ -355,7 +355,7 @@ void IrGraphGenerator::handle(const IterDomain* id) {
     addArc(id->start(), id, "[color=gray]");
   }
 
-  addArc(id->rawExtent(), id, "[color=gray]");
+  addArc(id->extent(), id, "[color=gray]");
 }
 
 void IrGraphGenerator::handle(const Bool* b) {

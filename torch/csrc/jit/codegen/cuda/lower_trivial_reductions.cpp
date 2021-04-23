@@ -58,7 +58,7 @@ bool traverseToRFactorTensor(TensorView* tv, IterDomain* root_id) {
 bool analyzeIfDerivedFromTrivialReduction(TensorView* tv, IterDomain* id) {
   auto id_inputs = InputsOf::output(id->fusion(), id);
   for (auto root_id : ir_utils::filterByType<IterDomain>(id_inputs)) {
-    if (root_id->isReduction() && root_id->rawExtent()->isOneInt()) {
+    if (root_id->isReduction() && root_id->extent()->isOneInt()) {
       continue;
     }
     // If not possible to prove the root ID is trivial, see if the ID
@@ -89,7 +89,7 @@ void TrivialReductionInfo::build(Fusion* fusion, GpuLower* gpu_lower) {
           domains_.insert(dep_id->as<IterDomain>());
           domains_derived_from_root_.insert(dep_id->as<IterDomain>());
         }
-      } else if (id->isReduction() && id->rawExtent()->isOneInt()) {
+      } else if (id->isReduction() && id->extent()->isOneInt()) {
         // This happens when a leaf domain is trivial but its root
         // axes are not. For example, consider a non-trivial domain
         // split by one. The inner output axis is a trivial domain,

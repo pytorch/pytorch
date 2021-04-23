@@ -338,7 +338,7 @@ bool canVectorize(
   }
 
   auto last_dim_size =
-      expr_eval.evaluate(lower.lowerValue(last_root_dim->rawExtent()));
+      expr_eval.evaluate(lower.lowerValue(last_root_dim->extent()));
 
   if (!last_dim_size.has_value()) {
     return false;
@@ -384,7 +384,7 @@ void validateVectorizedTensors(
       continue;
     }
     auto vector_word_size =
-        expr_eval.evaluate(lower.lowerValue(vector_dim->rawExtent()));
+        expr_eval.evaluate(lower.lowerValue(vector_dim->extent()));
     TORCH_INTERNAL_ASSERT(
         vector_word_size.has_value(),
         "Non constant vector dimension found in ",
@@ -563,7 +563,7 @@ ExpressionEvaluator bindFusionInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (size_t dim = 0; dim < root_dom.size(); dim++) {
-        const auto extent = root_dom[dim]->rawExtent();
+        const auto extent = root_dom[dim]->extent();
         const auto value = aten_tensor.sizes()[dim];
         const auto prev_value = evaluator.evaluate(extent);
         if (prev_value.has_value()) {

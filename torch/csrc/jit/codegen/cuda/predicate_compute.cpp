@@ -125,7 +125,7 @@ class IterationDomainAnalysis : private OptOutDispatch {
       IterDomain* id =
           gpu_lower->caLoopMap().getConcreteMappedID(fuser_tv->axis(i));
       IterationDomainAnalysis id_analysis(id->fusion());
-      auto extent = id->rawExtent();
+      auto extent = id->extent();
       id_analysis.handle(extent);
       if (!id_analysis.isExact(extent)) {
         return false;

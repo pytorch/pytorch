@@ -690,7 +690,7 @@ class IrParser {
                 reduction_axes.push_back(axis);
                 broadcast_mask[axis] = true;
                 num_features = mul(
-                    num_features, input->domain()->domain()[axis]->rawExtent());
+                    num_features, input->domain()->domain()[axis]->extent());
               }
             }
 
@@ -788,8 +788,8 @@ class IrParser {
               const size_t axis = input->nDims() - 1 - idx;
               inner_reduction_axes[idx] = axis;
               inner_broadcast_mask[axis] = true;
-              num_features = mul(
-                  num_features, input->domain()->domain()[axis]->rawExtent());
+              num_features =
+                  mul(num_features, input->domain()->domain()[axis]->extent());
             }
 
             // TODO: NAN when mean and variance are zero
@@ -883,7 +883,7 @@ class IrParser {
                 inner_reduction_axes[idx] = axis;
                 inner_broadcast_mask[axis] = true;
                 num_features = mul(
-                    num_features, input->domain()->domain()[axis]->rawExtent());
+                    num_features, input->domain()->domain()[axis]->extent());
               }
 
               // TODO: NAN when mean and variance are zero
@@ -995,8 +995,8 @@ class IrParser {
               const size_t axis = input->nDims() - 1 - idx;
               inner_reduction_axes[idx] = axis;
               inner_broadcast_mask[axis] = true;
-              num_features = mul(
-                  num_features, input->domain()->domain()[axis]->rawExtent());
+              num_features =
+                  mul(num_features, input->domain()->domain()[axis]->extent());
             }
 
             auto x_hat = mul(sub(input, mean), rstd);

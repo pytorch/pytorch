@@ -553,7 +553,7 @@ bool IterDomain::sameAs(const Statement* other) const {
 
   bool is_same = isReduction() == other_id->isReduction() &&
       getParallelType() == other_id->getParallelType();
-  is_same = is_same && ScalarCheck::sameAs(rawExtent(), other_id->rawExtent());
+  is_same = is_same && ScalarCheck::sameAs(extent(), other_id->extent());
   is_same = is_same && ScalarCheck::sameAs(start(), other_id->start());
 
   return is_same;
@@ -565,11 +565,11 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       "Merging IterDomains with starting values that aren't 0 is not supported at this time.");
   TORCH_CHECK(
       outer->isReduction() == inner->isReduction() ||
-          (!outer->isReduction() && inner->rawExtent()->isOneInt()) ||
-          (outer->rawExtent()->isOneInt() && !inner->isReduction()),
+          (!outer->isReduction() && inner->extent()->isOneInt()) ||
+          (outer->extent()->isOneInt() && !inner->isReduction()),
       "Merging IterDomains requires that their iteration types match.");
 
-  Val* merged_id_size = mul(outer->rawExtent(), inner->rawExtent());
+  Val* merged_id_size = mul(outer->extent(), inner->extent());
 
   IterType itype = outer->getIterType();
 
@@ -628,7 +628,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   }
 
   // outer loop size
-  Val* remainder = ceilDiv(in->rawExtent(), factor);
+  Val* remainder = ceilDiv(in->extent(), factor);
 
   // outer loop IterDomain
   IterDomain* ido = new IterDomain(
@@ -659,12 +659,12 @@ void IterDomain::parallelize(ParallelType t) {
   if (t == ParallelType::Unroll || t == ParallelType::Unswitch ||
       isParallelTypeVectorize(t)) {
     TORCH_CHECK(
-        start()->isZeroInt() && rawExtent()->isConstScalar(),
+        start()->isZeroInt() && extent()->isConstScalar(),
         "Vectorization, unrolling, and unswitching are only supported with start = 0 and extent as a const int, but got ",
         "a start of ",
         start(),
         " and extent ",
-        rawExtent(),
+        extent(),
         " .");
   }
 }

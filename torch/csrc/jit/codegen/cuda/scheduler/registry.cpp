@@ -23,7 +23,7 @@ inline bool isTrivialReduction(ReductionOp* red) {
   auto o_tv = red->out()->as<TensorView>();
   // Assuming graph unscheduled at this point.
   for (auto id : o_tv->getRootDomain()) {
-    if (id->isReduction() && !id->rawExtent()->isOneInt()) {
+    if (id->isReduction() && !id->extent()->isOneInt()) {
       return false;
     }
   }

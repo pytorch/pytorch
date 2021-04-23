@@ -421,7 +421,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runMultiKernelWithInput(
       auto input_tv = segmented_fusion_->inputs()[i]->as<TensorView>();
       auto root_dom = TensorDomain::noReductions(input_tv->getRootDomain());
       for (size_t dim = 0; dim < root_dom.size(); dim++) {
-        const auto extent = root_dom[dim]->rawExtent();
+        const auto extent = root_dom[dim]->extent();
         const auto value = aten_tensor.sizes()[dim];
         tensor_map.emplace(extent, value);
       }

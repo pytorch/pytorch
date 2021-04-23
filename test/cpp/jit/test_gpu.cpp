@@ -265,21 +265,21 @@ TEST(NVFuserTest, FusionExprEvalBasic_CUDA) {
   //  (ex. `tv0->getRootDomain()[0]->extent()`
   //   instead of `tv0->axis(0)->extent()`)
   //
-  evaluator.bind(tv0->getRootDomain()[0]->rawExtent(), 6);
-  evaluator.bind(tv0->getRootDomain()[1]->rawExtent(), 128);
-  evaluator.bind(tv1->getRootDomain()[0]->rawExtent(), 6);
-  evaluator.bind(tv1->getRootDomain()[1]->rawExtent(), 128);
+  evaluator.bind(tv0->getRootDomain()[0]->extent(), 6);
+  evaluator.bind(tv0->getRootDomain()[1]->extent(), 128);
+  evaluator.bind(tv1->getRootDomain()[0]->extent(), 6);
+  evaluator.bind(tv1->getRootDomain()[1]->extent(), 128);
 
   // 3. Evaluate and check result values
   TORCH_CHECK(tv2->domain()->nDims() == 3);
-  checkIntValue(evaluator, tv2->axis(0)->rawExtent(), 2);
-  checkIntValue(evaluator, tv2->axis(1)->rawExtent(), 4);
-  checkIntValue(evaluator, tv2->axis(2)->rawExtent(), 128);
+  checkIntValue(evaluator, tv2->axis(0)->extent(), 2);
+  checkIntValue(evaluator, tv2->axis(1)->extent(), 4);
+  checkIntValue(evaluator, tv2->axis(2)->extent(), 128);
 
   TORCH_CHECK(tv3->domain()->nDims() == 3);
-  checkIntValue(evaluator, tv3->axis(0)->rawExtent(), 2);
-  checkIntValue(evaluator, tv3->axis(1)->rawExtent(), 4);
-  checkIntValue(evaluator, tv3->axis(2)->rawExtent(), 128);
+  checkIntValue(evaluator, tv3->axis(0)->extent(), 2);
+  checkIntValue(evaluator, tv3->axis(1)->extent(), 4);
+  checkIntValue(evaluator, tv3->axis(2)->extent(), 128);
 }
 
 // Evaluate expressions in a more complex IR
@@ -309,29 +309,29 @@ TEST(NVFuserTest, FusionExprEvalComplex_CUDA) {
   ExpressionEvaluator evaluator(&fusion);
 
   // 2. Bind values
-  evaluator.bind(tv0->getRootDomain()[0]->rawExtent(), 129);
-  evaluator.bind(tv0->getRootDomain()[1]->rawExtent(), 127);
+  evaluator.bind(tv0->getRootDomain()[0]->extent(), 129);
+  evaluator.bind(tv0->getRootDomain()[1]->extent(), 127);
 
   // Evaluate and check extent values
   TORCH_CHECK(tv0->domain()->nDims() == 2);
-  checkIntValue(evaluator, tv0->axis(0)->rawExtent(), 129);
-  checkIntValue(evaluator, tv0->axis(1)->rawExtent(), 127);
+  checkIntValue(evaluator, tv0->axis(0)->extent(), 129);
+  checkIntValue(evaluator, tv0->axis(1)->extent(), 127);
 
   TORCH_CHECK(tv3->domain()->nDims() == 2);
-  checkIntValue(evaluator, tv3->axis(0)->rawExtent(), 129);
-  checkIntValue(evaluator, tv3->axis(1)->rawExtent(), 127);
+  checkIntValue(evaluator, tv3->axis(0)->extent(), 129);
+  checkIntValue(evaluator, tv3->axis(1)->extent(), 127);
 
   TORCH_CHECK(tv4->domain()->nDims() == 2);
-  checkIntValue(evaluator, tv4->axis(0)->rawExtent(), 129);
-  checkIntValue(evaluator, tv4->axis(1)->rawExtent(), 127);
+  checkIntValue(evaluator, tv4->axis(0)->extent(), 129);
+  checkIntValue(evaluator, tv4->axis(1)->extent(), 127);
 
   TORCH_CHECK(tv5->domain()->nDims() == 1);
-  checkIntValue(evaluator, tv5->axis(0)->rawExtent(), 16383);
+  checkIntValue(evaluator, tv5->axis(0)->extent(), 16383);
 
   TORCH_CHECK(tv6->domain()->nDims() == 3);
-  checkIntValue(evaluator, tv6->axis(0)->rawExtent(), 26);
-  checkIntValue(evaluator, tv6->axis(1)->rawExtent(), 5);
-  checkIntValue(evaluator, tv6->axis(2)->rawExtent(), 127);
+  checkIntValue(evaluator, tv6->axis(0)->extent(), 26);
+  checkIntValue(evaluator, tv6->axis(1)->extent(), 5);
+  checkIntValue(evaluator, tv6->axis(2)->extent(), 127);
 }
 
 // Evaluate expressions post lowering
@@ -362,8 +362,8 @@ TEST(NVFuserTest, FusionExprEvalPostLower_CUDA) {
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
-  auto* bid_x = add(tv3->axis(0)->rawExtent(), new Int(0));
-  auto* tid_x = add(tv3->axis(-1)->rawExtent(), new Int(0));
+  auto* bid_x = add(tv3->axis(0)->extent(), new Int(0));
+  auto* tid_x = add(tv3->axis(-1)->extent(), new Int(0));
 
   // Lower
   GpuLower gpulw(&fusion);
@@ -372,21 +372,21 @@ TEST(NVFuserTest, FusionExprEvalPostLower_CUDA) {
   ExpressionEvaluator evaluator(&fusion);
 
   // 2. Bind values
-  evaluator.bind(tv0->getRootDomain()[0]->rawExtent(), 6);
-  evaluator.bind(tv0->getRootDomain()[1]->rawExtent(), 128);
-  evaluator.bind(tv1->getRootDomain()[0]->rawExtent(), 6);
-  evaluator.bind(tv1->getRootDomain()[1]->rawExtent(), 128);
+  evaluator.bind(tv0->getRootDomain()[0]->extent(), 6);
+  evaluator.bind(tv0->getRootDomain()[1]->extent(), 128);
+  evaluator.bind(tv1->getRootDomain()[0]->extent(), 6);
+  evaluator.bind(tv1->getRootDomain()[1]->extent(), 128);
 
   // 3. Evaluate and check result values
   TORCH_CHECK(tv2->domain()->nDims() == 3);
-  checkIntValue(evaluator, tv2->axis(0)->rawExtent(), 2);
-  checkIntValue(evaluator, tv2->axis(1)->rawExtent(), 4);
-  checkIntValue(evaluator, tv2->axis(2)->rawExtent(), 128);
+  checkIntValue(evaluator, tv2->axis(0)->extent(), 2);
+  checkIntValue(evaluator, tv2->axis(1)->extent(), 4);
+  checkIntValue(evaluator, tv2->axis(2)->extent(), 128);
 
   TORCH_CHECK(tv3->domain()->nDims() == 3);
-  checkIntValue(evaluator, tv3->axis(0)->rawExtent(), 2);
-  checkIntValue(evaluator, tv3->axis(1)->rawExtent(), 4);
-  checkIntValue(evaluator, tv3->axis(2)->rawExtent(), 128);
+  checkIntValue(evaluator, tv3->axis(0)->extent(), 2);
+  checkIntValue(evaluator, tv3->axis(1)->extent(), 4);
+  checkIntValue(evaluator, tv3->axis(2)->extent(), 128);
 
   checkIntValue(evaluator, bid_x, 2);
   checkIntValue(evaluator, tid_x, 128);
@@ -921,22 +921,22 @@ TEST(NVFuserTest, FusionTVSplit_CUDA) {
 
   tv = tv->split(2, 2);
   TORCH_CHECK(tv->nDims() == 4);
-  Expr* outer = tv->axis(2)->rawExtent()->definition();
+  Expr* outer = tv->axis(2)->extent()->definition();
 
   TORCH_CHECK(
       outer->getExprType().value() == ExprType::BinaryOp &&
       static_cast<BinaryOp*>(outer)->getBinaryOpType() ==
           BinaryOpType::CeilDiv &&
       static_cast<BinaryOp*>(outer)->lhs()->sameAs(
-          tv->getRootDomain()[2]->rawExtent()) &&
+          tv->getRootDomain()[2]->extent()) &&
       static_cast<Int*>(static_cast<BinaryOp*>(outer)->rhs())
           ->sameAs(new Int(2)));
 
   IterDomain* inner = static_cast<IterDomain*>(tv->axis(3));
   TORCH_CHECK(
-      inner->rawExtent()->isScalar() &&
-      static_cast<Int*>(inner->rawExtent())->isConst() &&
-      static_cast<Int*>(inner->rawExtent())->value().value() == 2);
+      inner->extent()->isScalar() &&
+      static_cast<Int*>(inner->extent())->isConst() &&
+      static_cast<Int*>(inner->extent())->value().value() == 2);
 }
 
 TEST(NVFuserTest, FusionTVMerge_CUDA) {
@@ -946,15 +946,15 @@ TEST(NVFuserTest, FusionTVMerge_CUDA) {
   TensorView* tv = makeSymbolicTensor(3);
 
   tv = tv->merge(1);
-  Expr* axisOp = tv->axis(1)->rawExtent()->definition();
+  Expr* axisOp = tv->axis(1)->extent()->definition();
 
   TORCH_CHECK(
       tv->nDims() == 2 && axisOp->getExprType() == ExprType::BinaryOp &&
       static_cast<BinaryOp*>(axisOp)->getBinaryOpType() == BinaryOpType::Mul &&
       static_cast<BinaryOp*>(axisOp)->lhs() ==
-          tv->getRootDomain()[1]->rawExtent() &&
+          tv->getRootDomain()[1]->extent() &&
       static_cast<BinaryOp*>(axisOp)->rhs() ==
-          tv->getRootDomain()[2]->rawExtent());
+          tv->getRootDomain()[2]->extent());
 }
 
 TEST(NVFuserTest, FusionTVReorder_CUDA) {
@@ -7916,8 +7916,7 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
     const int axis = input->nDims() - 1 - idx;
     inner_reduction_axes[idx] = axis;
     inner_broadcast_mask[axis] = true;
-    num_features =
-        mul(num_features, input->domain()->domain()[axis]->rawExtent());
+    num_features = mul(num_features, input->domain()->domain()[axis]->extent());
   }
 
   /*
@@ -8037,8 +8036,7 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
     const int axis = input->nDims() - 1 - idx;
     reduction_axes[idx] = axis;
     broadcast_mask[axis] = true;
-    num_features =
-        mul(num_features, input->domain()->domain()[axis]->rawExtent());
+    num_features = mul(num_features, input->domain()->domain()[axis]->extent());
   }
 
   // Reduction
@@ -8130,7 +8128,7 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
       reduction_axes.push_back(axis);
       broadcast_mask[axis] = true;
       num_features =
-          mul(num_features, input->domain()->domain()[axis]->rawExtent());
+          mul(num_features, input->domain()->domain()[axis]->extent());
     }
   }
 

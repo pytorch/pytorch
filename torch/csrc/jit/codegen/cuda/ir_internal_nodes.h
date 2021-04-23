@@ -335,7 +335,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   IterDomain* clone() const {
     return new IterDomain(
         start(),
-        rawExtent(),
+        extent(),
         getParallelType(),
         getIterType(),
         isRFactorProduct());
@@ -411,7 +411,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return start_;
   }
 
-  Val* rawExtent() const {
+  Val* extent() const {
     TORCH_INTERNAL_ASSERT(extent_ != nullptr);
     return extent_;
   }
@@ -420,7 +420,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   //! known extent. This is the case with all size-1 IterDomains on
   //! a TensorView's root domain when the TensorView is created.
   bool isImplicitBroadcast() const {
-    return isBroadcast() && rawExtent()->isOneInt();
+    return isBroadcast() && extent()->isOneInt();
   }
 
   //! Check if IterDomain is a reduction axis with size of 1, i.e.
@@ -432,7 +432,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   //! reduction checks. So we ship to the correct scheduler. It may
   //! not be incredibly robust, but it makes sense to keep it for now.
   bool isTrivialReduction() const {
-    return isReduction() && rawExtent()->isOneInt();
+    return isReduction() && extent()->isOneInt();
   }
 
  protected:

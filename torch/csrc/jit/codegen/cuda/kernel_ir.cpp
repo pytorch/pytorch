@@ -88,7 +88,7 @@ IterDomain::IterDomain(
     const fuser::cuda::IterDomain* iter_domain)
     : Val(passkey, iter_domain->getDataType().value()),
       start_(GpuLower::current()->lowerValue(iter_domain->start())),
-      extent_(GpuLower::current()->lowerValue(iter_domain->rawExtent())),
+      extent_(GpuLower::current()->lowerValue(iter_domain->extent())),
       parallel_type_(iter_domain->getParallelType()),
       iter_type_(iter_domain->getIterType()),
       is_rfactor_domain_(iter_domain->isRFactorProduct()),

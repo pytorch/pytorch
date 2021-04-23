@@ -541,7 +541,7 @@ static TensorView* newForReduction(
 
     new_domain.push_back(new IterDomain(
         id->start(),
-        id->rawExtent(),
+        id->extent(),
         ParallelType::Serial,
         isReduction ? IterType::Reduction : id->getIterType()));
   }
@@ -1100,7 +1100,7 @@ TensorView* sum_to(TensorView* in, const std::vector<Int*>& sum_to_size) {
   // Reduce rest of the dims with keep_dim
   for (int i = leading_dims; i < int(root.size()); i++) {
     if (sum_to_size[i - leading_dims]->isOneInt() &&
-        !root[i]->rawExtent()->isOneInt()) {
+        !root[i]->extent()->isOneInt()) {
       inner_red_dims[i - leading_dims] = true;
       reduce_dims.push_back(i);
       reduction_within_shape = true;
@@ -1145,8 +1145,7 @@ TensorView* sum_to(TensorView* in, const std::vector<int64_t>& sum_to_size) {
 
   // Reduce rest of the dims with keep_dim
   for (int i = leading_dims; i < int(root.size()); i++) {
-    if (sum_to_size[i - leading_dims] == 1 &&
-        !root[i]->rawExtent()->isOneInt()) {
+    if (sum_to_size[i - leading_dims] == 1 && !root[i]->extent()->isOneInt()) {
       inner_red_dims[i - leading_dims] = true;
       reduce_dims.push_back(i);
       reduction_within_shape = true;
