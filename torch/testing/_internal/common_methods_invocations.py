@@ -601,7 +601,10 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
+# In order to use the kwarg alpha, partials should be used in an OpInfo's sample_inputs_func
+# eg. sample_inputs_func=partial(sample_inputs_binary_pwise, use_alpha=True, alpha=0.5)
 def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
+    alpha = kwargs.get("alpha", 1)
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
     scalar = 1 if dtype is torch.bool else scalar
     tests_list = [
@@ -626,6 +629,7 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
                               requires_grad=requires_grad)
         samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
                                                requires_grad=requires_grad),
+                                   kwargs=dict(alpha=alpha) if kwargs.get("use_alpha", False) else dict()
                                    args=(arg,),
                                    broadcasts_input=broadcasts_input))
     return tuple(samples)
