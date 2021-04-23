@@ -24,6 +24,11 @@ TypePtr parseType(const std::string& pythonStr);
 namespace torch {
 namespace jit {
 
+using caffe2::serialize::IStreamAdapter;
+using caffe2::serialize::PyTorchStreamReader;
+using caffe2::serialize::PyTorchStreamWriter;
+using caffe2::serialize::ReadAdapterInterface;
+
 namespace {
 static constexpr const char* kArchiveNameConstants = "constants";
 static constexpr const char* kArchiveNameBytecode = "bytecode";
@@ -55,7 +60,7 @@ TypePtr resolveTypeName(
 c10::IValue readArchive(
     const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> compilation_unit,
-    std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& stream_reader) {
+    std::unique_ptr<PyTorchStreamReader>& stream_reader) {
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
@@ -295,10 +300,6 @@ std::vector<IValue> get_bytecode_vals(
 
 } // namespace
 
-using caffe2::serialize::IStreamAdapter;
-using caffe2::serialize::PyTorchStreamReader;
-using caffe2::serialize::PyTorchStreamWriter;
-using caffe2::serialize::ReadAdapterInterface;
 
 // Forward declare so that _backport_for_mobile() overloads can
 // call this method directly.
