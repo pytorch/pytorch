@@ -52,11 +52,13 @@ std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t d
 
 void fillSliceWithIndex(Tensor& t,
                         int dim) {
-  auto sizes = DimVector(t.dim(), 1);
-  sizes[dim] = t.sizes()[dim];
-  auto range = at::arange(t.sizes()[dim], t.options());
-  auto rangeview = range.view(sizes);
-  t.copy_(rangeview);
+  if (t.numel()) {
+    auto sizes = DimVector(t.dim(), 1);
+    sizes[dim] = t.sizes()[dim];
+    auto range = at::arange(std::max(t.sizes()[dim], 1L), t.options());
+    auto rangeview = range.view(sizes);
+    t.copy_(rangeview);
+  }
 }
 
 std::tuple<Tensor &,Tensor &> small_sort_out_cuda(const Tensor &self,
@@ -64,24 +66,6 @@ std::tuple<Tensor &,Tensor &> small_sort_out_cuda(const Tensor &self,
                                                   Tensor &values,
                                                   Tensor &indices,
                                                   int dim, bool order) {
-  TORCH_INTERNAL_ASSERT(stable.has_value(), "small_sort(): c10::optional<bool> for stable has to have value.");
-  TORCH_CHECK(!stable.value(), "stable=True is not implemented on CUDA yet.");
-
-  // from thc: sorted->values, indices->indices, input->self
-  TensorArg self_arg{self, "self", 1}, values_arg{values, "values", 2}, indices_arg{indices, "indices", 3};
-  checkAllSameGPU("small_sort", {self_arg, values_arg, indices_arg});
-
-  if (!values.defined()) {
-    values = at::empty_like(self, self.options());
-  }
-  if (!indices.defined()) {
-    indices = at::empty_like(self, self.options().dtype(kLong));
-  }
-
-  // Make sure sufficient output space is allocated
-  std::vector<int64_t> self_size = self.sizes().vec();
-  at::native::resize_output(values, self_size);
-  at::native::resize_output(indices, self_size);
 
   // How large are the slices that we are sorting?
   int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
@@ -98,14 +82,6 @@ std::tuple<Tensor &,Tensor &> small_sort_out_cuda(const Tensor &self,
   if (sliceSize <= maxSliceSize) {
     // Fill `indices` (the values) with the
     // slice-relative index.
-    fillSliceWithIndex(indices, dim);
-
-    // We sort k/v pairs in-place; copy unsorted input to output
-    values.copy_(self);
-
-    // Sort using our in-place k/v kernel that supports arbitrary
-    // layout
-    sortKeyValueInplace(values, indices, dim, order);
   } else {
     // This should be unreachable due to size threshold dispatching in cuda sort
     TORCH_INTERNAL_ASSERT(false);
@@ -144,16 +120,12 @@ void sortKeyValueInplace(Tensor& key,
 
   // FIXME: We'd have to find some other trick with Thrust to perform a
   // vectorized (key, value) sort by slice segment
-  if (ceilPowerOf2 > 2048) {
-    AT_ERROR("sortKeyValueInplace only works for sizes <= 2048 at present");
-  }
+  TORCH_INTERNAL_ASSERT(ceilPowerOf2 <= 2048, "sortKeyValueInplace only works for sizes <= 2048 at present");
 
   // The grid is based on the number of independent slices that we
   // have to sort; one block per slice
   dim3 grid;
-  if (!getGridFromTiles(keySlices, grid)) {
-    AT_ERROR("Slice to sort is too large");
-  }
+  TORCH_INTERNAL_ASSERT(getGridFromTiles(keySlices, grid), "Too many slices to sort");
 
 #define HANDLE_CASE(TYPE, A, SIZE)                                      \
   do {                                                                  \
@@ -282,7 +254,10 @@ void sortKeyValueInplace(Tensor& key,
 #undef HANDLE_A_CASE
 }
 
-// We perform a vectorized segmented sort in cub.
+// We perform a vectorized segmented sort in cub with inputs larger
+// than 2048 elements. Otherwise, we do an inplace bitonic sort (see
+// sortKeyValueInplace).
+// Large sort algorithm:.
 // Say we are sorting a (2, 3) tensor. We have in flattened form:
 // values       0.4 1.2 5.3 6.2 1.3 2.3
 // indices        0   1   2   0   1   2
@@ -318,10 +293,32 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
 
   TORCH_CHECK(nsort <= std::numeric_limits<int>::max(),
     "The dimension being sorted can not have more than INT_MAX elsments.");
+  // use inplace algorithm for smaller input sizes without stable=True
+  if (should_use_small_sort(self, dim) && !stable.value()) {
+    // from thc: sorted->values, indices->indices, input->self
+    TensorArg self_arg{self, "self", 1}, values_arg{values, "values", 2}, indices_arg{indices, "indices", 3};
+    checkAllSameGPU("small_sort", {self_arg, values_arg, indices_arg});
+    at::maybe_wrap_dim(dim, self);
 
-  // use inplace algorithm for smaller input sizes
-  if (should_use_small_sort(self, dim)) {
-    return small_sort_out_cuda(self, stable, values, indices, dim, descending);
+    if (!values.defined()) {
+      values = at::empty_like(self, self.options());
+    }
+    if (!indices.defined()) {
+      indices = at::empty_like(self, self.options().dtype(kLong));
+    }
+
+    // Make sure sufficient output space is allocated
+    std::vector<int64_t> self_size = self.sizes().vec();
+    at::native::resize_output(values, self_size);
+    at::native::resize_output(indices, self_size);
+    fillSliceWithIndex(indices, dim);
+
+    // We sort k/v pairs in-place; copy unsorted input to output
+    values.copy_(self);
+
+    // Sort using our in-place k/v kernel that supports arbitrary
+    // layout
+    sortKeyValueInplace(values, indices, dim, descending);
   }
 
   if (ndim == 0) {

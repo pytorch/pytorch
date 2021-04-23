@@ -253,11 +253,9 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     }                                                                     \
                                                                           \
     dim3 grid;                                                            \
-    if (!THC_getGridFromTiles(inputSlices, grid)) {                       \
-      THError("Slice to sort is too large");                              \
-    }                                                                     \
+    TORCH_INTERNAL_ASSERT(getGridFromTiles(inputSlices, grid), "Too many slices to sort"); \
                                                                           \
-    dim3 block(std::min(at::cuda::ATenCeilDiv(sliceSize, (int64_t) C10_WARP_SIZE)*(int64_t) C10_WARP_SIZE, (int64_t) 1024)); \
+    dim3 block(std::min(at::cuda::ATenCeilDiv(sliceSize, (int64_t) C10_WARP_SIZE)*(int64_t) C10_WARP_SIZE, 1024L)); \
                                                                           \
     /* This is used as a template parameter to calculate indices. */      \
     /* We only specialize it if all collapsed dim sizes are the */        \
@@ -292,16 +290,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting
   if (sorted && values.numel() > 1) {
-    // FIXME: the k/v inplace sort along slice only works for size <=
-    // 2048 at the moment
-    // Workaround:
-    int maxSliceSize;
-    if (values.element_size() >= 8) {
-      maxSliceSize = 1024;
-    } else {
-      maxSliceSize = 2048;
-    }
-    if (k <= maxSliceSize) {
+    if (should_use_small_sort(values, dim)) {
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
 
@@ -317,11 +306,10 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
       // allocated tensors to receive the results.
 
       Tensor sortedIndices = at::empty_like(indices);
-      at::native::sort_out_cuda(values, dim, largest, values, sortedIndices);
+      sort_out_cuda(values, dim, largest, values, sortedIndices);
       indices.copy_(indices.gather(dim, sortedIndices));
     }
   }
-  AT_CUDA_CHECK(cudaGetLastError());
   return std::forward_as_tuple(values, indices);
 }
 
@@ -329,9 +317,7 @@ std::tuple<Tensor, Tensor> topk_cuda(const Tensor& self,
           int64_t k, int64_t dim, bool largest, bool sorted) {
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  // be careful about argument order
-  at::topk_out(values, indices, self, k, dim, largest, sorted);
-  return std::make_tuple(values, indices);
+  return at::topk_out(values, indices, self, k, dim, largest, sorted);
 }
 
 } // at::native
