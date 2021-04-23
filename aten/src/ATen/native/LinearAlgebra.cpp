@@ -1231,7 +1231,7 @@ Tensor& dot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   checkSameDevice("dot", result, other);
   at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-           "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
   return result.fill_(self.dot(other));
 }
 
@@ -1240,7 +1240,7 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   checkSameDevice("vdot", result, other);
   at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-           "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
   return result.fill_(self.vdot(other));
 }
 
