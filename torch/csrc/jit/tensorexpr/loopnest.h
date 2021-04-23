@@ -236,6 +236,31 @@ class TORCH_API LoopNest {
   static bool flatten(const std::vector<For*>& f, For** flattened);
   static bool flatten(const std::vector<For*>& f);
 
+  // Compresses the given buffer based on its use in the given Stmts.
+  // For example, given the input:
+  //
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[i,j] = sin(i*j)
+  //   }
+  //   for (int j = 0; j < 199; ++j) {
+  //     B[i,j] = A[i,j] + A[i, j+1]
+  //   }
+  // }
+  //
+  // compressBuffer(A, ...) will compress buffer A from
+  // [100, 200] to [1, 200] and modify the code as follows:
+  //
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[0,j] = sin(i*j)
+  //   }
+  //   for (int j = 0; j < 199; ++j) {
+  //     B[i,j] = A[0,j] + A[0, j+1]
+  //   }
+  // }
+  static void compressBuffer(Buf* buf, Stmt* stmt);
+
   // Get 'num' loops from the loopnest starting at 'f'.
   static std::vector<For*> getLoopStmtsInLoopNest(For* f, size_t num);
 
