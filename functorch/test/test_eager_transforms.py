@@ -254,14 +254,29 @@ class TestVmapOfGrad(TestCase):
         N = 3
         C = 5
 
-        def foo(x, y):
+        def foo(y, x):
             result = x.new_zeros((C,))
             result.copy_(y)
             return result.sum()
 
         x = torch.randn(N, device=device)
         y = torch.randn(N, C, device=device)
-        result = vmap(grad(foo))(x, y)
+        result = vmap(grad(foo))(y, x)
+        self.assertEqual(result, torch.ones_like(y))
+
+    def test_new_empty_materializes_tensor(self, device):
+        N = 3
+        C = 5
+
+        def foo(y, x):
+            result = x.new_empty((C,))
+            result.copy_(y)
+            return result.sum()
+
+        x = torch.randn(N, device=device)
+        y = torch.randn(N, C, device=device)
+        result = vmap(grad(foo))(y, x)
+        self.assertEqual(result, torch.ones_like(y))
 
     def test_per_sample_grads_simple(self, device):
         def compute_loss(weight, x, t):
