@@ -357,6 +357,10 @@ class TestCommon(JitCommonTestCase):
     @_variant_ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = op.supports_autograd and (dtype.is_floating_point or op.supports_complex_autograd)
+        # TODO: fix this
+        if _requires_grad and not op.supports_gradgrad:
+            self.skipTest("skipped! This test does not handle ops that don't support gragrad properly")
+
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
 
         for sample in samples:

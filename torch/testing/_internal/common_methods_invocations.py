@@ -3389,10 +3389,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            supports_out=False,
            supports_gradgrad=False,
-           skips=(
-               # jit consistency always checks gradgrad
-               SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda'),
-               SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cpu'),),
            sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
