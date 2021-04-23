@@ -93,7 +93,7 @@ Examples::
 inv = _add_docstr(_linalg.linalg_inv, r"""
 linalg.inv(A, *, out=None) -> Tensor
 
-Computes the `inverse`_ of a square matrix if it exists.
+Computes the inverse of a square matrix if it exists.
 Throws a `RuntimeError` if the matrix is not invertible.
 
 Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
@@ -164,8 +164,6 @@ Examples::
     >>> torch.dist(z, torch.eye(4, dtype=torch.cdouble))
     tensor(7.5107e-16, dtype=torch.float64)
 
-.. _inverse:
-    https://en.wikipedia.org/wiki/Invertible_matrix
 .. _invertible:
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
 """)
@@ -779,7 +777,7 @@ Example::
 matrix_power = _add_docstr(_linalg.linalg_matrix_power, r"""
 matrix_power(A, n, *, out=None) -> Tensor
 
-Computes the n-th power of a square matrix for an integer n.
+Computes the `n`-th power of a square matrix for an integer `n`.
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
@@ -913,7 +911,7 @@ Examples::
 vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
 linalg.vector_norm(A, ord=None, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
-Computes a vector norm of a vector.
+Computes a vector norm.
 
 If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
 
@@ -1175,7 +1173,8 @@ the **full SVD** of a matrix
 
 .. math::
 
-    A = U \operatorname{diag}(S) V^{\text{H}}\mathrlap{\qquad U \in \mathbb{K}^{m \times m}, \Lambda \in \mathbb{R}^k, V \in \mathbb{K}^{n \times n}}
+    A = U \operatorname{diag}(S) V^{\text{H}}
+    \mathrlap{\qquad U \in \mathbb{K}^{m \times m}, \Lambda \in \mathbb{R}^k, V \in \mathbb{K}^{n \times n}}
 
 where :math:`\operatorname{diag}(S) \in \mathbb{K}^{m \times n}`,
 :math:`V^{\text{H}}` is the conjugate transpose when :math:`V` is complex, and the transpose when :math:`V` is real-valued.
@@ -1185,7 +1184,8 @@ When `m > n` (resp. `m < n`) we can drop the last `m - n` (resp. `n - m`) column
 
 .. math::
 
-    A = U \operatorname{diag}(S) V^{\text{H}}\mathrlap{\qquad U \in \mathbb{K}^{m \times k}, \Lambda \in \mathbb{R}^k, V \in \mathbb{K}^{k \times n}}
+    A = U \operatorname{diag}(S) V^{\text{H}}
+    \mathrlap{\qquad U \in \mathbb{K}^{m \times k}, \Lambda \in \mathbb{R}^k, V \in \mathbb{K}^{k \times n}}
 
 where :math:`\operatorname{diag}(S) \in \mathbb{K}^{k \times k}`,
 
