@@ -74,12 +74,17 @@
         type: string
         description: "What subfolder to put our package into (eg. cpu, cudaX.Y, etc.)"
         default: "cpu"
+      include_debug:
+        type: bool
+        description: "Whether to upload debug information"
+        default: false
     docker:
       - image: continuumio/miniconda3
     environment:
       - DRY_RUN: disabled
       - PACKAGE_TYPE: "<< parameters.package_type >>"
       - UPLOAD_SUBFOLDER: "<< parameters.upload_subfolder >>"
+      - INCLUDE_DEBUG: "<< parameters.include_debug >>"
     steps:
       - attach_workspace:
           at: /tmp/workspace

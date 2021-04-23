@@ -131,9 +131,11 @@ class Conf(object):
           package_type: manywheel
           upload_subfolder: cu92
         """
+        name = self.gen_build_name(phase, nightly=True)
+        include_debug = name == "binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_upload"
         return {
             "binary_upload": OrderedDict({
-                "name": self.gen_build_name(phase, nightly=True),
+                "name": name,
                 "context": "org-member",
                 "requires": [self.gen_build_name(
                     requires_dependency,
@@ -147,6 +149,7 @@ class Conf(object):
                 "upload_subfolder": binary_build_data.get_processor_arch_name(
                     self.gpu_version,
                 ),
+                "include_debug": include_debug
             })
         }
 
