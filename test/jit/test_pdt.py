@@ -100,7 +100,7 @@ class TestPDT(JitTestCase):
         make_global(test_dict)
 
         _input = {'foo' : True, 'bar': False}
-        scripted_fn = torch.jit._script_pdt(test_dict, example_inputs=[(_input,)])
+        scripted_fn = torch.jit._script_pdt(test_dict, example_inputs=[(input,)])
         self.assertEqual(scripted_fn({'foo' : False, 'bar': True}, ), test_dict({'foo' : False, 'bar': True}, ))
 
     def test_pdt_dict_1(self):
@@ -109,8 +109,8 @@ class TestPDT(JitTestCase):
 
         make_global(test_dict_int_list)
 
-        _input = {0 : [True, False], 1: [False, True]}
-        scripted_fn = torch.jit._script_pdt(test_dict_int_list, example_inputs=[(_input,)])
+        input = {0 : [True, False], 1: [False, True]}
+        scripted_fn = torch.jit._script_pdt(test_dict_int_list, example_inputs=[(input,)])
         self.assertEqual(scripted_fn({0 : [False, False], 1: [True, True]}, ),
                          test_dict_int_list({0 : [False, False], 1: [True, True]}, ))
 
@@ -180,3 +180,40 @@ class TestPDT(JitTestCase):
 
         scripted_fn_2 = torch.jit._script_pdt(M4.fn, example_inputs=[(10, ), (True, ), ])
         self.assertEqual(scripted_fn_2(M4.fn(2)), M4.fn(2))  # type: ignore[arg-type]
+
+    def test_class_as_profiled_types_1(self):
+        class user_defined_class:
+            def fn(self, b):
+                assert b is not None
+                return b
+
+        def test_model(a, m):
+            assert not isinstance(a, bool)
+            return m.fn(a)
+
+        make_global(user_defined_class, test_model)
+
+        user_class = user_defined_class()
+        scripted_fn = torch.jit._script_pdt(test_model, example_inputs=[(10, user_class, ), (10.9, user_class, ), ])
+        self.assertEqual(scripted_fn(100, user_class, ), test_model(100, user_class))
+
+    def test_class_as_profiled_types_2(self):
+        class class_with_args:
+            def __init__(self, a: bool):
+                self.a = a
+
+            def fn(self, b):
+                if self.a:
+                    return b
+                else:
+                    return -1
+
+        def test_model_with_args(a, m):
+            assert not isinstance(a, bool)
+            return m.fn(a)
+
+        make_global(class_with_args, test_model_with_args)
+
+        user_class = class_with_args(False)
+        scripted_fn = torch.jit._script_pdt(test_model_with_args, example_inputs=[(10, user_class, ), (10.9, user_class, ), ])
+        self.assertEqual(scripted_fn(100, class_with_args(True), ), test_model_with_args(100, class_with_args(True)))
