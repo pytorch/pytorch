@@ -82,18 +82,21 @@ Only the following keys are supported: {", ".join(valid_keys)}'
         if isinstance(g, NativeFunction):
             f = g
             m = metadata.get(f.func.name, None)
-            dispatch_key = autograd_key if m is not None and m.is_autograd else backend_key
+            dispatch_key = DispatchKey.parse(f'Autograd{backend}') \
+                if m is not None and m.is_autograd else DispatchKey.parse(backend)
             kernel = kernel_name(f.func)
             return ExternalBackendFunction(NativeFunction.with_dispatch_entry(f, dispatch_key, kernel), dispatch_key, m)
         elif isinstance(g, NativeFunctionsGroup):
             out_meta = metadata.get(g.out.func.name, None)
             kernel = kernel_name(g.out.func)
-            dispatch_key = autograd_key if out_meta is not None and out_meta.is_autograd else backend_key
+            dispatch_key = DispatchKey.parse(f'Autograd{backend}') \
+                if out_meta is not None and out_meta.is_autograd else DispatchKey.parse(backend)
             out = ExternalBackendFunction(NativeFunction.with_dispatch_entry(g.out, dispatch_key, kernel), dispatch_key, out_meta)
 
             functional_meta = metadata.get(g.functional.func.name, None)
             kernel = kernel_name(g.functional.func)
-            dispatch_key = autograd_key if functional_meta is not None and functional_meta.is_autograd else backend_key
+            dispatch_key = DispatchKey.parse(f'Autograd{backend}') \
+                if functional_meta is not None and functional_meta.is_autograd else DispatchKey.parse(backend)
             functional = ExternalBackendFunction(
                 NativeFunction.with_dispatch_entry(g.functional, dispatch_key, kernel), dispatch_key, functional_meta)
 
@@ -108,13 +111,15 @@ autograd key. They can not be mix and matched. If this is something you need, fe
             if g.inplace:
                 inplace_meta = metadata.get(g.inplace.func.name, None)
                 kernel = kernel_name(g.inplace.func)
-                dispatch_key = autograd_key if inplace_meta is not None and inplace_meta.is_autograd else backend_key
+                dispatch_key = DispatchKey.parse(f'Autograd{backend}') \
+                    if inplace_meta is not None and inplace_meta.is_autograd else DispatchKey.parse(backend)
                 inplace = ExternalBackendFunction(
                     NativeFunction.with_dispatch_entry(g.inplace, dispatch_key, kernel), dispatch_key, inplace_meta)
-                if inplace_meta is not None and (out_meta is not None or functional_meta is not None):
+                if inplace_meta is not None:
                     other_meta = out_meta if out_meta is not None else functional_meta
-                    assert inplace_meta.is_autograd == other_meta.is_autograd, \
-                        f'Currently, all variants of an op must either be registered to a backend key, or to a backend\'s \
+                    if other_meta is not None:
+                        assert inplace_meta.is_autograd == other_meta.is_autograd, \
+                            f'Currently, all variants of an op must either be registered to a backend key, or to a backend\'s \
 autograd key. They can not be mix and matched. If this is something you need, feel free to create an issue! \
 {inplace_meta.operator} is listed under {"autograd" if inplace_meta.is_autograd else "supported"}, but \
 {other_meta.operator} is listed under {"autograd" if other_meta.is_autograd else "supported"}'
@@ -204,24 +209,26 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
     # If they have at least one autograd entry in their yaml file
     if autograd_key is not None:
         assert len(external_backend_functions_autograd) > 0
+        autograd_dispatchkey: DispatchKey = autograd_key  # make mypy happy
         fm.write_with_template(f'Register{autograd_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': '',
             'legacy_th_headers': '',
             'external_backend_headers': external_backend_headers,
-            'DispatchKey': autograd_key,
-            'dispatch_namespace': autograd_key.lower(),
+            'DispatchKey': autograd_dispatchkey,
+            'dispatch_namespace': autograd_dispatchkey.lower(),
             'dispatch_namespaced_definitions': list(concatMap(
                 dest.RegisterDispatchKey(
-                    autograd_key, Target.NAMESPACED_DEFINITION, selector, rocm=False, cpp_namespace=cpp_namespace),
+                    autograd_dispatchkey, Target.NAMESPACED_DEFINITION, selector, rocm=False, cpp_namespace=cpp_namespace),
                 external_backend_functions_autograd
             )),
             'dispatch_anonymous_definitions': list(concatMap(
                 dest.RegisterDispatchKey(
-                    autograd_key, Target.ANONYMOUS_DEFINITION, selector, rocm=False, cpp_namespace=cpp_namespace),
+                    autograd_dispatchkey, Target.ANONYMOUS_DEFINITION, selector, rocm=False, cpp_namespace=cpp_namespace),
                 external_backend_functions_autograd
             )),
             'dispatch_registrations': list(concatMap(
-                dest.RegisterDispatchKey(autograd_key, Target.REGISTRATION, selector, rocm=False, cpp_namespace=cpp_namespace),
+                dest.RegisterDispatchKey(
+                    autograd_dispatchkey, Target.REGISTRATION, selector, rocm=False, cpp_namespace=cpp_namespace),
                 external_backend_functions_autograd
             )),
         })

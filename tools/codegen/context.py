@@ -16,6 +16,7 @@ F = TypeVar(
     ExternalBackendFunction,
     ExternalBackendFunctionsGroup,
     Union[NativeFunction, NativeFunctionsGroup],
+    Union[NativeFunction, ExternalBackendFunction],
     Union[ExternalBackendFunctionsGroup, ExternalBackendFunction],
     Union[NativeFunction, NativeFunctionsGroup, ExternalBackendFunction, ExternalBackendFunctionsGroup]
 )

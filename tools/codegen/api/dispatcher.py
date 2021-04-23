@@ -24,7 +24,7 @@ from typing import Sequence, List, Union
 #     arguments.
 #
 
-def name(func: FunctionSchema, *, append_overload_name=False) -> str:
+def name(func: FunctionSchema, *, append_overload_name: bool = False) -> str:
     name = cpp.name(func)
     if append_overload_name and func.name.overload_name != '':
         # This isn't an important characteristic of the dispatcher API, and could be removed if we want to further unify

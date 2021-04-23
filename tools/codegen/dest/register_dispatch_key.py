@@ -123,6 +123,7 @@ class RegisterDispatchKey:
             self,
             native_or_external: Union[NativeFunction, ExternalBackendFunction],
     ) -> Optional[str]:
+        sig: Union[NativeSignature, DispatcherSignature]
         if isinstance(native_or_external, ExternalBackendFunction):
             if not requires_backend_wrapper(native_or_external):
                 return None
@@ -314,13 +315,16 @@ namespace {{
 
 """
         if self.target is Target.REGISTRATION:
-            return mapMaybe(lambda f: self.generate_registration(f.native_function, self.external_backend_wrapper_sig(f).name())
-                            if f.metadata is not None or gets_generated_wrapper(f)
-                            else None
-                            , g.functions())
+            return list(mapMaybe(lambda f: self.generate_registration(
+                f.native_function, self.external_backend_wrapper_sig(f).name())
+                if f.metadata is not None or gets_generated_wrapper(f)
+                else None
+                , g.functions()))
         elif self.target is Target.ANONYMOUS_DEFINITION:
-            return mapMaybe(gen_wrapper, g.functions(functional_first=True))
-        assert_never(self.target)
+            return list(mapMaybe(gen_wrapper, g.functions(functional_first=True)))
+        # Can't use mypy to help here, since this particular function is only meant to be used for a subset of the targets
+        raise AssertionError(f'invalid target: {self.target}')
+        return None
 
 
 
