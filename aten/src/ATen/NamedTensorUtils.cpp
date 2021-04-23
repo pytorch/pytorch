@@ -125,7 +125,7 @@ static void assert_names_equal(DimnameList a, DimnameList b) {
       ". Please rename the out tensor's dims with `Tensor.rename`.");
 }
 
-Tensor& propagate_names_if_nonempty(Tensor& result,
+const Tensor& propagate_names_if_nonempty(const Tensor& result,
     DimnameList maybe_names,
     bool validate_names) {
   propagate_names_if_nonempty(result.unsafeGetTensorImpl(), maybe_names, validate_names);
@@ -141,7 +141,7 @@ TensorImpl* propagate_names_if_nonempty(TensorImpl* result,
   return propagate_names(result, maybe_names, validate_names);
 }
 
-Tensor& propagate_names(Tensor& result, DimnameList names, bool validate_names) {
+const Tensor& propagate_names(const Tensor& result, DimnameList names, bool validate_names) {
   propagate_names(result.unsafeGetTensorImpl(), names, validate_names);
   return result;
 }
@@ -162,7 +162,7 @@ TensorImpl* propagate_names(TensorImpl* result, DimnameList names, bool validate
   return result;
 }
 
-void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
+void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
   if (!result.has_names() && !src.has_names()) {
     return;
   }
@@ -190,7 +190,7 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
   propagate_names(result, outnames);
 }
 
-void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef reduced_dims, bool keepdim) {
+void propagate_names_for_reduction(const Tensor& result, const Tensor& src, IntArrayRef reduced_dims, bool keepdim) {
   if (keepdim) {
     propagate_names(result, src);
     return;
@@ -202,7 +202,7 @@ void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRe
   propagate_names_except(result, src, reduced_dims);
 }
 
-void propagate_names(Tensor& result, const Tensor& src) {
+void propagate_names(const Tensor& result, const Tensor& src) {
   propagate_names(result.unsafeGetTensorImpl(), src.unsafeGetTensorImpl());
 }
 
@@ -409,7 +409,7 @@ void check_names_for_dot(
 // rules for binary ops that expect the named dims to line up positionally
 // from the right. i.e.,
 // Tensor[H, W].expand(3, 3, 3, 3) -> Tensor[None, None, H, W]
-void propagate_names_for_expand(Tensor& result, const Tensor& self) {
+void propagate_names_for_expand(const Tensor& result, const Tensor& self) {
   if (!self.has_names()) {
     return;
   }
