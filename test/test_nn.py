@@ -15608,6 +15608,14 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.softplus(x, out=x)
 
+    def test_softplus_low_threshold(self, device):
+        # Ensure gradients are computed correctly with a low threshold.
+        model = torch.nn.Softplus(threshold=1).double()
+        input = torch.tensor(0.9, device=device, dtype=torch.double,
+                             requires_grad=True)
+        output = model(input)
+        torch.autograd.gradcheck(model, input)
+
     @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_softshrink_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
