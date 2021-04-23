@@ -38,12 +38,20 @@ setup_lint:
 	 	--job 'cmakelint' --step 'Install dependencies' --no-quiet
 	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
 	 	--job 'mypy' --step 'Install dependencies' --no-quiet
+
+# TODO: This is broken on MacOS (it downloads a Linux binary)
 	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
 	 	--job 'quick-checks' --step 'Install ShellCheck' --no-quiet
 	pip install jinja2
 
 quick_checks:
-# TODO: This is broken when 'git config submodule.recurse' is 'true'
+	@python tools/actions_local_runner.py \
+		--file .github/workflows/lint.yml \
+		--job 'quick-checks' \
+		--step 'Extract scripts from GitHub Actions workflows'
+
+# TODO: This is broken when 'git config submodule.recurse' is 'true' since the
+# lints will descend into third_party submodules
 	@python tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--job 'quick-checks' \
