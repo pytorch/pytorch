@@ -603,6 +603,7 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
 # In order to use the kwarg alpha, partials should be used in an OpInfo's sample_inputs_func
 # eg. sample_inputs_func=partial(sample_inputs_binary_pwise, use_alpha=True, alpha=0.5)
+# Then sample inputs would also be generated corresponding to the value of alpha provided.
 def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     alpha = kwargs.get("alpha", 1)
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
@@ -3120,7 +3121,7 @@ op_db: List[OpInfo] = [
     OpInfo('add',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_binary_pwise,
+           sample_inputs_func=partial(sample_inputs_binary_pwise, use_alpha=True, alpha=0.5),
            supports_inplace_autograd=False),
     OpInfo('mul',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
@@ -3129,7 +3130,7 @@ op_db: List[OpInfo] = [
     OpInfo('sub',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_binary_pwise,
+           sample_inputs_func=partial(sample_inputs_binary_pwise, use_alpha=True, alpha=0.5),
            supports_inplace_autograd=False),
     OpInfo('addmm',
            dtypes=floating_types(),
