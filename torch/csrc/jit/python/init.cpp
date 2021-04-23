@@ -1370,7 +1370,7 @@ void initJITBindings(PyObject* module) {
   });
 
 #if defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
-  m.def("set_print_stack_traces_on_fatal_signal", [](bool print) {
+  m.def("_set_print_stack_traces_on_fatal_signal", [](bool print) {
     c10::FatalSignalHandler::getInstance().setPrintStackTracesOnFatalSignal(
         print);
   });

@@ -168,6 +168,7 @@ def simple_multi_input_reduce_tests(rank, world_size):
 
 
 class RendezvousEnvTest(TestCase):
+    @requires_gloo()
     @retry_on_connect_failures
     def test_logging_init(self):
         os.environ["WORLD_SIZE"] = "1"
