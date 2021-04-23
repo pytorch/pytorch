@@ -96,6 +96,9 @@
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/core/function_schema.h>
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAFuture.h>
+#endif
 
 #include <pybind11/functional.h>
 #include <pybind11/iostream.h>
@@ -207,7 +210,17 @@ void initJITBindings(PyObject* module) {
             return paramsDict;
           },
           pybind11::return_value_policy::move)
-      .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
+      .def(
+          "_jit_pass_onnx_scalar_type_analysis",
+          [](std::shared_ptr<Graph>& graph,
+             bool lowprecision_cast,
+             int opset_version) {
+            return ScalarTypeAnalysisForONNX(
+                graph, lowprecision_cast, opset_version);
+          },
+          py::arg("graph"),
+          py::arg("lowprecision_cast") = true,
+          py::arg("opset_version"))
       .def(
           "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def(
@@ -1202,9 +1215,22 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
       m, "Future")
-      .def(py::init([]() {
-        return std::make_shared<PythonFutureWrapper>(
-            c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()));
+      .def(py::init([](std::vector<c10::DeviceIndex> devices = {}) {
+        c10::intrusive_ptr<c10::ivalue::Future> fut;
+#ifdef USE_CUDA
+        if (devices.empty()) {
+          fut = c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get());
+        } else {
+          fut = c10::make_intrusive<at::cuda::CUDAFuture>(
+              PyObjectType::get(), std::move(devices));
+        }
+#else
+        TORCH_CHECK_VALUE(
+            devices.empty(),
+            "Tried to instantiate a Future with some devices, but PyTorch was built without CUDA support");
+        fut = c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get());
+#endif
+        return std::make_shared<PythonFutureWrapper>(std::move(fut));
       }))
       .def(
           "done",
