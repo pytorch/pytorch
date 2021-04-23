@@ -153,24 +153,6 @@ Tensor einsum(std::string equation, TensorList operands) {
   TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
   checkDeviceType("einsum():", operands, operands[0].device().type());
 
-  // TODO(@heitorschueroff) improve error messages for unsupported dtypes
-  for (const auto& operand : operands) {
-    const auto scalar_type = operand.scalar_type();
-    TORCH_CHECK(
-        scalar_type != at::kBool,
-        "einsum(): not supported for the Bool dtype");
-    if (operand.device().is_cuda()) {
-      TORCH_CHECK(
-          !at::isIntegralType(scalar_type, false),
-          "einsum(): integral types are not supported on CUDA devices");
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
-      TORCH_CHECK(
-          scalar_type != at::kBFloat16,
-          "einsum(): BFloat16 dtype is not supported on CUDA versions prior to 11");
-#endif
-    }
-  }
-
   // Code used to identify ELLIPSIS ("...")
   constexpr int ELLIPSIS = '.';
 

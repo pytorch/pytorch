@@ -4586,7 +4586,7 @@ op_db: List[OpInfo] = [
            # TODO(@heitorschueroff) update SampleInput to handle such cases
            op=lambda tensors, equation: torch.einsum(equation, tensors),
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            supports_out=False,
            sample_inputs_func=sample_inputs_einsum,
            # test does not work with passing lambda for op
