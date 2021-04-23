@@ -4692,7 +4692,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_einsum,
            # test does not work with passing lambda for op
            # there's a test `test_einsum` in `test_jit.py` to handle this case
-           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+               # The following dtypes are only supported for some inputs, ideally we should have
+               # checked this in the einsum code but to keep BC we'll just skip the tests for now.
+               SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
+                        dtypes=[torch.bool]),
+               SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
+                        device_type='cuda', dtypes=integral_types_and(torch.bfloat16)))),
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
