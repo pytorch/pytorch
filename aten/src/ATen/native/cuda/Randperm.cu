@@ -66,6 +66,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
   // See note [Algorithm of randperm]
   const double log_threshold_12 = std::log(0.9) * 12;
   double nd = static_cast<double>(n);
+
 #if !defined(_MSC_VER)
   int bits = std::min(64,
     static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / log_threshold_12))));
@@ -87,10 +88,12 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         keys.data_ptr<uint8_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
+
 #if !defined(_MSC_VER)
       // This causes failing tests on MSVC for unknown reason.
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
 #endif
+
     });
   } else if (bits <= 16) {
     auto keys = at::empty(result.sizes(), opt.dtype(kShort)).random_(
@@ -103,10 +106,12 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         keys.data_ptr<int16_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
+
 #if !defined(_MSC_VER)
       // This causes failing tests on MSVC for unknown reason.
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
 #endif
+
     });
   } else if (bits <= 32) {
     auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(
@@ -119,10 +124,12 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         keys.data_ptr<int>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
+
 #if !defined(_MSC_VER)
       // This causes failing tests on MSVC for unknown reason.
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
 #endif
+
     });
   } else {
     auto keys = at::empty(result.sizes(), opt.dtype(kLong)).random_(
@@ -135,10 +142,12 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         keys.data_ptr<int64_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
+
 #if !defined(_MSC_VER)
       // This causes failing tests on MSVC for unknown reason.
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
 #endif
+
     });
   }
 
