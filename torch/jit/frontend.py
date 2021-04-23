@@ -294,8 +294,8 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     type_trace_db = torch.jit._script._get_type_trace_db()
     pdt_arg_types = None
     if monkeytype_trace:
-        _qualname = get_qualified_name(fn)
-        pdt_arg_types = type_trace_db.get_args_types(_qualname)
+        qualname = get_qualified_name(fn)
+        pdt_arg_types = type_trace_db.get_args_types(qualname)
 
     return build_def(ctx, fn_def, type_line, def_name, self_name=self_name, pdt_arg_types=pdt_arg_types)
 
@@ -357,12 +357,13 @@ def build_param_list(ctx, py_args, self_name, pdt_arg_types=None):
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
 
     # List of Tuple of args and type as inferred by profile directed typing
-    arg_and_types = [(arg, next(iter(pdt_arg_types[arg.arg])) if pdt_arg_types[arg.arg] else None) for arg in py_args.args]
-    arg_and_types_kwonlyargs = [(arg, next(iter(pdt_arg_types[arg.arg])) if pdt_arg_types[arg.arg] else None)
+    arg_and_types = [(arg, next(iter(pdt_arg_types[arg.arg])) if bool(pdt_arg_types[arg.arg]) else None) for arg in py_args.args]
+    arg_and_types_kwonlyargs = [(arg, next(iter(pdt_arg_types[arg.arg])) if bool(pdt_arg_types[arg.arg]) else None)
                                 for arg in py_args.kwonlyargs]
 
-    result = [build_param(ctx, arg, self_name, kwarg_only=False, pdt_arg_type=_type) for arg, _type in arg_and_types]
-    result += [build_param(ctx, arg, self_name, kwarg_only=True, pdt_arg_type=_type) for arg, _type in arg_and_types_kwonlyargs]
+    result = [build_param(ctx, arg, self_name, kwarg_only=False, pdt_arg_type=arg_type) for arg, arg_type in arg_and_types]
+    result += [build_param(ctx, arg, self_name, kwarg_only=True, pdt_arg_type=arg_type)
+               for arg, arg_type in arg_and_types_kwonlyargs]
     return result
 
 
