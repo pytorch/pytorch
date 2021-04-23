@@ -865,12 +865,12 @@ def print_box(msg):
 if __name__ == '__main__':
     # Parse the command line and check the arguments
     # before we proceed with building deps and setup
-    # dist = Distribution()
-    # try:
-    #     dist.parse_command_line()
-    # except setuptools.distutils.errors.DistutilsArgError as e:
-    #     print(e)
-    #     sys.exit(1)
+    dist = Distribution()
+    try:
+        dist.parse_command_line()
+    except setuptools.distutils.errors.DistutilsArgError as e:
+        print(e)
+        sys.exit(1)
 
     if RUN_BUILD_DEPS:
         build_deps()
