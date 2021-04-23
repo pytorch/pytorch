@@ -19,7 +19,7 @@ executors:
   windows-with-nvidia-gpu:
     machine:
       resource_class: windows.gpu.nvidia.medium
-      image: windows-server-2019-nvidia:stable
+      image: windows-server-2019-nvidia:previous
       shell: bash.exe
 
   windows-xlarge-cpu-with-nvidia-cuda:
