@@ -7,6 +7,7 @@ from tools.codegen.api.types import (ArgName, BaseCType, Binding, ConstRefCType,
                                      OptionalCType, TupleCType, SpecialArgName, boolT, scalarT,
                                      tensorListT, dimnameListT, tensorT, voidT,
                                      BaseTypeToCppMapping, intArrayRefT, tensorOptionsT)
+from tools.codegen import local
 from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
@@ -68,7 +69,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
-            if mutable:
+            if mutable and not local.use_const_ref_for_mutable_tensors():
                 return NamedCType(binds, MutRefCType(BaseCType(tensorT)))
             else:
                 return NamedCType(binds, ConstRefCType(BaseCType(tensorT)))
@@ -78,7 +79,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
             raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
-            if mutable:
+            if mutable and not local.use_const_ref_for_mutable_tensors():
                 return NamedCType(binds, MutRefCType(BaseCType(tensorT)))  # TODO: fix this discrepancy
             else:
                 return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(tensorT))))
@@ -121,8 +122,15 @@ def returntype_type(t: Type, *, mutable: bool) -> CType:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
-                return MutRefCType(BaseCType(tensorT))
+                if local.use_const_ref_for_mutable_tensors():
+                    return ConstRefCType(BaseCType(tensorT))
+                else:
+                    return MutRefCType(BaseCType(tensorT))
             else:
+                # Note [Tensor Copy Returns]
+                # Currently, we use "Argument.is_write" to determine
+                # whether or not Tensor return types should be copies or references.
+                # If that ever changes, take a look at other locations of this note!
                 return BaseCType(tensorT)
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
@@ -146,7 +154,7 @@ def returns_type(rs: Sequence[Return]) -> CType:
     else:
         return TupleCType([return_type(r) for r in rs])
 
-def return_names(f: NativeFunction) -> Sequence[str]:
+def return_names(f: NativeFunction, *, fallback_name: str = 'result') -> Sequence[str]:
     returns: List[str] = []
     for i, r in enumerate(f.func.returns):
         # If we have an inplace function, the return argument is
@@ -167,11 +175,11 @@ def return_names(f: NativeFunction) -> Sequence[str]:
                 name = f'{r.name}_return'
             else:
                 name = r.name
-        # If there is no explicit name, we just name the output result,
+        # If there is no explicit name and no fallback name was passed in, we just name the output result,
         # unless it's a multi-return, in which case it's result0,
         # result1, etc (zero-indexed)
         else:
-            name = 'result' if len(f.func.returns) == 1 else f'result{i}'
+            name = fallback_name if len(f.func.returns) == 1 else f'{fallback_name}{i}'
         returns.append(name)
     return returns
 
