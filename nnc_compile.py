@@ -54,10 +54,6 @@ def index_or_broadcast(shape, *args):
         else:
             out.append(arg)
     return out
-def sum_lower(name, out_shape, inp_shapes, args):
-    assert(args[1] is None)
-    A = args[0]
-    return te.Reduce(name, get_dim_args([]), te.Sum(), A, get_dim_args(inp_shapes[0][0]))
 
 def ones_like_lower(name, out_shape, inp_shapes, args):
     def f(*idxs):
@@ -101,7 +97,6 @@ def transpose_lower(name, out_shape, inp_shapes, args):
     return te.Compute(name, get_dim_args(out_shape), f)
 
 
-lowering_functions[torch.ops.aten.sum] = sum_lower
 lowering_functions[torch.ops.aten.ones_like] = ones_like_lower
 lowering_functions[torch.ops.aten.expand] = expand_lower
 lowering_functions[torch.ops.aten.mm] = mm_lower
@@ -129,6 +124,7 @@ def lower_function(node, op, nnc_args, args):
         if op in func_to_aten:
             op = func_to_aten[op]
         aten_str = f'aten::{op.__name__}'
+        print(aten_str, nnc_args)
         out = te.lower(aten_str, list(nnc_args), get_te_shapes(node.meta['tensor_meta'].shape), get_nnc_type(torch.float))
     if isinstance(out, te.Tensor):
         return out.buf(), [out.stmt()]

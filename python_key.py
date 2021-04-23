@@ -80,7 +80,7 @@ class Foo(torch.nn.Module):
 # Phabricate sample inputs
 num_features = 128
 def gen_inputs():
-    x = torch.randn(1, num_features)
+    x = torch.randn(4, num_features)
     inps = (x,)
     return inps
 inps = gen_inputs()
