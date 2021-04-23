@@ -6689,11 +6689,7 @@ add_docstr(torch.positive,
 positive(input) -> Tensor
 
 Returns :attr:`input`.
-
-.. math::
-    \text{out} = \text{input}
-
-:attr:`input` should have a numeric data type.
+Throws a runtime error if :attr:`input` is a bool tensor.
 """ + r"""
 Args:
     {input}
