@@ -291,6 +291,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
     // Sort using our in-place k/v kernel that supports arbitrary
     // layout
     sortKeyValueInplace(values, indices, dim, descending);
+    return std::forward_as_tuple(values, indices);
   }
 
   if (ndim == 0) {
