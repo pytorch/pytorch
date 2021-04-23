@@ -7899,7 +7899,7 @@ class TestNN(NNTestCase):
                 res = F.gelu(X)
                 ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
                 self.assertEqual(res, ref, rtol=rtol, atol=atol)
-                if dtype != torch.bfloat16:
+                if dtype == torch.float64:
                     gradcheck(F.gelu, [X], eps=1e-4)
 
         for n in range(1, 10):
