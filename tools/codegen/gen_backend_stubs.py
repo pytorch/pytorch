@@ -34,6 +34,8 @@ def parse_backend_yaml(
     assert cpp_namespace is not None, 'You must provide a value for "cpp_namespace"'
 
     supported = yaml_values.pop('supported', [])
+    if supported is None:
+        supported = []  # Allow an empty list of supported ops
     assert isinstance(supported, list), f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
     supported_autograd = yaml_values.pop('autograd', [])
     assert isinstance(supported, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
@@ -69,8 +71,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
         else:
             assert_never(g)
     for op_name in metadata.keys():
-        assert op_name in native_functions_map, f"Found an invalid operator name: {op_name}. \
-For the list of valid operator names, see https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/native_functions.yaml"
+        assert op_name in native_functions_map, f"Found an invalid operator name: {op_name}"
     return cpp_namespace, [native_to_external(g) for g in grouped_native_functions]
 
 def main() -> None:
