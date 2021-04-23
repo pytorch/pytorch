@@ -336,12 +336,14 @@ void insertPrePackedOps(script::Module& module) {
 }
 
 void fusePrePackedLinearConvWithClamp(script::Module& module) {
-  auto graph = module.get_method("forward").graph();
-  fuseReluWithPackedOps(graph);
-  fuseHardtanhWithPackedOps(graph);
+  for (auto& method : module.get_methods()) {
+    auto graph = method.graph();
+    fuseReluWithPackedOps(graph);
+    fuseHardtanhWithPackedOps(graph);
 
-  // Ignore user defined classes for later passes
-  ConstantPropagation(graph, true);
+    // Ignore user defined classes for later passes
+    ConstantPropagation(graph, true);
+  }
 }
 
 void FoldPrePackingOps(script::Module& m) {
@@ -356,9 +358,11 @@ void FoldPrePackingOps(script::Module& m) {
                 "prepacked::conv2d_transpose_clamp_prepack"));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
-  auto graph = m.get_method("forward").graph();
-  // Folding requires a const propagation through user defined classes
-  ConstantPropagation(graph, false);
+  for (auto& method : m.get_methods()) {
+    auto graph = method.graph();
+    // Folding requires a const propagation through user defined classes
+    ConstantPropagation(graph, false);
+  }
 }
 
 script::Module optimizeForMobile(
@@ -401,8 +405,9 @@ script::Module optimizeForMobile(
   cloned_module = freeze_module(cloned_module, preserved_list);
 
   if (!optimization_blocklist.count(
-          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS) &&
-      optimize_forward) {
+          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
+    // TODO fix duplication caused by referencing same op across multiple
+    // functions
     insertPrePackedOps(cloned_module);
     cloned_module = freeze_module(cloned_module, preserved_list);
     fusePrePackedLinearConvWithClamp(cloned_module);
