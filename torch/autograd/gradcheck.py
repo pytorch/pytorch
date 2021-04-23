@@ -940,6 +940,11 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
     return True
 
 
+def has_complex_inputs_or_outputs(tupled_inputs, func_out):
+    return any(is_tensor_like(o) and o.is_complex() for o in _as_tuple(func_out)) or \
+        any(is_tensor_like(i) and i.is_complex() for i in tupled_inputs)
+
+
 # Note [VarArg of Tensors]
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # 'func' accepts a vararg of tensors, which isn't expressable in the type system at the moment.
@@ -1026,8 +1031,7 @@ def gradcheck(
 
     func_out = func(*tupled_inputs)
 
-    if (any(is_tensor_like(o) and o.is_complex() for o in _as_tuple(func_out)) or
-            any(is_tensor_like(i) and i.is_complex() for i in tupled_inputs)):
+    if has_complex_inputs_or_outputs(tupled_inputs, func_out):
         fast_mode = False
 
     outputs = _differentiable_outputs(func_out)
