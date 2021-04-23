@@ -45,7 +45,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest, expectedFailureMeta
+    deviceCountAtLeast, largeTensorTest, expectedFailureMeta
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -580,6 +580,47 @@ class TestNN(NNTestCase):
         # Ensure that requires grad is properly propagated
         mod.register_full_backward_hook(lambda mod, gI, gO: None)
         mod(inp, inp.detach(), inp)
+
+    def test_hook_no_requires_grad(self):
+        mod = nn.Linear(2, 3)
+
+        inp = torch.rand(1, 2)
+
+        return_val = "None"
+        hook_called = [0]
+
+        def hook(mod, grad_input, grad_output):
+            hook_called[0] += 1
+            for gI in grad_input:
+                self.assertIsNone(gI)
+            for gO in grad_output:
+                self.assertEqual(gO.size(), (1, 3))
+
+            if return_val == "grad_input":
+                return grad_input
+            elif return_val == "invalid":
+                # If the inputs were requiring gradients, this would be
+                # a valid return
+                return inp
+            elif return_val == "None":
+                return None
+            else:
+                raise RuntimeError("Invalid return_val string")
+
+        mod.register_full_backward_hook(hook)
+
+        # This should run and trigger the hook properly
+        mod(inp).sum().backward()
+        self.assertEqual(hook_called[0], 1)
+
+        return_val = "grad_input"
+
+        mod(inp).sum().backward()
+        self.assertEqual(hook_called[0], 2)
+
+        return_val = "invalid"
+        with self.assertRaisesRegex(RuntimeError, "where no input requires gradient"):
+            mod(inp).sum().backward()
 
     def test_hook_extra_input(self):
         class MyModule(nn.Module):
@@ -12054,6 +12095,24 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaises(ValueError):
             torch.nn.InstanceNorm1d(10)(x).to(device)
 
+    def test_instancenorm_raises_error_for_single_spatial_element_during_training(self, device):
+        BATCH_SIZE = 10
+        NUM_CHANNELS = 3
+        norms = [torch.nn.InstanceNorm1d, torch.nn.InstanceNorm2d, torch.nn.InstanceNorm3d]
+        for i, norm in enumerate(norms):
+            m = norm(NUM_CHANNELS, track_running_stats=True)
+            m.to(device)
+
+            # Create an appropriately-sized input with a single spatial element.
+            input = torch.randn(BATCH_SIZE, NUM_CHANNELS, *[1 for _ in range(i + 1)],
+                                device=device)
+            with self.assertRaises(ValueError):
+                m(input)
+
+            # Single spatial element should be fine in eval.
+            m.eval()
+            m(input)
+
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
 
@@ -13491,24 +13550,6 @@ class TestNNDeviceType(NNTestCase):
             result.backward(torch.ones_like(result))
             torch.cuda.synchronize()
         issue_24823_2()
-
-    @onlyCUDA
-    @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', fn_has_device_arg=False)
-    def test_grid_sample_2d_alert_nondeterministic(self, device):
-        input = torch.empty(1, 1, 2, 2, device=device)
-        grid = torch.empty(1, 1, 1, 2, device=device)
-        input.requires_grad = True
-        output = F.grid_sample(input, grid, align_corners=False)
-        output.sum().backward()
-
-    @onlyCUDA
-    @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', fn_has_device_arg=False)
-    def test_grid_sample_3d_alert_nondeterministic(self, device):
-        input = torch.empty(1, 1, 2, 2, 2, device=device)
-        grid = torch.empty(1, 1, 1, 2, 3, device=device)
-        input.requires_grad = True
-        output = F.grid_sample(input, grid, align_corners=False)
-        output.sum().backward()
 
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
@@ -15625,6 +15666,14 @@ class TestNNDeviceType(NNTestCase):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.softplus(x, out=x)
+
+    def test_softplus_low_threshold(self, device):
+        # Ensure gradients are computed correctly with a low threshold.
+        model = torch.nn.Softplus(threshold=1).double()
+        input = torch.tensor(0.9, device=device, dtype=torch.double,
+                             requires_grad=True)
+        output = model(input)
+        torch.autograd.gradcheck(model, input)
 
     @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_softshrink_inplace_overlap(self, device):
