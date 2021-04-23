@@ -7,9 +7,9 @@ using c10::string_view;
 namespace {
 namespace testutils {
 constexpr bool string_equal(const char* lhs, const char* rhs, size_t size) {
-  return (size == 0)
-      ? true
-      : (*lhs != *rhs) ? false : string_equal(lhs + 1, rhs + 1, size - 1);
+  return (size == 0)   ? true
+      : (*lhs != *rhs) ? false
+                       : string_equal(lhs + 1, rhs + 1, size - 1);
 }
 static_assert(string_equal("hi", "hi", 2), "");
 static_assert(string_equal("", "", 0), "");
@@ -124,7 +124,8 @@ TEST(StringViewTest, testCopyAssignment) {
     static_assert(5 == (string_view() = "hello").size(), "");
     static_assert(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        string_equal("hello", (string_view() = "hello").data(), 5), "");
+        string_equal("hello", (string_view() = "hello").data(), 5),
+        "");
   }
 #endif
   const string_view hello = assign("hello");
@@ -233,7 +234,7 @@ static_assert('o' == string_view("hello").back(), "");
 namespace test_data {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(string_equal("hello", string_view("hello").data(), 5), "");
-}
+} // namespace test_data
 
 namespace test_size_length {
 static_assert(0 == string_view("").size(), "");

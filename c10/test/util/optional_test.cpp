@@ -17,32 +17,29 @@ class OptionalTest : public ::testing::Test {
 template <typename T>
 T getSampleValue();
 
-template<>
+template <>
 bool getSampleValue() {
   return true;
 }
 
-template<>
+template <>
 uint64_t getSampleValue() {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return 42;
 }
 
-template<>
+template <>
 std::string getSampleValue() {
   return "hello";
 }
 
-
 using OptionalTypes = ::testing::Types<
-  // 32-bit scalar optimization.
-  bool,
-  // Trivially destructible but not 32-bit scalar.
-  uint64_t,
-  // Non-trivial destructor.
-  std::string
-  >;
-
+    // 32-bit scalar optimization.
+    bool,
+    // Trivially destructible but not 32-bit scalar.
+    uint64_t,
+    // Non-trivial destructor.
+    std::string>;
 
 TYPED_TEST_CASE(OptionalTest, OptionalTypes);
 
@@ -71,7 +68,8 @@ TYPED_TEST(OptionalTest, Initialized) {
   moveAssign = std::move(moveFrom2);
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  std::array<typename TestFixture::optional *, 5> opts = {&opt, &copy, &copyAssign, &move, &moveAssign};
+  std::array<typename TestFixture::optional*, 5> opts = {
+      &opt, &copy, &copyAssign, &move, &moveAssign};
   for (auto* popt : opts) {
     auto& opt = *popt;
     EXPECT_TRUE((bool)opt);

@@ -18,7 +18,6 @@ class Foo : public intrusive_ptr_target {
   int param;
 };
 
-
 class Bar : public std::enable_shared_from_this<Bar> {
  public:
   Bar(int param_) : param(param_) {}
@@ -48,7 +47,7 @@ BENCHMARK(BM_SharedPtrCtorDtor);
 static void BM_IntrusivePtrArray(benchmark::State& state) {
   intrusive_ptr<Foo> var = make_intrusive<Foo>(0);
   const size_t kLength = state.range(0);
-  std::vector<intrusive_ptr<Foo> > vararray(kLength);
+  std::vector<intrusive_ptr<Foo>> vararray(kLength);
   while (state.KeepRunning()) {
     for (const auto i : c10::irange(kLength)) {
       vararray[i] = var;
@@ -64,7 +63,7 @@ BENCHMARK(BM_IntrusivePtrArray)->RangeMultiplier(2)->Range(16, 4096);
 static void BM_SharedPtrArray(benchmark::State& state) {
   std::shared_ptr<Bar> var = std::make_shared<Bar>(0);
   const size_t kLength = state.range(0);
-  std::vector<std::shared_ptr<Bar> > vararray(kLength);
+  std::vector<std::shared_ptr<Bar>> vararray(kLength);
   while (state.KeepRunning()) {
     for (const auto i : c10::irange(kLength)) {
       vararray[i] = var;
@@ -77,6 +76,5 @@ static void BM_SharedPtrArray(benchmark::State& state) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 BENCHMARK(BM_SharedPtrArray)->RangeMultiplier(2)->Range(16, 4096);
 } // namespace
-
 
 BENCHMARK_MAIN();

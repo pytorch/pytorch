@@ -253,7 +253,7 @@ static inline bool isSparse(Backend b) {
 }
 
 static inline bool isSparseCsr(Backend b) {
-  switch(b) {
+  switch (b) {
     case Backend::SparseCsrCPU:
     case Backend::SparseCsrCUDA:
       return true;

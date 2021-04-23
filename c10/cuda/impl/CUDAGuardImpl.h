@@ -5,8 +5,8 @@
 #include <c10/util/Exception.h>
 
 #include <c10/cuda/CUDAException.h>
-#include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAStream.h>
 
 #include <cuda_runtime_api.h>
 
@@ -77,9 +77,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   // Event-related functions
-  void createEvent(
-    cudaEvent_t* cuda_event,
-    const EventFlag flag) const {
+  void createEvent(cudaEvent_t* cuda_event, const EventFlag flag) const {
     // Maps PyTorch's Event::Flag to CUDA flag
     auto cuda_flag = cudaEventDefault;
     switch (flag) {
@@ -98,10 +96,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
   }
 
-  void destroyEvent(
-    void* event,
-    const DeviceIndex device_index) const noexcept override {
-    if (!event) return;
+  void destroyEvent(void* event, const DeviceIndex device_index)
+      const noexcept override {
+    if (!event)
+      return;
     auto cuda_event = static_cast<cudaEvent_t>(event);
     int orig_device;
     C10_CUDA_CHECK_WARN(cudaGetDevice(&orig_device));
@@ -111,16 +109,17 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   void record(
-    void** event,
-    const Stream& stream,
-    const DeviceIndex device_index,
-    const EventFlag flag) const override {
-    TORCH_CHECK(device_index == -1 || device_index == stream.device_index(),
-      "Event device index ",
-      device_index,
-      " does not match recording stream's device index ",
-      stream.device_index(),
-      ".");
+      void** event,
+      const Stream& stream,
+      const DeviceIndex device_index,
+      const EventFlag flag) const override {
+    TORCH_CHECK(
+        device_index == -1 || device_index == stream.device_index(),
+        "Event device index ",
+        device_index,
+        " does not match recording stream's device index ",
+        stream.device_index(),
+        ".");
 
     cudaEvent_t cuda_event = static_cast<cudaEvent_t>(*event);
     CUDAStream cuda_stream{stream};
@@ -130,7 +129,8 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     setDevice(stream.device());
 
     // Creates the event (lazily)
-    if (!cuda_event) createEvent(&cuda_event, flag);
+    if (!cuda_event)
+      createEvent(&cuda_event, flag);
     C10_CUDA_CHECK(cudaEventRecord(cuda_event, cuda_stream));
     // Makes the void* point to the (possibly just allocated) CUDA event
     *event = cuda_event;
@@ -139,24 +139,24 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     setDevice(orig_device);
   }
 
-  void block(
-    void* event,
-    const Stream& stream) const override {
-    if (!event) return;
+  void block(void* event, const Stream& stream) const override {
+    if (!event)
+      return;
     cudaEvent_t cuda_event = static_cast<cudaEvent_t>(event);
     CUDAStream cuda_stream{stream};
     const auto orig_device = getDevice();
     setDevice(stream.device());
     C10_CUDA_CHECK(cudaStreamWaitEvent(
-      cuda_stream,
-      cuda_event,
-      /*flags (must be zero)=*/ 0));
+        cuda_stream,
+        cuda_event,
+        /*flags (must be zero)=*/0));
     setDevice(orig_device);
   }
 
   // May be called from any device
   bool queryEvent(void* event) const override {
-    if (!event) return true;
+    if (!event)
+      return true;
     cudaEvent_t cuda_event = static_cast<cudaEvent_t>(event);
     const cudaError_t err = cudaEventQuery(cuda_event);
     if (err != cudaErrorNotReady) {
@@ -166,4 +166,6 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 };
 
-}}} // namespace c10::cuda::impl
+} // namespace impl
+} // namespace cuda
+} // namespace c10

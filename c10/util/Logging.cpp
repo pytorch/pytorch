@@ -74,7 +74,6 @@ void ThrowEnforceFiniteNotMet(
     const char* condition,
     const char* msg,
     const void* caller) {
-
   ThrowEnforceFiniteNotMet(file, line, condition, std::string(msg), caller);
 }
 // PyTorch-style error message
@@ -118,7 +117,8 @@ void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
   *GetAPIUsageLogger() = logger;
 }
 
-void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger) {
+void SetPyTorchDDPUsageLogger(
+    std::function<void(const c10::DDPLoggingData&)> logger) {
   TORCH_CHECK(logger);
   *GetDDPUsageLogger() = logger;
 }
@@ -271,8 +271,7 @@ bool InitCaffeLogging(int* argc, char** argv) {
   }
   if (FLAGS_caffe2_log_level > GLOG_FATAL) {
     std::cerr << "The log level of Caffe2 has to be no larger than GLOG_FATAL("
-              << GLOG_FATAL << "). Capping it to GLOG_FATAL."
-              << std::endl;
+              << GLOG_FATAL << "). Capping it to GLOG_FATAL." << std::endl;
     FLAGS_caffe2_log_level = GLOG_FATAL;
   }
   return true;
@@ -304,17 +303,16 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::high_resolution_clock::now().time_since_epoch());
   */
-  stream_
-      << "["
-      << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
-      //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
-      //<< std::setfill('0')
-      //<< " " << std::setw(2) << timeinfo->tm_hour
-      //<< ":" << std::setw(2) << timeinfo->tm_min
-      //<< ":" << std::setw(2) << timeinfo->tm_sec
-      //<< "." << std::setw(9) << ns.count() % 1000000000
-      << " " << c10::detail::StripBasename(std::string(file)) << ":" << line
-      << "] ";
+  stream_ << "["
+          << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
+          //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
+          //<< std::setfill('0')
+          //<< " " << std::setw(2) << timeinfo->tm_hour
+          //<< ":" << std::setw(2) << timeinfo->tm_min
+          //<< ":" << std::setw(2) << timeinfo->tm_sec
+          //<< "." << std::setw(9) << ns.count() % 1000000000
+          << " " << c10::detail::StripBasename(std::string(file)) << ":" << line
+          << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.
@@ -333,8 +331,7 @@ MessageLogger::~MessageLogger() {
       ANDROID_LOG_DEBUG, // VLOG(1)
       ANDROID_LOG_VERBOSE, // VLOG(2) .. VLOG(N)
   };
-  int android_level_index =
-      GLOG_FATAL - std::min(GLOG_FATAL, severity_);
+  int android_level_index = GLOG_FATAL - std::min(GLOG_FATAL, severity_);
   int level = android_log_levels[std::min(android_level_index, 5)];
   // Output the log string the Android log at the appropriate level.
   __android_log_print(level, tag_, "%s", stream_.str().c_str());

@@ -34,8 +34,8 @@
 #define NOCLIPBOARD
 #endif
 
-#include <windows.h>
 #include <dbghelp.h>
+#include <windows.h>
 
 #undef VOID
 #undef DELETE

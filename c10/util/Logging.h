@@ -139,12 +139,12 @@ using EnforceNotMet = ::c10::Error;
   } while (false)
 
 #define CAFFE_ENFORCE_FINITE(condition, ...)                        \
-    do {                                                            \
-      if (C10_UNLIKELY(!(condition))) {                             \
-        ::c10::ThrowEnforceFiniteNotMet(                            \
+  do {                                                              \
+    if (C10_UNLIKELY(!(condition))) {                               \
+      ::c10::ThrowEnforceFiniteNotMet(                              \
           __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__)); \
-      }                                                             \
-    } while (false)
+    }                                                               \
+  } while (false)
 
 #define CAFFE_ENFORCE_WITH_CALLER(condition, ...)                         \
   do {                                                                    \
@@ -197,77 +197,72 @@ std::string enforceFailMsgImpl(const T1& x, const T2& y, const Args&... args) {
 }
 
 template <typename Pred, typename T1, typename T2, typename... Args>
-void enforceThatImpl(Pred p, const T1& lhs, const T2& rhs, const char* file,
-                     int line, const char* expr, const void* caller,
-                     const Args&... args) {
+void enforceThatImpl(
+    Pred p,
+    const T1& lhs,
+    const T2& rhs,
+    const char* file,
+    int line,
+    const char* expr,
+    const void* caller,
+    const Args&... args) {
   if (C10_UNLIKELY(!(p(lhs, rhs)))) {
     ::c10::ThrowEnforceNotMet(
         file,
         line,
         expr,
-        ::c10::enforce_detail::enforceFailMsgImpl(
-            lhs,
-            rhs,
-            args...),
+        ::c10::enforce_detail::enforceFailMsgImpl(lhs, rhs, args...),
         caller);
   }
 }
-#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...)        \
-  ::c10::enforce_detail::enforceThatImpl(                       \
-      op,                                                       \
-      lhs,                                                      \
-      rhs,                                                      \
-      __FILE__,                                                 \
-      __LINE__,                                                 \
-      expr,                                                     \
-      nullptr,                                                  \
-      ##__VA_ARGS__)
+#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...) \
+  ::c10::enforce_detail::enforceThatImpl(                \
+      op, lhs, rhs, __FILE__, __LINE__, expr, nullptr, ##__VA_ARGS__)
 
-#define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...)    \
-  ::c10::enforce_detail::enforceThatImpl(                               \
-      op,                                                               \
-      (lhs),                                                            \
-      (rhs),                                                            \
-      __FILE__,                                                         \
-      __LINE__,                                                         \
-      expr,                                                             \
-      this,                                                             \
-      ##__VA_ARGS__)
+#define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...) \
+  ::c10::enforce_detail::enforceThatImpl(                            \
+      op, (lhs), (rhs), __FILE__, __LINE__, expr, this, ##__VA_ARGS__)
 
 } // namespace enforce_detail
 
-#define CAFFE_ENFORCE_THAT(cmp, op, lhs, rhs,...)                        \
-  CAFFE_ENFORCE_THAT_IMPL(cmp, lhs, rhs,  #lhs " " #op " " #rhs, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_THAT(cmp, op, lhs, rhs, ...) \
+  CAFFE_ENFORCE_THAT_IMPL(cmp, lhs, rhs, #lhs " " #op " " #rhs, ##__VA_ARGS__)
 
-#define CAFFE_ENFORCE_BINARY_OP(cmp, op, x, y, ...)                      \
+#define CAFFE_ENFORCE_BINARY_OP(cmp, op, x, y, ...) \
   CAFFE_ENFORCE_THAT_IMPL(cmp, x, y, #x " " #op " " #y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_EQ(x, y, ...)                     \
+#define CAFFE_ENFORCE_EQ(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP(std::equal_to<void>(), ==, x, y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_NE(x, y, ...)                     \
+#define CAFFE_ENFORCE_NE(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP(std::not_equal_to<void>(), !=, x, y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_LE(x, y, ...)                     \
+#define CAFFE_ENFORCE_LE(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP(std::less_equal<void>(), <=, x, y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_LT(x, y, ...)                     \
+#define CAFFE_ENFORCE_LT(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP(std::less<void>(), <, x, y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_GE(x, y, ...)                     \
+#define CAFFE_ENFORCE_GE(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP(std::greater_equal<void>(), >=, x, y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_GT(x, y, ...)                     \
+#define CAFFE_ENFORCE_GT(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP(std::greater<void>(), >, x, y, ##__VA_ARGS__)
 
-#define CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(cmp, op, x, y, ...)          \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(cmp, x, y, #x " " #op " " #y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_EQ_WITH_CALLER(x, y, ...)                 \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::equal_to<void>(), ==, x, y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_NE_WITH_CALLER(x, y, ...)                 \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::not_equal_to<void>(), !=, x, y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_LE_WITH_CALLER(x, y, ...)                 \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::less_equal<void>(), <=, x, y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_LT_WITH_CALLER(x, y, ...)                 \
+#define CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(cmp, op, x, y, ...) \
+  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(                          \
+      cmp, x, y, #x " " #op " " #y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_EQ_WITH_CALLER(x, y, ...) \
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
+      std::equal_to<void>(), ==, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_NE_WITH_CALLER(x, y, ...) \
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
+      std::not_equal_to<void>(), !=, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_LE_WITH_CALLER(x, y, ...) \
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
+      std::less_equal<void>(), <=, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_LT_WITH_CALLER(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::less<void>(), <, x, y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_GE_WITH_CALLER(x, y, ...)                 \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::greater_equal<void>(), >=, x, y, ##__VA_ARGS__)
-#define CAFFE_ENFORCE_GT_WITH_CALLER(x, y, ...)                 \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::greater<void>(), >, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_GE_WITH_CALLER(x, y, ...) \
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
+      std::greater_equal<void>(), >=, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_GT_WITH_CALLER(x, y, ...) \
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
+      std::greater<void>(), >, x, y, ##__VA_ARGS__)
 
 /**
  * Very lightweight logging for the first time API usage. It's beneficial for
@@ -281,7 +276,7 @@ void enforceThatImpl(Pred p, const T1& lhs, const T2& rhs, const char* file,
  *   // Logs caller info with an arbitrary text event, if there is a usage.
  *   C10_LOG_API_USAGE_ONCE("my_api");
  */
-#define C10_LOG_API_USAGE_ONCE(...)             \
+#define C10_LOG_API_USAGE_ONCE(...)                        \
   C10_UNUSED static bool C10_ANONYMOUS_VARIABLE(logFlag) = \
       ::c10::detail::LogAPIUsageFakeReturn(__VA_ARGS__);
 
@@ -377,56 +372,76 @@ struct DDPLoggingData {
 
   // Stream insertion operator for logging i.e. to standard output/error.
   friend std::ostream& operator<<(
-    std::ostream& output,
-    const DDPLoggingData& ddp_logging_data
-  ) {
-
+      std::ostream& output,
+      const DDPLoggingData& ddp_logging_data) {
     std::string devicesStr = c10::Join(", ", ddp_logging_data.device_ids);
     std::string bucketSizesStr = c10::Join(", ", ddp_logging_data.bucket_sizes);
     std::string dtypesStr = c10::Join(" ", ddp_logging_data.dtypes);
 
     std::string ddpLoggingDataInfo = c10::str(
-      "world_size: ", ddp_logging_data.world_size, ", module_name: ",
-      ddp_logging_data.module_name, ", device_ids: ", devicesStr, ", output_device: ",
-      ddp_logging_data.output_device, ", backend_name: ", ddp_logging_data.backend_name,
-      ", parameter_dtype: ", dtypesStr, ", total_parameter_size_in_bytes: ",
-      ddp_logging_data.total_parameter_size_bytes, ", num_parameter_tensors: ",
-      ddp_logging_data.num_parameter_tensors, " bucket_sizes: ", bucketSizesStr,
-      ", CUDA_VISIBLE_DEVICES: ", ddp_logging_data.cuda_visible_devices, ", broadcast_buffers: ",
-      ddp_logging_data.broadcast_buffers, ", bucket_cap_mb: ", ddp_logging_data.bucket_cap_mb,
-      ", find_unused_parameters: ", ddp_logging_data.find_unused_parameters,
-      ", gradient_as_bucket_view: ", ddp_logging_data.gradient_as_bucket_view,
-      "\n"
-    );
+        "world_size: ",
+        ddp_logging_data.world_size,
+        ", module_name: ",
+        ddp_logging_data.module_name,
+        ", device_ids: ",
+        devicesStr,
+        ", output_device: ",
+        ddp_logging_data.output_device,
+        ", backend_name: ",
+        ddp_logging_data.backend_name,
+        ", parameter_dtype: ",
+        dtypesStr,
+        ", total_parameter_size_in_bytes: ",
+        ddp_logging_data.total_parameter_size_bytes,
+        ", num_parameter_tensors: ",
+        ddp_logging_data.num_parameter_tensors,
+        " bucket_sizes: ",
+        bucketSizesStr,
+        ", CUDA_VISIBLE_DEVICES: ",
+        ddp_logging_data.cuda_visible_devices,
+        ", broadcast_buffers: ",
+        ddp_logging_data.broadcast_buffers,
+        ", bucket_cap_mb: ",
+        ddp_logging_data.bucket_cap_mb,
+        ", find_unused_parameters: ",
+        ddp_logging_data.find_unused_parameters,
+        ", gradient_as_bucket_view: ",
+        ddp_logging_data.gradient_as_bucket_view,
+        "\n");
     std::string backendInfo = " Backend Info: ";
     if (ddp_logging_data.backend_name == "nccl") {
       backendInfo += c10::str(
-        "nccl_socket_ifname: ", ddp_logging_data.nccl_socket_ifname,
-        " nccl_blocking_wait: ", ddp_logging_data.nccl_blocking_wait,
-        " nccl_debug: ", ddp_logging_data.nccl_debug,
-        " nccl_async_error_handling: ", ddp_logging_data.nccl_async_error_handling,
-        " nccl_nthreads: ", ddp_logging_data.nccl_nthreads,
-        " nccl_ib_timeout: ", ddp_logging_data.nccl_ib_timeout,
-        "\n"
-      );
+          "nccl_socket_ifname: ",
+          ddp_logging_data.nccl_socket_ifname,
+          " nccl_blocking_wait: ",
+          ddp_logging_data.nccl_blocking_wait,
+          " nccl_debug: ",
+          ddp_logging_data.nccl_debug,
+          " nccl_async_error_handling: ",
+          ddp_logging_data.nccl_async_error_handling,
+          " nccl_nthreads: ",
+          ddp_logging_data.nccl_nthreads,
+          " nccl_ib_timeout: ",
+          ddp_logging_data.nccl_ib_timeout,
+          "\n");
     } else if (ddp_logging_data.backend_name == "gloo") {
       backendInfo += c10::str(
-        "gloo_socket_ifname: ", ddp_logging_data.gloo_socket_ifname,
-        " gloo_device_transport: ", ddp_logging_data.gloo_device_transport,
-        "\n"
-      );
+          "gloo_socket_ifname: ",
+          ddp_logging_data.gloo_socket_ifname,
+          " gloo_device_transport: ",
+          ddp_logging_data.gloo_device_transport,
+          "\n");
     }
     ddpLoggingDataInfo += backendInfo;
 
     if (ddp_logging_data.comm_hook != "") {
-      auto commHookInfo = c10::str(
-        "comm_hook: ", ddp_logging_data.comm_hook
-      );
+      auto commHookInfo = c10::str("comm_hook: ", ddp_logging_data.comm_hook);
       ddpLoggingDataInfo += commHookInfo;
     }
 
     if (ddp_logging_data.join_uneven_inputs) {
-      auto joinInfo = c10::str("join_uneven_inputs: ", ddp_logging_data.join_uneven_inputs);
+      auto joinInfo =
+          c10::str("join_uneven_inputs: ", ddp_logging_data.join_uneven_inputs);
       ddpLoggingDataInfo += joinInfo;
     }
 
@@ -434,13 +449,14 @@ struct DDPLoggingData {
   }
 };
 
-C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);
+C10_API void SetPyTorchDDPUsageLogger(
+    std::function<void(const c10::DDPLoggingData&)> logger);
 C10_API void LogPyTorchDDPUsage(const c10::DDPLoggingData& ddpData);
 
 namespace detail {
 // Return value is needed to do the static variable initialization trick
 C10_API bool LogAPIUsageFakeReturn(const std::string& context);
-}
+} // namespace detail
 
 } // namespace c10
 

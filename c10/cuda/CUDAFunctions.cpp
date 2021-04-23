@@ -101,7 +101,9 @@ DeviceIndex device_count() noexcept {
   static int count = []() {
     try {
       auto result = device_count_impl(/*fail_if_no_driver=*/false);
-      TORCH_INTERNAL_ASSERT(result <= std::numeric_limits<DeviceIndex>::max(), "Too many CUDA devices, DeviceIndex overflowed");
+      TORCH_INTERNAL_ASSERT(
+          result <= std::numeric_limits<DeviceIndex>::max(),
+          "Too many CUDA devices, DeviceIndex overflowed");
       return result;
     } catch (const c10::Error& ex) {
       // We don't want to fail, but still log the warning
