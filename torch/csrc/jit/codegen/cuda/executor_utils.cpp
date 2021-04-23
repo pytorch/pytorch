@@ -563,7 +563,7 @@ ExpressionEvaluator bindFusionInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (size_t dim = 0; dim < root_dom.size(); dim++) {
-        const auto extent = root_dom[dim]->extent();
+        const auto extent = root_dom[dim]->rawExtent();
         const auto value = aten_tensor.sizes()[dim];
         const auto prev_value = evaluator.evaluate(extent);
         if (prev_value.has_value()) {

@@ -541,7 +541,7 @@ static TensorView* newForReduction(
 
     new_domain.push_back(new IterDomain(
         id->start(),
-        id->extent(),
+        id->rawExtent(),
         ParallelType::Serial,
         isReduction ? IterType::Reduction : id->getIterType()));
   }

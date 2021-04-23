@@ -410,9 +410,9 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   Val* start() const {
     return start_;
   }
-  Val* extent() const;
 
   Val* rawExtent() const {
+    TORCH_INTERNAL_ASSERT(extent_ != nullptr);
     return extent_;
   }
 

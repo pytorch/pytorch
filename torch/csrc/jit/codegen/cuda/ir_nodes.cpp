@@ -553,7 +553,7 @@ bool IterDomain::sameAs(const Statement* other) const {
 
   bool is_same = isReduction() == other_id->isReduction() &&
       getParallelType() == other_id->getParallelType();
-  is_same = is_same && ScalarCheck::sameAs(extent(), other_id->extent());
+  is_same = is_same && ScalarCheck::sameAs(rawExtent(), other_id->rawExtent());
   is_same = is_same && ScalarCheck::sameAs(start(), other_id->start());
 
   return is_same;
@@ -569,7 +569,7 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
           (outer->rawExtent()->isOneInt() && !inner->isReduction()),
       "Merging IterDomains requires that their iteration types match.");
 
-  Val* merged_id_size = mul(outer->extent(), inner->extent());
+  Val* merged_id_size = mul(outer->rawExtent(), inner->rawExtent());
 
   IterType itype = outer->getIterType();
 
@@ -628,7 +628,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   }
 
   // outer loop size
-  Val* remainder = ceilDiv(in->extent(), factor);
+  Val* remainder = ceilDiv(in->rawExtent(), factor);
 
   // outer loop IterDomain
   IterDomain* ido = new IterDomain(
@@ -650,34 +650,21 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   return {ido, idi};
 }
 
-// TODO(kir): review if this is still needed in the Fusion IR
-Val* IterDomain::extent() const {
-  TORCH_INTERNAL_ASSERT(extent_ != nullptr);
-  if (isThread()) {
-    if (extent_->getValType() == ValType::Scalar)
-      if (extent_->as<Int>()->isConst())
-        return extent_;
-
-    return NamedScalar::getParallelDim(getParallelType());
-  }
-  return extent_;
-}
-
 // TODO: We should change parallelize interface to be on tensorview or at least
 // vectorize should be done on tensorview. This would let us check that we don't
 // vectorize to the left of the computeAt domain, and could allow us to do some
 // simple validation of vectorize as it's inputs are right most and contiguous.
 void IterDomain::parallelize(ParallelType t) {
   parallel_type_ = t;
-  if (t == ParallelType::Unroll || t == ParallelType::Vectorize ||
-      t == ParallelType::Unswitch) {
+  if (t == ParallelType::Unroll || t == ParallelType::Unswitch ||
+      isParallelTypeVectorize(t)) {
     TORCH_CHECK(
-        start()->isZeroInt() && extent()->isConstScalar(),
+        start()->isZeroInt() && rawExtent()->isConstScalar(),
         "Vectorization, unrolling, and unswitching are only supported with start = 0 and extent as a const int, but got ",
         "a start of ",
         start(),
         " and extent ",
-        extent(),
+        rawExtent(),
         " .");
   }
 }

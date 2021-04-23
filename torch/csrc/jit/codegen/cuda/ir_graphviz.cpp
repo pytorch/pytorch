@@ -77,10 +77,7 @@ class IrNodeLabel : private OptInConstDispatch {
     if (!id->start()->isZeroInt()) {
       label_ << IrNodeLabel::gen(id->start()) << " : ";
     }
-    label_ << IrNodeLabel::gen(id->extent());
-    if (id->rawExtent() != id->extent()) {
-      label_ << "\\<" << IrNodeLabel::gen(id->rawExtent()) << "\\>";
-    }
+    label_ << IrNodeLabel::gen(id->rawExtent());
     label_ << ")";
   }
 
@@ -359,11 +356,6 @@ void IrGraphGenerator::handle(const IterDomain* id) {
   }
 
   addArc(id->rawExtent(), id, "[color=gray]");
-
-  if (detail_level_ >= DetailLevel::Explicit &&
-      id->rawExtent() != id->extent()) {
-    addArc(id->extent(), id, "[color=gray, style=dashed]");
-  }
 }
 
 void IrGraphGenerator::handle(const Bool* b) {

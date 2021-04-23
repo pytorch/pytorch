@@ -14,8 +14,8 @@ namespace cuda {
 
 Statement* OptOutMutator::mutate(IterDomain* id) {
   Val* s = mutateAsVal(id->start())->asVal();
-  Val* e = mutateAsVal(id->extent())->asVal();
-  if (s->sameAs(id->start()) && e->sameAs(id->extent()))
+  Val* e = mutateAsVal(id->rawExtent())->asVal();
+  if (s->sameAs(id->start()) && e->sameAs(id->rawExtent()))
     return id;
 
   Val* mutated_val = new IterDomain(

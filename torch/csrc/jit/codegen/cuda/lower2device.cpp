@@ -56,7 +56,7 @@ void GpuLower::replaceSymbolicSizes() {
 
     size_t dim = 0;
     for (auto id : root_td) {
-      const Val* orig_size = id->extent();
+      const Val* orig_size = id->rawExtent();
 
       // Output sizes could have reduction axes, which isn't what gets output.
       if (id->isReduction() ||

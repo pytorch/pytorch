@@ -921,22 +921,22 @@ TEST(NVFuserTest, FusionTVSplit_CUDA) {
 
   tv = tv->split(2, 2);
   TORCH_CHECK(tv->nDims() == 4);
-  Expr* outer = tv->axis(2)->extent()->definition();
+  Expr* outer = tv->axis(2)->rawExtent()->definition();
 
   TORCH_CHECK(
       outer->getExprType().value() == ExprType::BinaryOp &&
       static_cast<BinaryOp*>(outer)->getBinaryOpType() ==
           BinaryOpType::CeilDiv &&
       static_cast<BinaryOp*>(outer)->lhs()->sameAs(
-          tv->getRootDomain()[2]->extent()) &&
+          tv->getRootDomain()[2]->rawExtent()) &&
       static_cast<Int*>(static_cast<BinaryOp*>(outer)->rhs())
           ->sameAs(new Int(2)));
 
   IterDomain* inner = static_cast<IterDomain*>(tv->axis(3));
   TORCH_CHECK(
-      inner->extent()->isScalar() &&
-      static_cast<Int*>(inner->extent())->isConst() &&
-      static_cast<Int*>(inner->extent())->value().value() == 2);
+      inner->rawExtent()->isScalar() &&
+      static_cast<Int*>(inner->rawExtent())->isConst() &&
+      static_cast<Int*>(inner->rawExtent())->value().value() == 2);
 }
 
 TEST(NVFuserTest, FusionTVMerge_CUDA) {
@@ -946,15 +946,15 @@ TEST(NVFuserTest, FusionTVMerge_CUDA) {
   TensorView* tv = makeSymbolicTensor(3);
 
   tv = tv->merge(1);
-  Expr* axisOp = tv->axis(1)->extent()->definition();
+  Expr* axisOp = tv->axis(1)->rawExtent()->definition();
 
   TORCH_CHECK(
       tv->nDims() == 2 && axisOp->getExprType() == ExprType::BinaryOp &&
       static_cast<BinaryOp*>(axisOp)->getBinaryOpType() == BinaryOpType::Mul &&
       static_cast<BinaryOp*>(axisOp)->lhs() ==
-          tv->getRootDomain()[1]->extent() &&
+          tv->getRootDomain()[1]->rawExtent() &&
       static_cast<BinaryOp*>(axisOp)->rhs() ==
-          tv->getRootDomain()[2]->extent());
+          tv->getRootDomain()[2]->rawExtent());
 }
 
 TEST(NVFuserTest, FusionTVReorder_CUDA) {
@@ -7916,7 +7916,8 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
     const int axis = input->nDims() - 1 - idx;
     inner_reduction_axes[idx] = axis;
     inner_broadcast_mask[axis] = true;
-    num_features = mul(num_features, input->domain()->domain()[axis]->extent());
+    num_features =
+        mul(num_features, input->domain()->domain()[axis]->rawExtent());
   }
 
   /*
@@ -8036,7 +8037,8 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
     const int axis = input->nDims() - 1 - idx;
     reduction_axes[idx] = axis;
     broadcast_mask[axis] = true;
-    num_features = mul(num_features, input->domain()->domain()[axis]->extent());
+    num_features =
+        mul(num_features, input->domain()->domain()[axis]->rawExtent());
   }
 
   // Reduction
@@ -8128,7 +8130,7 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
       reduction_axes.push_back(axis);
       broadcast_mask[axis] = true;
       num_features =
-          mul(num_features, input->domain()->domain()[axis]->extent());
+          mul(num_features, input->domain()->domain()[axis]->rawExtent());
     }
   }
 

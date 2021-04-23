@@ -131,7 +131,7 @@ bool isConstantAllocation(const TensorView* tv) {
   for (size_t axis = tv->getComputeAtPosition(); axis < domain.size(); ++axis) {
     if (!domain[axis]->isBroadcast() && !domain[axis]->isReduction() &&
         !domain[axis]->isParallelized()) {
-      constant_allocation &= domain[axis]->extent()->isConstScalar();
+      constant_allocation &= domain[axis]->rawExtent()->isConstScalar();
     }
   }
   return constant_allocation;

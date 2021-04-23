@@ -31,7 +31,7 @@ static TensorView* setupBatchNorm(
       reduction_axes.push_back(axis);
       broadcast_mask[axis] = true;
       num_features =
-          mul(num_features, input->domain()->domain()[axis]->extent());
+          mul(num_features, input->domain()->domain()[axis]->rawExtent());
     }
   }
 

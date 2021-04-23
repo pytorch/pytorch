@@ -43,7 +43,7 @@ class ReplaySelf : public ReplayTransformations {
         "Transform traversal failed, modified a node but it was not a leaf node.");
 
     // outer loop size
-    Val* remainder = ceilDiv(mapped->extent(), s->factor());
+    Val* remainder = ceilDiv(mapped->rawExtent(), s->factor());
 
     // Manually replay the split, following the output of the operations.
     // This is so rfactor ops are replayed correctly.
@@ -101,7 +101,7 @@ class ReplaySelf : public ReplayTransformations {
         " however one or both are not leaf nodes.");
 
     Val* merged_id_size =
-        mul(id_outer_mapped->extent(), id_inner_mapped->extent());
+        mul(id_outer_mapped->rawExtent(), id_inner_mapped->rawExtent());
 
     IterDomain* merged_id = new IterDomain(
         new Int(0),

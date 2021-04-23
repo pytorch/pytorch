@@ -48,7 +48,7 @@ class ReplayRFactor : public ReplayTransformations {
       return ReplayTransformations::handle(s);
 
     // outer loop size
-    Val* remainder = ceilDiv(mapped->extent(), s->factor());
+    Val* remainder = ceilDiv(mapped->rawExtent(), s->factor());
 
     // Manually replay the split, making reduction = false and rfactor = true
     // outer IterDomain
@@ -113,7 +113,7 @@ class ReplayRFactor : public ReplayTransformations {
       return ReplayTransformations::handle(m);
 
     Val* merged_id_size =
-        mul(id_outer_mapped->extent(), id_inner_mapped->extent());
+        mul(id_outer_mapped->rawExtent(), id_inner_mapped->rawExtent());
 
     IterDomain* merged_id = new IterDomain(
         new Int(0),
@@ -244,7 +244,7 @@ TensorDomain* TransformRFactor::runReplay(
       if (rfactor_root_axes.find(id) != rfactor_root_axes.end()) {
         new_root[i] = new IterDomain(
             id->start(),
-            id->extent(),
+            id->rawExtent(),
             id->getParallelType(),
             IterType::Reduction,
             true);
@@ -253,7 +253,7 @@ TensorDomain* TransformRFactor::runReplay(
       } else if (id->isReduction()) {
         new_root[i] = new IterDomain(
             id->start(),
-            id->extent(),
+            id->rawExtent(),
             id->getParallelType(),
             IterType::Iteration,
             false);
