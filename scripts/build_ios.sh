@@ -13,7 +13,7 @@ CMAKE_ARGS=()
 
 if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
   # Build PyTorch mobile
-  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'import sysconfig; print(sysconfig.get_path(\'purelib\')))')")
+  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
   # custom build with selected ops

@@ -642,6 +642,14 @@ class install(setuptools.command.install.install):
 
 
 class clean(setuptools.Command):
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
     def run(self):
         import glob
         import re
@@ -661,8 +669,6 @@ class clean(setuptools.Command):
                             os.remove(filename)
                         except OSError:
                             shutil.rmtree(filename, ignore_errors=True)
-
-        super().run()
 
 
 class sdist(setuptools.command.sdist.sdist):
@@ -859,12 +865,12 @@ def print_box(msg):
 if __name__ == '__main__':
     # Parse the command line and check the arguments
     # before we proceed with building deps and setup
-    dist = Distribution()
-    try:
-        dist.parse_command_line()
-    except setuptools.distutils.errors.DistutilsArgError as e:
-        print(e)
-        sys.exit(1)
+    # dist = Distribution()
+    # try:
+    #     dist.parse_command_line()
+    # except setuptools.distutils.errors.DistutilsArgError as e:
+    #     print(e)
+    #     sys.exit(1)
 
     if RUN_BUILD_DEPS:
         build_deps()
