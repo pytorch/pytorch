@@ -260,11 +260,10 @@ void writeArchive(
   }
   std::string fname = archive_name + ".pkl";
   writer->writeRecord(fname, data.data(), data.size());
-
 }
 
 void check_zip_file(std::shared_ptr<ReadAdapterInterface>& rai) {
-  std::array<uint8_t, 2> first_short;
+  std::array<uint8_t, 2> first_short{};
   static constexpr uint8_t first_slot = 0x80;
   static constexpr uint8_t second_slot = 0x02;
   //  uint8_t first_short[2];
@@ -404,7 +403,8 @@ bool _backport_for_mobile_impl(
         c10::ivalue::Tuple::create(std::move(ivalue_constants));
 
     update_bytecode_version(bytecode_values, to_bytecode_version);
-    auto bytecode_tuple = c10::ivalue::Tuple::create(std::move(bytecode_values));
+    auto bytecode_tuple =
+        c10::ivalue::Tuple::create(std::move(bytecode_values));
     tensors_archive_table =
         get_tensors_archive_table(kArchiveNameConstants, constants_data);
     writeArchive(

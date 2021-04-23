@@ -612,8 +612,6 @@ TEST(LiteInterpreterTest, LoadAndRunByteCodeModel) {
 
   auto expected_result = at::ones({2, 4}, ScalarType::Double) * 3;
 
-
-
   AT_ASSERT(compare_tensor(jit_module_v4_output, expected_result));
   AT_ASSERT(compare_tensor(jit_module_v5_output, expected_result));
   AT_ASSERT(compare_tensor(mobile_module_v4_output, expected_result));
@@ -664,7 +662,8 @@ TEST(LiteInterpreterTest, BackPortByteCodeModel) {
 
   // Backport script_module_v5.ptl to an older version
   std::ostringstream oss;
-  bool backPortSuccess = torch::jit::_backport_for_mobile(test_model_file_v5, oss);
+  bool backPortSuccess =
+      torch::jit::_backport_for_mobile(test_model_file_v5, oss);
   AT_ASSERT(backPortSuccess);
 
   // Check backport model version
