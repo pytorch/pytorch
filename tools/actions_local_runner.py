@@ -6,6 +6,8 @@ import os
 import argparse
 import yaml
 import asyncio
+import shutil
+import re
 from typing import List, Dict, Any, Optional
 
 
@@ -68,7 +70,7 @@ def find_changed_files() -> List[str]:
     return [x.strip() for x in all_files if x.strip() != ""]
 
 
-async def run_step(step: Dict[str, Any], job_name: str, files: Optional[List[str]]) -> bool:
+async def run_step(step: Dict[str, Any], job_name: str, files: Optional[List[str]], quiet: bool) -> bool:
     env = os.environ.copy()
     env["GITHUB_WORKSPACE"] = "/tmp"
     if files is None:
@@ -77,17 +79,19 @@ async def run_step(step: Dict[str, Any], job_name: str, files: Optional[List[str
         env["LOCAL_FILES"] = " ".join(files)
     script = step["run"]
 
-    PASS = "\U00002705"
-    FAIL = "\U0000274C"
-    # We don't need to print the commands for local running
-    # TODO: Either lint that GHA scripts only use 'set -eux' or make this more
-    # resilient
-    script = script.replace("set -eux", "set -eu")
+    PASS = color(col.GREEN, '\N{check mark}')
+    FAIL = color(col.RED, 'x')
+
+    if quiet:
+        # TODO: Either lint that GHA scripts only use 'set -eux' or make this more
+        # resilient
+        script = script.replace("set -eux", "set -eu")
+        script = re.sub(r"^time ", "", script, flags=re.MULTILINE)
     name = f'{job_name}: {step["name"]}'
 
     def header(passed: bool) -> None:
         icon = PASS if passed else FAIL
-        cprint(col.BLUE, f"{icon} {name}")
+        print(f"{icon} {color(col.BLUE, name)}")
 
     try:
         proc = await asyncio.create_subprocess_shell(
@@ -97,6 +101,7 @@ async def run_step(step: Dict[str, Any], job_name: str, files: Optional[List[str
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            executable=shutil.which("bash"),
         )
 
         stdout_bytes, stderr_bytes = await proc.communicate()
@@ -118,8 +123,8 @@ async def run_step(step: Dict[str, Any], job_name: str, files: Optional[List[str
     return proc.returncode == 0
 
 
-async def run_steps(steps: List[Dict[str, Any]], job_name: str, files: Optional[List[str]]) -> None:
-    coros = [run_step(step, job_name, files) for step in steps]
+async def run_steps(steps: List[Dict[str, Any]], job_name: str, files: Optional[List[str]], quiet: bool) -> None:
+    coros = [run_step(step, job_name, files, quiet) for step in steps]
     await asyncio.gather(*coros)
 
 
@@ -158,6 +163,7 @@ def main() -> None:
     parser.add_argument("--file-filter", help="only pass through files with this extension", default='')
     parser.add_argument("--changed-only", help="only run on changed files", action='store_true', default=False)
     parser.add_argument("--job", help="job name", required=True)
+    parser.add_argument("--no-quiet", help="output commands", action='store_true', default=False)
     parser.add_argument("--step", action="append", help="steps to run (in order)")
     parser.add_argument(
         "--all-steps-after", help="include every step after this one (non inclusive)"
@@ -165,6 +171,7 @@ def main() -> None:
     args = parser.parse_args()
 
     relevant_files = None
+    quiet = not args.no_quiet
 
     if args.changed_only:
         changed_files: Optional[List[str]] = None
@@ -206,7 +213,8 @@ def main() -> None:
         relevant_steps = grab_all_steps_after(args.all_steps_after, job)
 
     if sys.version_info > (3, 7):
-        asyncio.run(run_steps(relevant_steps, args.job, relevant_files))
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(run_steps(relevant_steps, args.job, relevant_files, quiet))
     else:
         raise RuntimeError("Only Python >3.7 is supported")
 
