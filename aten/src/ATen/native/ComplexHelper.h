@@ -47,7 +47,10 @@ Tensor view_as_real_physical(const Tensor& self) {
   auto new_strides = computeStrideForViewAsReal(self.strides());
   auto new_storage_offset = 2 * self.storage_offset();
   const auto float_type = c10::toValueType(self.scalar_type());
-  return view_tensor(self, float_type, new_storage_offset, new_sizes, new_strides);
+  auto real_tensor = view_tensor(self, float_type, new_storage_offset, new_sizes, new_strides);
+  // unconditionally set conj bit to false
+  real_tensor.set_conj(false);
+  return real_tensor;
 }
 
 inline DimVector computeStrideForViewAsComplex(IntArrayRef oldstride) {
