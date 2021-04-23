@@ -40,9 +40,52 @@ std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
   return data_ptrs;
 }
 
+std::vector<c10::DeviceIndex> getDevicesOfDataPtrs(
+    const std::vector<std::reference_wrapper<const at::DataPtr>>& data_ptrs) {
+  std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
+  for (const at::DataPtr& data_ptr : data_ptrs) {
+    if (data_ptr.device().is_cuda()) {
+      isCudaDeviceUsed[data_ptr.device().index()] = true;
+    }
+  }
+  std::vector<c10::DeviceIndex> deviceIndices;
+  for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
+    if (isCudaDeviceUsed[idx]) {
+      deviceIndices.push_back(idx);
+    }
+  }
+  return deviceIndices;
+}
+
+std::string formatSetOfDevices(const std::vector<c10::DeviceIndex>& devices) {
+  if (devices.empty()) {
+    return "(none)";
+  }
+  std::ostringstream oss;
+  oss << "cuda:" << static_cast<int64_t>(devices[0]);
+  for (size_t idx = 1; idx < devices.size(); idx++) {
+    if (idx == devices.size() - 1) {
+      oss << " and ";
+    } else {
+      oss << ", ";
+    }
+    oss << "cuda:" << static_cast<int64_t>(devices[idx]);
+  }
+  return oss.str();
+}
+
+// We need devices to be sorted in order to use set_difference.
+std::vector<c10::DeviceIndex> sortDevices(
+    std::vector<c10::DeviceIndex> devices) {
+  std::sort(devices.begin(), devices.end());
+  return devices;
+}
+
 } // namespace
 
-CUDAFuture::CUDAFuture(at::TypePtr type) : at::ivalue::Future(std::move(type)) {
+CUDAFuture::CUDAFuture(at::TypePtr type, std::vector<c10::DeviceIndex> devices)
+    : at::ivalue::Future(std::move(type)),
+      devices_(sortDevices(std::move(devices))) {
   // Use current device to initialize currentDevice_. This is necessary
   // because preMarkCompletedHook won't be called when the Future contains
   // an error. Uninitialized currentDevice_ could lead to crash when used
@@ -52,7 +95,7 @@ CUDAFuture::CUDAFuture(at::TypePtr type) : at::ivalue::Future(std::move(type)) {
 
 c10::intrusive_ptr<ivalue::Future> CUDAFuture::createInstance(
     at::TypePtr type) {
-  return c10::make_intrusive<CUDAFuture>(std::move(type));
+  return c10::make_intrusive<CUDAFuture>(std::move(type), devices_);
 }
 
 /**
@@ -70,52 +113,51 @@ void CUDAFuture::preMarkCompletedHook(
   // Start by performing all steps that can throw, before setting any field.
   std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs =
       dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
+  std::vector<c10::DeviceIndex> usedDevices =
+      getDevicesOfDataPtrs(actualDataPtrs);
+  std::vector<c10::DeviceIndex> excessDevices;
+  std::set_difference(
+      usedDevices.begin(),
+      usedDevices.end(),
+      devices_.begin(),
+      devices_.end(),
+      std::back_inserter(excessDevices));
+  TORCH_CHECK_VALUE(
+      excessDevices.empty(),
+      "The result contained tensors residing on device(s) ",
+      formatSetOfDevices(excessDevices),
+      " which are not among the expected device(s) ",
+      formatSetOfDevices(devices_));
 
   currentDevice_ = c10::cuda::current_device();
 
   // Extract them once and cache them for later uses.
   dataPtrs_ = std::move(actualDataPtrs);
 
-  std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
-  for (const at::DataPtr& data_ptr : dataPtrs_) {
-    if (data_ptr.device().is_cuda()) {
-      isCudaDeviceUsed[data_ptr.device().index()] = true;
-    }
-  }
-
-  for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
-    if (isCudaDeviceUsed[idx]) {
-      at::cuda::CUDAEvent cudaEvent;
-      cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
-      cudaEvents_.push_back(std::move(cudaEvent));
-    }
+  for (const c10::DeviceIndex& idx : usedDevices) {
+    at::cuda::CUDAEvent cudaEvent;
+    cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
+    cudaEvents_.push_back(std::move(cudaEvent));
   }
 }
 
 std::function<void(void)> CUDAFuture::wrapCallback(
     std::function<void(void)> callback) {
   return [this, callback{std::move(callback)}]() {
-    // We'd love to get a stream for all devices, even those that are not used
-    // by the value, because the callback could use those other devices, but
-    // unfortunately this could cause a deadlock with NCCL. See
-    // https://github.com/pytorch/pytorch/pull/48500#issuecomment-735395414
-    // In general, if some devices haven't been used yet, by getting a stream
-    // for them we'd initialize them, and in addition to causing NCCL to
-    // misbehaving this also ends up using memory on those devices, which the
-    // user might not want.
     std::vector<at::cuda::CUDAStream> streams;
-    for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
-      c10::DeviceIndex idx = cudaEvent.device_index();
+    for (const c10::DeviceIndex& idx : devices_) {
       // FIXME Should we find a way to allow to change the priority of
       // streams?
-      at::cuda::CUDAStream stream =
-          at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx);
-      cudaEvent.block(stream);
-      streams.push_back(stream);
+      streams.push_back(
+          at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
     }
 
     // Use the dedicated callback stream to run callback.
     at::cuda::CUDAMultiStreamGuard streamGuard(streams);
+
+    for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
+      cudaEvent.block(at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+    }
 
     // Do not free the underlying data storage of value_ before its
     // usage on the stream finishes.
