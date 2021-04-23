@@ -25,10 +25,12 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
 
     def __init__(self, *, devices: Optional[List[Union[int, str, torch.device]]] = None):
         r"""
-        Create a ``Future`` that is allowed to use (a subset of) the given
-        devices. All devices must be CUDA devices (if PyTorch supports CUDA).
-        This is needed to ensure proper CUDA stream synchronization. The child
-        futures, returned by the ``then`` method, will inherit these devices.
+        Create an empty unset ``Future``. If the future is intended to hold
+        values containing CUDA tensors, (a superset of) their CUDA devices must
+        be specified at construction. (This is only supported if
+        ``torch.cuda.is_available()`` returns ``True``). This is needed to
+        ensure proper CUDA stream synchronization. The child futures, returned
+        by the ``then`` method, will inherit these devices.
         """
         if devices is None:
             devices = []
