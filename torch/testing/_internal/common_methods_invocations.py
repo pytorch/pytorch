@@ -932,6 +932,7 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad, **kwargs):
             args=(shape,)) for size, shape in test_cases)
 
 def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
+    small_S = 2
     test_cases = (
         ((S, S, 2), (S, S + 1, 2)),
         ((S, S), (S, S)),
@@ -942,8 +943,10 @@ def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
         ((1, 1), (S, 1)),
         # TODO enable that as this causes "Floating point exception (core dumped)"
         # ((0, 5), (4, 5)),
-        # TODO enable that as this causes https://github.com/pytorch/pytorch/issues/55370
-        # ((S, S, 21, 2), (S, S, 22, 2))
+        # Using S here would make this one test take 9s
+        ((small_S, small_S, small_S + 1, 2), (small_S, small_S, small_S + 2, 2)),
+        ((small_S, 1, 1, small_S), (1, small_S, small_S)),
+        ((1, 1, small_S), (small_S, 1, small_S, small_S)),
     )
 
     samples = []
