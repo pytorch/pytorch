@@ -47,13 +47,11 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
     // be substantially slower. Namely, the total time taken by markCompleted on
     // a CUDAFuture is 21.5us with this implementation, but goes up to 58.7us
     // when using C++. The reason is unclear.
-    // FIXME There probably is a better package where this code could reside?
     try {
       pybind11::gil_scoped_acquire ag;
-      static py::object extractionFn =
-          py::module::import("torch.distributed.rpc.internal")
-              .attr("_extract_tensors");
-      return extractionFn(py_obj_).cast<std::vector<at::Tensor>>();
+      return py::module::import("torch._jit_internal")
+          .attr("_extract_tensors")(py_obj_)
+          .cast<std::vector<at::Tensor>>();
     } catch (py::error_already_set& e) {
       auto err = std::runtime_error(
           c10::str("Cannot extract tensors from value: ", e.what()));
