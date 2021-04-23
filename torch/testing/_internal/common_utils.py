@@ -1053,32 +1053,23 @@ class TestCase(expecttest.TestCase):
         sparse_dim = 2
         assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
 
-        def random_sparse(m, n, nnz_per_row):
-            rows = torch.arange(m, dtype=index_dtype, device=device).repeat(nnz_per_row)
-            cols = torch.randint(0, n, size=[nnz_per_row * m], dtype=index_dtype, device=device)
-            return rows, cols
+        def random_sparse_csr(n_rows, n_cols, nnz):
+            nnz_per_row = nnz // n_rows
+            if nnz_per_row > 0:
+                crow_indices = torch.zeros(n_rows + 1, dtype=index_dtype)
+                crow_indices[1:] = nnz_per_row
+                crow_indices.cumsum_(dim=0)
+                col_indices = torch.randint(0, n_cols, size=[nnz_per_row * n_rows], dtype=index_dtype, device=device)
+            else:
+                crow_indices = torch.zeros(n_rows + 1, dtype=index_dtype)
+                crow_indices[1:nnz + 1] = nnz_per_row
+                crow_indices.cumsum_(dim=0)
+                col_indices = torch.randint(0, n_cols, size=[nnz], dtype=index_dtype, device=device)
+            nnz = col_indices.shape[0]
+            values = make_tensor([nnz], device=device, dtype=dtype, low=-1, high=1)
+            return values, crow_indices, col_indices
 
-        def coo_to_csr(indices, dim):
-            r = torch.zeros(dim + 1, dtype=index_dtype)
-            for i in range(nnz):
-                hp0 = indices[i]
-                hp1 = dim if i + 1 == nnz else indices[i + 1]
-                if hp0 != hp1:
-                    r[hp0 + 1:hp0 + 1 + hp1] = i + 1
-            return r
-
-        values = make_tensor([nnz], device=device, dtype=dtype, low=-1, high=1)
-        rows, cols = None, None
-        if nnz >= size[0]:
-            rows, cols = random_sparse(size[0], size[1], nnz // size[0])
-        else:
-            rows, cols = random_sparse(size[0], size[1], 1)
-            permutation = list(range(nnz))
-            random.shuffle(permutation)
-            rows = rows[permutation]
-            cols = cols[permutation]
-        crow_indices = coo_to_csr(rows, size[0])
-        col_indices = cols
+        values, crow_indices, col_indices = random_sparse_csr(size[0], size[1], nnz)
         return torch.sparse_csr_tensor(crow_indices,
                                        col_indices,
                                        values, size=size, dtype=dtype, device=device)
