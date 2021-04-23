@@ -1268,7 +1268,7 @@ class TestNormalizeOperators(JitTestCase):
             return
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {'stack', 'hstack', 'vstack', 'dstack',
-                   'linalg.multi_dot'}
+                   'linalg.multi_dot', 'einsum'}
         print(op.name)
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
