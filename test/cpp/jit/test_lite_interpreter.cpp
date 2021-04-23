@@ -20,6 +20,19 @@
 namespace torch {
 namespace jit {
 
+namespace {
+auto compare_tensor = [](at::Tensor actual, at::Tensor expect) {
+  std::stringstream actual_stream;
+  actual_stream << actual;
+  std::string actual_str = actual_stream.str();
+
+  std::stringstream expect_stream;
+  expect_stream << expect;
+  std::string expect_str = expect_stream.str();
+  return actual_str == expect_str;
+};
+}
+
 TEST(LiteInterpreterTest, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
@@ -599,16 +612,7 @@ TEST(LiteInterpreterTest, LoadAndRunByteCodeModel) {
 
   auto expected_result = at::ones({2, 4}, ScalarType::Double) * 3;
 
-  auto compare_tensor = [](at::Tensor actual, at::Tensor expect) {
-    std::stringstream actual_stream;
-    actual_stream << actual;
-    std::string actual_str = actual_stream.str();
 
-    std::stringstream expect_stream;
-    expect_stream << expect;
-    std::string expect_str = expect_stream.str();
-    return actual_str == expect_str;
-  };
 
   AT_ASSERT(compare_tensor(jit_module_v4_output, expected_result));
   AT_ASSERT(compare_tensor(jit_module_v5_output, expected_result));
@@ -649,41 +653,33 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelV4) {
 }
 
 TEST(LiteInterpreterTest, BackPortByteCodeModel) {
-  // Load check in model: sequence.ptl
   std::string filePath(__FILE__);
   auto test_model_file_v5 =
       filePath.substr(0, filePath.find_last_of("/\\") + 1);
   test_model_file_v5.append("script_module_v5.ptl");
-  //  torch::jit::_backport_for_mobile(test_model_file_v5);
-  //
-  //  auto version = torch::jit::_get_bytecode_version(
-  //      "/Users/chenlai/Documents/pytorch/data/prod_example.pkl");
-  auto version = torch::jit::_get_bytecode_version(test_model_file_v5);
-  std::cout << "version is " << version;
-  //  bool sucess_1 = torch::jit::_backport_for_mobile(test_model_file_v5,
-  //      "/Users/chenlai/Documents/pytorch/data/script_module_v5_backport.pkl");
-  std::ostringstream oss;
-  bool success_2 = torch::jit::_backport_for_mobile(test_model_file_v5, oss);
 
+  // Load check in model: script_module_v5.ptl
+  auto from_version = torch::jit::_get_bytecode_version(test_model_file_v5);
+  AT_ASSERT(from_version == 5);
+
+  // Backport script_module_v5.ptl to an older version
+  std::ostringstream oss;
+  bool backPortSuccess = torch::jit::_backport_for_mobile(test_model_file_v5, oss);
+  AT_ASSERT(backPortSuccess);
+
+  // Check backport model version
   std::istringstream iss(oss.str());
   auto backport_version = torch::jit::_get_bytecode_version(iss);
+  AT_ASSERT(backport_version == 4);
   std::cout << "backport version: " << backport_version;
 
-  //    Module m = load(testModelFile);
-  //  std::string output_5 = "output_5.ptl";
-  //  m._backport_for_mobile(testModelFile, output_5);
-  //  mobile::Module m_5 = _load_for_mobile(output_5);
-  //  m_5.forward(std::vector<IValue>({IValue(1)}));
-  //  mobile::Module bc = _load_for_mobile(testModelFile);
+  // Load and run the backport model, then compare the result with expect result
+  auto input_data = std::vector<IValue>({IValue(1)});
+  mobile::Module m = _load_for_mobile(iss);
+  auto actual_result = m.forward(input_data).toTensor();
+  auto expected_result = at::ones({2, 4}, ScalarType::Double) * 3;
 
-  //  Module m =
-  //  load("/Users/chenlai/Documents/pytorch/models/265868112-4d43a58c-a960-4381-ae02-8c80a514f0d6-model.ptl");
-  //  std::vector<IValue> inputs;
-  //  inputs.push_back(at::ones(-0.1));
-  //  inputs.push_back(at::ones(-0.1));
-  //  auto tup = at::ivalue::Tuple::create({at::ones(1), at::ones(1)});
-  //  IValue iv(tup);
-  //  m.forward(std::vector<c10::IValue>{iv});
+  AT_ASSERT(compare_tensor(actual_result, expected_result));
 }
 
 TEST(LiteInterpreterTest, SequentialModuleInfo) {

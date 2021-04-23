@@ -30,7 +30,7 @@ TORCH_API bool _backport_for_mobile(
     const std::string& output_filename);
 
 TORCH_API bool _backport_for_mobile(
-    std::unique_ptr<ReadAdapterInterface> rai,
+    std::shared_ptr<ReadAdapterInterface> rai,
     std::unique_ptr<PyTorchStreamWriter> writer);
 
 // The family of methods below to get version given bytecode model
