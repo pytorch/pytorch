@@ -629,9 +629,14 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
                               requires_grad=requires_grad)
         samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
                                                requires_grad=requires_grad),
-                                   kwargs=dict(alpha=alpha) if kwargs.get("use_alpha", False) else dict()
                                    args=(arg,),
                                    broadcasts_input=broadcasts_input))
+        if kwargs.get("use_alpha", False):
+            samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
+                                                   requires_grad=requires_grad),
+                                       args=(arg,),
+                                       kwargs=dict(alpha=alpha)
+                                       broadcasts_input=broadcasts_input))       
     return tuple(samples)
 
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
