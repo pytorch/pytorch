@@ -619,10 +619,12 @@ TEST(LiteInterpreterTest, LoadAndRunByteCodeModel) {
 TEST(LiteInterpreterTest, GetByteCodeVersion) {
   // Load check in model: sequence.ptl
   std::string filePath(__FILE__);
-  auto test_model_file_v4 = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  auto test_model_file_v4 =
+      filePath.substr(0, filePath.find_last_of("/\\") + 1);
   test_model_file_v4.append("script_module_v4.ptl");
 
-  auto test_model_file_v5 = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  auto test_model_file_v5 =
+      filePath.substr(0, filePath.find_last_of("/\\") + 1);
   test_model_file_v5.append("script_module_v5.ptl");
 
   auto version_v4 = torch::jit::_get_bytecode_version(test_model_file_v4);
