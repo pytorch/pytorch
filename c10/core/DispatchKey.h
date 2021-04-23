@@ -172,7 +172,7 @@ enum class DispatchKey : uint8_t {
   //     // inplace/view ops called through `at::` inside your backend
   //     // kernel will dispatch to InplaceOrView kernels and do a lot
   //     // of extra work.
-  //     at::AutoDispatchBelowInplaceOrView guard(true);
+  //     at::AutoDispatchBelowInplaceOrView guard;
   //     at::redispatch::my_functional_op(...);
   //   }
   // }

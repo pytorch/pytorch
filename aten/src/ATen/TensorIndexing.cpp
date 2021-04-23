@@ -45,7 +45,7 @@ static inline void set_item(const Tensor& self, ArrayRef<TensorIndex> indices, c
   Tensor value;
 
   {
-    at::AutoDispatchBelowAutograd guard;
+    at::AutoDispatchBelowInplaceOrView guard;
     // TODO: This qint special case looks very suspicious...
     if (isQIntType(self.scalar_type())) {
       value = at::indexing::scalarToTensor(v, device(kCPU).dtype(kFloat), at::Device(kCPU));
