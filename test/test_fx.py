@@ -20,7 +20,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
-import torch._C._fx  # type: ignore
+import torch._C._fx
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -30,7 +30,6 @@ from copy import deepcopy
 
 from torch.fx.proxy import TraceError
 
-from fx.quantization import Quantizer
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
@@ -42,7 +41,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 from fx.named_tup import MyNamedTup
 
 try:
-    from torchvision.models import resnet18
+    from torchvision import models as torchvision_models
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
@@ -360,37 +359,6 @@ class TestFX(JitTestCase):
         for node in graph2.nodes:
             assert node.name not in seen_names
             seen_names.add(node.name)
-
-    @skipIfNoTorchVision
-    def test_resnet(self):
-        resnet = resnet18()
-        resnet.train()
-
-        res_graph = symbolic_trace(resnet)
-        res_script = torch.jit.script(res_graph)
-
-        ip = torch.rand(1, 3, 224, 224)
-
-        a = resnet(ip)
-        b = res_graph(ip)
-        c = res_script(ip)
-        self.assertEqual(a, b)
-        self.assertEqual(a, c)
-
-        quantizer = Quantizer(res_graph)
-
-        for i in range(10):
-            quantizer.observe((torch.rand(1, 3, 224, 224),))
-
-        qgraph = quantizer.quantize()
-        qgraph.graph.lint()
-        qgraph_script = torch.jit.script(qgraph)
-
-        d = qgraph(ip)
-        e = qgraph_script(ip)
-
-        assert (a - d).abs().max() < 2
-        self.assertEqual(d, e)
 
     def test_unpack(self):
         class M(torch.nn.Module):
@@ -1250,14 +1218,14 @@ class TestFX(JitTestCase):
 
     @skipIfNoTorchVision
     def test_interpreter_noop_resnet18(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
         transformed = torch.fx.Transformer(symbolic_trace(rn18)).transform()
         inp = torch.randn(5, 3, 224, 224)
         self.assertEqual(transformed(inp), rn18(inp))
 
     @skipIfNoTorchVision
     def test_interpreter_gc_values(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
         interp = Interpreter(symbolic_trace(rn18))
         inp = torch.rand(5, 3, 224, 224)
         out = interp.run(inp)
@@ -1447,7 +1415,7 @@ class TestFX(JitTestCase):
 
     @skipIfNoTorchVision
     def test_replace_uses(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
 
         class LowerReluTracer(torch.fx.Tracer):
             def is_leaf_module(self, m : torch.nn.Module, qualname : str):
@@ -2283,8 +2251,7 @@ class TestFX(JitTestCase):
 
 
         import torch
-        from torchvision.models.resnet import resnet18
-        rn = resnet18()
+        rn = torchvision_models.resnet18()
 
         try:
             sys.setprofile(trace_func)
@@ -2320,7 +2287,8 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot'}
+        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot',
+                           'polygamma'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2589,6 +2557,119 @@ TestFunctionalTracing.generate_tests()
 
 
 instantiate_device_type_tests(TestOperatorSignatures, globals())
+
+@skipIfNoTorchVision
+class TestVisionTracing(JitTestCase):
+    PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
+    INCONSISTENT_TYPE = (
+        RuntimeError,
+        r"Return value was annotated as having type __torch__.torchvision.models[.\w]+ but is actually of type Tensor"
+    )
+
+    UNTRACEABLE_MODELS = {
+        "fasterrcnn_resnet50_fpn": PROXY_ITERATED,
+        "fasterrcnn_mobilenet_v3_large_320_fpn": PROXY_ITERATED,
+        "fasterrcnn_mobilenet_v3_large_fpn": PROXY_ITERATED,
+        "maskrcnn_resnet50_fpn": PROXY_ITERATED,
+        "keypointrcnn_resnet50_fpn": PROXY_ITERATED,
+        "retinanet_resnet50_fpn": PROXY_ITERATED,
+    }
+    UNSCRIPTABLE_MODELS = {
+        "googlenet": INCONSISTENT_TYPE,
+        "inception_v3": INCONSISTENT_TYPE,
+    }
+
+    output_transform = {
+        "fcn_resnet50": lambda x: x["out"],
+        "fcn_resnet101": lambda x: x["out"],
+        "deeplabv3_resnet50": lambda x: x["out"],
+        "deeplabv3_resnet101": lambda x: x["out"],
+        "deeplabv3_mobilenet_v3_large": lambda x: x["out"],
+        "lraspp_mobilenet_v3_large": lambda x: x["out"],
+        "fasterrcnn_resnet50_fpn": lambda x: x[1],
+        "fasterrcnn_mobilenet_v3_large_fpn": lambda x: x[1],
+        "fasterrcnn_mobilenet_v3_large_320_fpn": lambda x: x[1],
+        "maskrcnn_resnet50_fpn": lambda x: x[1],
+        "keypointrcnn_resnet50_fpn": lambda x: x[1],
+        "retinanet_resnet50_fpn": lambda x: x[1],
+    }
+
+    @classmethod
+    def generate_test_fn(cls, name, model_fn, x, kwargs):
+        def run_test(self):
+            model = model_fn(**kwargs)
+            model = model.eval()
+            if name in self.UNTRACEABLE_MODELS:
+                err, exc = self.UNTRACEABLE_MODELS[name]
+                with self.assertRaisesRegex(err, exc):
+                    graph = symbolic_trace(model)
+            else:
+                out_transform = self.output_transform.get(name, lambda x: x)
+                graph : torch.fx.GraphModule = symbolic_trace(model)
+                a = out_transform(model(x))
+                b = out_transform(graph(x))
+                self.assertEqual(a, b)
+
+                if name in self.UNSCRIPTABLE_MODELS:
+                    err, exc = self.UNSCRIPTABLE_MODELS[name]
+                    with self.assertRaisesRegex(err, exc):
+                        script = torch.jit.script(graph)
+                else:
+                    script = torch.jit.script(graph)
+                    c = out_transform(script(x))
+                    self.assertEqual(a, c)
+
+        return run_test
+
+    @classmethod
+    def generate_classification_tests(cls):
+        for k, v in torchvision_models.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_' + k
+                x = torch.rand(1, 3, 299, 299) if k in ['inception_v3'] else torch.rand(1, 3, 224, 224)
+                kwargs = dict(num_classes=50)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_segmentation_tests(cls):
+        for k, v in torchvision_models.segmentation.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_segmentation_' + k
+                x = torch.rand(1, 3, 32, 32)
+                kwargs = dict(num_classes=10, pretrained_backbone=False)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_detection_tests(cls):
+        for k, v in torchvision_models.detection.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_detection_' + k
+                x = [torch.rand(3, 300, 300)]
+                kwargs = dict(num_classes=10, pretrained_backbone=False)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_video_tests(cls):
+        for k, v in torchvision_models.video.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_video_' + k
+                x = torch.rand(1, 3, 4, 112, 112)
+                kwargs = dict(num_classes=50)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_tests(cls):
+        cls.generate_classification_tests()
+        cls.generate_detection_tests()
+        cls.generate_segmentation_tests()
+        cls.generate_video_tests()
+
+if HAS_TORCHVISION:
+    TestVisionTracing.generate_tests()
 
 if __name__ == '__main__':
     run_tests()

@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <gloo/rendezvous/store.h>
 #include <gloo/algorithm.h>
 #include <gloo/common/error.h>
 #include <gloo/context.h>
@@ -90,6 +91,44 @@ class ProcessGroupGloo : public ProcessGroup {
 
    protected:
     friend class ProcessGroupGloo;
+  };
+
+  // Wrap c10d store as Gloo store
+  class GlooStore : public ::gloo::rendezvous::Store {
+   public:
+    GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
+
+    void setUint(const std::string& key, const std::vector<uint8_t>& value) {
+      store_->set(key, value);
+    }
+
+    void set(const std::string& key, const std::vector<char>& value) override {
+      std::vector<uint8_t> tmp(value.begin(), value.end());
+      store_->set(key, tmp);
+    }
+
+    std::vector<uint8_t> getUint(const std::string& key) {
+      auto value = store_->get(key);
+      return value;
+    }
+
+    std::vector<char> get(const std::string& key) override {
+      auto value = store_->get(key);
+      return std::vector<char>(value.begin(), value.end());
+    }
+
+    void wait(const std::vector<std::string>& keys) override {
+      store_->wait(keys, Store::kDefaultTimeout);
+    }
+
+    void wait(
+      const std::vector<std::string>& keys,
+      const std::chrono::milliseconds& timeout) override {
+      store_->wait(keys, timeout);
+    }
+
+   protected:
+    c10::intrusive_ptr<::c10d::Store> store_;
   };
 
   // For send and recv operations there is no need to pass them to the
@@ -251,6 +290,10 @@ class ProcessGroupGloo : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
+  const std::unique_ptr<::gloo::rendezvous::Store>& _getStore() const {
+    return store_;
+  }
+
   // Similar to barrier(), but blocks rank 0 until all other ranks have
   // acknowledged that they are alive (through send/recv from rank 0). Rank 0
   // is able to report all failed ranks if waitAllRanks = true, otherwise
@@ -258,6 +301,15 @@ class ProcessGroupGloo : public ProcessGroup {
   void monitoredBarrier(
       const BarrierOptions& opts = BarrierOptions(),
       bool waitAllRanks = false) override;
+
+  // Agrees on an initial sequence number for the whole group by having rank 0
+  // create it and broadcast it to other ranks using the store.
+  void setSequenceNumberForGroup() override;
+
+  // Retrieves the current sequence number for the whole group, which should be
+  // in sync. If the returned number is not consistent across the group, it
+  // may indicate that there is some sort of collective desynchronization.
+  uint64_t getSequenceNumberForGroup() override;
 
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
