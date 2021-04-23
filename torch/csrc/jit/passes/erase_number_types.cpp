@@ -6,14 +6,6 @@
 namespace torch {
 namespace jit {
 
-void SetNumTypeToTensorType(Value* v) {
-  if (v->type()->isSubtypeOf(NumberType::get())) {
-    v->setType(TensorType::fromNumberType(v->type()));
-  } else if (v->type()->isSubtypeOf(BoolType::get())) {
-    v->setType(TensorType::fromBoolType());
-  }
-}
-
 void EraseNumberTypesOnBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {

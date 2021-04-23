@@ -378,7 +378,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   auto* if_node = node;
   auto* graph = if_node->owningGraph();
-  FixupONNXSubblockOutputs(node);
+  FixupONNXSubblockOutputs(if_node);
   ONNXFixupUninitializedOutput(if_node);
   // Copy type of block output to node output.
   for (size_t i = 0; i < node->outputs().size(); ++i) {
