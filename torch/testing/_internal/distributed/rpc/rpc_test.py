@@ -487,20 +487,6 @@ def async_add_multi_fanout(to, x, num, step):
     return ret_future
 
 
-def MyConvNetForMNIST(device):
-    return nn.Sequential(
-        nn.Conv2d(1, 16, 3, 1),
-        nn.ReLU(),
-        nn.Conv2d(16, 32, 3, 1),
-        nn.ReLU(),
-        nn.MaxPool2d(2),
-        nn.Flatten(1),
-        nn.Linear(4608, 128),
-        nn.ReLU(),
-        nn.Linear(128, 10),
-    ).to(device)
-
-
 class AsyncExecutionClass:
 
     @staticmethod
@@ -4792,6 +4778,29 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         for rpc_api in ["rpc_sync", "rpc_async", "remote"]:
             self._test_rref_proxy_timeout(rpc_api)
 
+
+class MyConvNetForMNIST(nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(1, 16, 3, 1),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, 3, 1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Flatten(1),
+            nn.Linear(4608, 128),
+            nn.ReLU(),
+            nn.Linear(128, 10),
+        ).to(device)
+
+    def forward(self, x, is_rref=False):
+        if is_rref:
+            return self.net(x.to_here())
+        else:
+            return self.net(x)
+
+
 class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
     def _test_device_maps(self, options, errMsg="Invalid device_map"):
@@ -4818,7 +4827,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         options.set_device_map(dst, {torch.cuda.device_count(): 0})
 
-        self._test_device_maps(options)
+        self._test_device_maps(
+            options,
+            errMsg="Invalid device in TensorPipe options"
+        )
 
     @skip_if_lt_x_gpu(1)
     def test_device_maps_invalid_max_remote_device(self):
@@ -4869,7 +4881,6 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
-    @unittest.skip("Disallow new devices in user-function output tensors. See https://github.com/pytorch/pytorch/issues/54017")
     @skip_if_lt_x_gpu(2)
     def test_device_maps_gpu(self):
         options = self.rpc_backend_options
@@ -4904,53 +4915,6 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             return x.to(z_to) + y.to(z_to)
         else:
             raise ValueError("Wrong device affinity")
-
-    def _test_device_maps_new_gpu(self, x_from, y_from, z_to, device_map, dst=None):
-        x_to = device_map[x_from]
-        y_to = device_map[y_from]
-
-        options = self.rpc_backend_options
-        dst = worker_name((self.rank + 1) % self.world_size) if dst is None else dst
-        options.set_device_map(dst, device_map)
-
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=options,
-        )
-
-        x = torch.zeros(2).to(x_from)
-        y = torch.ones(2).to(y_from)
-
-        errMsg = "RPC detected that a user-function output tensor on device"
-        with self.assertRaisesRegex(RuntimeError, errMsg):
-            ret = rpc.rpc_sync(
-                dst,
-                TensorPipeAgentCudaRpcTest._gpu_add_given_gpus,
-                args=(x, y, x_to, y_to, z_to)
-            )
-
-        rpc.shutdown()
-
-    @skip_if_lt_x_gpu(2)
-    def test_device_map_error_on_new_gpu_0(self):
-        self._test_device_maps_new_gpu(
-            x_from=1,
-            y_from=1,
-            z_to=0,
-            device_map={0 : 0, 1 : 1}
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_device_map_error_on_new_gpu_1(self):
-        self._test_device_maps_new_gpu(
-            x_from=0,
-            y_from=0,
-            z_to=1,
-            device_map={0 : 0, 1 : 1}
-        )
 
     def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map, dst=None):
         x_to = device_map[x_from]
@@ -5578,11 +5542,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
-    @skip_if_lt_x_gpu(1)
-    def test_rref_to_here_synchronization(self):
+    def _test_rref_synchronization(self, local_device, remote_device):
         dst = worker_name((self.rank + 1) % self.world_size)
         options = self.rpc_backend_options
-        options.set_device_map(dst, {0: 0})
+        options.set_device_map(dst, {local_device : remote_device})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -5598,20 +5561,46 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             # This test needs multiple iterations and significant batch size to simulate real
             # training of a CNN of MNIST-like data.
             # see https://github.com/pytorch/pytorch/issues/54771
-            rref = rpc.remote(dst, MyConvNetForMNIST, args=("cuda:0",))
-            for _ in range(100):
-                x = torch.randn(100, 1, 28, 28).to("cuda:0")
+            rref = rpc.remote(dst, MyConvNetForMNIST, args=(remote_device,))
+            for _ in range(20):
+                x = torch.randn(100, 1, 28, 28).to(local_device)
                 actual = rref.remote().forward(x).to_here()
                 expected = rref.rpc_sync().forward(x)
                 self.assertEqual(actual, expected)
 
         rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_rref_to_here_synchronization1(self):
+        self._test_rref_synchronization("cuda:0", "cuda:0")
 
     @skip_if_lt_x_gpu(2)
-    def test_rref_to_here_synchronization_cross_device(self):
+    def test_rref_to_here_synchronization2(self):
+        self._test_rref_synchronization("cuda:1", "cuda:0")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_to_here_synchronization3(self):
+        self._test_rref_synchronization("cuda:1", "cuda:1")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_to_here_synchronization4(self):
+        self._test_rref_synchronization("cuda:0", "cuda:1")
+
+    def _test_rref_as_arg_synchronization(
+        self,
+        local_device,
+        remote_device,
+        devicesOptions=None
+    ):
         dst = worker_name((self.rank + 1) % self.world_size)
         options = self.rpc_backend_options
-        options.set_device_map(dst, {1: 0})
+        options.set_device_map(dst, {local_device: remote_device})
+
+        input_src = worker_name((self.rank - 1 + self.world_size) % self.world_size)
+        options.set_device_map(input_src, {remote_device: local_device})
+
+        if devicesOptions is not None:
+            options.set_devices(devicesOptions[self.rank])
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -5627,11 +5616,153 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             # This test needs multiple iterations and significant batch size to simulate real
             # training of a CNN of MNIST-like data.
             # see https://github.com/pytorch/pytorch/issues/54771
-            rref = rpc.remote(dst, MyConvNetForMNIST, args=("cuda:0",))
-            for _ in range(100):
-                x = torch.randn(100, 1, 28, 28).to("cuda:1")
-                actual = rref.remote().forward(x).to_here()
-                expected = rref.rpc_sync().forward(x)
+            rref = rpc.remote(dst, MyConvNetForMNIST, args=(remote_device,))
+            for _ in range(20):
+                rref_x = RRef(torch.randn(100, 1, 28, 28).to(local_device))
+                actual = rref.remote().forward(rref_x, True).to_here()
+                expected = rref.rpc_sync().forward(rref_x, True)
                 self.assertEqual(actual, expected)
 
         rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_rref_as_arg_synchronization1(self):
+        self._test_rref_as_arg_synchronization("cuda:0", "cuda:0")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_as_arg_synchronization2(self):
+        self._test_rref_as_arg_synchronization("cuda:1", "cuda:0")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_as_arg_synchronization3(self):
+        self._test_rref_as_arg_synchronization("cuda:1", "cuda:1")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_as_arg_synchronization4(self):
+        self._test_rref_as_arg_synchronization("cuda:0", "cuda:1")
+
+    @skip_if_lt_x_gpu(1)
+    def test_rref_as_arg_synchronization5(self):
+        self._test_rref_as_arg_synchronization(
+            "cuda:0",
+            "cuda:0",
+            [["cuda:0"] for _ in range(4)],  # devicesOptions
+        )
+
+    @staticmethod
+    def _rref_relay(rref):
+        return rref.to_here()
+
+    def _test_rref_forward_synchronization(self, local_device, remote_device):
+        options = self.rpc_backend_options
+
+        input_src = worker_name(0)
+        model_dst = worker_name(1)
+        out_relay = worker_name(2)
+
+        if self.rank == 0:
+            # for 1) model construction 2) forward execution
+            options.set_device_map(model_dst, {local_device: remote_device})
+
+            # Forward output will be first copied to the relay node before
+            # returning to the worker. This is intentional, to test RRef
+            # forward CUDA stream synchronizations.
+            options.set_device_map(out_relay, {local_device: local_device})
+        elif self.rank == 1:
+            # worker1 hosts the model and runs forward. The forward functions
+            # calls RRef.to_here(), hence needs to configure the device map
+            options.set_device_map(input_src, {remote_device: local_device})
+        elif self.rank == 2:
+            # worker2 will get the out RRef and call to_here() and hence, needs
+            # to configure devcie map.
+            options.set_device_map(model_dst, {local_device: remote_device})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        if self.rank == 0:
+            # This test compares rref.rpc_sync().forward(x) vs rref.remote().forward(x).to_here()
+            # If to_here() is properly synchronized with forward(x) the results must be identical
+            # This test needs multiple iterations and significant batch size to simulate real
+            # training of a CNN of MNIST-like data.
+            # see https://github.com/pytorch/pytorch/issues/54771
+            rref = rpc.remote(model_dst, MyConvNetForMNIST, args=(remote_device,))
+            for _ in range(20):
+                rref_input = RRef(torch.randn(200, 1, 28, 28).to(local_device))
+                rref_out = rref.remote().forward(rref_input, True)
+                out = rpc.remote(
+                    out_relay,
+                    TensorPipeAgentCudaRpcTest._rref_relay,
+                    args=(rref_out,)
+                ).to_here()
+                expected = rref.rpc_sync().forward(rref_input, True)
+                self.assertEqual(out, expected)
+
+        rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_rref_forward_synchronization1(self):
+        self._test_rref_forward_synchronization("cuda:0", "cuda:0")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_forward_synchronization2(self):
+        self._test_rref_forward_synchronization("cuda:0", "cuda:1")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_forward_synchronization3(self):
+        self._test_rref_forward_synchronization("cuda:1", "cuda:0")
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_forward_synchronization4(self):
+        self._test_rref_forward_synchronization("cuda:1", "cuda:1")
+
+    @skip_if_lt_x_gpu(1)
+    def test_devices_option_mismatch(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "but not included the devices field"
+        ):
+            dst = worker_name((self.rank + 1) % self.world_size)
+            options = self.rpc_backend_options
+            options.set_device_map(dst, {0 : 0})
+            options.set_devices([1])
+
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=options,
+            )
+
+            rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_devices_option_mismatch_reverse(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "but not included the devices field"
+        ):
+            dst = worker_name((self.rank + 1) % self.world_size)
+
+            options = rpc.TensorPipeRpcBackendOptions(
+                init_method=self.rpc_backend_options.init_method,
+                num_worker_threads=self.rpc_backend_options.num_worker_threads,
+                device_maps={dst: {0 : 1}},
+                devices=[0]
+            )
+
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=options,
+            )
+
+            rpc.shutdown()
