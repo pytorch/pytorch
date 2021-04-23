@@ -147,7 +147,7 @@ class BinaryOpNode : public ExprNode<Op> {
       const Expr* lhs_v,
       const Expr* rhs_v,
       IRNodeType expr_type,
-      ScalarType ret_type = ScalarType::None)
+      ScalarType ret_type = ScalarType::Undefined)
       : ExprNode<Op>(
             BinaryOpDtype(lhs_v->dtype(), rhs_v->dtype(), ret_type),
             expr_type),
