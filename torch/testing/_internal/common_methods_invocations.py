@@ -602,10 +602,11 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
     return inputs
 
 # In order to use the kwarg alpha, partials should be used in an OpInfo's sample_inputs_func
-# eg. sample_inputs_func=partial(sample_inputs_binary_pwise, use_alpha=True, alpha=0.5)
-# Then sample inputs would also be generated corresponding to the value of alpha provided.
+# eg. sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2)
+# Then one sample input would also be generated corresponding to the value of alpha provided.
+# In the future, kwargs 'alpha_floating', 'alpha_integral' & 'alpha_complex' can be used to
+# specify scalars of floating, integral & complex types as values for "alpha".
 def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
-    alpha = kwargs.get("alpha", 1)
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
     scalar = 1 if dtype is torch.bool else scalar
     tests_list = [
@@ -632,12 +633,12 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
                                                requires_grad=requires_grad),
                                    args=(arg,),
                                    broadcasts_input=broadcasts_input))
-        if kwargs.get("use_alpha", False):
-            samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
-                                                   requires_grad=requires_grad),
-                                       args=(arg,),
-                                       kwargs=dict(alpha=alpha),
-                                       broadcasts_input=broadcasts_input))
+    # Adds an extra sample using "alpha" if it's passed in kwargs
+    if 'alpha' in kwargs:
+        a = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
+        b = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
+        sample = SampleInput(a, args=(b,), kwargs={'alpha': kwargs['alpha']})
+        samples.append(sample)
     return tuple(samples)
 
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
@@ -3121,7 +3122,7 @@ op_db: List[OpInfo] = [
     OpInfo('add',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
-           sample_inputs_func=partial(sample_inputs_binary_pwise, use_alpha=True, alpha=2),
+           sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
            supports_inplace_autograd=False),
     OpInfo('mul',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
@@ -3130,7 +3131,7 @@ op_db: List[OpInfo] = [
     OpInfo('sub',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            assert_autodiffed=True,
-           sample_inputs_func=partial(sample_inputs_binary_pwise, use_alpha=True, alpha=2),
+           sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
            supports_inplace_autograd=False),
     OpInfo('addmm',
            dtypes=floating_types(),
