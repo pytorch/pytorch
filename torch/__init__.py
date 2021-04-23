@@ -171,10 +171,10 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
         try:
             # next try if DLFCN exists
-            import DLFCN as _dl_flags  # type: ignore
+            import DLFCN as _dl_flags  # type: ignore[import, no-redef]
         except ImportError:
             # as a last attempt, use compile-time constants
-            import torch._dl as _dl_flags  # type: ignore
+            import torch._dl as _dl_flags  # type: ignore[import, no-redef]
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
     from torch._C import *  # noqa: F403
@@ -405,7 +405,7 @@ def use_deterministic_algorithms(mode):
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.NLLLoss` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
@@ -423,6 +423,7 @@ def use_deterministic_algorithms(mode):
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.gather` when ``input`` dimension is larger than one
           and called on a CUDA tensor that requires grad
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -616,7 +617,7 @@ if TYPE_CHECKING:
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
-    from torch._C._VariableFunctions import *  # type: ignore # noqa: F403
+    from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
 
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):

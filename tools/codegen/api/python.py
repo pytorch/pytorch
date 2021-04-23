@@ -886,7 +886,7 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
         is_out_arg = cpp_arg.name in out_args
         if ps.method and cpp_arg.name == 'self':
             # For method's 'self', we can use 'const Tensor &' and simply ignore mutability!
-            type_str = 'const Tensor &'
+            type_str = 'const at::Tensor &'
         else:
             # For other cases we need prevent dangling refs to temps (unless it's
             # unpacked scattered output)
@@ -895,7 +895,7 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
             ensure_temp_safe = len(out_args) <= 1 or not is_out_arg
             if ensure_temp_safe:
                 type_str = {
-                    'Tensor &': 'Tensor',
+                    'at::Tensor &': 'at::Tensor',
                 }.get(type_str, type_str)
         return DispatchLambdaArgument(
             name=cpp_arg.name,
@@ -909,21 +909,21 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
 # it's enough to just extend the list here. Before you do this, make sure
 # to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
 SUPPORTED_RETURN_TYPES = {
-    'Tensor',
-    'std::tuple<Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,Tensor,int64_t>',
-    'std::tuple<Tensor,Tensor,double,int64_t>',
-    'std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t>',
-    'std::tuple<Tensor,Tensor,double,Tensor,int64_t>',
+    'at::Tensor',
+    'std::tuple<at::Tensor,at::Tensor>',
+    'std::tuple<at::Tensor,at::Tensor,at::Tensor>',
+    'std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor>',
+    'std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,at::Tensor>',
+    'std::tuple<at::Tensor,at::Tensor,at::Tensor,int64_t>',
+    'std::tuple<at::Tensor,at::Tensor,double,int64_t>',
+    'std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,int64_t>',
+    'std::tuple<at::Tensor,at::Tensor,double,at::Tensor,int64_t>',
     'std::tuple<double,int64_t>',
-    'std::vector<Tensor>',
-    'Scalar', 'bool', 'int64_t', 'void*', 'void',
-    'QScheme', 'double',
-    'IntArrayRef',
-    'ScalarType'
+    'std::vector<at::Tensor>',
+    'at::Scalar', 'bool', 'int64_t', 'void*', 'void',
+    'at::QScheme', 'double',
+    'at::IntArrayRef',
+    'at::ScalarType'
 }
 
 def dispatch_lambda_return_str(f: NativeFunction) -> str:
@@ -947,7 +947,7 @@ def dispatch_lambda_return_str(f: NativeFunction) -> str:
     # mutable reference to temporary.  Maybe we could assign it to a
     # variable itself.)
     returns_without_annotation = tuple(map(lambda r: Return(r.name, r.type, None), f.func.returns))
-    return_str = cpp.returns_type(returns_without_annotation)
+    return_str = cpp.returns_type(returns_without_annotation).cpp_type()
     if return_str not in SUPPORTED_RETURN_TYPES:
         raise RuntimeError(f'{f.func.name} returns unsupported type {return_str}')
     return return_str

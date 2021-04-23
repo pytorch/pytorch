@@ -3,6 +3,7 @@
 #include <ATen/CPUFunctions.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/IndexingUtils.h>
@@ -136,7 +137,8 @@ bool canRunNatively(Node* n) {
       "prim::ListConstruct",
       "prim::ListUnpack",
       "prim::TupleConstruct",
-      "prim::DictConstruct"};
+      "prim::DictConstruct",
+      "aten::__getitem__"};
   auto str = std::string(n->kind().toQualString());
   if (!native_nodes.count(str)) {
     return false;
@@ -910,6 +912,14 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       // put output back
       p_node->Output(0) = std::move(stack[0]);
     };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::__getitem__")) {
+    return [](ProcessedNode* p_node) {
+      auto dict = p_node->Input(0).toGenericDict();
+      auto key = p_node->Input(1);
+      auto value = dict.find(key);
+      TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
+      p_node->Output(0) = value->value();
+    };
   } else if (n->kind() == prim::ListConstruct) {
     return [](ProcessedNode* p_node) {
       // prepare inputs
@@ -1120,5 +1130,43 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    c10::optional<std::string> rounding_mode = c10::nullopt;
+    if (p_node->inputs().size() > 2) {
+      rounding_mode = p_node->Input(2).toOptional<std::string>();
+    }
+
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+
+    const auto& in1_t = p_node->Input(1).isTensor()
+        ? p_node->Input(1).toTensor()
+        : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
+    at::cpu::div_out(out_t, in0_t, in1_t, rounding_mode);
+  };
+});
+
+REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    const auto alpha = p_node->Input(2).toScalar();
+
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+
+    const auto& in1_t = p_node->Input(1).isTensor()
+        ? p_node->Input(1).toTensor()
+        : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
+    at::cpu::sub_out(out_t, in0_t, in1_t, alpha);
+  };
+});
 } // namespace jit
 } // namespace torch

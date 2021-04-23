@@ -197,7 +197,7 @@ class TORCH_API LoopNest {
   //  * The start bounds are the same for all loops.
   //  * The stop bounds are the same for all loops.
   //  * Fusing the loops does not violate or add any dependencies.
-  static For* fuseLoops(const std::vector<For*>& loops);
+  static bool fuseLoops(const std::vector<For*>& loops, For** fused);
 
   void reorderAxis(For* a, For* b);
 
@@ -227,9 +227,14 @@ class TORCH_API LoopNest {
   // and that statement must be the next inner loop.
   static bool areLoopsPerfectlyNested(const std::vector<For*>& loops);
 
+  // Returns true if the given loop has a loop-carried dependence.
+  static bool hasLoopCarriedDependence(For* loop);
+
   static void unroll(For* f, Stmt** unrolled);
-  static void normalize(For* f, For** normalized);
+  static void unroll(For* f);
+  static bool normalize(For* f);
   static bool flatten(const std::vector<For*>& f, For** flattened);
+  static bool flatten(const std::vector<For*>& f);
 
   // Get 'num' loops from the loopnest starting at 'f'.
   static std::vector<For*> getLoopStmtsInLoopNest(For* f, size_t num);
