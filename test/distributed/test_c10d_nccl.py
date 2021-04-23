@@ -2161,6 +2161,18 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
         self._test_sequence_num_set_default_pg(backend="nccl")
 
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_sequence_num_incremented_nccl_default(self):
+        self._test_sequence_num_incremented_default_group("nccl")
+
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sequence_num_incremented_nccl_subgroup(self):
+        if self.world_size < 4:
+            return unittest.skip("Test requires world_size of at least 4")
+        self._test_sequence_num_incremented_subgroup("nccl")
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_sequence_num_set_nccl_new_group(self):
