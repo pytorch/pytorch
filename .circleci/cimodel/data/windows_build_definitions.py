@@ -130,19 +130,16 @@ _VC2019 = VcSpec(2019)
 WORKFLOW_DATA = [
     # VS2019 CUDA-10.1
     WindowsJob(None, _VC2019, CudaVersion(10, 1)),
-    # Disable windows tests until https://github.com/pytorch/pytorch/issues/56654 is resolved
-    # WindowsJob(1, _VC2019, CudaVersion(10, 1)),
-    # WindowsJob(2, _VC2019, CudaVersion(10, 1)),
+    WindowsJob(1, _VC2019, CudaVersion(10, 1)),
+    WindowsJob(2, _VC2019, CudaVersion(10, 1)),
     # VS2019 CUDA-11.1
     WindowsJob(None, _VC2019, CudaVersion(11, 1)),
-    # Disable windows tests until https://github.com/pytorch/pytorch/issues/56654 is resolved
-    # WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),
-    # WindowsJob(2, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),
+    WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),
+    WindowsJob(2, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),
     # VS2019 CPU-only
     WindowsJob(None, _VC2019, None),
-    # Remove master only predicate until GPU tests can be re-enabled again
-    WindowsJob(1, _VC2019, None),
-    WindowsJob(2, _VC2019, None),
+    WindowsJob(1, _VC2019, None, master_only_pred=TruePred),
+    WindowsJob(2, _VC2019, None, master_only_pred=TruePred),
     WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
 ]
 
