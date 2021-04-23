@@ -379,7 +379,7 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
   // Use a prefix sum to determine the output locations of the masked elements
   auto maskPrefixSum = at::empty_like(mask, mask.options().dtype(kLong));
 
-  cub::exclusive_sum(
+  at::cuda::cub::exclusive_sum(
     mask_cont.data_ptr<mask_t>(), maskPrefixSum.data_ptr<int64_t>(),
     mask_cont.numel());
 
