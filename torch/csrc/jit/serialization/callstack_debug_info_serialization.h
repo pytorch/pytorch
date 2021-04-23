@@ -40,9 +40,9 @@ class InlinedCallStackSerializer {
       serialized_inlined_callstack_;
 };
 
-class TORCH_API InlinedCallStackPickler {
+class TORCH_API CallStackDebugInfoPickler {
  public:
-  InlinedCallStackPickler() = default;
+  CallStackDebugInfoPickler() = default;
 
   std::vector<char> pickle(
       const std::unordered_map<int64_t, DebugInfoPair>& callstack_ptrs,
@@ -69,7 +69,7 @@ class InlinedCallStackDeserializer {
           cached_inlined_callstacks_;
 };
 
-class TORCH_API InlinedCallStackUnpickler {
+class TORCH_API CallStackDebugInfoUnpickler {
  public:
   ska::flat_hash_map<int64_t, DebugInfoPair> unpickle(
       at::DataPtr&& data,
