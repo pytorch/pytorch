@@ -231,6 +231,7 @@ def _insert_dtype_cast_after_node(
     else:
         raise AssertionError(f"type f{type(prev_node_c)} is not handled")
 
+# TODO(future PR): look into using copy_node API instead
 def _copy_node_from_a_to_c(
     node_a: Node,
     gm_a: GraphModule,
