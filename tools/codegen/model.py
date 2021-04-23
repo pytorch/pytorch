@@ -118,12 +118,22 @@ class DispatchKey(Enum):
     def lower(self) -> str:
         return str(self).lower()
 
+    def is_autograd_key(self) -> bool:
+        return 'Autograd' in str(self)
+
     @staticmethod
     def parse(value: str) -> 'DispatchKey':
         for k, v in DispatchKey.__members__.items():
             if k == value:
                 return v
         raise AssertionError(f'unknown dispatch key {value}')
+
+    @staticmethod
+    def try_parse(value: str) -> Optional['DispatchKey']:
+        try:
+            return DispatchKey.parse(value)
+        except AssertionError:
+            return None
 
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
@@ -361,6 +371,28 @@ class NativeFunction:
             loc=loc,
             cpp_no_default_args=cpp_no_default_args,
         )
+
+    @staticmethod
+    def with_dispatch_entry(f: 'NativeFunction', dispatch_key: DispatchKey, kernel: str) -> 'NativeFunction':
+        updated_dispatch = f.dispatch.copy()
+        updated_dispatch[dispatch_key] = kernel
+        return NativeFunction(
+            func=f.func,
+            use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
+            variants=f.variants,
+            structured=f.structured,
+            structured_delegate=f.structured_delegate,
+            structured_inherits=f.structured_inherits,
+            manual_kernel_registration=f.manual_kernel_registration,
+            manual_cpp_binding=f.manual_cpp_binding,
+            python_module=f.python_module,
+            category_override=f.category_override,
+            dispatch=updated_dispatch,
+            device_guard=f.device_guard,
+            loc=f.loc,
+            cpp_no_default_args=f.cpp_no_default_args,
+        )
+
 
     def validate_unstructured(self) -> None:
         # TODO: probably better to accumulate these errors and report them all
@@ -1347,15 +1379,15 @@ class OperatorName:
 class ExternalBackendMetadata:
 
     operator: OperatorName
-    backend: str
     is_autograd: bool
-
     structured: bool = False  # TODO: this will eventually become per-op metadata in the yaml file
+
 
 @dataclass(frozen=True)
 class ExternalBackendFunction:
 
     native_function: NativeFunction
+    backend: DispatchKey
     metadata: Optional[ExternalBackendMetadata]
 
     @property
@@ -1368,9 +1400,11 @@ class ExternalBackendFunction:
         return self.metadata is not None and self.metadata.is_autograd
 
     def __post_init__(self) -> None:
+        assert self.backend in self.native_function.dispatch
         if self.metadata is not None:
             assert self.metadata.operator == self.native_function.func.name, \
                 f'Metadata and native function names do not match: {self.metadata.operator} and {self.native_function.func.name}'
+            assert self.backend.is_autograd_key() == self.metadata.is_autograd
         kind = self.native_function.func.kind()
         if kind == SchemaKind.out or kind == SchemaKind.inplace:
             assert self.metadata is None or not self.metadata.structured, \
@@ -1395,12 +1429,17 @@ class ExternalBackendFunctionsGroup:
 
     @property
     def is_autograd_kernel(self) -> bool:
-        return self.primary.metadata is not None and self.primary.metadata.is_autograd
+        return self.primary.is_autograd_kernel
 
     def __post_init__(self) -> None:
         # Note: I didn't want to copy-paste the post_init checks that NativeFunctionsGroup performs.
         # ExternalBackendFunctionsGroup objects should be created using `from_function_group` (below),
         # which guarantees that the relevant checks have already been performed.
+        assert self.out.backend == self.functional.backend, \
+            f"backend values do not match. out={self.out.backend}, functional={self.functional.backend}"
+        if self.inplace is not None:
+            assert self.out.backend == self.inplace.backend, \
+                f"backend values do not match. out={self.out.backend}, inplace={self.inplace.backend}"
         if self.structured:
             for f in self.functions():
                 if f == self.primary:
@@ -1417,24 +1456,6 @@ class ExternalBackendFunctionsGroup:
         yield self.functional
         if self.inplace is not None:
             yield self.inplace
-
-    @staticmethod
-    def from_function_group(
-            g: NativeFunctionsGroup,
-            metadata: Dict[OperatorName, ExternalBackendMetadata]
-    ) -> 'ExternalBackendFunctionsGroup':
-        out_meta = metadata.get(g.out.func.name, None)
-        out = ExternalBackendFunction(g.out, out_meta)
-
-        functional_meta = metadata.get(g.functional.func.name, None)
-        functional = ExternalBackendFunction(g.functional, functional_meta)
-
-        inplace = None
-        if g.inplace:
-            inplace_meta = metadata.get(g.inplace.func.name, None)
-            inplace = ExternalBackendFunction(g.inplace, inplace_meta)
-
-        return ExternalBackendFunctionsGroup(functional, inplace, out)
 
 
 # Helper functions for parsing argument lists (both inputs and returns)
