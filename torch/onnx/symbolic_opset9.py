@@ -1408,14 +1408,14 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
         if weight is None or sym_help._is_none(weight):
             if channel_size is None:
                 raise RuntimeError('Unsupported: ONNX export of instance_norm for unknown '
-                                'channel size.')
+                                   'channel size.')
             weight_value = torch.tensor([1.] * channel_size).type(
                 'torch.' + input.type().scalarType() + 'Tensor')
             weight = g.op("Constant", value_t=weight_value)
         if bias is None or sym_help._is_none(bias):
             if channel_size is None:
                 raise RuntimeError('Unsupported: ONNX export of instance_norm for unknown '
-                                'channel size.')
+                                   'channel size.')
             bias_value = torch.tensor([0.] * channel_size).type(
                 'torch.' + input.type().scalarType() + 'Tensor')
             bias = g.op("Constant", value_t=bias_value)
