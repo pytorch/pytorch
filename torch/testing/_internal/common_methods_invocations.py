@@ -636,7 +636,7 @@ def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
             samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
                                                    requires_grad=requires_grad),
                                        args=(arg,),
-                                       kwargs=dict(alpha=alpha)
+                                       kwargs=dict(alpha=alpha),
                                        broadcasts_input=broadcasts_input))       
     return tuple(samples)
 
