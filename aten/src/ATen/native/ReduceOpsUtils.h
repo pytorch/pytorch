@@ -264,7 +264,7 @@ static void zero_numel_check_dims(const Tensor& self, const int64_t dim, const c
   }
   else {
     TORCH_CHECK_INDEX(self.size(dim) != 0, fn_name,
-      ": Expected reduction dim ", dim, " to be non-zero.");
+      ": Expected reduction dim ", dim, " to have non-zero size.");
   }
 }
 
@@ -276,15 +276,17 @@ static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, con
 
 // Resize the result tensor and indices when result.numel() == 0 depending on values of
 // dim and keepdim for returning tensors containing reduction results.
-// This function should be called when you are reducing a zero-dim tensor and want to
-// simply resize the output and return it.
+// This function should be called when you are reducing a zero-numel tensor and want to
+// resize the output and return it. This function exists for resizing zero-numel
+// tensors when the size of the reduction dimension is non-zero.
 static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
                                      const Tensor& self, const int64_t dim,
                                      const bool keepdim, const char *fn_name) {
+  TORCH_CHECK(self.numel() == 0,  fn_name, ": Expected self.numel() != 0.");
   zero_numel_check_dims(self, dim, fn_name);
   std::vector<int64_t> sizes;
   if (keepdim) {
-    sizes = ensure_nonempty_vec(self.sizes().vec());
+    sizes = self.sizes().vec();
     sizes[dim] = 1;
   }
   else {

@@ -331,13 +331,6 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
 }
 
 std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
-  if (self.numel() == 0) {
-    Tensor max = at::empty({0}, self.options());
-    Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
-
-    return at::native::max_out(self, dim, keepdim, max, max_indices);
-  }
-  else {
     Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
     if (self.is_quantized()) {
       Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
@@ -349,7 +342,6 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
       Tensor max = at::empty({0}, self.options());
       return at::native::max_out(self, dim, keepdim, max, max_indices);
     }
-  }
 }
 
 static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indices,
@@ -393,24 +385,15 @@ std::tuple<Tensor&,Tensor&> max_out(const Tensor& self, int64_t dim, bool keepdi
 }
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
-  if (self.numel() == 0) {
+  Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
+  if (self.is_quantized()) {
+    Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
+    at::native::min_out(self.int_repr(), dim, keepdim, min, min_indices);
+    return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(min, self.q_scale(), self.q_zero_point()), min_indices);
+  } else {
     Tensor min = at::empty({0}, self.options());
-    Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
-
     return at::native::min_out(self, dim, keepdim, min, min_indices);
   }
-  else {
-    Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
-    if (self.is_quantized()) {
-      Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
-      at::native::min_out(self.int_repr(), dim, keepdim, min, min_indices);
-      return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(min, self.q_scale(), self.q_zero_point()), min_indices);
-    } else {
-      Tensor min = at::empty({0}, self.options());
-      return at::native::min_out(self, dim, keepdim, min, min_indices);
-    }
-  }
-
 }
 
 static std::tuple<Tensor &, Tensor &> _aminmax_out_impl(Tensor& min, Tensor& max,

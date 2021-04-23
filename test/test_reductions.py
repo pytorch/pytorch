@@ -2283,6 +2283,7 @@ class TestReductions(TestCase):
                              msg=error_msg)
 
             # Check if function raises error on specified zero'd dimension as reduction dim.
+            print(name)
             self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input, dim=1))
 
     def test_tensor_compare_ops_optional_dim_empty(self, device):
