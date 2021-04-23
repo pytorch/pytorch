@@ -2054,7 +2054,7 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=False, keepdim=False)),
     ]
 
-def sample_inputs_cov(op_info, device, dtype, requires_grad=False):
+def sample_inputs_cov(op_info, device, dtype, requires_grad):
     inp_dims = [ (S,), (1, S), (S, 2), (S, S)]  # (S, 1) produces nan outputs
     biases = [True, False]
     rowvars = [True, False]
@@ -2072,7 +2072,8 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad=False):
         tens = make_tensor(inp, device=device, dtype=dtype,
                             low=-50, high=50, requires_grad=requires_grad)
         tens2 = tens + make_tensor(inp, device=device, dtype=dtype,
-                            low=None, high=None, requires_grad=requires_grad)      
+                            low=-50, high=50, requires_grad=False)
+        tens2 = tens2.detach().requires_grad_(requires_grad)    
         inputs.append(SampleInput(tens))
         inputs.append(SampleInput(tens, args=(tens2, rowvar, bias, ddof, fwt, awt)))
     return inputs
