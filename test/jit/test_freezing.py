@@ -1866,14 +1866,17 @@ class TestFrozenOptimizations(JitTestCase):
     def test_conv_hardswish(self):
         with set_default_dtype(torch.float):
             activations = [
-                torch.nn.Hardswish,
-                torch.nn.Hardsigmoid,
-                torch.nn.ReLU6,
+                torch.nn.Hardswish(),
+                torch.nn.Hardsigmoid(),
+                torch.nn.ReLU6(),
+                torch.nn.Hardtanh(0., 6.),
+                torch.nn.Hardtanh(1., 100.),
+                torch.nn.Hardtanh(-100., -1.),
             ]
 
             model = torchvision.models.resnet18()
             for activation in activations:
-                sub_model = torch.nn.Sequential(model.conv1, activation())
+                sub_model = torch.nn.Sequential(model.conv1, activation)
                 sub_model.eval()
                 mod = torch.jit.freeze(torch.jit.script(sub_model))
                 N, C, H, W, = 10, 3, 224, 224
@@ -1887,7 +1890,6 @@ class TestFrozenOptimizations(JitTestCase):
             op_map = {
                 'prim::MKLDNNHardSwish' : F.hardswish,
                 'prim::MKLDNNHardSigmoid' : F.hardsigmoid,
-                'prim::MKLDNNRelu6' : F.relu6
             }
 
             input_sizes = ([0], [1], [3], [1, 3, 8, 8])
