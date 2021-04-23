@@ -44,9 +44,7 @@ from torch.quantization.ns.graph_matcher import (
 )
 from torch.quantization.ns.mappings import (
     get_node_type_to_io_type_map,
-    FUNS_UNMATCHABLE,
-    MODS_UNMATCHABLE,
-    METHS_UNMATCHABLE,
+    get_unmatchable_types_map,
 )
 from torch.quantization._numeric_suite_fx import (
     extract_weights,
@@ -1165,12 +1163,11 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         }
         mp1 = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
         mp2 = copy.deepcopy(mp1)
-        matching_config = {
-            'non_matchable_module_class': [M1],
-        }
+        unmatchable_types_map = get_unmatchable_types_map()
+        unmatchable_types_map['mods_unmatchable'].add(M1)
         mp1_ns, mp2_ns = _add_loggers_impl(
             'a', mp1, 'b', mp2, OutputLogger, should_log_inputs=False,
-            matching_config=matching_config)
+            unmatchable_types_map=unmatchable_types_map)
 
         # Scripting a model with loggers should succeed. If it fails because of
         # incorrect dtypes, we can blocklist the associated types from being instrumented.
@@ -1264,6 +1261,11 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         MODS_IO_TYPE_INT8 = node_type_to_io_type_map['mods_io_type_int8']
         MODS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['mods_io_type_fp32_or_int8']
         METHS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['meths_io_type_fp32_or_int8']
+
+        unmatchable_types_map = get_unmatchable_types_map()
+        FUNS_UNMATCHABLE = unmatchable_types_map['funs_unmatchable']
+        MODS_UNMATCHABLE = unmatchable_types_map['mods_unmatchable']
+        METHS_UNMATCHABLE = unmatchable_types_map['meths_unmatchable']
 
         # 1. check static quant module mappings
         static_quant_mod_mappings = get_default_static_quant_module_mappings()
