@@ -126,9 +126,9 @@ def type_matches(signature_type : Any, argument_type : Any):
             return True
         return all(c is int or (c is Ellipsis) for c in contained)
 
-    if signature_type is List[int] and is_homogeneous_int_tuple(argument_type):
+    if signature_type is List[int]:
         # Tuple[int] is accepted for List[int] parameters
-        return True
+        return is_homogeneous_int_tuple(argument_type)
 
     # Dtype is an int in schemas
     if signature_type is int and argument_type is torch.dtype:
@@ -207,14 +207,16 @@ def normalize_function(
                     arg_types = arg_types if arg_types else cast(Tuple[Any], ())
                     kwarg_types = kwarg_types if kwarg_types else {}
                     for candidate_signature in torch_op_schemas:
-                        sig_matches = True
                         try:
                             bound_types = candidate_signature.bind(*arg_types, **kwarg_types)
-                            for arg_name, arg_type in bound_types.arguments.items():
-                                param = candidate_signature.parameters[arg_name]
-                                sig_matches = sig_matches and type_matches(param.annotation, arg_type)
                         except TypeError as e:
-                            sig_matches = False
+                            continue
+
+                        sig_matches = True
+                        for arg_name, arg_type in bound_types.arguments.items():
+                            param = candidate_signature.parameters[arg_name]
+                            sig_matches = sig_matches and type_matches(param.annotation, arg_type)
+
                         if sig_matches:
                             new_kwargs = _args_kwargs_to_normalized_kwargs(candidate_signature, args, kwargs)
                             break
