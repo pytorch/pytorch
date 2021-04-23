@@ -858,7 +858,7 @@ Example:
 """.format(**factory_common_args))
 
 rfftfreq = _add_docstr(_fft.fft_rfftfreq, r"""
-rfftfreq(n, d=1.0, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, out=None) -> Tensor
+rfftfreq(n, d=1.0, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Computes the sample frequencies for :func:`~torch.fft.rfft` with a signal of size :attr:`n`.
 
