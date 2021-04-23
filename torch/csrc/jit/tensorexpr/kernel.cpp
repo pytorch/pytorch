@@ -332,6 +332,20 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
   if (ti != bufs_.end()) {
     return BufHandle(ti->second);
   }
+  if (v->node()->kind() == prim::ListConstruct) {
+    std::vector<ArgValue> vec;
+    for (auto el : v->node()->inputs()) {
+      vec.push_back(toArg(el));
+    }
+    if (vec.size() == 0) {
+      return BufList(); // Return arbitrarily typed vector
+    } else if (c10::get_if<BufHandle>(&vec[0])) {
+      return convertVecArgValue<BufHandle>(vec);
+    } else if (c10::get_if<int64_t>(&vec[0])) {
+      return convertVecArgValue<int64_t>(vec);
+    }
+    throw unsupported_dtype();
+  }
   if (v->node()->kind() == prim::Constant) {
     const auto val = toIValue(v).value();
     if (val.isDouble()) {
@@ -346,7 +360,7 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
       // the operator-specific lowering code.
       return ArgNone();
     } else {
-      throw unsupported_dtype();
+      throw unsupported_dtype(val.type()->str());
     }
   }
 
@@ -853,8 +867,7 @@ Tensor* tensorexpr::computeTwoOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [inputValues, outputType, innerExpr](
-          const std::vector<VarHandle>& axes) {
+      [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[0], indices),
@@ -877,8 +890,7 @@ Tensor* tensorexpr::computeTwoOperandWithAlpha(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [inputValues, outputType, innerExpr](
-          const std::vector<VarHandle>& axes) {
+      [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[0], indices),
@@ -903,8 +915,7 @@ Tensor* tensorexpr::computeConditionWithTwoOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [inputValues, outputType, innerExpr](
-          const std::vector<VarHandle>& axes) {
+      [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[1], indices),
@@ -961,8 +972,7 @@ Tensor* tensorexpr::computeFourOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [inputValues, outputType, innerExpr](
-          const std::vector<VarHandle>& axes) {
+      [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[0], indices),
@@ -1449,6 +1459,16 @@ Tensor* tensorexpr::computeOperandValue(
             return tan(promoteIntegerToDefaultType(a));
           });
     } break;
+    case aten::type_as: {
+      const BufHandle rhs = c10::get<BufHandle>(inputs[1]);
+      auto dtype = rhs.dtype();
+      return computeOneOperand(
+          "aten_type_as",
+          inputs,
+          outputShape,
+          outputType,
+          [dtype](const ExprHandle& lhs) { return Cast::make(dtype, lhs); });
+    } break;
     case aten::pow: {
       return computeTwoOperand(
           "aten_pow",
@@ -1719,7 +1739,19 @@ Tensor* tensorexpr::computeOperandValue(
           outputType,
           [](const ExprHandle& a) { return cast<float>(a); });
     } break;
-
+    case aten::to: {
+      // see handling of aten::to in tensorexpr_fuser.cpp for why we only
+      // need to handle the first input
+      return computeOneOperand(
+          "aten_to",
+          inputs,
+          outputShape,
+          outputType,
+          [outputType](const ExprHandle& a) {
+            TORCH_INTERNAL_ASSERT(outputType);
+            return Cast::make(ToDtype(*outputType), a);
+          });
+    } break;
     case aten::threshold: {
       return computeThreeOperand(
           "aten_threshold",
@@ -1821,6 +1853,9 @@ Tensor* tensorexpr::computeOperandValue(
     case aten::matmul: {
       return computeMatmul(inputs, outputShape, outputType);
     }
+    case aten::cat: {
+      return computeCat(inputs, outputShape);
+    }
     default: {
       throw std::runtime_error("Unhandled node kind");
       return nullptr;
@@ -1881,6 +1916,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::cos:
     case aten::sin:
     case aten::tan:
+    case aten::type_as:
     case aten::pow:
     case aten::fmod:
     case aten::lerp:
@@ -1901,13 +1937,15 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::round:
     case aten::trunc:
     case aten::_cast_Float:
+    case aten::to:
     case aten::threshold:
     case aten::where:
     case aten::frac:
     case aten::lgamma:
     case aten::slice:
     case aten::unsqueeze:
-    case aten::matmul: {
+    case aten::matmul:
+    case aten::cat: {
       std::vector<ArgValue> argInputs;
       for (auto inp : inputs) {
         argInputs.push_back(toArg(inp));
@@ -1916,44 +1954,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       auto outputShape = sizesForValue(v);
       return computeOperandValue(
           v->node()->kind(), argInputs, outputShape, outputType);
-    } break;
-
-    case aten::to: {
-      // see handling of aten::to in tensorexpr_fuser.cpp for why we only
-      // need to handle the first input
-      auto outputType = findDtypeForValue(v->node()->output());
-      auto outputShape = sizesForValue(v);
-      auto output_dtype = findDtypeForValue(v->node()->output());
-      return computeOneOperand(
-          "aten_to",
-          {toArg(inputs[0])},
-          outputShape,
-          outputType,
-          [output_dtype](const ExprHandle& a) {
-            TORCH_INTERNAL_ASSERT(output_dtype);
-            return Cast::make(ToDtype(*output_dtype), a);
-          });
-    } break;
-
-    case aten::type_as: {
-      auto outputType = findDtypeForValue(v->node()->output());
-      auto outputShape = sizesForValue(v);
-      const Buf* rhs = bufs_.at(inputs[1]);
-      auto dtype = rhs->dtype();
-      return computeOneOperand(
-          "aten_type_as",
-          {toArg(inputs[0])},
-          outputShape,
-          outputType,
-          [dtype](const ExprHandle& lhs) { return Cast::make(dtype, lhs); });
-    } break;
-    case aten::cat: {
-      std::vector<ArgValue> inputList;
-      for (auto inp : v->node()->input(0)->node()->inputs()) {
-        inputList.push_back(toArg(inp));
-      }
-      auto outputShape = sizesForValue(v);
-      return computeCat(inputList, toArg(v->node()->input(1)), outputShape);
     } break;
 
     case prim::ConstantChunk: {
@@ -1985,7 +1985,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::conv2d: {
       return computeConv2d(v);
     }
-
 
     default: {
       throw std::runtime_error("Unhandled node kind");
@@ -2327,14 +2326,13 @@ std::vector<VarHandle> squeezeIndices(
 } // namespace
 
 std::pair<ScalarType, std::vector<BufHandle>> processCatList(
-    const std::vector<ArgValue>& inputList) {
-  if (inputList.size() == 0) {
+    const std::vector<BufHandle>& bufList) {
+  if (bufList.size() == 0) {
     throw std::runtime_error("Empty input list is passed to aten::cat");
   }
   std::vector<BufHandle> bufInputs;
   std::vector<BufHandle> nonEmptyInputs;
-  for (auto input : inputList) {
-    auto buf = c10::get<BufHandle>(input);
+  for (auto buf : bufList) {
     bufInputs.push_back(buf);
     assert(buf.node()->dims().size() > 0);
     if (buf.node()->dims().size() == 1 &&
@@ -2352,15 +2350,16 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   return {highType, nonEmptyInputs};
 }
 Tensor* tensorexpr::computeCat(
-    const std::vector<ArgValue>& inputList,
-    const ArgValue& argDim,
+    const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape) {
   if (getCatWoConditionals()) {
-    return computeCatWoConditionals(inputList, argDim, outputShape);
+    return computeCatWoConditionals(inputs, outputShape);
   }
-  auto inputs = processCatList(inputList);
-  ScalarType highType = inputs.first;
-  std::vector<BufHandle> nonEmptyInputs = inputs.second;
+  auto inputList = c10::get<BufList>(inputs[0]);
+  auto argDim = inputs[1];
+  auto catInfo = processCatList(inputList);
+  ScalarType highType = catInfo.first;
+  std::vector<BufHandle> nonEmptyInputs = catInfo.second;
   return Compute(
       "aten_cat",
       c10::fmap<DimArg>(outputShape),
@@ -2411,12 +2410,13 @@ Tensor* tensorexpr::computeCat(
       });
 }
 Tensor* tensorexpr::computeCatWoConditionals(
-    const std::vector<ArgValue>& input_list,
-    const ArgValue& arg_dim,
-    const std::vector<ExprHandle>& output_shape) {
-  auto inputs = processCatList(input_list);
-  ScalarType high_type = inputs.first;
-  std::vector<BufHandle> non_empty_inputs = inputs.second;
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape) {
+  auto input_list = c10::get<BufList>(inputs[0]);
+  auto arg_dim = inputs[1];
+  auto cat_info = processCatList(input_list);
+  ScalarType high_type = cat_info.first;
+  std::vector<BufHandle> non_empty_inputs = cat_info.second;
 
   // Now we build one loop per input:
   //
@@ -2433,7 +2433,7 @@ Tensor* tensorexpr::computeCatWoConditionals(
   //     for k
   //       output[i,j+l2,k] = inp3[i,j,k]
 
-  auto output_sizes_expr = ExprHandleVectorToExprVector(output_shape);
+  auto output_sizes_expr = ExprHandleVectorToExprVector(outputShape);
   auto output_buf = new Buf("aten_cat", output_sizes_expr, ToDtype(high_type));
   if (non_empty_inputs.size() == 0) {
     return new Tensor(output_buf, new tensorexpr::Block({}));
@@ -2441,7 +2441,7 @@ Tensor* tensorexpr::computeCatWoConditionals(
 
   int64_t concat_dim = c10::get<int64_t>(arg_dim);
   size_t norm_concat_dim =
-      normalizeAndCheckIndex(concat_dim, output_shape.size());
+      normalizeAndCheckIndex(concat_dim, outputShape.size());
 
   auto gen_code_for_input = [&](const BufHandle& inp,
                                 size_t inp_pos,

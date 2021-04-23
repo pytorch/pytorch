@@ -25,14 +25,24 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
 }
 using ArgNone = c10::monostate;
 using BufList = std::vector<tensorexpr::BufHandle>;
+using IntList = std::vector<int64_t>;
 using ArgValue = c10::variant<
     tensorexpr::BufHandle,
     tensorexpr::VarHandle,
-    BufList,
     double,
     int64_t,
     bool,
+    BufList,
+    IntList,
     ArgNone>;
+template <class T>
+std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
+  std::vector<T> res;
+  for (size_t idx = 0; idx < v.size(); idx++) {
+    res.push_back(c10::get<T>(v[idx]));
+  }
+  return res;
+}
 
 enum ElementType {
   kAllTypes = 0,
@@ -51,13 +61,11 @@ TORCH_API Tensor* computeOperandValue(
     const c10::optional<ScalarType>& outputType);
 
 Tensor* computeCat(
-    const std::vector<ArgValue>& inputList,
-    const ArgValue& argDim,
+    const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape);
 
 Tensor* computeCatWoConditionals(
-    const std::vector<ArgValue>& inputList,
-    const ArgValue& argDim,
+    const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape);
 
 ExprHandle tensorOrConstant(
