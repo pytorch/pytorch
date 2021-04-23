@@ -1,3 +1,5 @@
+# NOTE!!!!! This file is currently referenced in the codebase in .jenkins/pytorch/test.sh, .jenkins/pytorch/win-test.sh,
+# and twice in test/run_test.py. If you move this file, please remember to update those references!
 [run]
 plugins =
     coverage_plugins.jit_plugin

@@ -501,7 +501,11 @@ def get_slow_tests_based_on_S3() -> List[str]:
 
 def get_executable_command(options, allow_pytest, disable_coverage=False):
     if options.coverage and not disable_coverage:
-        executable = ['coverage', 'run', '--parallel-mode', '--source=torch']
+        # We specify rcfile because COVERAGE_RCFILE does not seem to be applied for every call to coverage.
+        # That means that we do not actually use the plugin for any coverage call after the first. Currently,
+        # the .coveragerc config file is in the root directory, so if we move or rename it, we must change it
+        # all throughout the codebase, including here.
+        executable = ['coverage', 'run', '--parallel-mode', '--source=torch', '--rcfile=../.coveragerc']
     else:
         executable = [sys.executable]
     if options.pytest:
@@ -1139,7 +1143,7 @@ def main():
             from coverage import Coverage
             test_dir = os.path.dirname(os.path.abspath(__file__))
             with set_cwd(test_dir):
-                cov = Coverage()
+                cov = Coverage(config_file='../.coveragerc')
                 if PYTORCH_COLLECT_COVERAGE:
                     cov.load()
                 cov.combine(strict=False)

@@ -25,7 +25,6 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
-  export COVERAGE_RCFILE="$PWD/.coveragerc" # coverage config file needed for plug-ins and settings to work
   pip install -e tools/coverage_plugins_package # allows coverage to run with JitPlugin for JIT coverage
 fi
 
@@ -472,7 +471,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   pushd test
   echo "Generating XML coverage report"
-  time python -mcoverage xml
+  time python -mcoverage xml --rcfile=../.coveragerc
   popd
   pushd build
   echo "Generating lcov coverage report for C++ sources"
