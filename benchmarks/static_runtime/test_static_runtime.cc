@@ -157,6 +157,40 @@ TEST(StaticRuntime, IndividualOps_Binary) {
   testStaticRuntime(tuple_construct_script_2, args);
 }
 
+TEST(StaticRuntime, IndividualOps_Div) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({2, 3});
+
+  std::vector<IValue> args0{a, b};
+  testStaticRuntime(div_tensor, args0);
+
+  std::vector<IValue> args1{a, 3};
+  testStaticRuntime(div_scalar, args1);
+
+  std::vector<IValue> args2{a, b, "floor"};
+  testStaticRuntime(div_tensor_mode, args2);
+
+  std::vector<IValue> args3{a, 2.3, "trunc"};
+  testStaticRuntime(div_scalar_mode, args3);
+}
+
+TEST(StaticRuntime, IndividualOps_Sub) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({2, 3});
+
+  std::vector<IValue> args0{a, b};
+  testStaticRuntime(sub_tensor, args0);
+
+  std::vector<IValue> args1{a, 3};
+  testStaticRuntime(sub_scalar, args1);
+
+  std::vector<IValue> args2{a, b, 2.3};
+  testStaticRuntime(sub_tensor_alpha, args2);
+
+  std::vector<IValue> args3{a, 2.3, 4};
+  testStaticRuntime(sub_scalar_alpha, args3);
+}
+
 TEST(StaticRuntime, IndividualOps_Reshape) {
   auto a = at::randn({2, 3});
   auto b = std::vector<int64_t>({3, 2});
