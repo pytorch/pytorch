@@ -19,8 +19,14 @@ if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *old-gradcheck* ]]; then
+  export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
+  export COVERAGE_RCFILE="$PWD/.coveragerc" # coverage config file needed for plug-ins and settings to work
+  pip install -e tools/coverage_plugins_package # allows coverage to run with JitPlugin for JIT coverage
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
