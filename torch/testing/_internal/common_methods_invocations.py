@@ -3131,7 +3131,7 @@ op_db: List[OpInfo] = [
            skips=(
                # addmm_ resizes input tensor if it's not the correct size, but it shouldn't.
                # Reference: https://github.com/pytorch/pytorch/issues/56233
-               SkipInfo('TestCommon', 'test_variant_consistency_eager', device_type='CPU'),
+               SkipInfo('TestCommon', 'test_variant_consistency_eager', device_type='cpu'),
            )
            ),
     OpInfo('addmm',
@@ -3148,7 +3148,7 @@ op_db: List[OpInfo] = [
            skips=(
                # addmm_ resizes input tensor if it's not the correct size, but it shouldn't.
                # Reference: https://github.com/pytorch/pytorch/issues/56233
-               SkipInfo('TestCommon', 'test_variant_consistency_eager', device_type='CPU'),
+               SkipInfo('TestCommon', 'test_variant_consistency_eager', device_type='cpu'),
            )
            ),
     OpInfo('addmv',
