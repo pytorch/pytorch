@@ -226,8 +226,8 @@ void sortKeyValueInplace(Tensor& key,
 #undef HANDLE_A_CASE
 }
 
-// We perform a vectorized segmented sort in cub with inputs larger
-// than 1024/2048 elements in the selected dimension.
+// We perform a vectorized segmented sort in cub with inputs that have
+// more than 1024/2048 elements along the selected dimension.
 // Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
 // Large sort algorithm:.
 // Say we are sorting a (2, 3) tensor. We have in flattened form:
