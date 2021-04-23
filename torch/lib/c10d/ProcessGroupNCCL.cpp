@@ -184,6 +184,18 @@ std::string getExceptionMsgFromExceptionPtr(
   }
 }
 
+std::vector<c10::DeviceIndex> getIndicesOfDevices(
+    const std::vector<c10::Device>& devices) {
+  std::vector<c10::DeviceIndex> deviceIndices;
+  deviceIndices.reserve(devices.size());
+  for (const at::Device& device : devices) {
+    TORCH_INTERNAL_ASSERT(device.is_cuda());
+    deviceIndices.push_back(device.index());
+  }
+  return deviceIndices;
+}
+
+
 } // namespace
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
@@ -1045,10 +1057,8 @@ void ProcessGroupNCCL::workEnqueue(
   }
 }
 
-ProcessGroupNCCL::Options::Options(
-    std::chrono::milliseconds timeout,
-    bool is_high_priority_stream)
-    : ProcessGroup::Options(timeout, NCCL_BACKEND_NAME),
+ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
+    : ProcessGroup::Options(NCCL_BACKEND_NAME),
       is_high_priority_stream(is_high_priority_stream) {}
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -1060,6 +1070,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     PostProcess post,
     OpType opType,
     const char* profilingTitle) {
+
+  // Bump collective counter
+  if (sequenceNum_) {
+    sequenceNum_->increment();
+  }
   const auto devices = getDeviceList(inputs);
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices, opType);
@@ -1116,7 +1131,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   {
     at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
     work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
-        c10::ListType::create(c10::TensorType::get()));
+        c10::ListType::create(c10::TensorType::get()),
+        getIndicesOfDevices(devices));
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
@@ -1213,7 +1229,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   if (opType == OpType::RECV) {
     at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
     work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
-        c10::ListType::create(c10::TensorType::get()));
+        c10::ListType::create(c10::TensorType::get()),
+        getIndicesOfDevices(devices));
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
