@@ -526,6 +526,8 @@ struct CodeImpl {
     }
   }
 
+  virtual ~CodeImpl() = default;
+
   // since subclass of CodeImpl needs to populate
   // op_to_num_specified_args, we seperate the calls
   // that changes internals of CodeImpl into a separate
