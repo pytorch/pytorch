@@ -1192,8 +1192,8 @@ void SpecialPostProcess(Node* n) {
               shape_node->input()->node()->kind() ==
               ::c10::prim::ListConstruct) {
             // Assign rank of original input of onnx::Shape.
-            v_type = v_type->withSizes(
-                {shape_node->input()->node()->inputs().size()});
+            v_type = v_type->withSizes({static_cast<int64_t>(
+                shape_node->input()->node()->inputs().size())});
             n->output()->setType(v_type);
           }
         }
