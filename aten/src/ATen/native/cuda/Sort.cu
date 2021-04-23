@@ -7,28 +7,6 @@
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 
-namespace {
-
-template<typename scalar_t>
-__global__ void sort_postprocess_kernel(const scalar_t *in, scalar_t *out, int64_t *index, const int2 *i_s_ptr, int nsegments, int nsort) {
-  CUDA_KERNEL_LOOP(i, nsegments * nsort) {
-    int segment = i / nsort;
-    int j = i % nsort;
-
-    int offset = segment * nsort;
-    const scalar_t *in_ = in + offset;
-    scalar_t *out_ = out + offset;
-    int64_t *index_ = index + offset;
-    const int2 *i_s_ptr_ = i_s_ptr + offset;
-
-    int idx = i_s_ptr_[j].y;
-    index_[j] = idx;
-    out_[j] = in_[idx];
-  }
-}
-
-}
-
 namespace at { namespace native {
 
 bool should_use_th_sort(const Tensor &self, int64_t dim) {
@@ -46,31 +24,8 @@ bool should_use_th_sort(const Tensor &self, int64_t dim) {
 
 std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim);
 
-// We perform a vectorized segmented sort in cub.
-// Say we are sorting a (2, 3) tensor. We have in flattened form:
-// values       0.4 1.2 5.3 6.2 1.3 2.3
-// indices        0   1   2   0   1   2
-// segment_id     0   0   0   1   1   1
-
-// First we sort by values, globally:
-// values       6.2 5.3 2.3 1.2 1.3 0.4
-// indices        0   2   2   1   1   0
-// segment_id     1   0   1   0   1   0
-
-// Then we stable sort by segment id:
-// values       5.3 1.2 0.4 6.2 2.3 1.3
-// indices        2   1   0   0   2   1
-// segment_id     0   0   0   1   1   1
-
-// This method can only work if the slice we are sorting (`dim`) is
-// innermost, and both values and indices are contiguous. We do this
-// by re-arranging the input into this form as needed, which will
-// unfortunately allocate memory if the request is not in this form.
-// Vectorized sort is slower than iterated sort if the number of
-// slices is small (since we're sorting twice, instead of invoking a
-// smaller sort `numSlices` times), but the cub sort
-// implementation here is a catch-all, so we're not looking for
-// efficiency, but instead correctness.
+// If the dim being sorted is smaller than 2048/1024, then we will use the
+// implementation THC. Otherwise we use cub's segmented sort
 std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
   if (should_use_th_sort(self, dim)) {
     return legacy::cuda::_th_sort_out_stable(self, stable, dim, descending, values, indices);
@@ -166,32 +121,15 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
     while (remaining > 0) {
       int64_t n = std::min(remaining, nbatch);
       int64_t nsegments = n / nsort;
-      int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
 
       auto int_options = indices.options().dtype(kInt);
-      auto indices_and_segment = at::empty({nsegments, nsort, 2}, int_options);
-      indices_and_segment.select(-1, 0).copy_(  // segment id
-        at::arange(nsegments, int_options).view({nsegments, 1}).expand({nsegments, nsort}));
-      indices_and_segment.select(-1, 1).copy_(  // reverse indices
-        at::arange(nsort, int_options).view({1, nsort}).expand({nsegments, nsort}));
+      auto offset_begins = at::arange(0, n, nsort, int_options);
+      auto offset_ends = at::arange(nsort, n + nsort, nsort, int_options);
+      auto reverse_indices = at::arange(nsort, indices.options()).view({1, nsort}).expand({nsegments, nsort}).contiguous();
 
-      auto i_s_ptr = reinterpret_cast<int2 *>(indices_and_segment.data_ptr<int>());
-      auto indices_and_segment2 = at::empty_like(indices_and_segment);
-      auto i_s_ptr2 = reinterpret_cast<int2 *>(indices_and_segment2.data_ptr<int>());
-
-      at::cuda::cub::sort_pairs<scalar_t, int2>(
-        self_ptr, nullptr, i_s_ptr, i_s_ptr2,
-        n, descending);
-
-      TORCH_INTERNAL_ASSERT(segment_bits <= 32);
-
-      // sort on lower 32bits, i.e. segment index
-      at::cuda::cub::sort_keys<int64_t>(
-        reinterpret_cast<int64_t *>(i_s_ptr2), reinterpret_cast<int64_t *>(i_s_ptr),
-        n, false, 0, segment_bits);
-
-      sort_postprocess_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
-        self_ptr, values_ptr, indices_ptr, i_s_ptr, nsegments, nsort);
+      at::cuda::cub::segmented_sort_pairs(self_ptr, values_ptr,
+        reverse_indices.data_ptr<int64_t>(), indices_ptr, n, nsegments,
+        offset_begins.data_ptr<int>(), offset_ends.data_ptr<int>(), descending);
 
       remaining -= n;
       self_ptr += n;
@@ -209,6 +147,8 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   return std::forward_as_tuple(values, indices);
 }
 
+// If the dim being sorted is smaller than 2048/1024, then we will use the
+// implementation THC. Otherwise we use cub's segmented sort
 std::tuple<Tensor &,Tensor &> sort_out_cuda(const Tensor & self, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
   if (should_use_th_sort(self, dim)) {
     return legacy::cuda::_th_sort_out(self, dim, descending, values, indices);
@@ -216,6 +156,8 @@ std::tuple<Tensor &,Tensor &> sort_out_cuda(const Tensor & self, int64_t dim, bo
   return sort_out_stable_cuda(self, /*stable=*/false, dim, descending, values, indices);
 }
 
+// If the dim being sorted is smaller than 2048/1024, then we will use the
+// implementation THC. Otherwise we use cub's segmented sort
 std::tuple<Tensor,Tensor> sort_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
   if (should_use_th_sort(self, dim)) {
     return legacy::cuda::_th_sort_stable(self, stable, dim, descending);
@@ -224,6 +166,8 @@ std::tuple<Tensor,Tensor> sort_stable_cuda(const Tensor & self, c10::optional<bo
   return sort_out_stable_cuda(self, stable, dim, descending, values, indices);
 }
 
+// If the dim being sorted is smaller than 2048/1024, then we will use the
+// implementation THC. Otherwise we use cub's segmented sort
 std::tuple<Tensor,Tensor> sort_cuda(const Tensor & self, int64_t dim, bool descending) {  int64_t threshold;
   if (should_use_th_sort(self, dim)) {
     return legacy::cuda::_th_sort(self, dim, descending);
