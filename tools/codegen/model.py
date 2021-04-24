@@ -291,6 +291,8 @@ class NativeFunction:
         device_guard = e.pop('device_guard', True)
         assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
 
+        device_check_s = e.pop('device_check', None)
+
         structured = e.pop('structured', False)
         assert isinstance(structured, bool), f'not a bool: {structured}'
 
