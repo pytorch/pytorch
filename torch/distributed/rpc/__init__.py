@@ -149,9 +149,9 @@ if is_available():
             # Ignore type error because mypy doesn't handle dynamically generated type objects (#4865)
             if backend != BackendType.TENSORPIPE:  # type: ignore[attr-defined]
                 logger.warning(
-                    f"{BackendType.TENSORPIPE} was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
-                    f"corresponding to {backend}. To silence this "
-                    f"warning pass `backend={backend}` explicitly."
+                    f"{BackendType.TENSORPIPE} was initialized "  # type: ignore[attr-defined]
+                    f"with no explicit backend but with options corresponding to {backend}. "
+                    f"To silence this warning pass `backend={backend}` explicitly."
                 )
 
         if backend is None:
