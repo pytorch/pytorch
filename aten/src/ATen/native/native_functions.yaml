@@ -5478,10 +5478,20 @@
   dispatch:
     CPU, CUDA: scatter_reduce_
 
+- func: scatter.reduce(Tensor self, int dim, Tensor index, Tensor src, *, str reduce) -> Tensor
+  variants: method
+  dispatch:
+    CPU, CUDA: scatter_reduce
+
 - func: scatter_.value_reduce(Tensor(a!) self, int dim, Tensor index, Scalar value, *, str reduce) -> Tensor(a!)
   variants: method
   dispatch:
     CPU, CUDA: scatter_scalar_reduce_
+
+- func: scatter.value_reduce(Tensor self, int dim, Tensor index, Scalar value, *, str reduce) -> Tensor
+  variants: method
+  dispatch:
+    CPU, CUDA: scatter_scalar_reduce
 
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method

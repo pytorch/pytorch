@@ -1070,6 +1070,16 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Sca
   return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
 }
 
+Tensor scatter_scalar_reduce(const Tensor& self, const int64_t dim, const Tensor& index,
+                             const Scalar& value, const std::string reduce) {
+  return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, value, reduce);
+}
+
+Tensor scatter_reduce(const Tensor& self, const int64_t dim, const Tensor& index,
+                      const Tensor& src, const std::string reduce) {
+  return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, src, reduce);
+}
+
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index.");
