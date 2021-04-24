@@ -8730,6 +8730,30 @@ class TestONNXRuntime(unittest.TestCase):
         loop_count = torch.randint(20, (1, ))[0].item()
         self.run_test(M(1, index, updates, loop_count), (x,))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_index_add_if(self):
+        class M(torch.nn.Module):
+            def __init__(self, dim, updates, index_true, index_false):
+                super(M, self).__init__()
+                self.dim = dim
+                self.updates = updates
+                self.index_true = index_true
+                self.index_false = index_false
+
+            def forward(self, x, cond):
+                if cond:
+                    x.index_add_(self.dim, self.index_true, self.updates)
+                else:
+                    x.index_add_(self.dim, self.index_false, self.updates)
+                return x
+
+        x = torch.ones(5, 4, 3)
+        updates = torch.tensor([[[1, 5, 7], [2, 4, 5], [5, 5, 6], [2, 3, 4]]], dtype=torch.float)
+        index_true = torch.tensor([0, 2, 3, 1])
+        index_false = torch.tensor([1, 0, 2, 3])
+        cond = torch.tensor(1, dtype=torch.bool)
+        self.run_test(torch.jit.script(M(1, updates, index_true, index_false)), (x, cond))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
               **extra_kwargs):
