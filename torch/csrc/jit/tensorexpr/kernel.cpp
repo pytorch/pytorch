@@ -396,15 +396,6 @@ std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
   return dims;
 }
 
-std::vector<DimArg> TensorExprKernel::dimsFromSizes(
-    const std::vector<ExprHandle>& sizes) {
-  std::vector<DimArg> dimArgs;
-  for (size_t idx = 0; idx < sizes.size(); idx++) {
-    dimArgs.emplace_back(DimArg(sizes[idx], "i" + c10::to_string(idx)));
-  }
-  return dimArgs;
-}
-
 std::vector<ExprHandle> TensorExprKernel::sizesForValue(
     const torch::jit::Value* v) {
   if (known_sizes_.count(v)) {
@@ -615,9 +606,9 @@ ExprHandle tensorexpr::constant(const ArgValue& v) {
     // is operator-specific and should be handled properly in
     // the operator-specific lowering code.
     return IntImm::make(0);
+  } else {
+    throw unsupported_dtype("Trying to convert unsupported dtype to constant");
   }
-  TORCH_INTERNAL_ASSERT(false);
-  throw std::runtime_error("");
 }
 ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   if (v->node()->kind() == prim::Constant) {
@@ -1860,6 +1851,13 @@ Tensor* tensorexpr::computeOperandValue(
     case aten::sum: {
       return computeSum(inputs, outputType);
     }
+    case aten::softmax: {
+      return computeSoftmax(inputs, outputShape, outputType, false);
+    }
+
+    case aten::log_softmax: {
+      return computeSoftmax(inputs, outputShape, outputType, true);
+    }
     default: {
       throw std::runtime_error("Unhandled node kind");
       return nullptr;
@@ -1950,7 +1948,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::unsqueeze:
     case aten::matmul:
     case aten::cat:
-    case aten::sum: {
+    case aten::sum:
+    case aten::softmax:
+    case aten::log_softmax: {
       std::vector<ArgValue> argInputs;
       for (auto inp : inputs) {
         argInputs.push_back(toArg(inp));
@@ -1968,7 +1968,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case prim::ConstantChunk: {
       return Compute(
           "prim_constantchunk",
-          dimsFromSizes(sizesForValue(v)),
+          c10::fmap<DimArg>(sizesForValue(v)),
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
             int64_t dim = n->i(attr::dim);
@@ -1979,13 +1979,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           });
     } break;
 
-    case aten::softmax: {
-      return computeSoftmax(v, false);
-    }
-
-    case aten::log_softmax: {
-      return computeSoftmax(v, true);
-    }
 
     case aten::conv2d: {
       return computeConv2d(v);
@@ -2665,8 +2658,10 @@ Tensor* tensorexpr::computeMatmul(
   }
 }
 
-Tensor* TensorExprKernel::computeSoftmax(
-    const torch::jit::Value* v,
+Tensor* tensorexpr::computeSoftmax(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
     bool log_softmax) {
   // Softmax is computed as follows:
   //    softmax(vi) = exp(vi) / sum(exp(vi))
@@ -2697,16 +2692,15 @@ Tensor* TensorExprKernel::computeSoftmax(
   //   - Fourth loop computes log for every element in the sum.
   //   - Final loop computes the log_softmax for every element in v.
 
-  TORCH_INTERNAL_ASSERT(v->node()->inputs().size() == 3);
-  auto output_dims = dimsFromSizes(sizesForValue(v));
+  TORCH_INTERNAL_ASSERT(inputs.size() == 3);
+  auto output_dims = c10::fmap<DimArg>(outputShape);
 
   // We do not handle None for dims (input 1) because that is supposed to
   // be deprecated.
-  TORCH_INTERNAL_ASSERT(v->node()->input(1)->node()->kind() == prim::Constant);
-  int64_t rank =
-      *v->node()->input(0)->type()->castRaw<TensorType>()->sizes().size();
+  TORCH_INTERNAL_ASSERT(c10::get_if<int64_t>(&inputs[1]));
+  int64_t rank = valueShape(inputs[0]).size();
   size_t softmax_dim =
-      normalizeAndCheckIndex(v->node()->input(1)->node()->i(attr::value), rank);
+      normalizeAndCheckIndex(c10::get<int64_t>(inputs[1]), rank);
   std::vector<DimArg> non_softmax_dims;
   for (size_t i = 0; i < output_dims.size(); ++i) {
     if (i != softmax_dim) {
@@ -2753,9 +2747,8 @@ Tensor* TensorExprKernel::computeSoftmax(
   };
 
   c10::optional<Dtype> dtype = ToDtype(ScalarType::None);
-  auto maybe_dtype = v->node()->get(attr::dtype);
-  if (maybe_dtype && !maybe_dtype->isNone()) {
-    dtype = ToDtype(static_cast<ScalarType>(maybe_dtype->toInt()));
+  if (auto d = c10::get_if<int64_t>(&inputs[2])) {
+    dtype = ToDtype(static_cast<ScalarType>(*d));
   }
 
   auto max = Reduce(
@@ -2764,13 +2757,13 @@ Tensor* TensorExprKernel::computeSoftmax(
       Maximum(dtype.value()),
       [&](ParameterList& indices) {
         return tensorOrConstant(
-            v->node()->input(0), move_softmax_dim_index_to_pos(indices));
+            inputs[0], move_softmax_dim_index_to_pos(indices));
       },
       {output_dims[softmax_dim]});
   auto e =
       Compute("aten_softmax_exp", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
-            v->node()->input(0), convert_indices_to_expr_handle(indices));
+            inputs[0], convert_indices_to_expr_handle(indices));
         return exp(inp - max->load(remove_softmax_dim_index(indices)));
       });
   auto sum = Reduce(
@@ -2799,7 +2792,7 @@ Tensor* TensorExprKernel::computeSoftmax(
   auto result =
       Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
-            v->node()->input(0), convert_indices_to_expr_handle(indices));
+            inputs[0], convert_indices_to_expr_handle(indices));
         auto non_softmax_indices = remove_softmax_dim_index(indices);
         return inp - max->load(non_softmax_indices) -
             log_sum->load(non_softmax_indices);
@@ -2853,7 +2846,7 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
     return new Tensor(buf, nullptr);
   }
 
-  auto dims = dimsFromSizes(sizesForValue(v));
+  auto dims = c10::fmap<DimArg>(sizesForValue(v));
   // We need to convert the output tensor so that its values are layed
   // so that whene viewed from the output strides the values are correct.
   // A contiguous Tensor of size(2, 3) with values 0-5 is layed out as:

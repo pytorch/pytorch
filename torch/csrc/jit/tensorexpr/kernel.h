@@ -68,6 +68,12 @@ Tensor* computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape);
 
+Tensor* computeSoftmax(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    bool log_softmax);
+
 Tensor* computeOneOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
@@ -224,9 +230,7 @@ class TORCH_API TensorExprKernel {
       const std::vector<ExprHandle>& axes);
 
 
-  Tensor* computeSoftmax(const torch::jit::Value* v, bool log_softmax);
 
-  Tensor* computeCatWoConditionals(const torch::jit::Value* v);
 
   Tensor* computeConv2d(const torch::jit::Value* v);
 
