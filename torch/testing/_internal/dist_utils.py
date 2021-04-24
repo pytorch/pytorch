@@ -91,10 +91,10 @@ def dist_init(
         if setup_rpc:
             rpc.init_rpc(
                 name="worker%d" % self.rank,
-                backend=self.rpc_backend,
+                backend=rpc.BackendType.TENSORPIPE,
                 rank=self.rank,
                 world_size=self.world_size,
-                rpc_backend_options=self.rpc_backend_options,
+                rpc_backend_options=rpc.TensorPipeRpcBackendOptions(init_method=self.init_method),
             )
 
         return_value = old_test_method(self, *arg, **kwargs)

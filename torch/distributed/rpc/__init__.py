@@ -149,9 +149,8 @@ if is_available():
             # Ignore type error because mypy doesn't handle dynamically generated type objects (#4865)
             if backend != BackendType.TENSORPIPE:  # type: ignore[attr-defined]
                 logger.warning(
-                    f"RPC was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
-                    f"corresponding to {backend}, hence that backend will be used "
-                    f"instead of the default {BackendType.TENSORPIPE}. To silence this "
+                    f"{BackendType.TENSORPIPE} was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
+                    f"corresponding to {backend}. To silence this "
                     f"warning pass `backend={backend}` explicitly."
                 )
 
@@ -159,12 +158,9 @@ if is_available():
             backend = BackendType.TENSORPIPE  # type: ignore[attr-defined]
 
         if backend == BackendType.PROCESS_GROUP:  # type: ignore[attr-defined]
-            warnings.warn(
-                "RPC was initialized with the PROCESS_GROUP backend which is "
-                "deprecated and slated to be removed and superseded by the TENSORPIPE "
-                "backend. It is recommended to migrate to the TENSORPIPE backend. "
-                "PyTorch v1.9 will be the last release that carries PROCESS_GROUP "
-                "RPC backend. If you have concerns or suggestions please comment in "
+            raise ValueError(
+                "RPC PROCESS_GROUP backend is deprecated. Please migrate to the TENSORPIPE backend. "
+                "If you have concerns or suggestions please comment in "
                 "https://github.com/pytorch/pytorch/issues/55615"
             )
 
