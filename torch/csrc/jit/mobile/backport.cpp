@@ -346,8 +346,7 @@ bool _backport_for_mobile(
     const std::string& output_filename) {
   std::unique_ptr<FileAdapter> rai =
       std::make_unique<FileAdapter>(input_filename);
-  auto writer =
-      std::make_unique<PyTorchStreamWriter>(output_filename);
+  auto writer = std::make_unique<PyTorchStreamWriter>(output_filename);
   return _backport_for_mobile_impl(std::move(rai), std::move(writer));
 }
 
@@ -377,7 +376,7 @@ bool _backport_for_mobile_impl(
     auto records = reader->getAllRecords();
 
     // Copy everything except bytecode related to new output
-    for (auto record : records) {
+    for (const auto& record : records) {
       if (record.find(kArchiveNameBytecode) == std::string::npos) {
         auto data_ptr = reader->getRecord(record);
         auto data = std::get<0>(data_ptr).get();
@@ -395,7 +394,7 @@ bool _backport_for_mobile_impl(
     const auto ivalue_constants = tensors_from_constants_archive.value();
 
     auto constants_data =
-        c10::ivalue::Tuple::create(std::move(ivalue_constants));
+        c10::ivalue::Tuple::create(ivalue_constants);
 
     update_bytecode_version(bytecode_values, to_bytecode_version);
     auto bytecode_tuple =
