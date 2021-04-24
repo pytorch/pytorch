@@ -15,7 +15,7 @@ namespace nnc {
 
 // Specify the requirements on an input tensor.
 // TODO: support input tensor with dynamic shape (PR #54982)
-struct InputSpec {
+struct TORCH_API InputSpec {
   InputSpec() = default;
 
   // Deserialize the spec from an IValue.
@@ -33,7 +33,7 @@ struct InputSpec {
 
 // Specify the sizes/dtype/... of output tensor to preallocate the output.
 // TODO: support the case where kernel allocates output tensors dynamically.
-struct OutputSpec {
+struct TORCH_API OutputSpec {
   OutputSpec() = default;
 
   // Deserialize the spec from an IValue.
@@ -50,7 +50,7 @@ struct OutputSpec {
 };
 
 // Hold the temporary buffers / states needed during the execution.
-struct ExecutionState {
+struct TORCH_API ExecutionState {
   // Preallocated buffers needed by the NNC kernel.
   std::vector<c10::DataPtr> preallocations;
 
@@ -71,7 +71,7 @@ struct ExecutionState {
 };
 
 // Specify how to allocate temporary buffers at initialization.
-struct MemoryPlan {
+struct TORCH_API MemoryPlan {
   MemoryPlan() = default;
   explicit MemoryPlan(const c10::IValue& value);
 
@@ -84,7 +84,7 @@ struct MemoryPlan {
 
 // Represents a compiled NNC function which has a 1-1 correspondence with a
 // `Method` (e.g. `forward`). It's similar as torch::jit::mobile::Function.
-class Function {
+class TORCH_API Function {
  public:
   explicit Function() = default;
 
@@ -163,7 +163,7 @@ class Function {
 
 // Represents a set of compiled NNC functions which has a 1-1 correspondence
 // with a `Module`. It's similar as torch::jit::mobile::CompilationUnit.
-class CompilationUnit {
+class TORCH_API CompilationUnit {
  public:
   CompilationUnit() = default;
 

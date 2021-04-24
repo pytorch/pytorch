@@ -10,7 +10,7 @@ namespace nnc {
 
 using nnc_kernel_function_type = int(void**);
 
-struct NNCKernel {
+struct TORCH_API NNCKernel {
   virtual ~NNCKernel() = default;
   virtual int execute(void** /* args */) {
     TORCH_CHECK(false, "Missing NNC kernel impl!");
