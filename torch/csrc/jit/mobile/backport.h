@@ -31,7 +31,7 @@ TORCH_API bool _backport_for_mobile(
 
 TORCH_API bool _backport_for_mobile(
     std::shared_ptr<ReadAdapterInterface> rai,
-    std::unique_ptr<PyTorchStreamWriter> writer);
+    std::shared_ptr<PyTorchStreamWriter> writer);
 
 // The family of methods below to get version given bytecode model
 TORCH_API int64_t _get_bytecode_version(std::istream& in);

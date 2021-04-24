@@ -194,7 +194,7 @@ TensorIndexMap get_tensors_archive_table(const IValue& value) {
 }
 
 void writeArchive(
-    std::unique_ptr<PyTorchStreamWriter>& writer,
+    std::shared_ptr<PyTorchStreamWriter> writer,
     const std::string& archive_name,
     const IValue& value,
     TensorIndexMap& tensors_archive_table,
@@ -292,7 +292,6 @@ void update_bytecode_version(
     std::vector<IValue>& bytecode_values,
     const int64_t to_version) {
   if (!bytecode_values.empty() && bytecode_values[0].isInt()) {
-    int64_t model_version = bytecode_values[0].toInt();
     bytecode_values[0] = IValue(to_version);
   }
 }
@@ -303,7 +302,7 @@ void update_bytecode_version(
 // call this method directly.
 bool _backport_for_mobile_impl(
     std::shared_ptr<ReadAdapterInterface> rai,
-    std::unique_ptr<PyTorchStreamWriter> writer);
+    std::shared_ptr<PyTorchStreamWriter> writer);
 
 bool _backport_for_mobile(std::istream& in, std::ostream& out) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
@@ -334,7 +333,8 @@ bool _backport_for_mobile(
     out.write(static_cast<const char*>(buf), nbytes);
     return !out ? 0 : nbytes;
   };
-  auto writer = std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
+  std::unique_ptr<PyTorchStreamWriter> writer =
+      std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
   return _backport_for_mobile_impl(std::move(rai), std::move(writer));
 }
 
@@ -343,19 +343,20 @@ bool _backport_for_mobile(
     const std::string& output_filename) {
   std::unique_ptr<FileAdapter> rai =
       std::make_unique<FileAdapter>(input_filename);
-  auto writer = std::make_unique<PyTorchStreamWriter>(output_filename);
+  std::unique_ptr<PyTorchStreamWriter> writer =
+      std::make_unique<PyTorchStreamWriter>(output_filename);
   return _backport_for_mobile_impl(std::move(rai), std::move(writer));
 }
 
 bool _backport_for_mobile(
     std::shared_ptr<ReadAdapterInterface> rai,
-    std::unique_ptr<PyTorchStreamWriter> writer) {
+    std::shared_ptr<PyTorchStreamWriter> writer) {
   return _backport_for_mobile_impl(std::move(rai), std::move(writer));
 }
 
 bool _backport_for_mobile_impl(
     std::shared_ptr<ReadAdapterInterface> rai,
-    std::unique_ptr<PyTorchStreamWriter> writer) {
+    std::shared_ptr<PyTorchStreamWriter> writer) {
   auto bytecode_version = _get_bytecode_version(rai);
   auto to_bytecode_version = bytecode_version - 1;
 
