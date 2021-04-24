@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
 )
+from torch.testing._internal.common_utils import run_tests
 
 
 class RunProcResultsTest(unittest.TestCase):
@@ -738,3 +739,7 @@ class StartProcessesTest(unittest.TestCase):
             self.assertEqual(1, len(run_result.failures))
             failure = run_result.failures[0]
             self.assertEqual("Signal 1 (SIGHUP) received by PID 123", failure.message)
+
+
+if __name__ == "__main__":
+    run_tests()
