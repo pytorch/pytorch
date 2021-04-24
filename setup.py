@@ -542,8 +542,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             filename = self.get_ext_filename(fullname)
             report("\nCopying extension {}".format(ext.name))
 
-            python_version = os.path.basename(sysconfig.get_path("stdlib"))
-            src = os.path.join("torch", "lib", python_version, "site-packages", filename)
+            relative_site_packages = sysconfig.get_path('purelib').replace(sysconfig.get_path('data'), '').lstrip(os.path.sep)
+            src = os.path.join("torch", relative_site_packages, filename)
             if not os.path.exists(src):
                 report("{} does not exist".format(src))
                 del self.extensions[i]

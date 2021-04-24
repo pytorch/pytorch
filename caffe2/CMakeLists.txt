@@ -1698,7 +1698,7 @@ if(BUILD_PYTHON)
   pycmd(PYTHON_SITE_PACKAGES "
       import os
       import sysconfig
-      relative_site_packages = sysconfig.get_path('purelib').replace(sysconfig.get_path('data'), '').lstrip('/')
+      relative_site_packages = sysconfig.get_path('purelib').replace(sysconfig.get_path('data'), '').lstrip(os.path.sep)
       print(relative_site_packages)
   ")
   file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
