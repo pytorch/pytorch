@@ -17,7 +17,6 @@
 #include <vector>
 
 namespace c10 {
-// std::string serializeType(const Type &t);
 TypePtr parseType(const std::string& pythonStr);
 } // namespace c10
 
@@ -248,7 +247,6 @@ void writeArchive(
     WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string fname = prefix + c10::to_string(i++);
     if (can_use_tensors_archive_table) {
-      //      std::cout << "using tensor archive table" << std::endl;
       const auto found = tensors_archive_table.find(td);
       if (found == tensors_archive_table.end()) {
         writer->writeRecord(
@@ -266,7 +264,7 @@ void check_zip_file(std::shared_ptr<ReadAdapterInterface>& rai) {
   std::array<uint8_t, 2> first_short{};
   static constexpr uint8_t first_slot = 0x80;
   static constexpr uint8_t second_slot = 0x02;
-  //  uint8_t first_short[2];
+
   rai->read(
       /*pos=*/0,
       /*buf=*/&first_short,
@@ -349,7 +347,7 @@ bool _backport_for_mobile(
   std::unique_ptr<FileAdapter> rai =
       std::make_unique<FileAdapter>(input_filename);
   auto writer =
-      std::make_unique<PyTorchStreamWriter>(std::move(output_filename));
+      std::make_unique<PyTorchStreamWriter>(output_filename);
   return _backport_for_mobile_impl(std::move(rai), std::move(writer));
 }
 
@@ -394,10 +392,7 @@ bool _backport_for_mobile_impl(
             .toTuple()
             ->elements();
 
-    std::cout << "pass constatns " << std::endl;
     const auto ivalue_constants = tensors_from_constants_archive.value();
-
-    TensorIndexMap tensors_archive_table;
 
     auto constants_data =
         c10::ivalue::Tuple::create(std::move(ivalue_constants));
@@ -405,10 +400,10 @@ bool _backport_for_mobile_impl(
     update_bytecode_version(bytecode_values, to_bytecode_version);
     auto bytecode_tuple =
         c10::ivalue::Tuple::create(std::move(bytecode_values));
-    tensors_archive_table =
+    TensorIndexMap tensors_archive_table =
         get_tensors_archive_table(kArchiveNameConstants, constants_data);
     writeArchive(
-        writer, "bytecode", bytecode_tuple, tensors_archive_table, true);
+        writer, "bytecode", bytecode_tuple, tensors_archive_table, false);
     return true;
   }
   TORCH_WARN(

@@ -1670,19 +1670,38 @@ void initJitScriptBindings(PyObject* module) {
         return _load_for_mobile(in, optional_device);
       });
   m.def(
-      "_backport_for_lite_interpreter",
-      [](const std::string& input_filename,
-         const std::string& output_filename,
-         py::object map_location) {
-        c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
-          AT_ASSERT(THPDevice_Check(map_location.ptr()));
-          optional_device =
-              reinterpret_cast<THPDevice*>(map_location.ptr())->device;
-        }
-        Module module = torch::jit::load(input_filename);
-        return module._backport_for_mobile(input_filename, output_filename);
+      "_backport_for_mobile",
+      [](const std::string& filename_input,
+         const std::string& filename_output) {
+        return _backport_for_mobile(filename_input, filename_output);
       });
+  m.def(
+      "_backport_for_mobile_from_buffer",
+      [](const std::string& buffer_input, const std::string& filename_output) {
+        std::istringstream in(buffer_input);
+        return _backport_for_mobile(in, filename_output);
+      });
+  m.def(
+      "_backport_for_mobile_to_buffer", [](const std::string& filename_input) {
+        std::ostringstream buffer_output;
+        bool success = _backport_for_mobile(filename_input, buffer_output);
+        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+      });
+  m.def(
+      "_backport_for_mobile_from_buffer_to_buffer",
+      [](const std::string& buffer_input) {
+        std::istringstream in(buffer_input);
+        std::ostringstream buffer_output;
+        bool success = _backport_for_mobile(in, buffer_output);
+        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+      });
+  m.def("_get_bytecode_version", [](const std::string& filename) {
+    return _get_bytecode_version(filename);
+  });
+  m.def("_get_bytecode_version_from_buffer", [](const std::string& buffer) {
+    std::istringstream in(buffer);
+    return _get_bytecode_version(in);
+  });
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
   });
