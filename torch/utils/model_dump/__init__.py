@@ -136,7 +136,7 @@ def get_model_info(
         path_or_file,
         title=None,
         extra_file_size_limit=DEFAULT_EXTRA_FILE_SIZE_LIMIT):
-    """Get JSON-friendly informatino about a model.
+    """Get JSON-friendly information about a model.
 
     The result is suitable for being saved as model_info.json,
     or passed to burn_in_info.
