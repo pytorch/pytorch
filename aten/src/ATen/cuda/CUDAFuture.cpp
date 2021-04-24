@@ -26,15 +26,26 @@ namespace {
 
 std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
     const at::IValue& value) {
-  at::IValue::HashAliasedIValues sub_values;
-  // Prefer getSubValues() over visit() as the latter is a silent no-op for
-  // some unsupported types, whereas the former at least fails loudly.
-  value.getSubValues(sub_values);
-
   std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
-  for (const at::IValue& sub_value : sub_values) {
-    if (sub_value.isTensor()) {
-      data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+  // getSubValues works poorly on Python objects: it only works if they can be
+  // converted to a "regular" IValue type hence, for example, it doesn't support
+  // custom subclasses. Thus, instead, we extract the tensors through pickling.
+  if (value.isPyObject()) {
+    std::vector<at::Tensor> tensors =
+        value.toPyObjectHolder()->extractTensors();
+    data_ptrs.reserve(tensors.size());
+    for (const at::Tensor& tensor : tensors) {
+      data_ptrs.emplace_back(tensor.storage().data_ptr());
+    }
+  } else {
+    at::IValue::HashAliasedIValues sub_values;
+    // Prefer getSubValues() over visit() as the latter is a silent no-op for
+    // some unsupported types, whereas the former at least fails loudly.
+    value.getSubValues(sub_values);
+    for (const at::IValue& sub_value : sub_values) {
+      if (sub_value.isTensor()) {
+        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+      }
     }
   }
   return data_ptrs;
