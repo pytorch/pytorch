@@ -61,7 +61,7 @@ c10::IValue readArchive(
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
-  size_t pickle_size;
+  size_t pickle_size = 0;
   std::tie(pickle_ptr, pickle_size) =
       stream_reader->getRecord(picklename.str());
 
