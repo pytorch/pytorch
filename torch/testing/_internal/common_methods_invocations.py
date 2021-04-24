@@ -2067,8 +2067,8 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad):
             t_size = inp[1]
         else:
             t_size = inp[0]
-        fwt = torch.randint(1, 10, (t_size,), device=device) * 2 + 1  # '+1' to avoid zero sum weights
-        awt = torch.randint(1, 10, (t_size,), device=device)**2 + 1
+        fwt = torch.randint(1, 10, (t_size,), device=device, dtype=dtype)  
+        awt = torch.randint(1, 10, (t_size,), device=device, dtype=dtype)
         tens = make_tensor(inp, device=device, dtype=dtype,
                             low=-50, high=50, requires_grad=requires_grad)
         tens2 = tens + make_tensor(inp, device=device, dtype=dtype,
