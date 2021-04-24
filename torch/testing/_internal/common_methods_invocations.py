@@ -2720,11 +2720,11 @@ def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_msort(op_info, device, dtype, requires_grad):
     # test large sorting codepath
     largesample = SampleInput(make_tensor((L**3,), device, dtype,
-                                      low=None, high=None,
-                                      requires_grad=requires_grad))
+                                          low=None, high=None,
+                                          requires_grad=requires_grad))
     sample = SampleInput(make_tensor((S, M, S), device, dtype,
-                                      low=None, high=None,
-                                      requires_grad=requires_grad))
+                                     low=None, high=None,
+                                     requires_grad=requires_grad))
 
     return [largesample, sample]
 
