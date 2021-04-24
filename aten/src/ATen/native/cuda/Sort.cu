@@ -53,9 +53,7 @@ void fillSliceWithIndex(Tensor& t,int dim) {
   if (t.numel()) {
     auto sizes = DimVector(t.dim(), 1);
     sizes[dim] = t.sizes()[dim];
-    int64_t rangelen = 1;
-    rangelen = std::max(t.sizes()[dim], rangelen);
-    auto range = at::arange(rangelen, t.options());
+    auto range = at::arange(t.sizes()[dim], t.options());
     auto rangeview = range.view(sizes);
     t.copy_(rangeview);
   }

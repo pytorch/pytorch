@@ -1237,6 +1237,11 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
         return res
 
     samples = []
+    # Test case for large tensor.
+    largesample = SampleInput(make_tensor((L**3,), device, dtype,
+                              low=None, high=None,
+                              requires_grad=requires_grad))
+    samples.append(largesample)
 
     # Test cases for small 3d tensors.
     # Imitates legacy tests from test/test_torch.py
@@ -1263,7 +1268,6 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
         samples.append(SampleInput(scalar, kwargs=dict(stable=True)))
         samples.append(SampleInput(scalar, kwargs=dict(dim=0, stable=True)))
         samples.append(SampleInput(scalar, kwargs=dict(dim=0, descending=True, stable=True)))
-
     return samples
 
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
@@ -2714,11 +2718,15 @@ def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 def sample_inputs_msort(op_info, device, dtype, requires_grad):
-    sample = (SampleInput(make_tensor((S, M, S), device, dtype,
+    # test large sorting codepath
+    largesample = SampleInput(make_tensor((L**3,), device, dtype,
                                       low=None, high=None,
-                                      requires_grad=requires_grad)),)
+                                      requires_grad=requires_grad))
+    sample = SampleInput(make_tensor((S, M, S), device, dtype,
+                                      low=None, high=None,
+                                      requires_grad=requires_grad))
 
-    return sample
+    return [largesample, sample]
 
 def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
