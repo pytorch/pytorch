@@ -85,7 +85,7 @@ __device__ float where(bool c, float a, float b) {
   return c ? a : b;
 }
 
-__device__ float where(bool c, int64_t a, int64_t b) {
+__device__ int64_t where(bool c, int64_t a, int64_t b) {
   return c ? a : b;
 }
 
