@@ -51,12 +51,14 @@ struct TORCH_API OutputSpec {
 
 // Hold the temporary buffers / states needed during the execution.
 struct TORCH_API ExecutionState {
+  ExecutionState() = default;
   ExecutionState(const ExecutionState&) = delete;
-
+  ExecutionState(ExecutionState&&) = default;
   ExecutionState& operator=(const ExecutionState&) = delete;
+  ExecutionState& operator=(ExecutionState&&) = default;
 
   // Preallocated buffers needed by the NNC kernel.
-  std::vector<c10::DataPtr> preallocations;
+  std::vector<c10::DataPtr> preallocations_;
 
   // The NNC kernel expects the following arguments layout:
   //   input tensor 1
@@ -71,7 +73,7 @@ struct TORCH_API ExecutionState {
   //   temporary buffer 1
   //   ...
   //   temporary buffer BUFFER_NUM
-  std::vector<void*> arguments;
+  std::vector<void*> arguments_;
 };
 
 // Specify how to allocate temporary buffers at initialization.
@@ -171,10 +173,10 @@ class TORCH_API Function {
 class TORCH_API CompilationUnit {
  public:
   CompilationUnit() = default;
-
   CompilationUnit(const CompilationUnit&) = delete;
-
+  CompilationUnit(CompilationUnit&&) = default;
   CompilationUnit& operator=(const CompilationUnit&) = delete;
+  CompilationUnit& operator=(CompilationUnit&&) = default;
 
   // Deserialize from an IValue.
   explicit CompilationUnit(const c10::IValue& value);

@@ -15,8 +15,8 @@ constexpr int64_t kProducedNNCFileFormatVersion = 0x1L;
 
 namespace {
 
-c10::IValue Tup(const std::vector<c10::IValue>& ivalues) {
-  return c10::ivalue::Tuple::create(std::move(ivalues));
+c10::IValue Tup(std::vector<c10::IValue>&& ivalues) {
+  return c10::ivalue::Tuple::create(ivalues);
 }
 
 } // namespace
@@ -76,7 +76,7 @@ c10::IValue MemoryPlan::serialize() const {
 }
 
 void MemoryPlan::allocate(ExecutionState* state) const {
-  auto& allocations = state->preallocations;
+  auto& allocations = state->preallocations_;
   allocations.reserve(buffer_sizes_.size());
   for (int64_t buffer_size : buffer_sizes_) {
     at::DataPtr buffer = c10::GetCPUAllocator()->allocate(buffer_size);
@@ -145,9 +145,9 @@ void Function::init_execution_state() const {
   auto input_args = input_specs_.size();
   auto output_args = output_specs_.size();
   auto param_args = parameters_.size();
-  auto buffer_args = state.preallocations.size();
+  auto buffer_args = state.preallocations_.size();
 
-  auto& arguments = state.arguments;
+  auto& arguments = state.arguments_;
   arguments.reserve(input_args + output_args + param_args + buffer_args);
 
   // Keep empty slots to fill in inputs/outputs pointers at execution time.
@@ -159,7 +159,7 @@ void Function::init_execution_state() const {
   }
 
   // Fill in preallocated buffer pointers.
-  for (const auto& preallocation : state.preallocations) {
+  for (const auto& preallocation : state.preallocations_) {
     arguments.emplace_back(preallocation.get());
   }
 
@@ -175,7 +175,7 @@ c10::impl::GenericList Function::run(
 
   init_execution_state();
 
-  std::vector<void*>& args = execution_state_->arguments;
+  std::vector<void*>& args = execution_state_->arguments_;
 
   // Fill in input tensors.
   TORCH_CHECK(
@@ -184,9 +184,9 @@ c10::impl::GenericList Function::run(
       input_specs_.size(),
       " actual: ",
       inputs.size());
-  for (int i = 0; i < inputs.size(); ++i) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
     const c10::IValue& input = inputs[i];
-    auto input_tensor = input.toTensor();
+    const auto& input_tensor = input.toTensor();
     TORCH_CHECK(
         input_specs_[i].validate(input_tensor), "Invalid input at pos: ", i);
     args[i] = input_tensor.data_ptr();
@@ -195,7 +195,7 @@ c10::impl::GenericList Function::run(
   // Preallocate and fill in output tensors.
   c10::List<at::Tensor> outputs;
   outputs.reserve(output_specs_.size());
-  for (int i = 0; i < output_specs_.size(); ++i) {
+  for (size_t i = 0; i < output_specs_.size(); ++i) {
     at::Tensor output = output_specs_[i].allocate();
     outputs.emplace_back(output);
     args[inputs.size() + i] = output.data_ptr();
