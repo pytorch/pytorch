@@ -58,12 +58,12 @@ TypePtr resolveTypeName(
 
 c10::IValue readArchive(
     const std::string& archive_name,
-    std::shared_ptr<mobile::CompilationUnit> compilation_unit,
+    std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit,
     std::unique_ptr<PyTorchStreamReader>& stream_reader) {
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
-  size_t pickle_size;
+  size_t pickle_size = 0;
   std::tie(pickle_ptr, pickle_size) =
       stream_reader->getRecord(picklename.str());
 
@@ -91,7 +91,7 @@ c10::IValue readArchive(
     auto cls = type.type_->expect<at::ClassType>();
     auto qn = cls->name();
     c10::QualifiedName method_name(qn.value(), "__setstate__");
-    auto setstate = compilation_unit->find_function(method_name);
+    auto setstate = mobile_compilation_unit->find_function(method_name);
     auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
       auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
       if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
@@ -165,9 +165,7 @@ c10::IValue readArchive(
   return unpickler.parse_ivalue();
 }
 
-TensorIndexMap get_tensors_archive_table(
-    const std::string& archive_name,
-    const IValue& value) {
+TensorIndexMap get_tensors_archive_table(const IValue& value) {
   std::vector<char> data;
   TensorIndexMap tensors_archive_table;
   TypeNameUniquer type_name_uniquer;
@@ -282,7 +280,6 @@ void check_zip_file(std::shared_ptr<ReadAdapterInterface>& rai) {
 
 std::vector<IValue> get_bytecode_vals(
     std::shared_ptr<mobile::CompilationUnit>& mobile_compilation_unit,
-    std::shared_ptr<CompilationUnit>& compilation_unit,
     std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader) {
   std::vector<IValue> bytecode_vals;
   bytecode_vals = readArchive("bytecode", mobile_compilation_unit, reader)
@@ -369,9 +366,7 @@ bool _backport_for_mobile_impl(
         std::move(rai));
     std::vector<IValue> bytecode_values;
     auto mobile_compilation_unit = std::make_shared<mobile::CompilationUnit>();
-    auto compilation_unit = std::make_shared<CompilationUnit>();
-    bytecode_values =
-        get_bytecode_vals(mobile_compilation_unit, compilation_unit, reader);
+    bytecode_values = get_bytecode_vals(mobile_compilation_unit, reader);
 
     auto records = reader->getAllRecords();
 
@@ -385,22 +380,20 @@ bool _backport_for_mobile_impl(
       }
     }
 
-    c10::optional<std::vector<IValue>> tensors_from_constants_archive;
-    tensors_from_constants_archive =
+    std::vector<IValue> ivalues_from_constants_archive =
         readArchive("constants", mobile_compilation_unit, reader)
             .toTuple()
             ->elements();
 
-    const auto ivalue_constants = tensors_from_constants_archive.value();
+    auto ivalues_tuple_from_constants_archive =
+        c10::ivalue::Tuple::create(ivalues_from_constants_archive);
 
-    auto constants_data =
-        c10::ivalue::Tuple::create(ivalue_constants);
-
+    // Update the bytecode version in bytecode.pkl
     update_bytecode_version(bytecode_values, to_bytecode_version);
     auto bytecode_tuple =
         c10::ivalue::Tuple::create(std::move(bytecode_values));
     TensorIndexMap tensors_archive_table =
-        get_tensors_archive_table(kArchiveNameConstants, constants_data);
+        get_tensors_archive_table(ivalues_tuple_from_constants_archive);
     writeArchive(
         writer, "bytecode", bytecode_tuple, tensors_archive_table, false);
     return true;
@@ -422,11 +415,9 @@ int64_t _get_bytecode_version(const std::string& filename) {
 
 int64_t _get_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
   auto mobile_compilation_unit = std::make_shared<mobile::CompilationUnit>();
-  auto compilation_unit = std::make_shared<CompilationUnit>();
   auto reader = torch::make_unique<caffe2::serialize::PyTorchStreamReader>(
       std::move(rai));
-  auto bvals =
-      get_bytecode_vals(mobile_compilation_unit, compilation_unit, reader);
+  auto bvals = get_bytecode_vals(mobile_compilation_unit, reader);
   if (!bvals.empty() && bvals[0].isInt()) {
     int64_t model_version = bvals[0].toInt();
     return model_version;
