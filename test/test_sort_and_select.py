@@ -806,7 +806,7 @@ class TestSortAndSelect(TestCase):
     def test_kthvalue_overlap(self, device, dtype):
         S = 10
         k = 5
-        a = torch.randn(S)
+        a = torch.randn(S, device=device)
         indices = torch.empty((), device=device, dtype=torch.long)
         with self.assertRaisesRegex(RuntimeError, "unsupported operation:"):
             torch.kthvalue(a, k, out=(a, indices))
