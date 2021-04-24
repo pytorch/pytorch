@@ -171,7 +171,8 @@ std::unordered_set<std::string> BytecodeDeserializer::
   for (const auto& op : ops_list) {
     auto op_item = op.toTuple()->elements();
     TORCH_CHECK(
-        op_item.size() >= 2, "There should be at least two parts in an operator.");
+        op_item.size() >= 2,
+        "There should be at least two parts in an operator.");
     int num_args = -1;
     if (op_item.size() > 2) {
       num_args = op_item[2].toInt();

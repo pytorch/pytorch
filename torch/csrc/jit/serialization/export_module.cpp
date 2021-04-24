@@ -202,8 +202,8 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   operators.reserve(opnames.size());
   for (const auto& opname : opnames) {
     auto unique_name = opname.overload_name != ""
-                       ? opname.name + "." + opname.overload_name
-                       : opname.name;
+        ? opname.name + "." + opname.overload_name
+        : opname.name;
     int num_args = -1;
     auto it = op_to_specified_args.find(unique_name);
     if (it != op_to_specified_args.end()) {
@@ -651,8 +651,8 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
       TORCH_CHECK(
-          op_item.size() == 2,
-          "There should be two parts in an operator name.");
+          op_item.size() >= 2,
+          "There should at least two parts in an operator name.");
       auto opname = op_item[0].toString()->string();
       auto overload = op_item[1].toString()->string();
       opnames.emplace(overload.empty() ? opname : opname + "." + overload);

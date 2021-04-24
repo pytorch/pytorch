@@ -64,8 +64,13 @@ bool Function::append_operator(
     // Sanity check at load time, to save perf at runtime
     for (size_t i = num_specified_args; i < args.size(); ++i) {
       auto default_val = args[i].default_value();
-      TORCH_CHECK(default_val.has_value(), "Error happens at preparing for default values for the argument. The ", i,
-                  "th arguement of operator", opname, " does not have default value. ");
+      TORCH_CHECK(
+          default_val.has_value(),
+          "Error happens at preparing for default values for the argument. The ",
+          i,
+          "th arguement of operator",
+          opname,
+          " does not have default value. ");
     }
     fn = [fn, num_specified_args, args](Stack& stack) {
       for (size_t i = num_specified_args; i < args.size(); ++i) {

@@ -977,7 +977,9 @@ TEST(LiteInterpreterTest, DefaultArgsConv) {
 }
 
 namespace {
-void testLiteModuleCompareResultTensors(Module& m, const std::vector<torch::jit::IValue>& inputs) {
+void testLiteModuleCompareResultTensors(
+    Module& m,
+    const std::vector<torch::jit::IValue>& inputs) {
   auto outputref = m.forward(inputs).toTensor();
 
   std::stringstream ss;
@@ -1015,78 +1017,88 @@ void testDefaultArgsPinv(int num_args) {
   inputs.push_back(torch::rand({28, 28}));
   testLiteModuleCompareResultTensors(m, inputs);
 }
-}
+} // namespace
 
 TEST(LiteInterpreterTest, DefaultArgsPinv) {
-
   // Test with different number of specified arguments.
   // Arguments not specified take default value.
   for (int num_args = 1; num_args <= 3; ++num_args) {
     testDefaultArgsPinv(num_args);
   }
 
-//  bytecode with one specified argument:
-//  (6,
-//      ('__torch__.m.forward',
-//          (('instructions',
-//              (('STOREN', 1, 2),
-//                  ('DROPR', 1, 0),
-//                  ('MOVE', 2, 0),
-//                  ('OP', 0, 0),
-//                  ('RET', 0, 0))),
-//              ('operators', (('aten::linalg_pinv', '', 1),)),
-//              ('constants', (False, 1e-15)), # default constants are not used
-//              ('types', ()),
-//              ('register_size', 2)),
-//          (('arguments',
-//              ((('name', 'self'), ('type', '__torch__.m'), ('default_value', None)),
-//                  (('name', 'input'), ('type', 'Tensor'), ('default_value', None)))),
-//              ('returns',
-//                  ((('name', ''), ('type', 'Tensor'), ('default_value', None)),)))))
+  //  bytecode with one specified argument:
+  //  (6,
+  //      ('__torch__.m.forward',
+  //          (('instructions',
+  //              (('STOREN', 1, 2),
+  //                  ('DROPR', 1, 0),
+  //                  ('MOVE', 2, 0),
+  //                  ('OP', 0, 0),
+  //                  ('RET', 0, 0))),
+  //              ('operators', (('aten::linalg_pinv', '', 1),)),
+  //              ('constants', (False, 1e-15)), # default constants are not
+  //              used
+  //              ('types', ()),
+  //              ('register_size', 2)),
+  //          (('arguments',
+  //              ((('name', 'self'), ('type', '__torch__.m'), ('default_value',
+  //              None)),
+  //                  (('name', 'input'), ('type', 'Tensor'), ('default_value',
+  //                  None)))),
+  //              ('returns',
+  //                  ((('name', ''), ('type', 'Tensor'), ('default_value',
+  //                  None)),)))))
 
-//  bytecode with 2 specified argument:
-//  (6,
-//      ('__torch__.m.forward',
-//          (('instructions',
-//              (('STOREN', 1, 2),
-//                  ('DROPR', 1, 0),
-//                  ('MOVE', 2, 0),
-//                  ('LOADC', 1, 0), # added LOADC for specified argument
-//                  ('OP', 0, 0),
-//                  ('RET', 0, 0))),
-//              ('operators', (('aten::linalg_pinv', '', 2),)),
-//              ('constants', (False, 1e-05)), # updated constant table
-//              ('types', ()),
-//              ('register_size', 2)),
-//          (('arguments',
-//              ((('name', 'self'), ('type', '__torch__.m'), ('default_value', None)),
-//                  (('name', 'input'), ('type', 'Tensor'), ('default_value', None)))),
-//              ('returns',
-//                  ((('name', ''), ('type', 'Tensor'), ('default_value', None)),)))))
+  //  bytecode with 2 specified argument:
+  //  (6,
+  //      ('__torch__.m.forward',
+  //          (('instructions',
+  //              (('STOREN', 1, 2),
+  //                  ('DROPR', 1, 0),
+  //                  ('MOVE', 2, 0),
+  //                  ('LOADC', 1, 0), # added LOADC for specified argument
+  //                  ('OP', 0, 0),
+  //                  ('RET', 0, 0))),
+  //              ('operators', (('aten::linalg_pinv', '', 2),)),
+  //              ('constants', (False, 1e-05)), # updated constant table
+  //              ('types', ()),
+  //              ('register_size', 2)),
+  //          (('arguments',
+  //              ((('name', 'self'), ('type', '__torch__.m'), ('default_value',
+  //              None)),
+  //                  (('name', 'input'), ('type', 'Tensor'), ('default_value',
+  //                  None)))),
+  //              ('returns',
+  //                  ((('name', ''), ('type', 'Tensor'), ('default_value',
+  //                  None)),)))))
 
-//  bytecode with 3 specified arguments:
-//  (6,
-//      ('__torch__.m.forward',
-//          (('instructions',
-//              (('STOREN', 1, 2),
-//                  ('DROPR', 1, 0),
-//                  ('MOVE', 2, 0),
-//                  ('LOADC', 1, 0),
-//                  ('LOADC', 0, 0),
-//                  ('OP', 0, 0),
-//                  ('RET', 0, 0))),
-//              ('operators', (('aten::linalg_pinv', '', 3),)),
-//              ('constants', (True, 1e-05)),
-//              ('types', ()),
-//              ('register_size', 2)),
-//          (('arguments',
-//              ((('name', 'self'), ('type', '__torch__.m'), ('default_value', None)),
-//                  (('name', 'input'), ('type', 'Tensor'), ('default_value', None)))),
-//              ('returns',
-//                  ((('name', ''), ('type', 'Tensor'), ('default_value', None)),)))))
+  //  bytecode with 3 specified arguments:
+  //  (6,
+  //      ('__torch__.m.forward',
+  //          (('instructions',
+  //              (('STOREN', 1, 2),
+  //                  ('DROPR', 1, 0),
+  //                  ('MOVE', 2, 0),
+  //                  ('LOADC', 1, 0),
+  //                  ('LOADC', 0, 0),
+  //                  ('OP', 0, 0),
+  //                  ('RET', 0, 0))),
+  //              ('operators', (('aten::linalg_pinv', '', 3),)),
+  //              ('constants', (True, 1e-05)),
+  //              ('types', ()),
+  //              ('register_size', 2)),
+  //          (('arguments',
+  //              ((('name', 'self'), ('type', '__torch__.m'), ('default_value',
+  //              None)),
+  //                  (('name', 'input'), ('type', 'Tensor'), ('default_value',
+  //                  None)))),
+  //              ('returns',
+  //                  ((('name', ''), ('type', 'Tensor'), ('default_value',
+  //                  None)),)))))
 
-// The second argument is specified, but the value is the same as the default value.
-// It's treated as "not specified" since the value can be fetched from schema.
+  // The second argument is specified, but the value is the same as the default
+  // value. It's treated as "not specified" since the value can be fetched from
+  // schema.
   Module m("m");
   m.define(R"(
     def forward(self, input):
