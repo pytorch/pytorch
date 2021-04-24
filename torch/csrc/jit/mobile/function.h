@@ -23,7 +23,7 @@ class Function {
   bool append_operator(
       const std::string& name,
       const std::string& overload_name,
-      int64_t model_version);
+      int64_t num_args);
   void set_module_debug_info_list_size(size_t size);
   void set_module_info(const std::string& module_info, size_t pc);
   void append_constant(const c10::IValue& constant);

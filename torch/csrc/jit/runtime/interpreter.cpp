@@ -1160,26 +1160,25 @@ struct MobileCodeImpl : CodeImpl {
   }
 
   void emitOperator(Node* node) override {
-    CodeImpl::emitOperator(node);
-    // const Operator& op = node->getOperator();
-    // if (op.hasOperation() && op.schema().is_vararg()) {
-    //   emitLoadInputs(node->inputs());
-    //   insertInstruction(OPN, operator_table_.size(), node->inputs().size());
-    // } else {
-    //   auto unique_op_name = op.schema().overload_name() != ""
-    //     ? op.schema().name() + "." + op.schema().overload_name()
-    //     : op.schema().name();
-    //   auto num_include = node->inputs().size();
-    //   // make sure we only do this for mobile code
-    //   if (op_to_num_specified_args_.find(unique_op_name) !=
-    //           op_to_num_specified_args_.end()) {
-    //     num_include = op_to_num_specified_args_[unique_op_name];
-    //   }
-    //   emitLoadInputs(node->inputs(), num_include);
-    //   insertInstruction(OP, operator_table_.size());
-    // }
+     const Operator& op = node->getOperator();
+     if (op.hasOperation() && op.schema().is_vararg()) {
+       emitLoadInputs(node->inputs());
+       insertInstruction(OPN, operator_table_.size(), node->inputs().size());
+     } else {
+       auto unique_op_name = op.schema().overload_name() != ""
+         ? op.schema().name() + "." + op.schema().overload_name()
+         : op.schema().name();
+       auto num_include = node->inputs().size();
+       // make sure we only do this for mobile code
+       if (op_to_num_specified_args_.find(unique_op_name) !=
+               op_to_num_specified_args_.end()) {
+         num_include = op_to_num_specified_args_[unique_op_name];
+       }
+       emitLoadInputs(node->inputs(), num_include);
+       insertInstruction(OP, operator_table_.size());
+     }
 
-    // operator_table_.emplace_back(op.getOperation(node));
+     operator_table_.emplace_back(op.getOperation(node));
   }
 };
 

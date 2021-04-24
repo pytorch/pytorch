@@ -33,7 +33,7 @@ void Function::append_instruction(OpCode op, int X, int N) {
 bool Function::append_operator(
     const std::string& name,
     const std::string& overload_name,
-    int64_t model_version) {
+    int64_t num_specified_args) {
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   auto opname = code_->op_names_.back();
@@ -42,26 +42,35 @@ bool Function::append_operator(
   std::function<void(Stack&)> fn;
 
   auto jit_op = findOperatorFor(opname);
+  std::vector<c10::Argument> args;
   if (jit_op) {
     fn = [jit_op](Stack& stack) { jit_op->getOperation()(&stack); };
+    args = jit_op->schema().arguments();
   } else {
     auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
     if (op.has_value()) {
       fn = [op](Stack& stack) { op->callBoxed(&stack); };
+      if (op->hasSchema()) {
+        args = op->schema().arguments();
+      } else {
+        TORCH_CHECK(false, "arguments are missing for operator ", opname);
+      }
     } else {
       return false;
     }
   }
 
-  if (model_version == 0x3LL &&
-      opname == c10::OperatorName("aten::_convolution", "")) {
-    // Since byte-code versions 0x4L, convolution has an additional
-    // default-value argument (allow_tf32=True, see
-    // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
-    // backward compatibility with models of byte-code version <= 0x3L, where
-    // this bool argument does not yet exist.
-    fn = [fn](Stack& stack) {
-      stack.push_back(true);
+  if (num_specified_args >= 0 && num_specified_args < args.size()) {
+    // Sanity check at load time, to save perf at runtime
+    for (size_t i = num_specified_args; i < args.size(); ++i) {
+      auto default_val = args[i].default_value();
+      TORCH_CHECK(default_val.has_value(), "Error happens at preparing for default values for the argument. The ", i,
+                  "th arguement of operator", opname, " does not have default value. ");
+    }
+    fn = [fn, num_specified_args, args](Stack& stack) {
+      for (size_t i = num_specified_args; i < args.size(); ++i) {
+        stack.push_back(args[i].default_value());
+      }
       fn(stack);
     };
   }

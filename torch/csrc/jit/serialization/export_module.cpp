@@ -198,9 +198,18 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
 
   // operators
   std::vector<IValue> operators;
+  auto op_to_specified_args = code.op_to_num_specified_args();
   operators.reserve(opnames.size());
   for (const auto& opname : opnames) {
-    operators.emplace_back(Tup({opname.name, opname.overload_name}));
+    auto unique_name = opname.overload_name != ""
+                       ? opname.name + "." + opname.overload_name
+                       : opname.name;
+    int num_args = -1;
+    auto it = op_to_specified_args.find(unique_name);
+    if (it != op_to_specified_args.end()) {
+      num_args = it->second;
+    }
+    operators.emplace_back(Tup({opname.name, opname.overload_name, num_args}));
   }
 
   // constants

@@ -943,6 +943,164 @@ TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
       << "Expected the root operator lists to be the same";
 }
 
+TEST(LiteInterpreterTest, DefaultArgsConv) {
+  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
+  if (s && strcmp(s, "1") == 0)
+    return;
+
+  std::vector<torch::jit::IValue> inputs;
+
+  Module m("m");
+  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  m.register_parameter("bias", torch::ones({20}), false);
+  m.define(R"(
+    def forward(self, input):
+      return torch.conv2d(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], 1)
+  )");
+
+  m.get_method("forward").graph()->dump();
+  inputs.push_back(torch::ones({1, 1, 28, 28}));
+
+  auto outputref = m.forward(inputs).toTensor();
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  m._save_for_mobile("/Users/myuan/temp/args.ptl");
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 1; ++i) {
+    res = bc.get_method("forward")(inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(output.equal(outputref));
+}
+
+namespace {
+void testLiteModuleCompareResultTensors(Module& m, const std::vector<torch::jit::IValue>& inputs) {
+  auto outputref = m.forward(inputs).toTensor();
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    res = bc.get_method("forward")(inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(output.equal(outputref));
+}
+
+void testDefaultArgsPinv(int num_args) {
+  Module m("m");
+  if (num_args == 1) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input)
+    )");
+  } else if (num_args == 2) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5)
+    )");
+  } else if (num_args == 3) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5, True)
+    )");
+  }
+
+  std::vector<torch::jit::IValue> inputs;
+  inputs.push_back(torch::rand({28, 28}));
+  testLiteModuleCompareResultTensors(m, inputs);
+}
+}
+
+TEST(LiteInterpreterTest, DefaultArgsPinv) {
+
+  // Test with different number of specified arguments.
+  // Arguments not specified take default value.
+  for (int num_args = 1; num_args <= 3; ++num_args) {
+    testDefaultArgsPinv(num_args);
+  }
+
+//  bytecode with one specified argument:
+//  (6,
+//      ('__torch__.m.forward',
+//          (('instructions',
+//              (('STOREN', 1, 2),
+//                  ('DROPR', 1, 0),
+//                  ('MOVE', 2, 0),
+//                  ('OP', 0, 0),
+//                  ('RET', 0, 0))),
+//              ('operators', (('aten::linalg_pinv', '', 1),)),
+//              ('constants', (False, 1e-15)), # default constants are not used
+//              ('types', ()),
+//              ('register_size', 2)),
+//          (('arguments',
+//              ((('name', 'self'), ('type', '__torch__.m'), ('default_value', None)),
+//                  (('name', 'input'), ('type', 'Tensor'), ('default_value', None)))),
+//              ('returns',
+//                  ((('name', ''), ('type', 'Tensor'), ('default_value', None)),)))))
+
+//  bytecode with 2 specified argument:
+//  (6,
+//      ('__torch__.m.forward',
+//          (('instructions',
+//              (('STOREN', 1, 2),
+//                  ('DROPR', 1, 0),
+//                  ('MOVE', 2, 0),
+//                  ('LOADC', 1, 0), # added LOADC for specified argument
+//                  ('OP', 0, 0),
+//                  ('RET', 0, 0))),
+//              ('operators', (('aten::linalg_pinv', '', 2),)),
+//              ('constants', (False, 1e-05)), # updated constant table
+//              ('types', ()),
+//              ('register_size', 2)),
+//          (('arguments',
+//              ((('name', 'self'), ('type', '__torch__.m'), ('default_value', None)),
+//                  (('name', 'input'), ('type', 'Tensor'), ('default_value', None)))),
+//              ('returns',
+//                  ((('name', ''), ('type', 'Tensor'), ('default_value', None)),)))))
+
+//  bytecode with 3 specified arguments:
+//  (6,
+//      ('__torch__.m.forward',
+//          (('instructions',
+//              (('STOREN', 1, 2),
+//                  ('DROPR', 1, 0),
+//                  ('MOVE', 2, 0),
+//                  ('LOADC', 1, 0),
+//                  ('LOADC', 0, 0),
+//                  ('OP', 0, 0),
+//                  ('RET', 0, 0))),
+//              ('operators', (('aten::linalg_pinv', '', 3),)),
+//              ('constants', (True, 1e-05)),
+//              ('types', ()),
+//              ('register_size', 2)),
+//          (('arguments',
+//              ((('name', 'self'), ('type', '__torch__.m'), ('default_value', None)),
+//                  (('name', 'input'), ('type', 'Tensor'), ('default_value', None)))),
+//              ('returns',
+//                  ((('name', ''), ('type', 'Tensor'), ('default_value', None)),)))))
+
+// The second argument is specified, but the value is the same as the default value.
+// It's treated as "not specified" since the value can be fetched from schema.
+  Module m("m");
+  m.define(R"(
+    def forward(self, input):
+      return torch.linalg_pinv(input, 1e-15)
+  )");
+  torch::jit::MobileCode code(m.get_method("forward").graph(), "forward");
+  auto arg_nums = code.op_to_num_specified_args();
+  ASSERT_EQ(arg_nums.size(), 1);
+  ASSERT_EQ(arg_nums["aten::linalg_pinv"], 1);
+  std::vector<torch::jit::IValue> inputs;
+  inputs.push_back(torch::rand({28, 28}));
+  testLiteModuleCompareResultTensors(m, inputs);
+}
+
 namespace {
 static auto reg =
     torch::class_<TorchBindLiteInterpreterTestStruct>(
