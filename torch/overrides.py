@@ -163,7 +163,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sparse_csr_tensor,
         torch.tril_indices,
         torch.triu_indices,
-        torch.cov,
         torch.vander,
         torch.zeros,
         torch._jit_internal.boolean_dispatch,
