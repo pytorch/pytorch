@@ -1,5 +1,8 @@
 #pragma once
 
+#include <ATen/Tensor.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/core/List.h>
 #include <c10/core/TensorOptions.h>
 
 /*
@@ -57,6 +60,42 @@ check_tensor_options_and_extract_memory_format(
     return memory_format;
   } else {
     return options.memory_format_opt();
+  }
+}
+
+TORCH_API void common_device_check_failure(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName);
+
+inline void check_and_update_common_device(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
+  // TODO: Remove this check once all tensors are guaranteed to be defined
+  if (!tensor.defined()) {
+    return;
+  }
+
+  if (!common_device.has_value()) {
+    common_device = tensor.device();
+    return;
+  }
+
+  if (C10_UNLIKELY(common_device != tensor.device())) {
+    common_device_check_failure(common_device, tensor, methodName, argName);
+  }
+}
+
+inline void check_and_update_common_device(optional<Device>& common_device, const optional<at::Tensor>& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
+  if (tensor.has_value()) {
+    check_and_update_common_device(common_device, tensor.value(), methodName, argName);
+  }
+}
+
+inline void check_and_update_common_device(optional<Device>& common_device, at::TensorList tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
+  for (const auto& tensor : tensors) {
+    check_and_update_common_device(common_device, tensor, methodName, argName);
+  }
+}
+
+inline void check_and_update_common_device(optional<Device>& common_device, const List<optional<at::Tensor>>& tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
+  for (const auto& tensor : tensors) {
+    check_and_update_common_device(common_device, tensor, methodName, argName);
   }
 }
 } // namespace impl

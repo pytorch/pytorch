@@ -129,10 +129,12 @@
   variants: method
 
 - func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
+  device_check: NoCheck  # Tensor arguments allowed to be on different devices, see also _cudnn_ctc_loss
   dispatch:
     CUDA: _use_cudnn_ctc_loss
 
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
+  device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
   dispatch:
     CUDA: _cudnn_ctc_loss
 
@@ -4752,6 +4754,7 @@
     SparseCUDA: hspmm_sparse_cuda
 
 - func: copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
+  device_check: NoCheck  # Allows copy into different device
   variants: function
   dispatch:
     SparseCPU, SparseCUDA: copy_sparse_
@@ -9309,6 +9312,7 @@
     CPU, CUDA: linalg_lstsq_out
 
 - func: _lstsq_helper_(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float cond, str driver_name) -> Tensor(a!)
+  device_check: NoCheck  # MAGMA expects infos to be on CPU
   variants: function
   dispatch:
     CPU: _lstsq_helper_cpu
