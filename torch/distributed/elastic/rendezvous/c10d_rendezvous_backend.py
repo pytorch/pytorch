@@ -15,7 +15,7 @@ from torch.distributed import Store, TCPStore
 
 from .api import RendezvousConnectionError, RendezvousParameters, RendezvousStateError
 from .dynamic_rendezvous import RendezvousBackend, Token
-from .utils import _matches_machine_hostname, _parse_rendezvous_endpoint
+from .utils import _matches_machine_hostname, parse_rendezvous_endpoint
 
 log = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ class C10dRendezvousBackend(RendezvousBackend):
 
 
 def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
-    host, port = _parse_rendezvous_endpoint(params.endpoint, default_port=29500)
+    host, port = parse_rendezvous_endpoint(params.endpoint, default_port=29500)
 
     cfg_is_host = params.get_as_bool("is_host")
     # If the user has explicitly specified whether our process should host the

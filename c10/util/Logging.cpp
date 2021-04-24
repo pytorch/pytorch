@@ -13,6 +13,7 @@
 
 // Common code that we use regardless of whether we use glog or not.
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_use_fatal_for_enforce,
     false,
@@ -22,6 +23,7 @@ C10_DEFINE_bool(
 namespace c10 {
 
 namespace {
+// NOLINTNEXTLINE(modernize-redundant-void-arg)
 std::function<string(void)>* GetFetchStackTrace() {
   static std::function<string(void)> func = []() {
     return get_backtrace(/*frames_to_skip=*/1);
@@ -164,8 +166,11 @@ DECLARE_bool(logtostderr);
 // This backward compatibility flags are in order to deal with cases where
 // Caffe2 are not built with glog, but some init flags still pass in these
 // flags. They may go away in the future.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(minloglevel, 0, "Equivalent to glog minloglevel");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(v, 0, "Equivalent to glog verbose");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(logtostderr, false, "Equivalent to glog logtostderr");
 #endif // !defined(c10_USE_GLOG)
 
@@ -245,6 +250,7 @@ void ShowLogInfoToStderr() {
 #include <android/log.h>
 #endif // ANDROID
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_log_level,
     c10::GLOG_WARNING,

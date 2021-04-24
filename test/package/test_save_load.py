@@ -10,7 +10,7 @@ try:
     from .common import PackageTestCase
 except ImportError:
     # Support the case where we run this file directly.
-    from common import PackageTestCase  # type: ignore
+    from common import PackageTestCase
 
 from pathlib import Path
 
@@ -67,6 +67,53 @@ class TestSaveLoad(PackageTestCase):
         package_a_i = hi.import_module("package_a")
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
+
+    def test_save_module_with_module_object(self):
+        """
+        Test that save_module works with a module object
+        instead of a module name.
+        """
+        buffer = BytesIO()
+
+        with PackageExporter(buffer, verbose=False) as he:
+            import module_a
+
+            he.save_module(module_a)
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        module_a_i = hi.import_module("module_a")
+        self.assertEqual(module_a_i.result, "module_a")
+        self.assertIsNot(module_a, module_a_i)
+
+    def test_dunder_imports(self):
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
+            import package_b
+            obj = package_b.PackageBObject
+            he.save_pickle("res", "obj.pkl", obj)
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        loaded_obj = hi.load_pickle("res", "obj.pkl")
+
+        package_b = hi.import_module("package_b")
+        self.assertEqual(package_b.result, "package_b")
+
+        math = hi.import_module("math")
+        self.assertEqual(math.__name__, "math")
+
+        xml_sub_sub_package = hi.import_module("xml.sax.xmlreader")
+        self.assertEqual(xml_sub_sub_package.__name__, "xml.sax.xmlreader")
+
+        subpackage_1 = hi.import_module("package_b.subpackage_1")
+        self.assertEqual(subpackage_1.result, "subpackage_1")
+
+        subpackage_2 = hi.import_module("package_b.subpackage_2")
+        self.assertEqual(subpackage_2.result, "subpackage_2")
+
+        subsubpackage_0 = hi.import_module("package_b.subpackage_0.subsubpackage_0")
+        self.assertEqual(subsubpackage_0.result, "subsubpackage_0")
 
     def test_save_module_binary(self):
         f = BytesIO()
