@@ -138,6 +138,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
+    @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_TSAN, "test incompatible with tsan")
     def test_launch_user_script_bash(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
@@ -168,6 +169,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
+    @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_TSAN, "test incompatible with tsan")
     def test_launch_with_env_vars(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
