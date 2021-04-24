@@ -151,6 +151,8 @@ TESTS = [
     'distributed/pipeline/sync/test_worker',
     'distributed/optim/test_zero_redundancy_optimizer',
     'distributed/elastic/multiprocessing/api_test',
+    'distributed/elastic/timer/api_test',
+    "distributed/elastic/events/lib_test",
 ]
 
 # Tests need to be run with pytest.
@@ -181,7 +183,6 @@ USE_PYTEST_LIST = [
     'distributions/test_transforms',
     'distributions/test_utils',
     'test_typing',
-    "distributed/elastic/events/lib_test",
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -216,6 +217,7 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_worker',
     'distributed/optim/test_zero_redundancy_optimizer',
     'distributed/elastic/multiprocessing/api_test',
+    'distributed/elastic/timer/api_test',
 ]
 
 ROCM_BLOCKLIST = [

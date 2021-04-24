@@ -8,6 +8,7 @@ import unittest.mock as mock
 
 from torch.distributed.elastic.timer import TimerServer
 from torch.distributed.elastic.timer.api import RequestQueue, TimerRequest
+from torch.testing._internal.common_utils import run_tests
 
 
 class MockRequestQueue(RequestQueue):
@@ -72,3 +73,7 @@ class TimerApiTest(unittest.TestCase):
         request_queue.get.assert_called_with(request_queue.size(), max_interval)
         mock_register_timers.assert_called_with(request_queue.get(2, 1))
         mock_clear_timers.assert_called_with({1, 2})
+
+
+if __name__ == "__main__":
+    run_tests()
