@@ -121,8 +121,7 @@ TEST(Function, ValidInput) {
       at::ones({128}, at::kFloat)
   });
   EXPECT_NO_THROW(
-      f.run(c10::impl::toList(input)),
-      c10::Error);
+      f.run(c10::impl::toList(input)));
 }
 
 TEST(Function, InvalidInput) {
