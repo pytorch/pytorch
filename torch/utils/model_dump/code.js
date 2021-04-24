@@ -10,15 +10,17 @@ function humanFileSize(size) {
   if (size == 0) { return "0 B"; }
   var i = Math.floor( Math.log(size) / Math.log(1024) );
   return (size / Math.pow(1024, i)).toFixed(2) * 1 + ' ' + ['B', 'kB', 'MB', 'GB', 'TB'][i];
-};
+}
 
 function caret(down) {
   return down ? "\u25BE" : "\u25B8";
 }
 
 class Blamer {
-  blame_on_click = false;
-  aux_content_pane = null;
+  constructor() {
+    this.blame_on_click = false;
+    this.aux_content_pane = null;
+  }
 
   setAuxContentPane(pane) {
     this.aux_content_pane = pane;
@@ -38,12 +40,15 @@ class Blamer {
     }
     this.aux_content_pane.doBlame(arg);
   }
-};
+}
 
 let blame = new Blamer();
 
 class Hider extends Component {
-  state = { shown: this.props.shown === "true" }
+  constructor() {
+    super();
+    this.state = { shown: this.props.shown === "true" };
+  }
 
   render(_, {shown}) {
     return html`<h2>
@@ -93,11 +98,13 @@ function ModelStructureSection({model: {model_data}}) {
 }
 
 class ModelData extends Component {
-  state = { shown: false }
+  constructor() {
+    super();
+    this.state = { shown: false };
 
-  INLINE_TYPES = new Set(["boolean", "number", "string"])
-
-  IGNORED_STATE_KEYS = new Set(["training", "_is_full_backward_hook"])
+    this.INLINE_TYPES = new Set(["boolean", "number", "string"])
+    this.IGNORED_STATE_KEYS = new Set(["training", "_is_full_backward_hook"])
+  }
 
   click() {
     const shown = !this.state.shown;
@@ -171,6 +178,10 @@ class ModelData extends Component {
       // TODO: Check size, stride, offset, and numel and indicate if
       // the tensor doesn't use all data in storage.
       // TODO: Maybe show key?
+      void(offset);
+      void(stride);
+      void(key);
+      void(numel);
       return "tensor(" + parts.join(", ") + ")";
     }
     throw new Error("TODO: handle dict, etc.");
@@ -266,7 +277,10 @@ function CodeSection({model: {code_files}}) {
 }
 
 class OneCodeSection extends Component {
-  state = { shown: false }
+  constructor() {
+    super();
+    this.state = { shown: false };
+  }
 
   click() {
     const shown = !this.state.shown;
@@ -307,7 +321,10 @@ function ExtraJsonSection({files}) {
 }
 
 class OneJsonSection extends Component {
-  state = { shown: false }
+  constructor() {
+    super();
+    this.state = { shown: false };
+  }
 
   click() {
     const shown = !this.state.shown;
@@ -341,7 +358,10 @@ function ExtraPicklesSection({files}) {
 }
 
 class OnePickleSection extends Component {
-  state = { shown: false }
+  constructor() {
+    super();
+    this.state = { shown: false };
+  }
 
   click() {
     const shown = !this.state.shown;
@@ -365,8 +385,11 @@ class OnePickleSection extends Component {
 }
 
 class AuxContentPane extends Component {
-  state = {
-    blame_info: null,
+  constructor() {
+    super();
+    this.state = {
+      blame_info: null,
+    };
   }
 
   doBlame(arg) {
@@ -392,9 +415,12 @@ class AuxContentPane extends Component {
 }
 
 class App extends Component {
-  state = {
-    err: false,
-    model: null,
+  constructor() {
+    super();
+    this.state = {
+      err: false,
+      model: null,
+    };
   }
 
   componentDidMount() {
@@ -416,6 +442,7 @@ class App extends Component {
   }
 
   componentDidCatch(error) {
+    void(error);
     this.setState({...this.state, err: true});
   }
 

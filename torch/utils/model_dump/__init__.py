@@ -81,7 +81,7 @@ def hierarchical_pickle(data):
     if isinstance(data, (bool, int, float, str, type(None))):
         return data
     if isinstance(data, list):
-        return [ hierarchical_pickle(d) for d in data ]
+        return [hierarchical_pickle(d) for d in data]
     if isinstance(data, tuple):
         return {
             "__tuple_values__": hierarchical_pickle(list(data)),
@@ -109,13 +109,13 @@ def hierarchical_pickle(data):
             assert storage.state is None
             assert isinstance(storage.args, tuple)
             assert len(storage.args) == 1
-            assert isinstance(storage.args[0], tuple)
-            assert len(storage.args[0]) == 5
-            assert storage.args[0][0] == "storage"
-            assert isinstance(storage.args[0][1], torch.utils.show_pickle.FakeClass)
-            assert storage.args[0][1].module == "torch"
-            assert storage.args[0][1].name.endswith("Storage")
             sa = storage.args[0]
+            assert isinstance(sa, tuple)
+            assert len(sa) == 5
+            assert sa[0] == "storage"
+            assert isinstance(sa[1], torch.utils.show_pickle.FakeClass)
+            assert sa[1].module == "torch"
+            assert sa[1].name.endswith("Storage")
             storage_info = [sa[1].name.replace("Storage", "")] + list(sa[2:])
             return {"__tensor_v2__": [storage_info, offset, size, stride, requires_grad]}
         if typename == "torch.jit._pickle.restore_type_tag":
@@ -166,13 +166,13 @@ def get_model_info(
             elif prefix != path_prefix:
                 raise Exception(f"Mismatched prefixes: {path_prefix} != {prefix}")
             zip_files.append(dict(
-                    filename=zi.filename,
-                    compression=zi.compress_type,
-                    compressed_size=zi.compress_size,
-                    file_size=zi.file_size,
-                    ))
+                filename=zi.filename,
+                compression=zi.compress_type,
+                compressed_size=zi.compress_size,
+                file_size=zi.file_size,
+            ))
 
-        assert path_prefix != None
+        assert path_prefix is not None
         version = zf.read(path_prefix + "/version").decode("utf-8").strip()
 
         with zf.open(path_prefix + "/data.pkl") as handle:
@@ -186,12 +186,12 @@ def get_model_info(
         # so we have to do it manually.
         interned_strings = {}
 
-        code_files = {}
         def ist(s):
             if s not in interned_strings:
                 interned_strings[s] = len(interned_strings)
             return interned_strings[s]
 
+        code_files = {}
         for zi in zf.infolist():
             if not zi.filename.endswith(".py"):
                 continue
@@ -253,7 +253,6 @@ def get_model_info(
                 continue
             extra_pickles[zi.filename] = contents
 
-
     return {"model": dict(
         title=title,
         file_size=file_size,
@@ -264,7 +263,7 @@ def get_model_info(
         model_data=model_data,
         extra_files_jsons=extra_files_jsons,
         extra_pickles=extra_pickles,
-        )}
+    )}
 
 
 def get_inline_skeleton():
@@ -292,8 +291,8 @@ def burn_in_info(skeleton, info):
     """
 
     return skeleton.replace(
-            "BURNED_IN_MODEL_INFO = null",
-            "BURNED_IN_MODEL_INFO = " + json.dumps(info).replace("/", "\/"))
+        "BURNED_IN_MODEL_INFO = null",
+        "BURNED_IN_MODEL_INFO = " + json.dumps(info).replace("/", "\\/"))
 
 
 def main(argv, stdout=None):
