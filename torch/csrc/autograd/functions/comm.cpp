@@ -124,7 +124,7 @@ variable_list Gather::apply(variable_list&& inputs) {
   // so no need for extra logic here
   at::Tensor variable;
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     // This is special logic for torch::cuda::gather!
     const auto destination_index =
         destination_device_.is_cpu() ? -1 : destination_device_.index();
