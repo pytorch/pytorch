@@ -8,6 +8,7 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
+#include "lazy_tensor_core/csrc/ops/index_along_dim.h"
 #include "lazy_tensor_core/csrc/ops/index_get.h"
 #include "lazy_tensor_core/csrc/ops/index_put.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
@@ -150,8 +151,8 @@ std::vector<LazyTensor> WrapIndicesOnce(
 ir::NodePtr IndexFillOp(const ir::Value& buffer, lazy_tensors::int64 dim,
                         const ir::Value& index, const ir::Value& value) {
   ir::Value index_rank1 = EnsureRank1(index);
-  ir::NodePtr node = ir::ops::GenericOp(ir::OpKind(at::aten::index_fill),
-                                        {buffer, index_rank1, value});
+  ir::NodePtr node = ir::MakeNode<ir::ops::IndexAlongDim>(
+      ir::OpKind(at::aten::index_fill), buffer, index_rank1, value, dim);
   node->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
@@ -160,8 +161,8 @@ ir::NodePtr IndexFillOp(const ir::Value& buffer, lazy_tensors::int64 dim,
 ir::NodePtr IndexAddOp(const ir::Value& buffer, lazy_tensors::int64 dim,
                        const ir::Value& index, const ir::Value& source) {
   ir::Value index_rank1 = EnsureRank1(index);
-  ir::NodePtr node = ir::ops::GenericOp(ir::OpKind(at::aten::index_add),
-                                        {buffer, index_rank1, source});
+  ir::NodePtr node = ir::MakeNode<ir::ops::IndexAlongDim>(
+      ir::OpKind(at::aten::index_add), buffer, index_rank1, source, dim);
   node->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
@@ -170,8 +171,8 @@ ir::NodePtr IndexAddOp(const ir::Value& buffer, lazy_tensors::int64 dim,
 ir::NodePtr IndexCopyOp(const ir::Value& buffer, lazy_tensors::int64 dim,
                         const ir::Value& index, const ir::Value& source) {
   ir::Value index_rank1 = EnsureRank1(index);
-  ir::NodePtr node = ir::ops::GenericOp(ir::OpKind(at::aten::index_copy),
-                                        {buffer, index_rank1, source});
+  ir::NodePtr node = ir::MakeNode<ir::ops::IndexAlongDim>(
+      ir::OpKind(at::aten::index_copy), buffer, index_rank1, source, dim);
   node->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
