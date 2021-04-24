@@ -43,6 +43,7 @@ namespace detail {
 static uint64_t readURandomLong()
 {
   int randDev = open("/dev/urandom", O_RDONLY);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint64_t randValue;
   TORCH_CHECK(randDev >= 0, "Unable to open /dev/urandom");
   ssize_t readBytes = read(randDev, &randValue, sizeof(randValue));
@@ -67,6 +68,7 @@ static uint64_t readURandomLong()
  *   a 32 bit number to 64 bit.
  */
 uint64_t getNonDeterministicRandom(bool is_cuda) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint64_t s;
   if (!is_cuda) {
     #ifdef _WIN32
@@ -77,6 +79,7 @@ uint64_t getNonDeterministicRandom(bool is_cuda) {
   } else {
     std::random_device rd;
     // limit to 53 bits to ensure unique representation in double
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     s = ((((uint64_t)rd()) << 32) + rd()) & 0x1FFFFFFFFFFFFF;
   }
   return s;
