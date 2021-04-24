@@ -1,7 +1,7 @@
 import torch
 import io
 
-from torch.jit.mobile import _load_for_lite_interpreter, _get_bytecode_version, _backport_for_mobile_to_buffer, _backport_for_mobile
+from torch.jit.mobile import _load_for_lite_interpreter, _get_bytecode_version, _backport_for_mobile_to_buffer, _backport_for_mobile, _backport_to_version_for_mobile_to_buffer, _backport_to_version_for_mobile
 from torch.testing._internal.common_utils import TestCase, run_tests
 import pathlib
 import tempfile
@@ -153,6 +153,56 @@ class testVariousModelVersions(TestCase):
         mobile_module_result = mobile_module(module_input)
         expected_mobile_module_result = 3 * torch.ones([2, 4], dtype=torch.float64)
         torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
+
+    def test_backport_to_version_bytecode_from_file_to_file(self):
+        script_module_v5 = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            backport_model_path = pathlib.Path(tmpdirname, "backport_script_module_v5.ptl")
+            _backport_to_version_for_mobile(script_module_v5, backport_model_path, 4)
+            buf = io.StringIO()
+            torch.utils.show_pickle.main(["", tmpdirname + "/" + backport_model_path.name + "@*/bytecode.pkl"], output_stream=buf)
+            output = buf.getvalue()
+
+            expected_result = SCRIPT_MODULE_V4_BYTECODE_PKL
+            acutal_result_clean = "".join(output.split())
+            expect_result_clean = "".join(expected_result.split())
+            isMatch = fnmatch.fnmatch(acutal_result_clean, expect_result_clean)
+            assert(isMatch)
+
+            # Load model v5 and run forward method
+            mobile_module = _load_for_lite_interpreter(str(backport_model_path))
+            module_input = 1
+            mobile_module_result = mobile_module(module_input)
+            expected_mobile_module_result = 3 * torch.ones([2, 4], dtype=torch.float64)
+            torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
+            shutil.rmtree(tmpdirname)
+
+    def test_backport_to_version_bytecode_from_file_to_buffer(self):
+        script_module_v5 = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
+
+        # Backport model to v4
+        buffer = _backport_to_version_for_mobile_to_buffer(script_module_v5, 4)
+        buf = io.StringIO()
+        bytesio = io.BytesIO(buffer)
+        backport_version = _get_bytecode_version(bytesio)
+        assert(backport_version == 4)
+
+
+    def test_run_backport_to_version_bytecode_from_file_to_buffer(self):
+        script_module_v5 = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
+
+        # Backport model to v4
+        buffer = _backport_to_version_for_mobile_to_buffer(script_module_v5, 4)
+        bytesio = io.BytesIO(buffer)
+
+        # Load model v4 from backport and run forward method
+        mobile_module = _load_for_lite_interpreter(bytesio)
+        module_input = 1
+        mobile_module_result = mobile_module(module_input)
+        expected_mobile_module_result = 3 * torch.ones([2, 4], dtype=torch.float64)
+        torch.testing.assert_allclose(mobile_module_result, expected_mobile_module_result)
+
 
     def test_load_and_run_model(self):
         script_module_v4 = pytorch_test_dri / "cpp" / "jit" / "script_module_v4.ptl"
