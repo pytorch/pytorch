@@ -179,6 +179,13 @@ class NativeFunction:
     # What python module to put the function in
     python_module: Optional[str]
 
+    # Alias name of the function
+    # TODO make it a list
+    alias: Optional[str]
+
+    # What python module to put alias in
+    alias_python_module: Optional[str]
+
     # TODO: figure out what this does
     category_override: Optional[str]
 
@@ -306,6 +313,12 @@ class NativeFunction:
         python_module = e.pop('python_module', None)
         assert python_module is None or isinstance(python_module, str), f'not a str: {python_module}'
 
+        alias = e.pop('alias', None)
+        assert alias is None or isinstance(alias, str), f'not a str: {python_module}'
+
+        alias_python_module = e.pop('alias_python_module', None)
+        assert alias_python_module is None or isinstance(alias_python_module, str), f'not a str: {python_python_module}'
+
         category_override = e.pop('category_override', None)
         assert category_override is None or isinstance(category_override, str), f'not a str: {category_override}'
 
@@ -356,6 +369,8 @@ class NativeFunction:
             manual_kernel_registration=manual_kernel_registration,
             manual_cpp_binding=manual_cpp_binding,
             python_module=python_module,
+            alias=alias,
+            alias_python_module=alias_python_module,
             category_override=category_override,
             dispatch=dispatch,
             device_guard=device_guard,
