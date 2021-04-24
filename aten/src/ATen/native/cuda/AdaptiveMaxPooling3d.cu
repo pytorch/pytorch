@@ -373,7 +373,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
  const Tensor& indices,
  const Tensor& gradInput) {
   TensorArg grad_input_arg{gradInput, "gradInput", 1};
-  TensorArg grad_output_arg{gradOutput_, "gradOutput_", 2};
+  TensorArg grad_output_arg{gradOutput, "gradOutput", 2};
   TensorArg input_arg{input, "input", 3};
   TensorArg indices_arg{indices, "indices", 4};
 
