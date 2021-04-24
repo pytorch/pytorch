@@ -49,8 +49,7 @@ bool should_use_small_sort(const Tensor &self, int64_t dim) {
 
 std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim);
 
-void fillSliceWithIndex(Tensor& t,
-                        int dim) {
+void fillSliceWithIndex(Tensor& t,int dim) {
   if (t.numel()) {
     auto sizes = DimVector(t.dim(), 1);
     sizes[dim] = t.sizes()[dim];
@@ -71,7 +70,6 @@ void sortKeyValueInplace(Tensor& key,
   TORCH_CHECK(key.sizes() == value.sizes(),
               "Key tensor must have same size as value tensor");
   int dims = value.dim();
-  dims = dims == 0 ? 1 : dims;
   TORCH_CHECK(dims <= MAX_DIMS, "value tensor has too many dimensions");
   // if key and value tensors have the same size, we do not need to check both
 
@@ -81,7 +79,7 @@ void sortKeyValueInplace(Tensor& key,
     return;
   }
 
-  int64_t keySliceSize = key.dim() == 0 ? 1 : key.size(dim);
+  int64_t keySliceSize = key.size(dim);
   ptrdiff_t keySlices = inElements / keySliceSize;
 
   // The amount of shared memory and block size is based on
@@ -160,7 +158,7 @@ void sortKeyValueInplace(Tensor& key,
       /* Nothing to do, data already sorted */          \
       break;                                            \
       default:                                          \
-      TORCH_INTERNAL_ASSERT(false);                                    \
+      TORCH_INTERNAL_ASSERT(false);                     \
     }                                                   \
   }
 
@@ -175,12 +173,6 @@ void sortKeyValueInplace(Tensor& key,
       at::cuda::detail::TensorInfo<int64_t, unsigned int> valueInfo =
         at::cuda::detail::getTensorInfo<int64_t, unsigned int>(value);
 
-      if (!key.dim()) {
-        keyInfo.dims = 1;
-        valueInfo.dims = 1;
-        keyInfo.strides[0] = 1;
-        valueInfo.strides[0] = 1;
-      }
       keyInfo.reduceDim(dim);
       int collapseKeyDim = keyInfo.collapseDims(dim);
       valueInfo.reduceDim(dim);
@@ -205,12 +197,6 @@ void sortKeyValueInplace(Tensor& key,
       at::cuda::detail::TensorInfo<int64_t, uint64_t> valueInfo =
         at::cuda::detail::getTensorInfo<int64_t, uint64_t>(value);
 
-      if (!key.dim()) {
-        keyInfo.dims = 1;
-        valueInfo.dims = 1;
-        keyInfo.strides[0] = 1;
-        valueInfo.strides[0] = 1;
-      }
       keyInfo.reduceDim(dim);
       int collapseKeyDim = keyInfo.collapseDims(dim);
       valueInfo.reduceDim(dim);
@@ -267,31 +253,6 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
 
   TORCH_CHECK(nsort <= std::numeric_limits<int>::max(),
     "The dimension being sorted can not have more than INT_MAX elsments.");
-  // use inplace algorithm for smaller input sizes without stable=True
-  if (should_use_small_sort(self, dim) && !stable.value()) {
-    // from thc: sorted->values, indices->indices, input->self
-
-    if (!values.defined()) {
-      values = at::empty_like(self);
-    }
-    if (!indices.defined()) {
-      indices = at::empty_like(self, self.options().dtype(kLong));
-    }
-
-    // Make sure sufficient output space is allocated
-    std::vector<int64_t> self_size = self.sizes().vec();
-    at::native::resize_output(values, self_size);
-    at::native::resize_output(indices, self_size);
-    fillSliceWithIndex(indices, dim);
-
-    // We sort k/v pairs in-place; copy unsorted input to output
-    values.copy_(self);
-
-    // Sort using our in-place k/v kernel that supports arbitrary
-    // layout
-    sortKeyValueInplace(values, indices, dim, descending);
-    return std::forward_as_tuple(values, indices);
-  }
 
   if (ndim == 0) {
     if (!values.defined()) {
@@ -306,6 +267,32 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
       indices.resize_as_(self);
       indices.zero_();
     }
+    return std::forward_as_tuple(values, indices);
+  }
+
+  // use inplace algorithm for smaller input sizes without stable=True
+  if (should_use_small_sort(self, dim) && !stable.value()) {
+    // from thc: sorted->values, indices->indices, input->self
+
+    if (!values.defined()) {
+      values = at::empty_like(self);
+    }
+    if (!indices.defined()) {
+      indices = at::empty_like(self, self.options().dtype(kLong));
+    }
+
+    // Make sure sufficient output space is allocated
+    auto self_size = self.sizes();
+    at::native::resize_output(values, self_size);
+    at::native::resize_output(indices, self_size);
+    fillSliceWithIndex(indices, dim);
+
+    // We sort k/v pairs in-place; copy unsorted input to output
+    values.copy_(self);
+
+    // Sort using our in-place k/v kernel that supports arbitrary
+    // layout
+    sortKeyValueInplace(values, indices, dim, descending);
     return std::forward_as_tuple(values, indices);
   }
 

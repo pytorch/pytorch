@@ -11,9 +11,6 @@
 
 namespace at { namespace native {
 
-void fillSliceWithIndex(Tensor& t,
-                        int dim);
-
 // at::cuda::detail::TensorInfo version
 // Sorts (key, value) pairs (in different tensors) in-place; i.e.,
 // modifies the input `keys` and `values`
