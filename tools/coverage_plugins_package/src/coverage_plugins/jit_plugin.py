@@ -39,9 +39,11 @@ class JitPlugin(CoveragePlugin):
             # built-in modules or functions as those do not seem to be JIT'd either.
             if is_not_builtin_class(obj) or ismodule(obj) or ismethod(obj) or isfunction(obj) or iscode(obj):
                 filename = getsourcefile(obj)
-                sourcelines, starting_lineno = getsourcelines(obj)
-                line_data = {filename: range(starting_lineno, starting_lineno + len(sourcelines))}
-                cov_data.add_lines(line_data)
+                # We don't want to report for filename = None
+                if filename:
+                    sourcelines, starting_lineno = getsourcelines(obj)
+                    line_data = {filename: range(starting_lineno, starting_lineno + len(sourcelines))}
+                    cov_data.add_lines(line_data)
         super().dynamic_context(frame)
 
 def coverage_init(reg, options):
