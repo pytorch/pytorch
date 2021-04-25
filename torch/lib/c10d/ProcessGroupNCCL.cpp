@@ -184,6 +184,18 @@ std::string getExceptionMsgFromExceptionPtr(
   }
 }
 
+std::vector<c10::DeviceIndex> getIndicesOfDevices(
+    const std::vector<c10::Device>& devices) {
+  std::vector<c10::DeviceIndex> deviceIndices;
+  deviceIndices.reserve(devices.size());
+  for (const at::Device& device : devices) {
+    TORCH_INTERNAL_ASSERT(device.is_cuda());
+    deviceIndices.push_back(device.index());
+  }
+  return deviceIndices;
+}
+
+
 } // namespace
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
@@ -1058,6 +1070,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     PostProcess post,
     OpType opType,
     const char* profilingTitle) {
+
+  // Bump collective counter
+  if (sequenceNum_) {
+    sequenceNum_->increment();
+  }
   const auto devices = getDeviceList(inputs);
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices, opType);
@@ -1114,7 +1131,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   {
     at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
     work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
-        c10::ListType::create(c10::TensorType::get()));
+        c10::ListType::create(c10::TensorType::get()),
+        getIndicesOfDevices(devices));
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
@@ -1211,7 +1229,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   if (opType == OpType::RECV) {
     at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
     work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
-        c10::ListType::create(c10::TensorType::get()));
+        c10::ListType::create(c10::TensorType::get()),
+        getIndicesOfDevices(devices));
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
@@ -1781,12 +1800,46 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
   throw std::runtime_error("ProcessGroupNCCL does not support recvAnysource");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_base(
-    at::Tensor& /*unused */,
-    at::Tensor& /*unused */,
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
     const AllgatherOptions& /*unused */) {
-  throw std::runtime_error(
-      "no support for allgather_base in NCCL process group");
+  check_gpu_single_tensor(input_tensor);
+  check_gpu_single_tensor(output_tensor);
+
+  if (input_tensor.dtype() != output_tensor.dtype()) {
+    throw std::runtime_error("output tensor must have the same type as input tensor");
+  }
+
+  if (input_tensor.numel() * size_ != output_tensor.numel()) {
+    throw std::runtime_error("output tensor size must be equal to world_size times input tensor size");
+  }
+
+  // just a wrapper to fit the collective interface
+  auto inputs = std::vector<at::Tensor> {input_tensor};
+  auto outputs = std::vector<at::Tensor> {output_tensor};
+
+  return collective(
+      inputs,
+      outputs,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        c10::cuda::CUDACachingAllocator::recordStream(
+            output.storage().data_ptr(), stream);
+        return ncclAllGather(
+            input.data_ptr(),
+            output.data_ptr(),
+            input.numel(),
+            getNcclDataType(input.scalar_type()),
+            comm,
+            stream.stream());
+      },
+      [&](std::vector<at::cuda::CUDAStream>&) {},
+      [&](std::vector<at::cuda::CUDAStream>&) {},
+      OpType::_ALLGATHER_BASE,
+      "nccl:_all_gather_base");
 }
 
 } // namespace c10d

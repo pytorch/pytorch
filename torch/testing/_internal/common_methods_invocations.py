@@ -20,9 +20,8 @@ from torch.testing import \
      integral_types_and, all_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
-     skipCPUIfNoLapack, skipCPUIfNoMkl,
-     skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
+    (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
@@ -178,6 +177,7 @@ class OpInfo(object):
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
                  variant_test_name='',  # additional string to include in the test name
                  supports_autograd=True,  # support for autograd
+                 supports_gradgrad=True,  # support second order gradients (this value is ignored if supports_autograd=False)
                  supports_inplace_autograd=None,  # whether the operation supports inplace autograd
                                                   # defaults to supports_autograd's value
                  supports_complex_autograd=None,  # whether the operation supports complex autograd
@@ -239,6 +239,7 @@ class OpInfo(object):
             self.supports_complex_autograd = supports_autograd
 
         self.gradcheck_wrapper = gradcheck_wrapper
+        self.supports_gradgrad = supports_gradgrad
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
@@ -929,6 +930,39 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(
             make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(shape,)) for size, shape in test_cases)
+
+def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
+    small_S = 2
+    test_cases = (
+        ((S, S, 2), (S, S + 1, 2)),
+        ((S, S), (S, S)),
+        ((S, S, S), (S, S, S)),
+        ((3, 5), (3, 5)),
+        ((2, 3, 5), (2, 3, 5)),
+        ((1, 2, 3), (1, 2, 3)),
+        ((1, 1), (S, 1)),
+        ((0, 5), (4, 5)),
+        ((4, 5), (0, 5)),
+        ((0, 4, 5), (3, 5)),
+        ((4, 5), (0, 3, 5)),
+        ((0, 4, 5), (1, 3, 5)),
+        ((1, 4, 5), (0, 3, 5)),
+        # Using S here would make this one test take 9s
+        ((small_S, small_S, small_S + 1, 2), (small_S, small_S, small_S + 2, 2)),
+        ((small_S, 1, 1, small_S), (1, small_S, small_S)),
+        ((1, 1, small_S), (small_S, 1, small_S, small_S)),
+    )
+
+    samples = []
+    for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+        for p in [0, 1, 2, 3, 0.5, 1.5, 2.5, float("inf")]:
+            for t1_size, t2_size in test_cases:
+                # The args should never be non-contiguous as this is not supported in the backward
+                samples.append(SampleInput(
+                    make_tensor(t1_size, device, dtype, requires_grad=requires_grad, noncontiguous=False),
+                    args=(make_tensor(t2_size, device, dtype, requires_grad=requires_grad, noncontiguous=False), p, cm)))
+
+    return samples
 
 def sample_inputs_comparison_ops(self, device, dtype, requires_grad, **kwargs):
     test_cases = (
@@ -2191,6 +2225,15 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
 def sample_inputs_linalg_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=True)
 
+def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **kwargs):
+    batches = [(), (0, ), (2, ), (1, 1)]
+    ns = [5, 2, 0]
+    samples = []
+    for batch, (m, n) in product(batches, product(ns, ns)):
+        a = make_tensor((*batch, m, n), device, dtype, low=None, high=None, requires_grad=requires_grad)
+        samples.append(SampleInput(a))
+    return samples
+
 def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
     eigvecs = make_tensor((S, S), device=device, dtype=dtype,
                           low=None, high=None)
@@ -2241,6 +2284,18 @@ def sample_inputs_linalg_qr(op_info, device, dtype, requires_grad=False, **kwarg
         a = torch.randn(*batch, m, n, dtype=dtype, device=device, requires_grad=requires_grad)
         out.append(SampleInput(a))
     return out
+
+def sample_inputs_geqrf(op_info, device, dtype, requires_grad=False):
+    batches = [(), (0, ), (2, ), (1, 1)]
+    ns = [5, 2, 0]
+    samples = []
+    for batch, (m, n) in product(batches, product(ns, ns)):
+        # TODO: CUDA path doesn't work with batched or empty inputs
+        if torch.device(device).type == 'cuda' and (batch != () or m == 0 or n == 0):
+            continue
+        a = make_tensor((*batch, m, n), device, dtype, low=None, high=None, requires_grad=requires_grad)
+        samples.append(SampleInput(a))
+    return samples
 
 def sample_inputs_flip(op_info, device, dtype, requires_grad, **kwargs):
     tensors = (
@@ -3386,6 +3441,11 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=None,
                    dtypesIfROCM=None,
                    supports_autograd=False),
+    OpInfo('cdist',
+           dtypes=floating_types(),
+           supports_out=False,
+           supports_gradgrad=False,
+           sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
                    dtypes=floating_types_and(torch.half),
@@ -3772,6 +3832,17 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_comparison_ops),
+    OpInfo('geqrf',
+           dtypes=floating_and_complex_types(),
+           dtypesIfCPU=floating_and_complex_types(),
+           dtypesIfCUDA=floating_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_geqrf,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # TODO: geqrf_out for CUDA inputs modifies the stride of "out" tensors
+               SkipInfo('TestCommon', 'test_out', device_type='cuda'),
+           )),
     OpInfo('gt',
            aliases=('greater',),
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
@@ -4676,6 +4747,15 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are very slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+    OpInfo('linalg.svdvals',
+           op=torch.linalg.svdvals,
+           aten_name='linalg_svdvals',
+           dtypes=floating_and_complex_types(),
+           sample_inputs_func=sample_inputs_linalg_svdvals,
+           supports_autograd=False,
+           decorators=[
+               skipCUDAIfNoMagmaAndNoCusolver,
+               skipCPUIfNoLapack]),
     OpInfo('polar',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_polar),
@@ -5411,8 +5491,6 @@ def method_tests():
         ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
         ('kthvalue', (S, S, S), (2,)),
         ('kthvalue', (S, S, S), (2, 1,), 'dim', (), [1]),
-        ('kthvalue', (S, S, S), (2, 1,), 'dim_alert_nondeterministic', (), [1],
-            [skipMeta, expectedAlertNondeterministic('kthvalue CUDA', 'cuda')]),
         ('kthvalue', (S, S, S), (2, 1, True,), 'keepdim_dim', (), [1]),
         ('kthvalue', (S,), (2, 0,), 'dim_1d', (), [1]),
         ('kthvalue', (S,), (2, 0, True,), 'keepdim_dim_1d', (), [1]),
@@ -5421,8 +5499,6 @@ def method_tests():
         ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1]),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
-        ('median', (S, S, S), (1,), 'dim_alert_nondeterministic', (), [0],
-            [skipMeta, expectedAlertNondeterministic('median CUDA with indices output', 'cuda')]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
         ('median', (), NO_ARGS, 'scalar'),
         ('median', (), (0,), 'scalar_dim', (), [0]),
