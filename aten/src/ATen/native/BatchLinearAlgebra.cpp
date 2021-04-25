@@ -2813,6 +2813,36 @@ std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(const Tensor& self, bool fu
   return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, VT);
 }
 
+Tensor linalg_svdvals(const Tensor& input) {
+  TORCH_CHECK(
+      input.dim() >= 2,
+      "torch.linalg.svdvals: input should have at least 2 dimensions, but has ",
+      input.dim(),
+      " dimensions instead");
+  Tensor singular_values;
+  std::tie(std::ignore, singular_values, std::ignore) =
+      at::_svd_helper(input, /*full_matrices=*/false, /*compute_uv=*/false);
+  return singular_values;
+}
+
+Tensor& linalg_svdvals_out(const Tensor& input, Tensor& result) {
+  checkSameDevice("torch.linalg.svdvals", result, input);
+
+  // singular values are always real-valued
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  checkLinalgCompatibleDtype(
+      "torch.linalg.svdvals", result.scalar_type(), real_dtype);
+
+  Tensor singular_values_tmp;
+  std::tie(std::ignore, singular_values_tmp, std::ignore) =
+      at::_svd_helper(input, /*full_matrices=*/false, /*compute_uv=*/false);
+
+  at::native::resize_output(result, singular_values_tmp.sizes());
+  result.copy_(singular_values_tmp);
+
+  return result;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #ifdef USE_LAPACK

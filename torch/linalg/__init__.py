@@ -1021,6 +1021,8 @@ always be real-valued, even if :attr:`input` is complex.
 .. note:: Unlike NumPy's `linalg.svd`, :func:`torch.linalg.svd` always returns a namedtuple
           of three tensors, even when :attr:`compute_uv` is `False`. This behavior may
           change in a future PyTorch release.
+          Please use :func:`torch.linalg.svdvals`, which computes only the singular values,
+          instead of ``compute_uv=False``.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch are returned in descending order.
@@ -1101,6 +1103,46 @@ Example::
 
 .. _the resulting vectors will span the same subspace:
        (https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD)
+""")
+
+svdvals = _add_docstr(_linalg.linalg_svdvals, r"""
+linalg.svdvals(input, *, out=None) -> Tensor
+
+Computes the singular values of a matrix.
+
+The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
+then the singular values of each matrix in the batch are returned in descending order.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
+
+.. note:: This function is not differentiable. Please use :func:`torch.linalg.svd`
+          instead, which also computes the singular vectors.
+
+.. note:: This function is equivalent to NumPy's ``linalg.svd`` with ``compute_uv=False``.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+Args:
+    input (Tensor): the `m \times n` matrix or the batch of such matrices of size
+                    `(*, m, n)` where `*` is one or more batch dimensions.
+
+Keyword args:
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+
+Example::
+
+    >>> import torch
+    >>> a = torch.randn(5, 3)
+    >>> a
+    tensor([[-1.3490, -0.1723,  0.7730],
+            [-1.6118, -0.3385, -0.6490],
+            [ 0.0908,  2.0704,  0.5647],
+            [-0.6451,  0.1911,  0.7353],
+            [ 0.5247,  0.5160,  0.5110]])
+    >>> s = torch.linalg.svdvals(a)
+    >>> s
+    tensor([2.5139, 2.1087, 1.1066])
 """)
 
 cond = _add_docstr(_linalg.linalg_cond, r"""
