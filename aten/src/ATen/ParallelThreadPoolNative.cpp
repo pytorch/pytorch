@@ -17,6 +17,7 @@ const int CONSUMED = -2;
 // (CONSUMED - thread pool is initialized)
 // or
 // NOT_SET -> CONSUMED
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int> num_interop_threads{NOT_SET};
 
 // thread pool global instance is hidden,
@@ -45,6 +46,7 @@ std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool);
 
 void set_num_interop_threads(int nthreads) {
@@ -79,8 +81,10 @@ void launch_no_thread_state(std::function<void()> fn) {
 } // namespace internal
 
 void launch(std::function<void()> func) {
+  // NOLINTNEXTLINE(modernize-avoid-bind)
   internal::launch_no_thread_state(std::bind([](
     std::function<void()> f, ThreadLocalState thread_locals) {
+      // NOLINTNEXTLINE(performance-move-const-arg)
       ThreadLocalStateGuard guard(std::move(thread_locals));
       f();
     },
