@@ -74,6 +74,7 @@ CREATE_UNARY_FLOAT_META_FUNC(tanh)
 CREATE_UNARY_META_FUNC(bitwise_not)
 CREATE_UNARY_META_FUNC(frac)
 CREATE_UNARY_META_FUNC(i0)
+CREATE_UNARY_META_FUNC(neg)
 CREATE_UNARY_META_FUNC(round)
 
 } // namespace meta
@@ -112,6 +113,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(log)
 CREATE_UNARY_TORCH_IMPL_FUNC(log10)
 CREATE_UNARY_TORCH_IMPL_FUNC(log1p)
 CREATE_UNARY_TORCH_IMPL_FUNC(log2)
+CREATE_UNARY_TORCH_IMPL_FUNC(neg)
 CREATE_UNARY_TORCH_IMPL_FUNC(reciprocal)
 CREATE_UNARY_TORCH_IMPL_FUNC(round)
 CREATE_UNARY_TORCH_IMPL_FUNC(rsqrt)
@@ -492,15 +494,6 @@ Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
 Tensor& fix_out(const Tensor& self, Tensor& result) { return at::trunc_out(result, self); }
 Tensor fix(const Tensor& self) { return self.trunc(); }
 Tensor& fix_(Tensor& self) { return self.trunc_(); }
-
-Tensor& neg_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() != kBool,
-              "Negation, the `-` operator, on a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
-  return unary_op_impl_out(result, self, neg_stub);
-}
-Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
-Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
 Tensor& negative_out(const Tensor& self, Tensor& result) { return at::neg_out(result, self); }
 Tensor negative(const Tensor& self) { return self.neg(); }
