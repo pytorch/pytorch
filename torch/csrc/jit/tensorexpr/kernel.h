@@ -12,7 +12,7 @@ namespace jit {
 namespace tensorexpr {
 
 // Returns true if the TE fuser supports this conv2d.
-bool conv2dIsSupported(const Node* node);
+bool conv2dIsSupportedJit(const Node* node);
 // Returns true if the TE fuser supports this matmul.
 bool matmulIsSupported(const Node* node);
 template <typename T>
@@ -35,14 +35,49 @@ using ArgValue = c10::variant<
     BufList,
     IntList,
     ArgNone>;
+
+inline std::string getArgValueName(const ArgValue& a) {
+  if (c10::get_if<tensorexpr::BufHandle>(&a)) {
+    return "BufHandle";
+  } else if (c10::get_if<tensorexpr::VarHandle>(&a)) {
+    return "VarHandle";
+  } else if (c10::get_if<double>(&a)) {
+    return "double";
+  } else if (c10::get_if<int64_t>(&a)) {
+    return "int64_t";
+  } else if (c10::get_if<bool>(&a)) {
+    return "bool";
+  } else if (c10::get_if<BufList>(&a)) {
+    return "BufList";
+  } else if (c10::get_if<IntList>(&a)) {
+    return "IntList";
+  } else if (c10::get_if<ArgNone>(&a)) {
+    return "None";
+  } else {
+    throw std::runtime_error("ArgValue type not handled in string conversion");
+  }
+}
+
 template <class T>
 std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   std::vector<T> res;
   for (size_t idx = 0; idx < v.size(); idx++) {
-    res.push_back(c10::get<T>(v[idx]));
+    auto val = c10::get_if<T>(&v[idx]);
+    if (val) {
+      res.push_back(*val);
+    } else {
+      throw std::runtime_error(
+          "vector type not homogeneous - found " + getArgValueName(v[idx]) +
+          ", expected " + getArgValueName(v[0]));
+    }
   }
   return res;
 }
+
+struct TensorInfo {
+  std::vector<int64_t> dims;
+  c10::ScalarType dtype;
+};
 
 enum ElementType {
   kAllTypes = 0,
@@ -137,6 +172,11 @@ Tensor* computeSum(
     const std::vector<ArgValue> inputs,
     const c10::optional<ScalarType>& outputType);
 
+Tensor* computeConv2d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType);
+
 ExprHandle tensorOrConstant(
     const ArgValue& v,
     const std::vector<ExprHandle>& axes);
@@ -229,10 +269,6 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::vector<ExprHandle>& axes);
 
-
-
-
-  Tensor* computeConv2d(const torch::jit::Value* v);
 
   Tensor* computeValue(const torch::jit::Value* v);
 
