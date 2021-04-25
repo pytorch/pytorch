@@ -224,8 +224,9 @@ def _check_values_close(
     actual: Tensor,
     expected: Tensor,
     *,
-    rtol,
-    atol,
+    rtol: float,
+    atol: float,
+    equal_nan: bool,
 ) -> Optional[AssertionError]:
     """Checks if the values of two tensors are close up to a desired tolerance.
 
@@ -234,11 +235,13 @@ def _check_values_close(
         expected (Tensor): Expected tensor.
         rtol (float): Relative tolerance.
         atol (float): Absolute tolerance.
+        equal_nan (bool): If ``True``, two ``NaN`` values will be considered equal.
 
     Returns:
         (Optional[AssertionError]): If check did not pass.
     """
-    mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol)
+
+    mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
     if not torch.any(mismatches):
         return None
 
@@ -288,6 +291,7 @@ def _check_tensors_close(
     *,
     rtol: Optional[float] = None,
     atol: Optional[float] = None,
+    equal_nan: bool = False,
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
@@ -316,7 +320,7 @@ def _check_tensors_close(
         return UsageError(
             f"Both 'rtol' and 'atol' must be omitted or specified, but got rtol={rtol} and atol={atol} instead."
         )
-    elif rtol is None:
+    elif rtol is None or atol is None:
         rtol, atol = _get_default_rtol_and_atol(actual, expected)
 
     exc: Optional[Exception] = _check_attributes_equal(
@@ -329,7 +333,7 @@ def _check_tensors_close(
     if (rtol == 0.0) and (atol == 0.0):
         exc = _check_values_equal(actual, expected)
     else:
-        exc = _check_values_close(actual, expected, rtol=rtol, atol=atol)
+        exc = _check_values_close(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
     if exc:
         return exc
 
@@ -614,6 +618,7 @@ def assert_close(
     *,
     rtol: Optional[float] = None,
     atol: Optional[float] = None,
+    equal_nan: bool = False,
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
@@ -642,6 +647,7 @@ def assert_close(
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
         atol (Optional[float]): Absolute tolerance. If specified :attr:`rtol` must also be specified. If omitted,
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
+        equal_nan (bool): If ``True``, two ``NaN`` values will be considered equal.
         check_device (bool): If ``True`` (default), asserts that each tensor pair is on the same
             :attr:`~torch.Tensor.device` memory. If this check is disabled **and** it is not on the same
             :attr:`~torch.Tensor.device` memory, it is moved CPU memory before the values are compared.
@@ -702,6 +708,7 @@ def assert_close(
         _check_tensors_close,
         rtol=rtol,
         atol=atol,
+        equal_nan=equal_nan,
         check_device=check_device,
         check_dtype=check_dtype,
         check_stride=check_stride,
