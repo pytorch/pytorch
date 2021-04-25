@@ -5722,13 +5722,13 @@
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
-    CPU: legacy::cpu::_th_geqrf_out
+    CPU: geqrf_out
     CUDA: legacy::cuda::_th_geqrf_out
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_geqrf
+    CPU: geqrf
     CUDA: legacy::cuda::_th_geqrf
 
 # orgqr, alias for linalg_householder_product
@@ -8793,6 +8793,14 @@
   python_module: linalg
 
 - func: linalg_svd(Tensor self, bool full_matrices=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
+  python_module: linalg
+  variants: function
+
+- func: linalg_svdvals(Tensor input) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_svdvals.out(Tensor input, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
