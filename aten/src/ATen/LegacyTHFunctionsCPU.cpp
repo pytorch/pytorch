@@ -18,6 +18,7 @@ namespace {
   ScalarType infer_scalar_type(const Tensor & t) {
     return t.scalar_type();
   }
+  // NOLINTNEXTLINE(clang-diagnostic-unused-function)
   ScalarType infer_scalar_type(const TensorList & tl) {
     TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
     return tl[0].scalar_type();
