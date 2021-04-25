@@ -115,6 +115,7 @@ struct TORCH_API TensorIndex final {
   }
 
   // Case 3: Integer value
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(int64_t integer) : integer_(integer), type_(TensorIndexType::Integer) {}
   TensorIndex(int integer) : TensorIndex((int64_t)integer) {}
 
