@@ -27,7 +27,7 @@ Tensor max(const Tensor &self) {
 }
 
 std::tuple<Tensor, Tensor> _aminmax_all(const Tensor &self) {
-  TORCH_CHECK(self.numel() > 0, 
+  TORCH_CHECK(self.numel() > 0,
               "_aminmax_all(): Expected reduction dim for self.numel() == 0. Specify the reduction dim with the 'dim' argument.");
   Tensor min_result = at::empty({}, self.options());
   Tensor max_result = at::empty({}, self.options());
