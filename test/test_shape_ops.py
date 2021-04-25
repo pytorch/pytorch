@@ -533,7 +533,7 @@ class TestShapeOps(TestCase):
                 self.assertRaisesRegex(
                     RuntimeError,
                     "scalar type Long",
-                    lambda: torch.nonzero(tensor, out=torch.empty([], dtype=torch.float))
+                    lambda: torch.nonzero(tensor, out=torch.empty([], dtype=torch.float, device=device))
                 )
             if self.device_type == 'cuda':
                 self.assertRaisesRegex(
