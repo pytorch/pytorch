@@ -1436,14 +1436,17 @@
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
 - func: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
+  device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: div.out_mode
 
 - func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
   variants: method
   structured_delegate: div.out_mode
 
 - func: div.out_mode(Tensor self, Tensor other, *, str? rounding_mode, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
