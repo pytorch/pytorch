@@ -23,9 +23,11 @@ namespace at {
 namespace {
 // used with _set_in_parallel_region to mark master thread
 // as in parallel region while executing parallel primitives
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool in_parallel_region_ = false;
 
 // thread number (task_id) set by parallel primitive
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local size_t thread_num_ = 0;
 
 void _set_in_parallel_region(bool in_region) {
@@ -53,6 +55,7 @@ const int CONSUMED = -2;
 //  - NOT_SET - pool not initialized, user value is not set
 //  - positive value - pool not initialized, user value set
 //  - CONSUMED - pool is initialized
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int> num_intraop_threads{NOT_SET};
 
 int _num_pool_threads(int nthreads) {
@@ -123,10 +126,12 @@ void _parallel_run(
   const std::function<void(int64_t, int64_t, size_t)>& f) {
   at::internal::lazy_init_num_threads();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t num_tasks, chunk_size;
   std::tie(num_tasks, chunk_size) =
       internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct {
     std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
     std::exception_ptr eptr;
@@ -197,6 +202,7 @@ void set_num_threads(int nthreads) {
     int stored_nthreads = num_intraop_threads.load();
     if (stored_nthreads <= 0) {
       // plus one because of master thread
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       stored_nthreads = _get_intraop_pool().size() + 1;
     }
     if (stored_nthreads != nthreads) {
@@ -224,6 +230,7 @@ int get_num_threads() {
     return intraop_default_num_threads();
   } else {
     TORCH_INTERNAL_ASSERT(nthreads == CONSUMED);
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return _get_intraop_pool().size() + 1;
   }
 #else
