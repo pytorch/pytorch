@@ -1901,6 +1901,10 @@ Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this r
     y_i = \min(\max(x_i, \text{min\_value}), \text{max\_value})
 """ + r"""
 
+.. note::
+    If :attr:`min` is greater than :attr:`max` :func:`torch.clamp(..., min, max) <torch.clamp>`
+    sets all elements in :attr:`input` to the value of :attr:`max`.
+
 Args:
     {input}
     min (Number): lower-bound of the range to be clamped to
