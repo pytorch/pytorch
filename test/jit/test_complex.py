@@ -124,7 +124,7 @@ class TestComplex(JitTestCase):
         def pow_float_complex(x: float, y: complex):
             return pow(x, y)
 
-        for x, y in zip(vals, complex_vals):
+        for (x, y) in list(itertools.product(vals, complex_vals)):
             # Reference: https://github.com/pytorch/pytorch/issues/54622
             if (x == 0):
                 continue
