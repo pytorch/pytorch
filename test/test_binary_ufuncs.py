@@ -380,9 +380,9 @@ class TestBinaryUfuncs(TestCase):
         a = make_tensor((4096,), device, dtype, low=low, high=high)
         b = make_tensor((4096,), device, dtype, low=low, high=high)
 
-        # Avoid integer division by zero which raises
-        if not dtype.is_floating_point:
-            b[b == 0] = 1
+        # Avoid division by zero which raises for integers and, for floats,
+        # NumPy behavior changed in 1.20
+        b[b == 0] = 1
 
         # Compare bfloat16 against NumPy float
         exact_dtype = dtype != torch.bfloat16
