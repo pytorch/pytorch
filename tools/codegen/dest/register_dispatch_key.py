@@ -172,7 +172,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             device_check = '  // No device check\n'
             if is_cuda_dispatch_key(self.dispatch_key):
-                device_check = RegisterDispatchKey.gen_device_check(f.device_check, f.func.arguments.flat_positional, name)
+                device_check_args = itertools.chain(
+                    f.func.arguments.out,
+                    f.func.arguments.flat_positional
+                )
+                device_check = RegisterDispatchKey.gen_device_check(f.device_check, device_check_args, name)
 
             device_guard = "// DeviceGuard omitted"  # default
             if f.device_guard and is_cuda_dispatch_key(self.dispatch_key):
@@ -448,7 +452,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 parent_class = f"at::native::structured_{self.g.out.dispatch[self.dispatch_key]}"
 
             if is_cuda_dispatch_key(self.dispatch_key):
-                sig_body.append(RegisterDispatchKey.gen_device_check(f.device_check, f.func.arguments.flat_positional, sig.name()))
+                device_check_args = itertools.chain(
+                    f.func.arguments.out,
+                    f.func.arguments.flat_positional
+                )
+                sig_body.append(RegisterDispatchKey.gen_device_check(f.device_check, device_check_args, sig.name()))
 
             if k is SchemaKind.functional:
                 sig_body.append(f"{class_name} op;")

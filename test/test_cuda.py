@@ -1913,7 +1913,7 @@ torch.cuda.synchronize()
                                                              inv_scale)
 
         if TEST_MULTIGPU:
-            with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device""):
+            with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device"):
                 torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(device="cuda:1")],
                                                                  found_inf,
                                                                  inv_scale)
