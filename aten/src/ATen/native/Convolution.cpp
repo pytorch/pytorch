@@ -161,6 +161,8 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
              (bias.scalar_type() == at::kFloat))) &&
          !is_strided() &&
          !is_dilated() &&
+         // 3x3 depthwith convolutions implementation is inference only
+         !(input.requires_grad() && GradMode::is_enabled()) &&
          !transposed;
 #else
   return false;
