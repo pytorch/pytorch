@@ -5,7 +5,9 @@ import torch.backends.xnnpack
 import torch.utils.bundled_inputs
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.jit_utils import get_forward, get_forward_graph
-from torch.utils.mobile_optimizer import *
+from torch.utils.mobile_optimizer import (LintCode,
+                                          generate_mobile_module_lints,
+                                          optimize_for_mobile)
 from torch.nn import functional as F
 from torch._C import MobileOptimizerType
 from torch.testing._internal.common_quantized import override_quantized_engine
@@ -72,6 +74,17 @@ class TestOptimizer(TestCase):
                 o = o + x
                 return F.relu(o)
 
+            @torch.jit.export
+            def foo(self, x):
+                o = F.conv2d(x, self.conv_weight, self.conv_bias,
+                             self.strides, self.paddings, self.dilations, self.groups)
+                o = F.relu(o)
+                x = o.permute([0, 2, 3, 1])
+                o = F.linear(x, self.linear_weight, self.linear_bias)
+                o = o + x
+                return F.relu(o)
+
+
         class BNTestModule(torch.nn.Module):
             def __init__(self):
                 super(BNTestModule, self).__init__()
@@ -90,9 +103,11 @@ class TestOptimizer(TestCase):
         scripted_model = torch.jit.script(MyTestModule())
         scripted_model.eval()
         initial_result = scripted_model(input_data)
+        initial_foo_result = scripted_model.foo(input_data)
 
-        optimized_scripted_model = optimize_for_mobile(scripted_model)
+        optimized_scripted_model = optimize_for_mobile(scripted_model, methods_to_optimize=['foo'])
         optimized_result = optimized_scripted_model(input_data)
+        optimized_foo_result = optimized_scripted_model.foo(input_data)
 
         FileCheck().check_not("Tensor = aten::conv2d") \
                    .check_not("Tensor = prim::CallFunction") \
@@ -105,6 +120,18 @@ class TestOptimizer(TestCase):
                    .check_count("aten::_add_relu(", 1, exactly=True) \
                    .run(optimized_scripted_model.graph)
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
+
+        FileCheck().check_not("Tensor = aten::conv2d") \
+                   .check_not("Tensor = prim::CallFunction") \
+                   .check_not("prepacked::conv2d_clamp_prepack") \
+                   .check_count("prepacked::conv2d_clamp_run", 1, exactly=True) \
+                   .check_not("prepacked::linear_clamp_prepack") \
+                   .check_count("prepacked::linear_clamp_run", 1, exactly=True) \
+                   .check_not("aten::add(") \
+                   .check_not("aten::relu(") \
+                   .check_count("aten::_add_relu(", 1, exactly=True) \
+                   .run(optimized_scripted_model.foo.graph)
+        torch.testing.assert_allclose(initial_foo_result, optimized_foo_result, rtol=1e-2, atol=1e-3)
 
 
         optimization_blocklist_no_prepack = {MobileOptimizerType.INSERT_FOLD_PREPACK_OPS}

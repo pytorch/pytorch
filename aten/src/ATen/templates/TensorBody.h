@@ -86,6 +86,16 @@ inline bool variable_excluded_from_dispatch() {
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
 class TORCH_API Tensor {
+ private:
+  struct unsafe_borrow_t { explicit unsafe_borrow_t() = default; };
+
+  // Create a Tensor with a +0 reference count. Special care must be
+  // taken to avoid decrementing this reference count at destruction
+  // time. Intended to support MaybeOwnedTraits<Tensor>.
+  explicit Tensor(unsafe_borrow_t, const Tensor& rhs)
+      : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>::reclaim(rhs.impl_.get())) {}
+  friend MaybeOwnedTraits<Tensor>;
+
  public:
   Tensor(){};
   // This constructor should not be used by end users and is an implementation
@@ -132,13 +142,7 @@ class TORCH_API Tensor {
   /// increment/decrement if *this is already contiguous, at the cost
   /// in all cases of an extra pointer of stack usage, an extra branch
   /// to access, and an extra branch at destruction time.
-  c10::MaybeOwned<Tensor> expect_contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const & {
-    if (is_contiguous(memory_format)) {
-      return c10::MaybeOwned<Tensor>::borrowed(*this);
-    } else {
-      return c10::MaybeOwned<Tensor>::owned(__dispatch_contiguous(memory_format));
-    }
-  }
+  c10::MaybeOwned<Tensor> expect_contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const &;
 
   // Use .contiguous() instead. Trying to borrow from a prvalue Tensor
   // will only lead to trouble and dangling references.
@@ -473,8 +477,13 @@ class TORCH_API Tensor {
   }
 
   /// Returns a `Tensor`'s dimension names data structure
-  const NamedTensorMeta* get_named_tensor_meta() const;
-  NamedTensorMeta* get_named_tensor_meta();
+  const NamedTensorMeta* get_named_tensor_meta() const {
+    return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+  }
+
+  NamedTensorMeta* get_named_tensor_meta() {
+    return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+  }
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
@@ -676,7 +685,7 @@ class TORCH_API Tensor {
   ///
   /// Enables .grad() for non-leaf Tensors.
 
-  Tensor& set_requires_grad(bool requires_grad) {
+  const Tensor& set_requires_grad(bool requires_grad) const {
     impl_->set_requires_grad(requires_grad);
     return *this;
   }
@@ -688,7 +697,7 @@ class TORCH_API Tensor {
   /// used as `t.grad() = x` to set a gradient to a completely new tensor.
   /// Note that this function work with a non-const Tensor and is not
   /// thread safe.
-  Tensor& mutable_grad() {
+  Tensor& mutable_grad() const {
     return impl_->mutable_grad();
   }
 
@@ -712,7 +721,7 @@ class TORCH_API Tensor {
   /// Note that the given new_grad might not be used directly if it has different
   /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
   /// new_grad content will be copied into a new Tensor
-  void _set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) {
+  void _set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) const {
     impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
   }
 
@@ -856,7 +865,7 @@ public:
 
   void _backward(TensorList inputs, const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
 
-  Tensor& requires_grad_(bool _requires_grad=true) const;
+  const Tensor& requires_grad_(bool _requires_grad=true) const;
 
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -922,4 +931,67 @@ static inline DispatchKey legacyExtractDispatchKey(const Tensor& t) {
   return legacyExtractDispatchKey(t.key_set());
 }
 
+} // namespace at
+
+namespace c10 {
+template <>
+struct MaybeOwnedTraits<at::Tensor> {
+  using owned_type = at::Tensor;
+  using borrow_type = at::Tensor;
+
+  static borrow_type createBorrow(const owned_type& from) {
+    // NOTE: this can be implemented without the special
+    // unsafe_borrow_t Tensor constructor as
+    //
+    // return borrow_type(c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(from.unsafeGetTensorImpl()));
+    //
+    // but that hurts inlining due to the nullptr check in the
+    // Tensor(c10::intrusive_ptr<...>) constructor. We already know
+    // that from.impl_ isn't null because from is a valid Tensor, so
+    // we needn't do the check again. (using __builtin_assume can
+    // avoid this, but wouldn't be portable to MSVC.)
+    return borrow_type(borrow_type::unsafe_borrow_t{}, from);
+  }
+
+  static void assignBorrow(borrow_type& lhs, const borrow_type& rhs) {
+    lhs.unsafeReleaseTensorImpl();
+    // See above note: this can be implemented with public API
+    // similarly to createBorrow(), but that would hurt inlining.
+    lhs = borrow_type(borrow_type::unsafe_borrow_t{}, rhs);
+  }
+
+  static void destroyBorrow(borrow_type& toDestroy) {
+    toDestroy.unsafeReleaseTensorImpl(); // "leak" it, but it was already +0.
+  }
+
+  static const owned_type& referenceFromBorrow(const borrow_type& borrow) {
+    return borrow;
+  }
+
+  static const owned_type* pointerFromBorrow(const borrow_type& borrow) {
+    return &borrow;
+  }
+
+  static bool debugBorrowIsValid(const borrow_type& borrow) {
+    return true;
+  }
+};
+} // namespace c10
+
+namespace at {
+
+inline c10::MaybeOwned<Tensor> borrow_from_optional_tensor(
+    const c10::optional<Tensor>& opt) {
+  return opt.has_value()
+    ? c10::MaybeOwned<Tensor>::borrowed(*opt)
+    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+}
+
+inline c10::MaybeOwned<Tensor> Tensor::expect_contiguous(MemoryFormat memory_format) const & {
+  if (is_contiguous(memory_format)) {
+    return c10::MaybeOwned<Tensor>::borrowed(*this);
+  } else {
+    return c10::MaybeOwned<Tensor>::owned(__dispatch_contiguous(memory_format));
+  }
+}
 } // namespace at

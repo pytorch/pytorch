@@ -22,10 +22,13 @@ inline void expectThrowsEq(Functor&& functor, const char* expectedMessage) {
 }
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExceptionTest, TORCH_INTERNAL_ASSERT_DEBUG_ONLY) {
 #ifdef NDEBUG
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false));
   // Does nothing - `throw_func()` should not be evaluated
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(TORCH_INTERNAL_ASSERT_DEBUG_ONLY(throw_func()));
 #else
   ASSERT_THROW(TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false), c10::Error);
@@ -33,10 +36,12 @@ TEST(ExceptionTest, TORCH_INTERNAL_ASSERT_DEBUG_ONLY) {
 #endif
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WarningTest, JustPrintWarning) {
   TORCH_WARN("I'm a warning");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExceptionTest, ErrorFormatting) {
   expectThrowsEq([]() {
     TORCH_CHECK(false, "This is invalid");
@@ -66,6 +71,7 @@ R"msg(This is invalid
   While checking Y)msg");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int assertionArgumentCounter = 0;
 static int getAssertionArgument() {
   return ++assertionArgumentCounter;
@@ -79,11 +85,14 @@ static void failInternalAssert() {
   TORCH_INTERNAL_ASSERT(false, "message ", getAssertionArgument());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExceptionTest, DontCallArgumentFunctionsTwiceOnFailure) {
   assertionArgumentCounter = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(failCheck());
   EXPECT_EQ(assertionArgumentCounter, 1) << "TORCH_CHECK called argument twice";
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(failInternalAssert());
   EXPECT_EQ(assertionArgumentCounter, 2) << "TORCH_INTERNAL_ASSERT called argument twice";
 }

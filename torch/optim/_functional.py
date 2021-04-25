@@ -17,6 +17,7 @@ def adagrad(params: List[Tensor],
             grads: List[Tensor],
             state_sums: List[Tensor],
             state_steps: List[int],
+            *,
             lr: float,
             weight_decay: float,
             lr_decay: float,
@@ -56,6 +57,7 @@ def adam(params: List[Tensor],
          exp_avg_sqs: List[Tensor],
          max_exp_avg_sqs: List[Tensor],
          state_steps: List[int],
+         *,
          amsgrad: bool,
          beta1: float,
          beta2: float,
@@ -102,6 +104,7 @@ def adamw(params: List[Tensor],
           exp_avg_sqs: List[Tensor],
           max_exp_avg_sqs: List[Tensor],
           state_steps: List[int],
+          *,
           amsgrad: bool,
           beta1: float,
           beta2: float,
@@ -143,6 +146,7 @@ def adamw(params: List[Tensor],
 def sgd(params: List[Tensor],
         d_p_list: List[Tensor],
         momentum_buffer_list: List[Optional[Tensor]],
+        *,
         weight_decay: float,
         momentum: float,
         lr: float,
@@ -180,6 +184,7 @@ def adadelta(params: List[Tensor],
              grads: List[Tensor],
              square_avgs: List[Tensor],
              acc_deltas: List[Tensor],
+             *,
              lr: float,
              rho: float,
              eps: float,
@@ -205,6 +210,7 @@ def rmsprop(params: List[Tensor],
             square_avgs: List[Tensor],
             grad_avgs: List[Tensor],
             momentum_buffer_list: List[Tensor],
+            *,
             lr: float,
             alpha: float,
             eps: float,
@@ -238,3 +244,81 @@ def rmsprop(params: List[Tensor],
             param.add_(buf, alpha=-lr)
         else:
             param.addcdiv_(grad, avg, value=-lr)
+
+
+def rprop(params: List[Tensor],
+          grads: List[Tensor],
+          prevs: List[Tensor],
+          step_sizes: List[Tensor],
+          *,
+          step_size_min: float,
+          step_size_max: float,
+          etaminus: float,
+          etaplus: float):
+    r"""Functional API that performs rprop algorithm computation.
+
+    See :class:`~torch.optim.Rprop` for details.
+    """
+
+    for i, param in enumerate(params):
+        grad = grads[i]
+        prev = prevs[i]
+        step_size = step_sizes[i]
+
+        sign = grad.mul(prev).sign()
+        sign[sign.gt(0)] = etaplus
+        sign[sign.lt(0)] = etaminus
+        sign[sign.eq(0)] = 1
+
+        # update stepsizes with step size updates
+        step_size.mul_(sign).clamp_(step_size_min, step_size_max)
+
+        # for dir<0, dfdx=0
+        # for dir>=0 dfdx=dfdx
+        grad = grad.clone(memory_format=torch.preserve_format)
+        grad[sign.eq(etaminus)] = 0
+
+        # update parameters
+        param.addcmul_(grad.sign(), step_size, value=-1)
+
+        prev.copy_(grad)
+
+
+def adamax(params: List[Tensor],
+           grads: List[Tensor],
+           exp_avgs: List[Tensor],
+           exp_infs: List[Tensor],
+           state_steps: List[int],
+           *,
+           eps: float,
+           beta1: float,
+           beta2: float,
+           lr: float,
+           weight_decay: float):
+    r"""Functional API that performs adamax algorithm computation.
+
+    See :class:`~torch.optim.Adamax` for details.
+    """
+
+    for i, param in enumerate(params):
+        grad = grads[i]
+        exp_avg = exp_avgs[i]
+        exp_inf = exp_infs[i]
+        step = state_steps[i]
+
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        # Update biased first moment estimate.
+        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+        # Update the exponentially weighted infinity norm.
+        norm_buf = torch.cat([
+            exp_inf.mul_(beta2).unsqueeze(0),
+            grad.abs().add_(eps).unsqueeze_(0)
+        ], 0)
+        torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
+
+        bias_correction = 1 - beta1 ** step
+        clr = lr / bias_correction
+
+        param.addcdiv_(exp_avg, exp_inf, value=-clr)
