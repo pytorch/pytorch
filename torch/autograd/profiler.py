@@ -1248,6 +1248,7 @@ def parse_legacy_records(thread_records):
                 continue
 
             if record.kind() == 'push':
+                print(f"Skipping recording {record.name()} kind {record.kind()} node id {record.node_id()}, with handle {record.handle()}, old handle is {prev_record.handle()}")
                 # workaround to reduce double logging from operator
                 # wrappers and redispatch
                 if prev_record is not None:
