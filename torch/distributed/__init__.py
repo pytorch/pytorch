@@ -27,6 +27,7 @@ if is_available():
         FileStore,
         TCPStore,
         ProcessGroup,
+        PrefixStore,
         Reducer,
         Logger,
         BuiltinCommHookType,
@@ -47,9 +48,9 @@ if is_available():
             _round_robin_process_groups,
         )
 
-    from .distributed_c10d import *
+    from .distributed_c10d import *  # noqa: F403
     # Variables prefixed with underscore are not auto imported
     # See the comment in `distributed_c10d.py` above `_backend` on why we expose
     # this.
 
-    from .distributed_c10d import _backend
+    from .distributed_c10d import _backend, _all_gather_base

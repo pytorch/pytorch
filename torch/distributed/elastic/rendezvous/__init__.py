@@ -101,7 +101,7 @@ process:
    to participate in next rendezvous.
 """
 
-from .api import *
+from .api import *  # noqa: F403
 from .registry import _register_default_handlers
 
 
