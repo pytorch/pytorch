@@ -8796,6 +8796,14 @@
   python_module: linalg
   variants: function
 
+- func: linalg_svdvals(Tensor input) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_svdvals.out(Tensor input, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
 - func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
   python_module: linalg
   variants: function

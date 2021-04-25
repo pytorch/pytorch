@@ -2810,6 +2810,25 @@ class TestLinalg(TestCase):
             assert USV.V is out[2]
             self.assertEqual(USV.S, np_s)
 
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_svdvals(self, device, dtype):
+
+        def run_test(shape):
+            # NumPy doesn't have separate svdvals function, it is included in
+            # svd with compute_uv=False
+            # so we test our implementation against numpy.linalg.svd(*, compute_uv=False)
+            A = make_tensor(shape, dtype=dtype, device=device)
+            expected = np.linalg.svd(A.cpu(), compute_uv=False)
+            actual = torch.linalg.svdvals(A)
+            self.assertEqual(actual, expected)
+
+        batches = [(), (0, ), (2, ), (2, 1)]
+        ns = [5, 2, 0]
+        for batch, (m, n) in itertools.product(batches, product(ns, ns)):
+            run_test((*batch, m, n))
+
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 

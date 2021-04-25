@@ -2225,6 +2225,15 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
 def sample_inputs_linalg_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=True)
 
+def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **kwargs):
+    batches = [(), (0, ), (2, ), (1, 1)]
+    ns = [5, 2, 0]
+    samples = []
+    for batch, (m, n) in product(batches, product(ns, ns)):
+        a = make_tensor((*batch, m, n), device, dtype, low=None, high=None, requires_grad=requires_grad)
+        samples.append(SampleInput(a))
+    return samples
+
 def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
     eigvecs = make_tensor((S, S), device=device, dtype=dtype,
                           low=None, high=None)
@@ -4738,6 +4747,15 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are very slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+    OpInfo('linalg.svdvals',
+           op=torch.linalg.svdvals,
+           aten_name='linalg_svdvals',
+           dtypes=floating_and_complex_types(),
+           sample_inputs_func=sample_inputs_linalg_svdvals,
+           supports_autograd=False,
+           decorators=[
+               skipCUDAIfNoMagmaAndNoCusolver,
+               skipCPUIfNoLapack]),
     OpInfo('polar',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_polar),
