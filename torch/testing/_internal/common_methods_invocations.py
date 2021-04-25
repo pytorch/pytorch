@@ -177,6 +177,7 @@ class OpInfo(object):
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
                  variant_test_name='',  # additional string to include in the test name
                  supports_autograd=True,  # support for autograd
+                 supports_gradgrad=True,  # support second order gradients (this value is ignored if supports_autograd=False)
                  supports_inplace_autograd=None,  # whether the operation supports inplace autograd
                                                   # defaults to supports_autograd's value
                  supports_complex_autograd=None,  # whether the operation supports complex autograd
@@ -238,6 +239,7 @@ class OpInfo(object):
             self.supports_complex_autograd = supports_autograd
 
         self.gradcheck_wrapper = gradcheck_wrapper
+        self.supports_gradgrad = supports_gradgrad
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
@@ -928,6 +930,39 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(
             make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(shape,)) for size, shape in test_cases)
+
+def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
+    small_S = 2
+    test_cases = (
+        ((S, S, 2), (S, S + 1, 2)),
+        ((S, S), (S, S)),
+        ((S, S, S), (S, S, S)),
+        ((3, 5), (3, 5)),
+        ((2, 3, 5), (2, 3, 5)),
+        ((1, 2, 3), (1, 2, 3)),
+        ((1, 1), (S, 1)),
+        ((0, 5), (4, 5)),
+        ((4, 5), (0, 5)),
+        ((0, 4, 5), (3, 5)),
+        ((4, 5), (0, 3, 5)),
+        ((0, 4, 5), (1, 3, 5)),
+        ((1, 4, 5), (0, 3, 5)),
+        # Using S here would make this one test take 9s
+        ((small_S, small_S, small_S + 1, 2), (small_S, small_S, small_S + 2, 2)),
+        ((small_S, 1, 1, small_S), (1, small_S, small_S)),
+        ((1, 1, small_S), (small_S, 1, small_S, small_S)),
+    )
+
+    samples = []
+    for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+        for p in [0, 1, 2, 3, 0.5, 1.5, 2.5, float("inf")]:
+            for t1_size, t2_size in test_cases:
+                # The args should never be non-contiguous as this is not supported in the backward
+                samples.append(SampleInput(
+                    make_tensor(t1_size, device, dtype, requires_grad=requires_grad, noncontiguous=False),
+                    args=(make_tensor(t2_size, device, dtype, requires_grad=requires_grad, noncontiguous=False), p, cm)))
+
+    return samples
 
 def sample_inputs_comparison_ops(self, device, dtype, requires_grad, **kwargs):
     test_cases = (
@@ -3385,6 +3420,11 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=None,
                    dtypesIfROCM=None,
                    supports_autograd=False),
+    OpInfo('cdist',
+           dtypes=floating_types(),
+           supports_out=False,
+           supports_gradgrad=False,
+           sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
                    dtypes=floating_types_and(torch.half),
