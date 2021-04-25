@@ -37,6 +37,7 @@ void apply_reflect_conj_tri_single(scalar_t* self, int64_t n, int64_t stride, bo
     };
   }
   // For small matrices OpenMP overhead is too large
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (n < 256) {
     loop(0, n);
   } else {
@@ -101,6 +102,7 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
   scalar_t* wr = vals_data;
 
   scalar_t* vecs_data = eigenvectors ? vecs_.data_ptr<scalar_t>() : nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int ldvr = eigenvectors ? n : 1;
 
   Tensor rwork;
@@ -114,6 +116,7 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
   if (n > 0) {
     // call lapackEig once to get the optimal size for work data
     scalar_t wkopt;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int info;
     lapackEig<scalar_t, value_t>('N', jobvr, n, self_data, n, wr,
       nullptr, 1, vecs_data, ldvr, &wkopt, -1, rwork_data, &info);
@@ -155,10 +158,12 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
                  ? at::empty_strided({n, n}, {1, n}, options)
                  : Tensor();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t info;
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "eig_cpu", [&]{
     apply_eig<scalar_t>(self_, eigenvectors, vals_, vecs_, &info);
   });
+  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   singleCheckErrors(info, "eig_cpu");
   return std::tuple<Tensor, Tensor>(vals_, vecs_);
 }
@@ -277,9 +282,11 @@ void apply_lapack_eigh(Tensor& values, Tensor& vectors, Tensor& infos, bool uppe
   int liwork = -1;
   scalar_t lwork_query;
   value_t rwork_query;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int iwork_query;
 
   // call lapackSyevd once to get the optimal size for work data
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   scalar_t work_query;
   lapackSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_data, lda, values_data,
     &lwork_query, lwork, &rwork_query, lrwork, &iwork_query, liwork, infos_data);
@@ -366,6 +373,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau, int64_t m, int64
   auto batch_size = batchCount(input);
   auto lda = std::max<int>(1, m);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int info;
   // Run once, first to get the optimum work size.
   // Since we deal with batches of matrices with the same dimensions, doing this outside
@@ -436,6 +444,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns) {
   auto m = self.size(-2);
   auto k = tau.size(-1);
   auto lda = std::max<int64_t>(1, m);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int info;
 
   // LAPACK's requirement
@@ -533,38 +542,59 @@ void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bo
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(cholesky_inverse_stub, DEFAULT, &cholesky_inverse_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 REGISTER_VSX_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(eig_stub, DEFAULT, &eig_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX_DISPATCH(eig_stub, &eig_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_VSX_DISPATCH(eig_stub, &eig_kernel_impl);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(linalg_eig_stub, DEFAULT, &linalg_eig_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 REGISTER_VSX_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(linalg_eigh_stub, DEFAULT, &linalg_eigh_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 REGISTER_VSX_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(geqrf_stub, DEFAULT, &geqrf_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX_DISPATCH(geqrf_stub, &geqrf_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(geqrf_stub, &geqrf_kernel);
 REGISTER_VSX_DISPATCH(geqrf_stub, &geqrf_kernel);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(orgqr_stub, DEFAULT, &orgqr_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_VSX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(triangular_solve_stub, DEFAULT, &triangular_solve_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 REGISTER_VSX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
