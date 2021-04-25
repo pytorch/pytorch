@@ -2276,6 +2276,18 @@ def sample_inputs_linalg_qr(op_info, device, dtype, requires_grad=False, **kwarg
         out.append(SampleInput(a))
     return out
 
+def sample_inputs_geqrf(op_info, device, dtype, requires_grad=False):
+    batches = [(), (0, ), (2, ), (1, 1)]
+    ns = [5, 2, 0]
+    samples = []
+    for batch, (m, n) in product(batches, product(ns, ns)):
+        # TODO: CUDA path doesn't work with batched or empty inputs
+        if torch.device(device).type == 'cuda' and (batch != () or m == 0 or n == 0):
+            continue
+        a = make_tensor((*batch, m, n), device, dtype, low=None, high=None, requires_grad=requires_grad)
+        samples.append(SampleInput(a))
+    return samples
+
 def sample_inputs_flip(op_info, device, dtype, requires_grad, **kwargs):
     tensors = (
         make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -3811,6 +3823,17 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_comparison_ops),
+    OpInfo('geqrf',
+           dtypes=floating_and_complex_types(),
+           dtypesIfCPU=floating_and_complex_types(),
+           dtypesIfCUDA=floating_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_geqrf,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # TODO: geqrf_out for CUDA inputs modifies the stride of "out" tensors
+               SkipInfo('TestCommon', 'test_out', device_type='cuda'),
+           )),
     OpInfo('gt',
            aliases=('greater',),
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
