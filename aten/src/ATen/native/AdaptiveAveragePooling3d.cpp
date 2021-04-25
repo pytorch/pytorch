@@ -8,10 +8,12 @@ namespace native {
 namespace {
 
 inline int start_index(int a, int b, int c) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return (int)std::floor((float)(a * c) / b);
 }
 
 inline int end_index(int a, int b, int c) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return (int)std::ceil((float)((a + 1) * c) / b);
 }
 
@@ -137,6 +139,7 @@ void adaptive_avg_pool3d_out_cpu_template(
               istrideW);
         });
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     output.resize_({input.size(-5), sizeD, osizeT, osizeH, osizeW});
     int64_t n = input.size(0);
 
