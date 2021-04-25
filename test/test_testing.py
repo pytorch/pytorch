@@ -1097,6 +1097,31 @@ class TestAsserts(TestCase):
         for fn in self.assert_fns_with_inputs(actual, expected):
             fn()
 
+    @onlyCPU
+    def test_msg_str(self, device):
+        msg = "Custom error message!"
+
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=msg)
+
+    @onlyCPU
+    def test_msg_callable(self, device):
+        msg = "Custom error message!"
+
+        def make_msg(actual, expected, trace):
+            return msg
+
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=make_msg)
+
 
 instantiate_device_type_tests(TestAsserts, globals())
 
