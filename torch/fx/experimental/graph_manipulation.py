@@ -1,4 +1,4 @@
-from typing import Dict, List, NamedTuple, Any, Optional
+from typing import Dict, List, NamedTuple, Any, Optional, Tuple
 
 import torch
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
@@ -7,6 +7,7 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node, Target, Argument, map_arg, map_aggregate
 from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import ShapeProp
+
 
 def replace_target_nodes_with(
     fx_module: GraphModule,
@@ -56,18 +57,31 @@ def get_size_of_all_nodes(
     return
 
 
+def get_shape_dtype_and_stride(
+    node: Node,
+) -> Tuple[torch.Size, torch.dtype, Tuple[int]]:
+    shape: torch.Size
+    dtype: torch.dtype
+    shape, dtype = get_shape_and_dtype(node)
+    tensor_meta = node.meta.get("tensor_meta")
+    if not tensor_meta:
+        raise RuntimeError(
+            f"Node {node} has no tensor metadata associated with it! "
+            f"Check that shape propagation has run."
+        )
+    return shape, dtype, tensor_meta.stride
+
+
 def get_shape_and_dtype(node: Node) -> Any:
-    shape = node.meta.get('shape')
+    tensor_meta = node.meta.get("tensor_meta")
 
-    # Shape could be torch.Size([]) which would be true for `if not shape`
-    if shape is None:
-        raise RuntimeError("Node has no shape attr")
+    if not tensor_meta:
+        raise RuntimeError(
+            f"Node {node} has no tensor metadata associated with it! "
+            f"Check that shape propagation has run."
+        )
 
-    dtype = node.meta.get('dtype')
-    if not dtype:
-        raise RuntimeError("Node has no dtype attr")
-
-    return shape, dtype
+    return tensor_meta.shape, tensor_meta.dtype
 
 
 def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
@@ -99,6 +113,10 @@ def serialize_shape(shape: torch.Size) -> str:
     return str(list(shape))
 
 
+def serialize_stride(stride: Tuple[int]) -> str:
+    return str(list(stride))
+
+
 def serialize_tensor_quantization(tensor: torch.Tensor) -> Dict[str, Any]:
     scheme: Dict[str, Any] = {}
     if tensor.is_quantized:
@@ -128,6 +146,7 @@ def serialize_weight(tensor: torch.Tensor) -> Dict:
     if tensor.is_quantized:
         weight.update(serialize_tensor_quantization(tensor))
     weight["shape"] = serialize_shape(tensor.shape)
+    weight["stride"] = serialize_stride(tensor.stride())
     return weight
 
 
@@ -136,7 +155,7 @@ def serialize_leaf_module(
 ) -> Dict:
     parameters: Dict[str, Any] = {}
 
-    for p_name, p_value in node.attrs_for_lowering.items():  # type: ignore
+    for p_name, p_value in node.attrs_for_lowering.items():  # type: ignore[attr-defined]
         if isinstance(p_value, torch.Tensor):
             weights_metadata[f"{name_prefix}.{p_name}"] = serialize_weight(p_value)
             weights[f"{name_prefix}.{p_name}"] = p_value
@@ -159,6 +178,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
     NODE
     {
         shape: [],
+        stride: [],
         dtype: dtype,
         is_quantized: bool,
         target: target,
@@ -203,19 +223,29 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
     add_weight_tensors(fx_module.named_buffers())
 
     def get_node_info(node):
-        shape, dtype = get_shape_and_dtype(node)
+        shape, dtype, stride = get_shape_dtype_and_stride(node)
+        tensor_meta = node.meta.get("tensor_meta")
+        if not tensor_meta:
+            raise RuntimeError(
+                f"Node {node} has no tensor metadata! Ensure shape "
+                f"propagation has been run!"
+            )
         node_rep = {
             "shape": serialize_shape(shape),
             "dtype": str(dtype),
-            "is_quantized": node.meta["is_quantized"],
+            "stride": serialize_stride(stride),
+            "is_quantized": tensor_meta.is_quantized,
         }
 
-        if node.meta["is_quantized"]:
-            node_rep["qscheme"] = str(node.meta["qscheme"])
+        if tensor_meta.is_quantized:
+            node_rep["qscheme"] = str(tensor_meta.qscheme)
 
-            if node.meta["qscheme"] in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
-                node_rep["q_scale"] = node.meta["q_scale"]
-                node_rep["q_zero_point"] = node.meta["q_zero_point"]
+            if tensor_meta.qscheme in {
+                torch.per_tensor_affine,
+                torch.per_tensor_symmetric,
+            }:
+                node_rep["q_scale"] = tensor_meta.q_scale
+                node_rep["q_zero_point"] = tensor_meta.q_zero_point
 
         return node_rep
 
@@ -307,13 +337,9 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
             if isinstance(node_rep["args"][0], tuple):
                 node_rep["args"] = node_rep["args"][0]
         else:
-            node_rep["args"] = map_aggregate(
-                node.args, get_arg_info
-            )
+            node_rep["args"] = map_aggregate(node.args, get_arg_info)
 
-        node_rep["kwargs"] = map_aggregate(
-            node.kwargs, get_arg_info
-        )
+        node_rep["kwargs"] = map_aggregate(node.kwargs, get_arg_info)
         serialized_dict["nodes"] += [node_rep]
 
     return serialized_dict

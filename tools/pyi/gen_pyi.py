@@ -3,8 +3,9 @@ from pprint import pformat
 
 import argparse
 
-from tools.codegen.model import *
-from tools.codegen.api.python import *
+from tools.codegen.model import Variant
+from tools.codegen.api.python import (PythonSignatureGroup,
+                                      PythonSignatureNativeFunctionPair)
 from tools.codegen.gen import FileManager
 from typing import Sequence, List, Dict
 
@@ -147,7 +148,7 @@ def sig_for_ops(opname: str) -> List[str]:
         return ['def {}(self, other: Any) -> Tensor: ...'.format(opname)]
     elif name in comparison_ops:
         # unsafe override https://github.com/python/mypy/issues/5704
-        return ['def {}(self, other: Any) -> Tensor: ...  # type: ignore'.format(opname)]
+        return ['def {}(self, other: Any) -> Tensor: ...  # type: ignore[override]'.format(opname)]
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
     elif name in to_py_type_ops:
