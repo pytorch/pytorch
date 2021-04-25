@@ -934,11 +934,11 @@ TEST(Cuda, HalfSupport_CUDA) {
   });
 
   Tensor* c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
-    return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b->call(i));
+    return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b->load(i));
   });
 
   Tensor* d = Compute("d", {{4, "n"}}, [&](const VarHandle& i) {
-    return Cast::make(half, c->call(i));
+    return Cast::make(half, c->load(i));
   });
 
   LoopNest l({b, c, d});
@@ -1554,7 +1554,7 @@ TEST(Cuda, MaskMultiDim_CUDA) {
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -1684,7 +1684,7 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -2098,7 +2098,7 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -2229,7 +2229,7 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
       "D",
       {{OUTER_B_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
