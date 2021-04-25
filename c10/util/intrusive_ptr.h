@@ -354,6 +354,7 @@ class intrusive_ptr final {
   }
 
   TTarget* operator->() const noexcept {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
     return target_;
   }
 
