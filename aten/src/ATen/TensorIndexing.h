@@ -128,6 +128,7 @@ struct TORCH_API TensorIndex final {
   TensorIndex(Slice slice) : slice_(std::move(slice)), type_(TensorIndexType::Slice) {}
 
   // Case 6: Tensor value
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(Tensor tensor) : tensor_(std::move(tensor)), type_(TensorIndexType::Tensor) {}
 
   inline bool is_none() const {
