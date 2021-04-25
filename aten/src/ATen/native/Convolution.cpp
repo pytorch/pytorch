@@ -23,8 +23,10 @@ constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ConvParams {
   std::vector<int64_t> stride;
   std::vector<int64_t> padding;
@@ -74,6 +76,7 @@ std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
 
 auto ConvParams::is_strided() const -> bool {
   bool is_strided = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int s : stride) {
     is_strided |= (s != 1);
   }
@@ -82,6 +85,7 @@ auto ConvParams::is_strided() const -> bool {
 
 auto ConvParams::is_dilated() const -> bool {
   bool is_dilated = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int d : dilation) {
     is_dilated |= (d != 1);
   }
@@ -90,6 +94,7 @@ auto ConvParams::is_dilated() const -> bool {
 
 auto ConvParams::is_padded() const -> bool {
   bool is_padded = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int p : padding) {
     is_padded |= (p != 0);
   }
@@ -98,6 +103,7 @@ auto ConvParams::is_padded() const -> bool {
 
 auto ConvParams::is_output_padding_neg() const -> bool {
   bool is_non_neg = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int p : output_padding) {
     is_non_neg |= (p < 0);
   }
@@ -114,6 +120,7 @@ auto ConvParams::is_output_padding_big() const -> bool {
 
 auto ConvParams::is_padding_neg() const -> bool {
   bool is_non_neg = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int p : padding) {
     is_non_neg |= (p < 0);
   }
@@ -122,6 +129,7 @@ auto ConvParams::is_padding_neg() const -> bool {
 
 auto ConvParams::is_stride_nonpos() const -> bool {
   bool is_nonpos = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   for (int s : stride) {
     is_nonpos |= (s <= 0);
   }
@@ -246,11 +254,13 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
      !transposed && // or transposed tensors
      // For 1x1 filters, MKLDNN is faster than THNN when multi-threaded,
      // but THNN is faster when single-threaded.
+     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
      (is_strided() || is_dilated() || input.size(0) >= 16 ||
       weight.size(-1) != 1 || weight.size(-2) != 1 || at::get_num_threads() > 1) &&
      (groups > 1
       || (weight.size(-1) > 3 && weight.size(-2) > 3)
       || input.size(0) > 1
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480) // for some case, native is faster
       );
 
@@ -267,8 +277,10 @@ auto ConvParams::use_nnpack(const at::Tensor& input, const at::Tensor& weight) c
          !transposed &&   // or transposed tensors
          input.ndimension() == 4 && // must be in NCHW format
          weight.ndimension() == 4 &&
+         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
          (weight.size(2) < 17) && (weight.size(3) < 17) // NNPACK only supports kernels up to 16x16
 #if !defined(C10_MOBILE)
+         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
          && input.size(0) >= 16 // ensure large enough batch size to ensure perf, tuneable
 #endif
      ;
@@ -304,6 +316,7 @@ auto ConvParams::is_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
   return input.is_cuda() &&
          !transposed &&
+         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
          (input.ndimension() == 4 || input.ndimension() == 5) &&
          input.size(1) == groups &&
          groups > 1 && // no point if there is only a single group
@@ -316,102 +329,145 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
   int ch = input.size(1);
   int bs = input.size(0);
   if (stride==1) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (w >= 7) {
       // All batch sizes and nb_channels
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (w >= 112) {
         return true;
       }
 
       // large nb_channels
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (ch >= 1024) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if (w >= 56) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (bs >= 32) {
           return true;
         }
       }
 
       // batch_size specific
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (bs >= 128) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if (ch >= 512) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (ch >= 64) {
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           if (w >= 14) {
             return true;
           }
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if ((ch >= 32) && (w >=28)) {
           return true;
         }
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       } else if (bs >= 64) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 256) && (w >= 14)) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if ((ch >= 32) && (w >= 28)) {
           return true;
         }
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       } else if (bs >= 32) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 256) && (w >= 14)) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if ((ch >= 128) && (w >= 28)) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if ((ch >= 32) && (w >= 56)) {
           return true;
         }
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       } else if (bs >= 16) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 1024) && (w >= 14)) {
           return true;
         }
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 256) && (w >= 28)) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if ((ch >= 32) && (w >= 56)) {
           return true;
         }
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       } else if (bs >= 8) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 512) && (w >= 28)) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if ((ch >= 64) && (w >= 56)) {
           return true;
         }
       }
     }
   } else if (stride==2) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (ch < 256) {
       return false;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (w >= 7) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (bs >= 128) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if (ch >= 1024) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if ((ch >= 512) && (w >= 14)) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (w >= 28) {
           return true;
         }
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       } else if (bs >= 64) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 512) && (w >= 14)) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (w >= 28) {
           return true;
         }
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       } else if (bs >= 32) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 1024) && (w >= 14)) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (w >= 28) {
           return true;
         }
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       } else if (bs >= 16) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 512) && (w >= 28)) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (w >= 56) {
           return true;
         }
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       } else if (bs >= 8) {
+        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 1024) && (w >= 28)) {
           return true;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (w >= 56) {
           return true;
         }
       } else if (bs >= 1) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if ((ch >= 512) && (w >=112)) {
           return true;
         }
@@ -428,6 +484,7 @@ auto ConvParams::use_cudnn_depthwise(
   }
   if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
     long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     bool kernel_cond =  (cudnn_version >= 7600 &&
                          use_cudnn(input, weight) &&
                          input.scalar_type() == kHalf && // only for FP16
@@ -435,10 +492,12 @@ auto ConvParams::use_cudnn_depthwise(
                          is_depthwise(input, weight) &&
                          input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
                          weight.size(2) == weight.size(3) && // only square kernels
+                         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                          input.size(2) >= 7 && // min width/height 7
                          !is_dilated() && // no dilation supported
                          stride[0] == stride[1] && // equal strides
                          ((weight.size(3) == 3) || (weight.size(3) == 1)) &&
+                         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                          input.size(1) >= 32); // min 32 channels supported)
     if (kernel_cond) {
       return check_cudnn_depthwise_workload(input, stride[0]);
@@ -604,10 +663,13 @@ static Tensor convolution_same(
               k, "-dimensional weight", weight_sizes, ", but got ",
               input.dim(), "-dimensional input of size ",
               input.sizes(), " instead");
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(stride.size() == dim || stride.size() == 1,
               "stride cannot broadcast to ", dim, " dimensions");
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(dilation.size() == dim || dilation.size() == 1,
               "dilation cannot broadcast to ", dim, " dimensions");
+  // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
   for (int64_t i = 0; i < stride.size(); ++i) {
     TORCH_CHECK(stride[i] == 1, "padding='same' is not supported for strided convolutions");
   }
@@ -666,6 +728,7 @@ Tensor _convolution_mode(
     return at::native::convolution_same(
         input, weight, bias, stride, dilation, groups);
   } else if (padding == "valid") {
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t padding_[] = {0};
     return at::native::convolution(
         input, weight, bias, stride, padding_, dilation, false, padding_, groups);
@@ -752,6 +815,7 @@ at::Tensor convolution_overrideable(
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   const Tensor& bias = *bias_maybe_owned;
 
   TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_overrideable not implemented. You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
@@ -831,6 +895,7 @@ at::Tensor _convolution(
 
   at::MemoryFormat cudnn_memory_format = at::MemoryFormat::Contiguous;
   if (cudnn_conv_use_channels_last(input, weight)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     cudnn_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
   }
 
@@ -943,6 +1008,7 @@ at::Tensor _convolution(
         params.padding,
         params.groups);
   } else if (
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         !params.transposed && (input.ndimension() == 5) &&
         (input.device().is_cpu()) &&
         !params.is_dilated()) {
@@ -1026,6 +1092,7 @@ at::Tensor _convolution_nogroup(
       return at::slow_conv_transpose2d(
           input, weight, kernel_size, bias,
           stride, padding, output_padding, dilation);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (dim == 5) {
       return at::slow_conv_transpose3d(
         input, weight, kernel_size, bias,
@@ -1051,10 +1118,12 @@ at::Tensor _convolution_nogroup(
               stride, padding);
         }
       }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (dim == 5 && (input.is_cuda() || dilated)) {
       return at::slow_conv_dilated3d(
           input, weight, kernel_size, bias,
           stride, padding, dilation);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
@@ -1113,6 +1182,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
   // TODO: hacky way of inferring the groups number for grouped Conv3D
   // See: https://github.com/pytorch/pytorch/pull/36355
   if (!params.transposed && input.dim() > 4) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     params.groups = input.size(1) / weight.size(1);
   } else {
     params.groups = groups_;
