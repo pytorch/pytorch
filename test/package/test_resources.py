@@ -11,7 +11,7 @@ try:
     from .common import PackageTestCase
 except ImportError:
     # Support the case where we run this file directly.
-    from common import PackageTestCase  # type: ignore
+    from common import PackageTestCase
 
 
 @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
