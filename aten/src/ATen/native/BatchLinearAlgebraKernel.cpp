@@ -330,10 +330,75 @@ void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos
       });
 }
 
+/*
+  The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
+  from a sequence of elementary reflectors, such as produced by the geqrf function.
+
+  Args:
+  * `self` - Tensor with the directions of the elementary reflectors below the diagonal,
+              it will be overwritten with the result
+  * `tau` - Tensor containing the magnitudes of the elementary reflectors
+  * `n_columns` - The number of columns of Q to be computed
+
+  For further details, please see the LAPACK documentation for ORGQR and UNGQR.
+*/
+template <typename scalar_t>
+inline void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns) {
+#ifndef USE_LAPACK
+  TORCH_CHECK(false, "Calling torch.orgqr on a CPU tensor requires compiling ",
+    "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  // Some LAPACK implementations might not work well with empty matrices:
+  // workspace query might return lwork as 0, which is not allowed (requirement is lwork >= 1)
+  // We don't need to do any calculations in this case, so let's return early
+  if (self.numel() == 0) {
+    return;
+  }
+
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  auto self_data = self.data_ptr<scalar_t>();
+  auto tau_data = tau.data_ptr<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  auto tau_stride = tau.size(-1);
+  auto batch_size = batchCount(self);
+  auto m = self.size(-2);
+  auto k = tau.size(-1);
+  auto lda = std::max<int64_t>(1, m);
+  int info;
+
+  // LAPACK's requirement
+  TORCH_INTERNAL_ASSERT(m >= n_columns);
+  TORCH_INTERNAL_ASSERT(n_columns >= k);
+
+  // Run once, first to get the optimum work size.
+  // Since we deal with batches of matrices with the same dimensions, doing this outside
+  // the loop saves (batch_size - 1) workspace queries which would provide the same result
+  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
+  int lwork = -1;
+  scalar_t wkopt;
+  lapackOrgqr<scalar_t>(m, n_columns, k, self_data, lda, tau_data, &wkopt, lwork, &info);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
+  Tensor work = at::empty({lwork}, self.options());
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+
+    // now compute the actual Q
+    lapackOrgqr<scalar_t>(m, n_columns, k, self_working_ptr, lda, tau_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
+
+    // info from lapackOrgqr only reports if the i-th parameter is wrong
+    // so we don't need to check it all the time
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+  }
+#endif
+}
+
 // This is a type dispatching helper function for 'apply_orgqr'
-Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, int64_t n_columns) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "orgqr_cpu", [&]{
-    apply_orgqr<scalar_t>(result, tau, infos, n_columns);
+    apply_orgqr<scalar_t>(result, tau, n_columns);
   });
   return result;
 }

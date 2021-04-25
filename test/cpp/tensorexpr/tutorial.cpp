@@ -190,7 +190,7 @@ int main(int argc, char* argv[]) {
         "R",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return Z->call(i, j) * P.load(i, j);
+          return Z->load(i, j) * P.load(i, j);
         });
     std::cout << "Tensor computation: " << *R << std::endl;
     // Prints:
@@ -208,11 +208,6 @@ int main(int argc, char* argv[]) {
     // have such an expression. They need to be considered as coming to us as
     // inputs from outside - we can only load data from them.
     //
-    // Also note that we use 'call' to construct an access to an element of a
-    // Tensor and we use 'load' for accessing elements of an external tensor
-    // through its Placeholder. This is an implementation detail and could be
-    // changed in future.
-
     // TODO: Show how reductions are represented and constructed
   }
 
@@ -238,7 +233,7 @@ int main(int argc, char* argv[]) {
         "Y",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return sigmoid(X->call(i, j));
+          return sigmoid(X->load(i, j));
         });
     std::cout << "Tensor computation X: " << *X
               << "Tensor computation Y: " << *Y << std::endl;
