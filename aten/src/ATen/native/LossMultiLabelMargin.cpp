@@ -102,6 +102,7 @@ static void multilabel_margin_loss_forward_out_cpu_template(
     Tensor& is_target,
     int64_t reduction) {
   auto target_arg = TensorArg(target, "target", 2);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
   const int64_t ndims = input.dim();
   if (ndims <= 1) {
@@ -155,7 +156,9 @@ static void multilabel_margin_loss_backward_out_frame(
     const Tensor& is_target_contiguous,
     int64_t nframe,
     int64_t dim) {
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   CheckedFrom c = "multilabel_margin_loss_backward_out_frame";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto is_target_arg = TensorArg(is_target_contiguous, "is_target", 5);
 
   TORCH_CHECK(
@@ -167,6 +170,7 @@ static void multilabel_margin_loss_backward_out_frame(
   int64_t* target_data = target_contiguous.data_ptr<int64_t>();
   scalar_t* is_target_data = is_target_contiguous.data_ptr<scalar_t>();
   scalar_t g = static_cast<scalar_t>(
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
 
   scalar_t* grad_input_row_data = grad_input.data_ptr<scalar_t>();
@@ -220,9 +224,11 @@ static void multilabel_margin_loss_backward_out_cpu_template(
     const Tensor& target,
     int64_t reduction,
     const Tensor& is_target) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
   CheckedFrom c = "multilabel_margin_loss_backward_cpu_template";
   auto target_arg = TensorArg(target, "target", 3);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto is_target_arg = TensorArg(is_target, "is_target", 5);
   const int64_t ndims = input.dim();
 
