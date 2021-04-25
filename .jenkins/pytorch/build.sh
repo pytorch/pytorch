@@ -182,7 +182,12 @@ if [ -z "$MAX_JOBS" ]; then
 fi
 
 # Target only our CI GPU machine's CUDA arch to speed up the build
-export TORCH_CUDA_ARCH_LIST="5.2;7.5"
+export TORCH_CUDA_ARCH_LIST="5.2"
+
+# Add sm_75 support for the Linux CUDA 10.2 cuDNN 7 build
+if [[ "$BUILD_ENVIRONMENT" == *cuda10.2-cudnn7*build ]]; then
+  export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
+fi
 
 if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
