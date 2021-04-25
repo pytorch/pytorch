@@ -96,6 +96,7 @@ Tensor embedding_dense_backward_cpu(
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cpu", [&] () {
     auto indices_data = indices_contig.data_ptr<index_t>();
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     std::unique_ptr<index_t[]> counts;
     if (scale_grad_by_freq) {
       counts.reset(new index_t[num_weights]);
@@ -114,6 +115,7 @@ Tensor embedding_dense_backward_cpu(
           if (k >= start && k < end) {
             double scale = 1.0;
             if (scale_grad_by_freq) {
+              // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
               scale /= counts[k];
             }
             grad_weight[k].add_(grad[i], scale);
@@ -156,6 +158,7 @@ Tensor & embedding_renorm_cpu_(
       auto row = self[sorted_indices[i]];
       auto norm = row.norm(norm_type).item<double>();
       if (norm > max_norm) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto scale = max_norm / (norm + 1e-7);
         row *= scale;
       }
