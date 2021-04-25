@@ -117,7 +117,8 @@ def _permute_to_axis_zero(X, axis):
 
 # Reference method for fake quantize
 def _fake_quantize_per_channel_affine_reference(X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max):
-    X, permute_axis_list = _permute_to_axis_zero(X, axis)
+    dtype = X.dtype
+    X, permute_axis_list = _permute_to_axis_zero(X.to(torch.float32), axis)
     res = torch.zeros_like(X)
 
     for i in range(X.size()[0]):
@@ -125,11 +126,12 @@ def _fake_quantize_per_channel_affine_reference(X, per_channel_scale, per_channe
                   per_channel_zero_point[i]), quant_min, quant_max) - per_channel_zero_point[i]) * per_channel_scale[i]
 
     out = res.permute(tuple(permute_axis_list))
-    return out
+    return out.to(dtype)
 
 # Reference method for the gradient of the fake quantize operator
 def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max):
-    X, permute_axis_list = _permute_to_axis_zero(X, axis)
+    dtype = X.dtype
+    X, permute_axis_list = _permute_to_axis_zero(X.to(torch.float32), axis)
     Xq = torch.zeros_like(X)
     for i in range(X.size()[0]):
         Xq[i] = torch.round(X[i] * (1.0 / per_channel_scale[i]) + per_channel_zero_point[i])
@@ -137,7 +139,7 @@ def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, p
     mask = (Xq >= quant_min) * (Xq <= quant_max)
     res = torch.zeros_like(dY)
     res[mask] = dY[mask]
-    return res
+    return res.to(dtype)
 
 # Reference method for quantization.
 def _quantize_per_tensor(x, scale, zero_point, quant_min, quant_max):
@@ -1275,9 +1277,10 @@ class TestFakeQuantize(TestCase):
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
     def _test_forward_per_channel_cachemask_impl(self, device):
-        for torch_type in (torch.qint8, torch.quint8):
-
-            X = torch.randn(1, 2, 4, 4).to(device)
+        torch_types = (torch.qint8, torch.quint8)
+        float_types = (torch.float32, torch.float16, torch.float64)
+        for torch_type, float_type in itertools.product(torch_types, float_types):
+            X = torch.randn(1, 2, 4, 4, dtype=float_type).to(device)
             # pick the scale + zp so that some values get clipped
             axis = 1
             obs = torch.quantization.PerChannelMinMaxObserver(axis, torch_type).to(device)
@@ -1299,6 +1302,36 @@ class TestFakeQuantize(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
     def test_forward_per_channel_cachemask_cuda(self):
         self._test_forward_per_channel_cachemask_impl('cuda')
+
+    def test_forward_per_channel_half_precision_numerics(self):
+        scale = torch.randn(5).abs()
+        zero = torch.randn(5).to(dtype=torch.long)
+        axis = 1
+        mini = 0
+        maxi = 255
+        
+
+        for i in range(20):
+            X1 = torch.randn(4, 5).to(torch.float16)
+            Y1 = torch.fake_quantize_per_channel_affine(X1, scale, zero, axis, mini, maxi)
+            Y1r = _fake_quantize_per_channel_affine_reference(X1, scale, zero, axis, mini, maxi)
+            self.assertTrue(torch.allclose(Y1, Y1r, rtol=tolerance, atol=tolerance))
+
+        # to force overflow
+        X2 = torch.randn(4, 5).to(torch.float16)
+        X2[0,0] = 2**15 + .01
+        Y2 = torch.fake_quantize_per_channel_affine(X2, scale, zero, axis, mini, maxi)
+        Y2r = _fake_quantize_per_channel_affine_reference(X2, scale, zero, axis, mini, maxi)
+        self.assertTrue(torch.allclose(Y2, Y2r, rtol=tolerance, atol=tolerance))
+
+        scale = torch.zeros(5)+10
+
+        # to force underflow
+        X3 = torch.randn(4, 5).to(torch.float16)
+        X3[0,0] = 2**-24
+        Y3 = torch.fake_quantize_per_channel_affine(X3, scale, zero, axis, mini, maxi)
+        Y3r = _fake_quantize_per_channel_affine_reference(X3, scale, zero, axis, mini, maxi)
+        self.assertTrue(torch.allclose(Y3, Y3r, rtol=tolerance, atol=tolerance))
 
     def _test_learnable_forward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
         r"""Tests the forward path of the learnable FakeQuantizePerTensorAffine op.
@@ -1371,8 +1404,10 @@ class TestFakeQuantize(TestCase):
         np.testing.assert_allclose(dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     def _test_backward_per_channel_cachemask_impl(self, device):
-        for torch_type in (torch.qint8, torch.quint8):
-            X = torch.randn(1, 2, 4, 4).to(device)
+        torch_types = (torch.qint8, torch.quint8)
+        float_types = (torch.float32, torch.float16, torch.float64)
+        for torch_type, float_type in itertools.product(torch_types, float_types):
+            X = torch.randn(1, 2, 4, 4, dtype = float_type).to(device)
             # pick the scale + zp so that some values get clipped
             axis = 1
             obs = torch.quantization.PerChannelMinMaxObserver(axis, torch_type).to(device)
@@ -1384,7 +1419,8 @@ class TestFakeQuantize(TestCase):
             X.requires_grad_()
             Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
-            dout = torch.rand(X.shape, dtype=torch.float).to(device)
+            # dout = torch.rand(X.shape, dtype=torch.float).to(device)
+            dout = torch.rand(X.shape, dtype=float_type).to(device)
             dX = _fake_quantize_per_channel_affine_grad_reference(
                 dout, X, scale, zero_point, axis, quant_min, quant_max)
             Y_prime.backward(dout)
