@@ -217,6 +217,7 @@ AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
 namespace blas_impl {
 #if AT_BUILD_WITH_BLAS()
 float dot_fast_path(int n, float* x, int incx, float* y, int incy) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return sdot_(&n, x, &incx, y, &incy);
 }
 
@@ -257,6 +258,7 @@ scalar_t dot_naive(
     scalar_t* y,
     int64_t incy,
     Functor op) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t i;
   scalar_t sum = 0;
   for (i = 0; i < n; i++) {
