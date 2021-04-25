@@ -2810,6 +2810,25 @@ class TestLinalg(TestCase):
             assert USV.V is out[2]
             self.assertEqual(USV.S, np_s)
 
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_svdvals(self, device, dtype):
+
+        def run_test(shape):
+            # NumPy doesn't have separate svdvals function, it is included in
+            # svd with compute_uv=False
+            # so we test our implementation against numpy.linalg.svd(*, compute_uv=False)
+            A = make_tensor(shape, dtype=dtype, device=device)
+            expected = np.linalg.svd(A.cpu(), compute_uv=False)
+            actual = torch.linalg.svdvals(A)
+            self.assertEqual(actual, expected)
+
+        batches = [(), (0, ), (2, ), (2, 1)]
+        ns = [5, 2, 0]
+        for batch, (m, n) in itertools.product(batches, product(ns, ns)):
+            run_test((*batch, m, n))
+
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
@@ -7363,13 +7382,41 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    def test_geqrf(self, device):
-        a = torch.randn(5, 5, device=device)
-        b, c = torch.geqrf(a)
-        b_placeholder, c_placeholder = torch.empty_like(b), torch.empty_like(c)
-        torch.geqrf(a, out=(b_placeholder, c_placeholder))
-        self.assertEqual(b, b_placeholder)
-        self.assertEqual(c, c_placeholder)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
+    def test_geqrf(self, device, dtype):
+
+        def run_test(shape):
+            # numpy.linalg.qr with mode = 'raw' computes the same operation as torch.geqrf
+            # so this test compares against that function
+            A = make_tensor(shape, dtype=dtype, device=device)
+
+            # numpy.linalg.qr doesn't work with batched input
+            m, n = A.shape[-2:]
+            tau_size = "n" if m > n else "m"
+            np_dtype = A.cpu().numpy().dtype
+            ot = [np_dtype, np_dtype]
+            numpy_geqrf_batched = np.vectorize(
+                lambda x: np.linalg.qr(x, mode='raw'),
+                otypes=ot,
+                signature=f'(m,n)->(n,m),({tau_size})')
+
+            expected = numpy_geqrf_batched(A.cpu())
+            actual = torch.geqrf(A)
+
+            # numpy.linalg.qr returns transposed result
+            self.assertEqual(expected[0].swapaxes(-2, -1), actual[0])
+            self.assertEqual(expected[1], actual[1])
+
+        batches = [(), (0, ), (2, ), (2, 1)]
+        ns = [5, 2, 0]
+        for batch, (m, n) in product(batches, product(ns, ns)):
+            # TODO: CUDA path doesn't work with batched or empty inputs
+            if self.device_type == 'cuda' and (batch != () or m == 0 or n == 0):
+                with self.assertRaisesRegex(RuntimeError, "A should be non-empty 2 dimensional"):
+                    run_test((*batch, m, n))
+                continue
+            run_test((*batch, m, n))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
