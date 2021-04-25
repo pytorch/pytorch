@@ -1,3 +1,5 @@
+from .analyze.is_from_package import is_from_package
+from .glob_group import GlobGroup
 from .importer import (
     Importer,
     ObjMismatchError,
