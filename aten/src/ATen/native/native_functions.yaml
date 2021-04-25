@@ -804,16 +804,19 @@
     CPU, CUDA: bitwise_not_out
 
 - func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: copysign_out
 
 - func: copysign.Tensor(Tensor self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: copysign.out
 
 - func: copysign_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
   variants: method
   structured_delegate: copysign.out
 
