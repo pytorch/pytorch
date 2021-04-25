@@ -5217,6 +5217,7 @@ class TestLinalg(TestCase):
                 # 0. This however conveys that the factorization was
                 # successful albeit with a singular input. Therefore,
                 # we require info.min() >= 0
+
                 self.assertGreaterEqual(info_.min(), 0)
                 a_LU, pivots = a.lu(pivot=pivot)
                 self.assertEqual(a_LU, a_LU_info)
@@ -5241,7 +5242,7 @@ class TestLinalg(TestCase):
                     self.assertEqual(np.matmul(P_nopiv_, np.matmul(L_nopiv_, U_nopiv_)), a)
 
                     k = min(rows, columns)
-                    self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(a.shape[:-2] + (k, )))
+                    self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=nopiv.dtype).expand(a.shape[:-2] + (k, )))
                     if not singular:
                         # It is not guaranteed that LU factorization
                         # without pivoting is able to determine if a

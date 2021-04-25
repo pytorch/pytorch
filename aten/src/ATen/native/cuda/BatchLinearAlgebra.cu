@@ -1,5 +1,6 @@
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDASolver.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
@@ -1867,15 +1868,30 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool p
   Tensor pivots_tensor = at::arange(1, k + 1, self.options().dtype(at::kInt)).expand(req_size).contiguous();
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(at::kInt));
+  auto batch_size = cuda_int_cast(batchCount(self), "batch size");
 
   Tensor self_working_copy;
   if (self.numel() == 0) {
     self_working_copy = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cuda", [&]{
+
+#ifdef USE_CUSOLVER
+    // Heuristic: for single matrix factorization and batch sizes less 8 and matrix sizes less than
+    // 512 we default to looped cuSOLVER if available. Otherwise revert to the default MAGMA function.
+    if (batch_size == 1 || (batch_size <= 8 && m <= 512)) {
+      apply_lu_cusolver_looped(self_working_copy, pivots_tensor, infos_tensor, pivot);
+    }
+    else {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cuda", [&]{
         apply_lu<scalar_t>(self_working_copy, pivots_tensor, infos_tensor, pivot);
+      });
+    }
+#else
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cuda", [&]{
+      apply_lu<scalar_t>(self_working_copy, pivots_tensor, infos_tensor, pivot);
     });
+#endif
   }
   if (check_errors) {
     if (self.dim() == 2) {

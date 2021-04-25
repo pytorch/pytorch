@@ -826,6 +826,55 @@ Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau) {
   return result;
 }
 
+void apply_lu_cusolver_looped(Tensor& self, Tensor& pivots, Tensor& infos, bool get_pivots) {
+  auto infos_data = infos.data_ptr<int>();
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cusolver", [&]{
+    auto self_data = self.data_ptr<scalar_t>();
+    auto self_stride = matrixStride(self);
+    int batch_size = cuda_int_cast(batchCount(self), "batch size");
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+    int m = cuda_int_cast(self.size(-2), "m");
+    int n = cuda_int_cast(self.size(-1), "n");
+    int lda = std::max<int>(1, m);
+    for (int batch = 0; batch < batch_size; ++batch) {
+      if (get_pivots) {
+        auto pivots_data = pivots.data_ptr<int>();
+        auto pivots_matrix_stride = pivots.size(-1);
+        at::cuda::solver::getrf<scalar_t>(
+          handle, m, n,
+          self_data + batch * self_stride,
+          lda,
+          pivots_data + batch * pivots_matrix_stride,
+          infos_data + batch
+        );
+      }
+      else {
+        at::cuda::solver::getrf<scalar_t>(
+          handle, m, n,
+          self_data + batch * self_stride,
+          lda,
+          NULL,
+          infos_data  + batch
+        );
+      }
+    }
+  });
+
+  // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA.
+  if (self.is_complex()) {
+    Tensor real = at::real(self);
+    Tensor imag = at::imag(self);
+    // TODO: Make nan_to_num_ work with complex numbers so this if-condition is unneccesary.
+    at::nan_to_num_(real);
+    at::nan_to_num_(imag);
+  }
+  else {
+    at::nan_to_num_(self);
+  }
+}
+
 template <typename scalar_t>
 static void apply_syevd(Tensor& values, Tensor& vectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
