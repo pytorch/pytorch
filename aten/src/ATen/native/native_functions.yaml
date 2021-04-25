@@ -145,6 +145,7 @@
     CUDA: _cudnn_rnn_flatten_weight
 
 - func: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  device_check: NoCheck  # TODO: explain this
   dispatch:
     CUDA: _cudnn_rnn
 
