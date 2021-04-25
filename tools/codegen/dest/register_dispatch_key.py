@@ -59,7 +59,7 @@ class RegisterDispatchKey:
     rocm: bool
 
     @staticmethod
-    def gen_device_check(type: DeviceCheckType, args: Sequence[Argument], method_name: str) -> str:
+    def gen_device_check(type: DeviceCheckType, args: List[Argument], method_name: str) -> str:
         if type == DeviceCheckType.NoCheck:
             return '  // No device check\n'
 
@@ -67,7 +67,8 @@ class RegisterDispatchKey:
         for arg in args:
             # Only tensor like arguments are eligible
             if arg.type.is_tensor_like():
-                device_check += f'\n  c10::impl::check_and_update_common_device(common_device, {arg.name}, "{method_name}", "{arg.name}");'
+                device_check += f"""
+  c10::impl::check_and_update_common_device(common_device, {arg.name}, "{method_name}", "{arg.name}");"""
         return device_check
 
     @method_with_native_function
@@ -176,7 +177,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     f.func.arguments.out,
                     f.func.arguments.flat_positional
                 )
-                device_check = RegisterDispatchKey.gen_device_check(f.device_check, device_check_args, name)
+                device_check = RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), name)
 
             device_guard = "// DeviceGuard omitted"  # default
             if f.device_guard and is_cuda_dispatch_key(self.dispatch_key):
@@ -456,7 +457,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     f.func.arguments.out,
                     f.func.arguments.flat_positional
                 )
-                sig_body.append(RegisterDispatchKey.gen_device_check(f.device_check, device_check_args, sig.name()))
+                sig_body.append(RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), sig.name()))
 
             if k is SchemaKind.functional:
                 sig_body.append(f"{class_name} op;")
