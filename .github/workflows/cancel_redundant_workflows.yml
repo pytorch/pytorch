@@ -7,6 +7,7 @@ on:
     workflows:
     - Lint
     - Test tools
+    - TorchBench CI (pytorch-linux-py3.7-cu102)
     - clang-format
 jobs:
   cancel:
