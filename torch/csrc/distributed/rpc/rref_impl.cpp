@@ -10,7 +10,6 @@
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-
 namespace {
 // If the type is subtype of named type, return its qualifiedname, otherwise
 // return its type str.
