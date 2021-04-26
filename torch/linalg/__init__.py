@@ -689,13 +689,15 @@ In this case, if :math:`\sigma_i` are the singular values of `A` in decreasing o
 If :attr:`cond`\ `= None` (default), :attr:`cond` is set to the machine precision of the dtype of :attr:`A`.
 
 This function returns the solution to the problem and some extra information in a named tuple of
-four tensors `(solution, residuals, rank, singular_values)` containing:
+four tensors `(solution, residuals, rank, singular_values)`. For inputs :attr:`A`, :attr:`B`
+of shape `(*, m, n)`, `(*, m, k)` respectively, it cointains
 
-- `solution`: the least squares solution
-- `residuals`: the squared residuals of the solutions, that is :math:`\|AX - B\|_F^2`.
-  It is computed when `m > n` and the matrix is full-rank,
+- `solution`: the least squares solution. It has shape `(*, n, k)`.
+- `residuals`: the squared residuals of the solutions, that is, :math:`\|AX - B\|_F^2`.
+  It has shape equal to the batch dimensions of :attr:`A`.
+  It is computed when `m > n` and every matrix in :attr:`A` is full-rank,
   otherwise, it is an empty tensor.
-- `rank`: tensor of ranks of the matrices in :attr:`A`
+- `rank`: tensor of ranks of the matrices in :attr:`A`.
   It has shape equal to the batch dimensions of :attr:`A`.
   It is computed when :attr:`driver` is one of (`'gelsy'`, `'gelsd'`, `'gelss'`),
   otherwise it is an empty tensor.
@@ -717,9 +719,9 @@ four tensors `(solution, residuals, rank, singular_values)` containing:
 Args:
     A (Tensor): lhs tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     B (Tensor): rhs tensor of shape `(*, m, k)` where `*` is zero or more batch dimensions.
-    cond (float, optional): used to determine the effective rank of the input.
+    cond (float, optional): used to determine the effective rank of :attr:`A`.
                             If :attr:`cond`\ `= None`, :attr:`cond` is set to the machine
-                            of the dtype of :attr:`A`. Default: `None`.
+                            precision of the dtype of :attr:`A`. Default: `None`.
 
 Keyword args:
     driver (str, optional): name of the LAPACK/MAGMA method to be used.
