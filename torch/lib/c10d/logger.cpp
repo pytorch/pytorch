@@ -80,7 +80,7 @@ void Logger::set_parameter_stats() {
   ddp_logging_data_->ints_map["num_parameter_tensors"] =
       reducer_->replicas_[0].size();
   // Total parameters size (Bytes)
-  int64_t total_parameter_size_bytes = 0;
+  ddp_logging_data_->ints_map["total_parameter_size_bytes"] = 0;
   // Parameters' data types, there may be multiple data
   // types for mixed precision training.
   std::set<std::string> unique_dtypes;

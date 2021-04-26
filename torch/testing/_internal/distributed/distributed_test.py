@@ -3203,7 +3203,7 @@ class DistributedTest:
             )
             ddp_logging_data = ddp_model.get_ddp_logging_data()
             # Hook not registered yet, so should be empty
-            self.assertEqual(ddp_logging_data.get("comm_hook"), "")
+            self.assertEqual(ddp_logging_data.get("comm_hook"), None)
             # After second forward pass, hook should still be empty string
             for i in range(2):
                 inp = torch.ones(1, 1, device=self.rank)
@@ -3211,7 +3211,7 @@ class DistributedTest:
                 loss.backward()
 
             ddp_logging_data = ddp_model.get_ddp_logging_data()
-            self.assertEqual(ddp_logging_data.get("comm_hook"), "")
+            self.assertEqual(ddp_logging_data.get("comm_hook"), None)
 
         def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
