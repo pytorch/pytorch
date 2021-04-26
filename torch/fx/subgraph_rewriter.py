@@ -87,7 +87,8 @@ class SubgraphMatcher:
 def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
     gm.delete_all_unused_submodules()
 
-    replacement.lint()
+    if isinstance(replacement, GraphModule):
+        replacement.graph.lint()
 
     def try_get_submodule(mod: torch.nn.Module, target: str) -> Optional[torch.nn.Module]:
         try:
@@ -117,15 +118,16 @@ def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
 
             # CASE 3: The target doesn't exist as a submodule in `gm`
             # or `replacement`
-            raise RuntimeError("Attempted to create a \"", node.op,
-                               "\" node during subgraph rewriting with"
-                               " target ", node.target, " but the "
-                               "referenced submodule does not exist in"
-                               "either the original GraphModule `gm` "
-                               "or the replacement GraphModule "
-                               "`replacement`")
+            else:
+                raise RuntimeError("Attempted to create a \"", node.op,
+                                   "\" node during subgraph rewriting "
+                                   f"with target {node.target}, but "
+                                   "the referenced submodule does not "
+                                   "exist in either the original "
+                                   "GraphModule `gm` or the replacement"
+                                   " GraphModule `replacement`")
 
-    gm.lint()
+    gm.graph.lint()
 
 def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -> List[Match]:
     """
