@@ -44,8 +44,8 @@ from torch.jit._monkeytype_config import (
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
-torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore[attr-defined]
-torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore[attr-defined]
+torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
+torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
 ScriptFunction = torch._C.ScriptFunction
 ScriptFunction.__doc__ = """
 Functionally equivalent to a :class:`ScriptModule`, but represents a single
