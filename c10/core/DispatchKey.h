@@ -134,9 +134,9 @@ enum class DispatchKey : uint8_t {
   // correct backend.
   BackendSelect,
 
-  Python, // See Note [Out-of-tree vmap+grad prototype]
+  FuncTorchPython, // See Note [Out-of-tree vmap+grad prototype]
 
-  DynamicLayerBackMode, // See Note [Out-of-tree vmap+grad prototype]
+  FuncTorchDynamicLayerBackMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
@@ -237,8 +237,8 @@ enum class DispatchKey : uint8_t {
   // autograd; for example, error checking, tracing, profiling or vmap.  They
   // go here.
 
-  BatchedOutOfTree, // See Note [Out-of-tree vmap+grad prototype]
-  VmapModeOutOfTree, // See Note [Out-of-tree vmap+grad prototype]
+  FuncTorchBatched, // See Note [Out-of-tree vmap+grad prototype]
+  FuncTorchVmapMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // This is the dispatch key for BatchedTensorImpl, which is used to implement
   // batching rules for vmap.
@@ -248,8 +248,8 @@ enum class DispatchKey : uint8_t {
   // See Note: [DispatchKey::VmapMode usage] for more details.
   VmapMode,
 
-  GradWrapper, // See Note [Out-of-tree vmap+grad prototype]
-  DynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
+  FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
+  FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
