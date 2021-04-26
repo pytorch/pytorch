@@ -6,7 +6,7 @@ name: Linux CI (pytorch-linux-xenial-py3.6-gcc5.4)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-  # pull_request:
+
   push:
     branches:
       - master
@@ -61,6 +61,9 @@ jobs:
           mkdir -pv ../custom-op-build
           mkdir -pv ../custom-backend-build
           mkdir -pv ../jit-hook-build
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Build PyTorch
         run: |
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
@@ -76,14 +79,15 @@ jobs:
             -e SCCACHE_BUCKET \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --tty \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -v "${GITHUB_WORKSPACE}../custom-op-build:/var/lib/jenkins/custom-op-build" \
-            -v "${GITHUB_WORKSPACE}../custom-backend-build:/var/lib/jenkins/custom-backend-build" \
-            -v "${GITHUB_WORKSPACE}../jit-hook-build:/var/lib/jenkins/jit-hook-build" \
+            -v "${GITHUB_WORKSPACE}/../custom-op-build:/var/lib/jenkins/custom-op-build" \
+            -v "${GITHUB_WORKSPACE}/../custom-backend-build:/var/lib/jenkins/custom-backend-build" \
+            -v "${GITHUB_WORKSPACE}/../jit-hook-build:/var/lib/jenkins/jit-hook-build" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins ../ && .jenkins/pytorch/build.sh'
@@ -118,7 +122,7 @@ jobs:
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
+          docker run --rm -v "$(pwd)/../":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
       - name: Checkout PyTorch
         uses: actions/checkout@v2
       - name: Log in to ECR
@@ -146,16 +150,24 @@ jobs:
               ;;
           esac
           echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
+      - name: Remove test binary build directories
+        run: |
+          rm -rf ../custom-op-build
+          rm -rf ../custom-backend-build
+          rm -rf ../jit-hook-build
       - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
       - name: Unzip artifacts
         run: |
-          (cd "${GITHUB_WORKSPACE}/../" && unzip -q pytorch/artifacts.zip)
+          (cd "${GITHUB_WORKSPACE}/../" && unzip -qof pytorch/artifacts.zip)
       - name: Output disk space left
         run: |
           sudo df -H
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         run: |
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
@@ -172,15 +184,16 @@ jobs:
             -e BUILD_ENVIRONMENT \
             -e IN_CI \
             -e MAX_JOBS \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --shm-size="${SHM_SIZE}" \
             --tty \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -v "${GITHUB_WORKSPACE}../custom-op-build:/var/lib/jenkins/custom-op-build" \
-            -v "${GITHUB_WORKSPACE}../custom-backend-build:/var/lib/jenkins/custom-backend-build" \
-            -v "${GITHUB_WORKSPACE}../jit-hook-build:/var/lib/jenkins/jit-hook-build" \
+            -v "${GITHUB_WORKSPACE}/../custom-op-build:/var/lib/jenkins/custom-op-build" \
+            -v "${GITHUB_WORKSPACE}/../custom-backend-build:/var/lib/jenkins/custom-backend-build" \
+            -v "${GITHUB_WORKSPACE}/../jit-hook-build:/var/lib/jenkins/jit-hook-build" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins ../ && pip install dist/*.whl && .jenkins/pytorch/test.sh'
