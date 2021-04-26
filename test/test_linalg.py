@@ -4424,33 +4424,60 @@ class TestLinalg(TestCase):
         check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
 
     def test_einsum_error_cases(self, device):
-        def check(equation, operands, regex, exception=RuntimeError):
-            with self.assertRaisesRegex(exception, r'einsum\(\) ' + regex):
-                torch.einsum(equation, operands)
+        def check(*args, regex, exception=RuntimeError):
+            with self.assertRaisesRegex(exception, r'einsum\(\).*' + regex):
+                torch.einsum(*args)
 
         x = torch.rand(2)
         y = torch.rand(2, 3)
 
-        check('', [], r'must provide at least one operand')
-        check('. ..', [x], r'found \'.\' for operand 0 that is not part of any ellipsis')
-        check('... ...', [x], r'found \'.\' for operand 0 for which an ellipsis was already found')
-        check('1', [x], r'operand subscript must be in \[a-zA-Z\] but found 1 for operand 0')
-        check(',', [x], r'fewer operands were provided than specified in the equation')
-        check('', [x, x], r'more operands were provided than specified in the equation')
-        check('', [x], r'the number of subscripts in the equation \(0\) does not match the number '
-                       r'of dimensions \(1\) for operand 0 and no ellipsis was given')
-        check('ai', [x], r'the number of subscripts in the equation \(2\) does not match the number '
-                         r'of dimensions \(1\) for operand 0 and no ellipsis was given')
-        check('ai...', [x], r'the number of subscripts in the equation \(2\) is more than the number '
-                            r'of dimensions \(1\) for operand 0')
-        check('a->... .', [x], r'found \'.\' for output but an ellipsis \(...\) was already found')
-        check('a->..', [x], r'found \'.\' for output that is not part of any ellipsis \(...\)')
-        check('a->1', [x], r'subscripts must be in \[a-zA-Z\] but found 1 for the output')
-        check('a->aa', [x], r'output subscript a appears more than once in the output')
-        check('a->i', [x], r'output subscript i does not appear in the equation for any input operand')
-        check('aa', [y], r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
-        check('a, ba', [x, y], r'operands do not broadcast with remapped shapes \[original->remapped\]: '
-                               r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')
+        check('', [], regex=r'at least one operand', exception=ValueError)
+        check('. ..', [x], regex=r'found \'.\' for operand 0 that is not part of any ellipsis')
+        check('... ...', [x], regex=r'found \'.\' for operand 0 for which an ellipsis was already found')
+        check('1', [x], regex=r'invalid subscript given at index 0')
+        check(',', [x], regex=r'fewer operands were provided than specified in the equation')
+        check('', [x, x], regex=r'more operands were provided than specified in the equation')
+        check('', [x], regex=r'the number of subscripts in the equation \(0\) does not match the number '
+              r'of dimensions \(1\) for operand 0 and no ellipsis was given')
+        check('ai', [x], regex=r'the number of subscripts in the equation \(2\) does not match the number '
+              r'of dimensions \(1\) for operand 0 and no ellipsis was given')
+        check('ai...', [x], regex=r'the number of subscripts in the equation \(2\) is more than the number '
+              r'of dimensions \(1\) for operand 0')
+        check('a->... .', [x], regex=r'found \'.\' for output but an ellipsis \(...\) was already found')
+        check('a->..', [x], regex=r'found \'.\' for output that is not part of any ellipsis \(...\)')
+        check('a->1', [x], regex=r'invalid subscript given at index 3')
+        check('a->aa', [x], regex=r'output subscript a appears more than once in the output')
+        check('a->i', [x], regex=r'output subscript i does not appear in the equation for any input operand')
+        check('aa', [y], regex=r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
+        check('a, ba', [x, y], regex=r'operands do not broadcast with remapped shapes \[original->remapped\]: '
+              r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')
+
+        check(x, [-1], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
+        check(x, [52], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
+
+    @dtypes(torch.double, torch.cdouble)
+    def test_einsum_sublist_format(self, device, dtype):
+        def check(*args):
+            np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
+            ref = np.einsum(*np_args)
+            res = torch.einsum(*args)
+            self.assertEqual(torch.from_numpy(np.array(ref)), res)
+
+        x = torch.rand(5, device=device, dtype=dtype)
+        y = torch.rand(7, device=device, dtype=dtype)
+        A = torch.randn(3, 5, device=device, dtype=dtype)
+        B = torch.randn(2, 5, device=device, dtype=dtype)
+        C = torch.rand((2, 1, 3, 1, 4), device=device, dtype=dtype)
+
+        check(x, [0])
+        check(x, [0], [])
+        check(x, [0], y, [1], [0, 1])
+        check(A, [0, 1], [1, 0])
+        check(A, [0, 1], x, [1], [0])
+        check(A, [0, 1], B, [2, 1], [0, 2])
+        check(C, [0, 1, 2, 1, Ellipsis], [0, 2, 1, Ellipsis])
+        check(A.t(), [0, 1], B, [Ellipsis, 0], [1, Ellipsis])
+        check(A.t(), [0, Ellipsis], B, [1, 0], [Ellipsis])
 
     def triangular_solve_test_helper(self, A_dims, b_dims, upper, unitriangular,
                                      device, dtype):

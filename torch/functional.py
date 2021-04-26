@@ -309,7 +309,7 @@ def einsum(*args):
 
     Equation:
 
-        The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for each dimension of
+        The :attr:`equation` string specifies the subscripts (letters in `[a-zA-Z]`) for each dimension of
         the input :attr:`operands` in the same order as the dimensions, separating subcripts for each operand by a
         comma (','), e.g. `'ij,jk'` specify subscripts for two 2D operands. The dimensions labeled with the same subscript
         must be broadcastable, that is, their size must either match or be `1`. The exception is if a subscript is
@@ -347,9 +347,18 @@ def einsum(*args):
         run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
         can optimize the formula for you.
 
+    .. note::
+
+        There's an alternative way of calling :func:`torch.einsum` by providing each input operand followed by its
+        subscripts as a list of integers in the range [0, 52), and optionally `Ellipsis`, as separate arguments. The
+        output subscripts may be optionally specified as the last argument.
+        e.g.`torch.einsum(op1, sublist1, op2, sublist2, ..., [subslist_out])`, where `opn` is the `nth` operand,
+        `sublistn` the subscript list for the `nth` and `sublist_out` the optional output subscripts. An example of
+        a subscript list is `[0, 30, Ellipsis, 30, 5]`. See below for more examples.
+
     Args:
         equation (string): The subscripts for the Einstein summation.
-        operands (Tensor): The operands to compute the Einstein sum of.
+        operands (List[Tensor]): The tensors to compute the Einstein summation of.
 
     Examples::
 
@@ -397,46 +406,40 @@ def einsum(*args):
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
     """
-    if len(args) == 0:
-        raise ValueError('einsum(): no input operands were provided')
+    if len(args) < 2:
+        raise ValueError('einsum(): must specify the equation string and at least one operand, '
+                         'or at least one operand and its subscripts list')
 
     equation = None
     operands = None
 
-    # subslist input format, convert to string equation input format
+    # Convert subscript list input format to equation string format
     if isinstance(args[0], torch.Tensor):
-        def convert_subscript(subscript):
-            if subscript == Ellipsis:
+        def parse_subscript(n):
+            if n == Ellipsis:
                 return '...'
-            elif subscript >= 0 and subscript < 26:
-                return chr(ord('a') + subscript)
-            else:
-                raise ValueError('einsum(): subscript must be in range [0, 26) but got ', subscript)
+            if n < 0 or n >= 52:
+                raise ValueError('einsum(): subscript in subscript list is not within the valid range [0, 52)')
+            return chr((n + ord('a')) if n < 26 else (n - 26 + ord('A')))
 
-        out_subscripts = None
-        if isinstance(args[-2], Sequence):
-            out_subscripts = args[-1]
-            args = args[:-1]
+        input_subscripts = []
+        for sublist in args[1::2]:
+            input_subscripts.append(''.join(parse_subscript(s) for s in sublist))
+        equation = ','.join(input_subscripts)
 
-        equation = ''
-        operands = args[::2]
-
-        for subscripts in args[1::2]:
-            for s in subscripts:
-                equation += convert_subscript(s)
-            equation += ','
-        equation = equation[:-1]
-
-        if out_subscripts is not None:
-            equation += '->'
-            for s in out_subscripts:
-                equation += convert_subscript(s)
+        if isinstance(args[-2], torch.Tensor):
+            operands = args[::2]
+        else:
+            # Parse output subscript list
+            equation += '->' + ''.join(parse_subscript(s) for s in args[-1])
+            operands = args[:-1:2]
     else:
         equation = args[0]
         operands = args[1:]
 
     if has_torch_function(operands):
         return handle_torch_function(einsum, operands, equation, *operands)
+
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         _operands = operands[0]
