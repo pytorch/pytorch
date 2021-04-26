@@ -1529,6 +1529,22 @@ except RuntimeError as e:
         self.assertIsInstance(batch, torch.DoubleTensor)
         self.assertEqual(batch.size(), torch.Size([12, 2, 3, 4]))
 
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_numpy_gen_state(self):
+        from torch.utils.data._utils.worker import _generate_state
+        import numpy as np
+
+        for i in range(10):
+            # uint64 as the base seed
+            base_seed = np.random.randint(0, high=0xffffffff_ffffffff, dtype=np.uint64)
+            bs1 = np.bitwise_and(base_seed, np.uint64(0xffffffff)).item()
+            bs2 = np.right_shift(base_seed, np.uint64(32)).item()
+            for worker_id in range(8):
+                # Same seedsequence as `_generate_state`
+                ss = [worker_id, bs1, bs2, 0]
+                np_ss = np.random.SeedSequence(ss)
+                self.assertEqual(np_ss.generate_state(4), _generate_state(base_seed.item(), worker_id))
+
     def test_error(self):
         self._test_error(self._get_data_loader(ErrorDataset(100), batch_size=2, shuffle=True))
 
