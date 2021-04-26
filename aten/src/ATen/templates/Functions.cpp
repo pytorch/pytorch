@@ -71,7 +71,7 @@ void noopDelete(void*) {}
 } // namespace detail
 
 Tensor TensorMaker::make_tensor() {
-  AutoDispatchBelowAutograd guard{}; // TODO: Remove.
+  AutoDispatchBelowInplaceOrView guard{}; // TODO: Remove.
   tracer::impl::NoTracerDispatchMode tracer_guard{};
 
   check_size_nonnegative(sizes_);
