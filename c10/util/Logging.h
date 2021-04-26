@@ -291,9 +291,9 @@ C10_API void LogAPIUsage(const std::string& context);
 // and torch files.
 struct DDPLoggingData {
   // logging fields that are string types.
-  std::unordered_map<std::string, std::string> strs_map;
+  std::map<std::string, std::string> strs_map;
   // logging fields that are int64_t types.
-  std::unordered_map<std::string, int64_t> ints_map;
+  std::map<std::string, int64_t> ints_map;
 };
 
 C10_API void SetPyTorchDDPUsageLogger(

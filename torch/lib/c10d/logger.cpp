@@ -214,6 +214,13 @@ void Logger::calculate_avg_gpu_time(
 }
 #endif
 
+void Logger::reset_performance_stats() {
+  ddp_logging_data_->ints_map["forward_compute_time"] = 0;
+  ddp_logging_data_->ints_map["backward_comm_time"] = 0;
+  ddp_logging_data_->ints_map["backward_compute_time"] = 0;
+  ddp_logging_data_->ints_map["backward_compute_comm_overlap_time"] = 0;
+}
+
 void Logger::set_runtime_stats_and_log() {
   // Sync with reducer's data
   std::lock_guard<std::mutex> lock(reducer_->mutex_);
@@ -247,24 +254,8 @@ void Logger::set_runtime_stats_and_log() {
         c10::Join(", ", get_bucket_sizes());
   }
 
-  // The following runtime stats are collected for the first 10 iterations
-  // and then are collected every kDDPRuntimeLoggingSampleRate=100 iterations.
-  // Users can get these stats at any iteration of training
-  // loop by calling get_ddp_logging_data() in python.
-  // 1. Average performance stats for the number of sampling iterations
-  // when time is recorded (ns).
-  // e.g., training loop has ran "DDPLoggingData::iteration=1000" iterations,
-  // time is recorded every kDDPRuntimeLoggingSampleRate=100 iterations,
-  // the average performance stats are averaged among the
-  // "DDPLoggingData::iteration"/"kDDPRuntimeLoggingSampleRate"=10 sampling
-  // iterations.
-  // 2. Performance stats for the current iteration are also recorded.
+  reset_performance_stats();
 
-  // Performance stats for the current iteration are reset.
-  ddp_logging_data_->ints_map["forward_compute_time"] = 0;
-  ddp_logging_data_->ints_map["backward_compute_time"] = 0;
-  ddp_logging_data_->ints_map["backward_comm_time"] = 0;
-  ddp_logging_data_->ints_map["backward_compute_comm_overlap_time"] = 0;
   if (reducer_->replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA
     // Cuda time stats are only collected for single process single

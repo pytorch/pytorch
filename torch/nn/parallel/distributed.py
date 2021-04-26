@@ -736,55 +736,56 @@ class DistributedDataParallel(Module):
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def forward(self, *inputs, **kwargs):
-        self.reducer.save_thread_local_state()
-        if torch.is_grad_enabled() and self.require_backward_grad_sync:
-            self.logger.set_runtime_stats_and_log()
-            self.reducer.prepare_for_forward()
-        if self.ddp_uneven_inputs_config.ddp_join_enabled:
-            ones = torch.ones(1, device=self.device)
-            work = dist.all_reduce(ones, group=self.process_group, async_op=True)
-            self.reducer._set_forward_pass_work_handle(
-                work,
-                self.ddp_uneven_inputs_config.ddp_join_divide_by_initial_world_size,
-            )
+        with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
+            self.reducer.save_thread_local_state()
+            if torch.is_grad_enabled() and self.require_backward_grad_sync:
+                self.logger.set_runtime_stats_and_log()
+                self.reducer.prepare_for_forward()
+            if self.ddp_uneven_inputs_config.ddp_join_enabled:
+                ones = torch.ones(1, device=self.device)
+                work = dist.all_reduce(ones, group=self.process_group, async_op=True)
+                self.reducer._set_forward_pass_work_handle(
+                    work,
+                    self.ddp_uneven_inputs_config.ddp_join_divide_by_initial_world_size,
+                )
 
-        # Calling _rebuild_buckets before forward compuation,
-        # It may allocate new buckets before deallocating old buckets
-        # inside _rebuild_buckets. To save peak memory usage,
-        # call _rebuild_buckets before the peak memory usage increases
-        # during forward computation.
-        # This should be called only once during whole training period.
-        if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
-            logging.info("Reducer buckets have been rebuilt in this iteration.")
+            # Calling _rebuild_buckets before forward compuation,
+            # It may allocate new buckets before deallocating old buckets
+            # inside _rebuild_buckets. To save peak memory usage,
+            # call _rebuild_buckets before the peak memory usage increases
+            # during forward computation.
+            # This should be called only once during whole training period.
+            if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
+                logging.info("Reducer buckets have been rebuilt in this iteration.")
 
-        if self.require_forward_param_sync:
-            self._sync_params()
+            if self.require_forward_param_sync:
+                self._sync_params()
 
-        if self.ddp_uneven_inputs_config.ddp_join_enabled:
-            # Notify joined ranks whether they should sync in backwards pass or not.
-            self._check_global_requires_backward_grad_sync(is_joined_rank=False)
+            if self.ddp_uneven_inputs_config.ddp_join_enabled:
+                # Notify joined ranks whether they should sync in backwards pass or not.
+                self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
-        if self.device_ids:
-            inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
-            output = self.module(*inputs[0], **kwargs[0])
-        else:
-            output = self.module(*inputs, **kwargs)
-
-        if torch.is_grad_enabled() and self.require_backward_grad_sync:
-            self.require_forward_param_sync = True
-            # We'll return the output object verbatim since it is a freeform
-            # object. We need to find any tensors in this object, though,
-            # because we need to figure out which parameters were used during
-            # this forward pass, to ensure we short circuit reduction for any
-            # unused parameters. Only if `find_unused_parameters` is set.
-            if self.find_unused_parameters:
-                self.reducer.prepare_for_backward(list(_find_tensors(output)))
+            if self.device_ids:
+                inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
+                output = self.module(*inputs[0], **kwargs[0])
             else:
-                self.reducer.prepare_for_backward([])
-        else:
-            self.require_forward_param_sync = False
+                output = self.module(*inputs, **kwargs)
 
-        return output
+            if torch.is_grad_enabled() and self.require_backward_grad_sync:
+                self.require_forward_param_sync = True
+                # We'll return the output object verbatim since it is a freeform
+                # object. We need to find any tensors in this object, though,
+                # because we need to figure out which parameters were used during
+                # this forward pass, to ensure we short circuit reduction for any
+                # unused parameters. Only if `find_unused_parameters` is set.
+                if self.find_unused_parameters:
+                    self.reducer.prepare_for_backward(list(_find_tensors(output)))
+                else:
+                    self.reducer.prepare_for_backward([])
+            else:
+                self.require_forward_param_sync = False
+
+            return output
 
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
@@ -796,6 +797,8 @@ class DistributedDataParallel(Module):
 
         def to_map(obj):
             if isinstance(obj, torch.Tensor):
+                if obj.device == torch.device("cuda", target_gpu):
+                    return (obj,)
                 if not self.use_side_stream_for_tensor_copies:
                     return (obj.to(target_gpu),)
                 else:
@@ -1247,7 +1250,6 @@ class DistributedDataParallel(Module):
                     assert (
                         self.device_type != "cpu"
                     ), "SyncBatchNorm layers only work with GPU modules"
-                    layer._specify_ddp_gpu_num(1)
 
     def _check_comm_hook(self, hook):
         if not callable(hook):

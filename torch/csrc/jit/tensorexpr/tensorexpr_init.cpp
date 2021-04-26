@@ -332,6 +332,12 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
+          "get_loop_body_for",
+          [](const LoopNest& self, BufHandle* b) {
+            return self.getLoopBodyFor(b->node());
+          },
+          py::return_value_policy::reference)
+      .def(
           "get_loops_for",
           [](const LoopNest& self, Tensor* t) {
             return self.getLoopStmtsFor(t);
@@ -339,8 +345,14 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_all_loopnests_for",
-          [](const LoopNest& self, const BufHandle& b) {
-            return self.getAllLoopNestsWritingToBuf(b.node());
+          [](const LoopNest& self, const BufHandle* b) {
+            return self.getAllLoopNestsWritingToBuf(b->node());
+          },
+          py::return_value_policy::reference)
+      .def(
+          "get_enclosing_loopnest",
+          [](const LoopNest& self, const Stmt* s) {
+            return self.getEnclosingLoopNest(s);
           },
           py::return_value_policy::reference)
       .def(
@@ -350,9 +362,21 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
+          "get_writes_for",
+          [](const LoopNest& self, const BufHandle* b) {
+            return self.getAllWritesToBuf(b->node());
+          },
+          py::return_value_policy::reference)
+      .def(
           "get_parent_loop",
           [](const LoopNest& self, const Stmt* s) {
             return self.getParentLoop(s);
+          },
+          py::return_value_policy::reference)
+      .def_static(
+          "get_loop_stmts_in_loopnest",
+          [](For* f, size_t num) {
+            return LoopNest::getLoopStmtsInLoopNest(f, num);
           },
           py::return_value_policy::reference)
       .def(
@@ -390,9 +414,8 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "normalize",
           [](For* f) {
-            For* normalized = nullptr;
-            LoopNest::normalize(f, &normalized);
-            return normalized;
+            LoopNest::normalize(f);
+            return f;
           },
           py::return_value_policy::reference)
       .def_static(
@@ -408,6 +431,21 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "distribute_loop_over_inner_loops",
           [](For* f) { return LoopNest::distributeLoopOverInnerLoops(f); },
+          py::return_value_policy::reference)
+      .def_static(
+          "fuse_loops",
+          [](const std::vector<For*>& loops) {
+            For* fused_loop;
+            LoopNest::fuseLoops(loops, &fused_loop);
+            return fused_loop;
+          },
+          py::return_value_policy::reference)
+      .def_static(
+          "reorder",
+          [](const std::vector<For*>& loops,
+             const std::vector<size_t>& permutation) {
+            return LoopNest::reorder(loops, permutation);
+          },
           py::return_value_policy::reference)
       .def(
           "unroll",
@@ -460,7 +498,9 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
-          "reorder", &LoopNest::reorderAxis, py::return_value_policy::reference)
+          "reorder_axis",
+          &LoopNest::reorderAxis,
+          py::return_value_policy::reference)
       .def("simplify", &LoopNest::simplify, py::return_value_policy::reference)
       .def(
           "set_GPU_block_index",
