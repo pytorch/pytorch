@@ -5591,7 +5591,9 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
         elif isinstance(arg, non_differentiable):
             if isinstance(arg.tensor, torch.Tensor):
                 if arg.tensor.dtype == torch.float:
-                    return maybe_non_contig(arg.tensor.to(dtype=dtype, device=device))
+                    return maybe_non_contig(arg.tensor.to(dtype=torch.double, device=device))
+                if arg.tensor.dtype == torch.cfloat:
+                    return maybe_non_contig(arg.tensor.to(dtype=torch.cdouble, device=device))
                 return maybe_non_contig(arg.tensor.to(device=device))
             return maybe_non_contig(arg.tensor.to(device=device))
         elif isinstance(arg, torch.Tensor):
