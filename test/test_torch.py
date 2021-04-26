@@ -3966,23 +3966,6 @@ else:
         test_func(torch.Tensor.scatter_add)
         test_func(torch.scatter_add)
 
-    def test_nondeterministic_alert_index_add(self, device):
-        def test_func(op_call):
-            input = torch.randn(10, device=device)
-            dim = 0
-            index = torch.tensor([3], device=device)
-            src = torch.randn(1, device=device)
-
-            @expectedAlertNondeterministic('index_add_cuda_', 'cuda')
-            def forward_func(slf, device):
-                op_call(input, dim, index, src)
-
-            forward_func(self, device)
-
-        test_func(torch.Tensor.index_add_)
-        test_func(torch.Tensor.index_add)
-        test_func(torch.index_add)
-
     # Ensures that index_put throws nondeterministic alerts in the correct cases
     @onlyOnCPUAndCUDA
     def test_nondeterministic_alert_index_put(self, device):
@@ -4032,38 +4015,6 @@ else:
 
         test_func(torch.Tensor.put)
         test_func(torch.Tensor.put_)
-
-    def test_nondeterministic_alert_index_select(self, device):
-        def test_func(op_call):
-            a = torch.randn(10, device=device, requires_grad=True)
-            dim = 0
-            indices = torch.tensor([0, 1], device=device)
-            res = op_call(a, dim, indices)
-            grad = torch.ones_like(res)
-
-            @expectedAlertNondeterministic('index_add_cuda_', 'cuda')
-            def backward_func(slf, device):
-                res.backward(grad)
-
-            backward_func(self, device)
-
-        test_func(torch.index_select)
-        test_func(torch.Tensor.index_select)
-
-    def test_nondeterministic_alert_repeat_interleave(self, device):
-        def test_func(op_call):
-            a = torch.randn(2, 2, device=device, requires_grad=True)
-            res = op_call(a, 2)
-            grad = torch.ones_like(res)
-
-            @expectedAlertNondeterministic('index_add_cuda_', 'cuda')
-            def backward_func(slf, device):
-                res.backward(grad)
-
-            backward_func(self, device)
-
-        test_func(torch.repeat_interleave)
-        test_func(torch.Tensor.repeat_interleave)
 
     def test_nondeterministic_alert_histc(self, device):
         def test_func(op_call):
@@ -5155,6 +5106,31 @@ else:
         test_func(self, device, 'function')
         test_func(self, device, 'method')
         test_func(self, device, 'method inplace')
+
+    @onlyOnCPUAndCUDA
+    def test_index_add_deterministic(self, device):
+        for dim in range(3):
+            a = [5, 4, 3]
+            a[dim] = 1000
+            alpha = random.random() + 1
+            x = torch.zeros(a, device=device)
+            b = a.copy()
+            elems = a[dim] * 20
+            b[dim] = elems
+            src = torch.rand(b, device=device)
+            index = torch.randint(a[dim], (elems,), device=device)
+
+            # on CPU it should be deterministic regardless of the deterministic mode
+            with DeterministicGuard(True):
+                y0 = torch.index_add(x, dim, index, src, alpha=alpha)
+                for _ in range(3):
+                    y = torch.index_add(x, dim, index, src, alpha=alpha)
+                    self.assertEqual(y, y0, atol=0, rtol=0)
+
+            with DeterministicGuard(False):
+                for _ in range(3):
+                    y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
+                    self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_index_fill(self, device, dtype):
