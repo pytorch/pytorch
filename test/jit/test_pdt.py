@@ -224,3 +224,41 @@ class TestPDT(JitTestCase):
         user_class = class_with_args(False)
         scripted_fn = torch.jit._script_pdt(test_model_with_args, example_inputs=[(10, user_class, ), (10.9, user_class, ), ])
         self.assertEqual(scripted_fn(100, class_with_args(True), ), test_model_with_args(100, class_with_args(True)))
+
+    def test_nn_module(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                assert x is not None
+                return x
+
+        make_global(Foo)
+        scripted_model = torch.jit._script_pdt(Foo(), example_inputs=[(100, ), (10.80, ), ])
+        input = 120
+        self.assertEqual(scripted_model(input), input)
+
+    def test_nested_nn_module_class(self):
+        class inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                assert x is not None
+                return x
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, inner):
+                super().__init__()
+                self.inner = inner
+
+            def forward(self, x):
+                return self.inner(x)
+
+
+        make_global(inner, Wrapper)
+
+        scripted_inner = torch.jit._script_pdt(inner(), example_inputs=[(100, ), (10.80, ), ])
+        wrapped = torch.jit._script_pdt(Wrapper(scripted_inner), example_inputs=[(20, ), (False, )])
+        self.assertTrue(wrapped(True))
