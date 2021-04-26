@@ -43,15 +43,9 @@ from torch.quantization.ns.graph_matcher import (
     GraphMatchingException,
 )
 from torch.quantization.ns.mappings import (
-    FUNS_IO_TYPE_FP32,
-    FUNS_IO_TYPE_INT8,
-    FUNS_IO_TYPE_FP32_OR_INT8,
+    get_node_type_to_io_type_map,
     FUNS_UNMATCHABLE,
-    MODS_IO_TYPE_FP32,
-    MODS_IO_TYPE_INT8,
-    MODS_IO_TYPE_FP32_OR_INT8,
     MODS_UNMATCHABLE,
-    METHS_IO_TYPE_FP32_OR_INT8,
     METHS_UNMATCHABLE,
 )
 from torch.quantization._numeric_suite_fx import (
@@ -1169,6 +1163,16 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
         type_a_related_to_b = \
             get_type_a_related_to_b(base_name_to_sets_of_related_ops)
+
+        # TODO(future PR): clean this up
+        node_type_to_io_type_map = get_node_type_to_io_type_map()
+        FUNS_IO_TYPE_FP32 = node_type_to_io_type_map['funs_io_type_fp32']
+        FUNS_IO_TYPE_INT8 = node_type_to_io_type_map['funs_io_type_int8']
+        FUNS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['funs_io_type_fp32_or_int8']
+        MODS_IO_TYPE_FP32 = node_type_to_io_type_map['mods_io_type_fp32']
+        MODS_IO_TYPE_INT8 = node_type_to_io_type_map['mods_io_type_int8']
+        MODS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['mods_io_type_fp32_or_int8']
+        METHS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['meths_io_type_fp32_or_int8']
 
         # 1. check static quant module mappings
         static_quant_mod_mappings = get_default_static_quant_module_mappings()
