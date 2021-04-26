@@ -696,7 +696,7 @@
   other: grad * self / (other + 1)
 
 - name: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
-  self: grad * std::log1p(other.toDouble())
+  self: grad * log1p(other.toDouble())
 
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
