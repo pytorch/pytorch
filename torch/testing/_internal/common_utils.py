@@ -1230,7 +1230,7 @@ class TestCase(expecttest.TestCase):
     def detect_nested_containers(self, *sequences):
         for sequence in sequences:
             for item in sequence:
-                if isinstance(item, (collections.abc.Sequence, collections.abc.Mapping)):
+                if isinstance(item, (collections.abc.Sequence, collections.abc.Mapping)) and not isinstance(item, str):
                     raise type(
                         f"{type(item).__name__.title()}"
                         f"In"
