@@ -8901,6 +8901,14 @@
   python_module: linalg
   variants: function
 
+- func: linalg_matrix_rank.tol_tensor(Tensor input, Tensor tol, bool hermitian=False) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_matrix_rank.out_tol_tensor(Tensor input, Tensor tol, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
 - func: linalg_multi_dot(Tensor[] tensors) -> Tensor
   python_module: linalg
 
