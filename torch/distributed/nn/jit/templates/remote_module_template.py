@@ -13,13 +13,47 @@ from torch.distributed.rpc import RRef
 
 
 {jit_script_decorator}
-def _remote_forward(module_rref: RRef[module_interface_cls], {arg_types}){arrow_and_return_type}:
+def _remote_forward(
+    module_rref: RRef[module_interface_cls], device: str, {arg_types}){arrow_and_return_type}:
     module = module_rref.local_value()
-    return module.forward({args}, {kwargs})
+    device = torch.device(device)
+
+    if device.type != "cuda":
+        return module.forward({args}, {kwargs})
+
+    # If the module is on a cuda device,
+    # move any CPU tensor in args or kwargs to the same cuda device.
+    # Since torch script does not support generator expression,
+    # have to use tuple concatenation instead of
+    # ``tuple(i.to(device) if isinstance(i, Tensor) else i for i in *args)``.
+    args = ({args},)
+    out_args = ()
+    for arg in args:
+        arg = (arg.to(device),) if isinstance(arg, Tensor) else (arg,)
+        out_args = out_args + arg
+
+    kwargs = {{{kwargs}}}
+    for k, v in kwargs.items():
+        if isinstance(v, Tensor):
+            kwargs[k] = kwargs[k].to(device)
+
+    # Since only CPU tensors are allowed to send over wire,
+    # need to move any GPU tensor to CPU in the output.
+    # Since torch script does not support generator expression,
+    # have to use tuple concatenation instead of
+    # ``tuple(i.cpu() if isinstance(i, Tensor) else i for i in module.forward(*out_args, {kwargs}))``.
+    # TODO: Once process group RPC backend is deprecated,
+    # and a device map is explicitly provided to TensorPipe backend,
+    # do no move any input on cuda devices back to CPU.
+    ret = ()
+    for arg in module.forward(*out_args, {kwargs}):
+        arg = (arg.cpu(),) if isinstance(arg, Tensor) else (arg,)
+        ret = ret + arg
+    return ret
 
 
 def forward_async(self, {arg_types}){arrow_and_future_return_type}:
-    args = (self.module_rref, {args})
+    args = (self.module_rref, self.device, {args})
     kwargs = {{{kwargs}}}
     return rpc.rpc_async(
         self.module_rref.owner(),
@@ -30,7 +64,7 @@ def forward_async(self, {arg_types}){arrow_and_future_return_type}:
 
 
 def forward(self, {arg_types}){arrow_and_return_type}:
-    args = (self.module_rref, {args})
+    args = (self.module_rref, self.device, {args})
     kwargs = {{{kwargs}}}
     ret_fut = rpc.rpc_async(
         self.module_rref.owner(),
