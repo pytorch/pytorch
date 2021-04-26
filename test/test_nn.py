@@ -4419,6 +4419,31 @@ class TestNN(NNTestCase):
             self.assertEqual(out, ref_out)
             self.assertEqual(input.grad, ref_input.grad)
 
+    def test_adaptive_pooling_avg_bfloat16(self):
+        def _test_adaptive_pooling_avg_bfloat16(self, device, memory_format):
+            input = torch.randn(3, 19, 8, 8, dtype=torch.float32).to(device).to(memory_format=memory_format).requires_grad_()
+            grad = torch.randn(3, 19, 7, 7, dtype=torch.float32).to(device).to(memory_format=memory_format)
+            pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
+
+            input2 = input.detach().clone().bfloat16().requires_grad_(True)
+            grad2 = grad.detach().clone().bfloat16()
+
+            out = pool(input)
+            out.backward(grad)
+            out2 = pool(input2)
+            out2.backward(grad2)
+
+            self.assertTrue(out2.is_contiguous(memory_format=memory_format))
+            self.assertEqual(out2.dtype, torch.bfloat16)
+            self.assertEqual(input2.grad.dtype, torch.bfloat16)
+            self.assertEqual(out, out2.float(), atol=0.1, rtol=0)
+            self.assertEqual(input.grad, input2.grad.float(), atol=0.1, rtol=0)
+
+        device_list = ['cpu']
+        for device in device_list:
+            _test_adaptive_pooling_avg_bfloat16(self, device, torch.contiguous_format)
+            _test_adaptive_pooling_avg_bfloat16(self, device, torch.channels_last)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @largeTensorTest('12GB', device='cuda')
     def test_adaptive_pooling_avg_nhwc_launch_config_backward(self):
