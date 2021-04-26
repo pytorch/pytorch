@@ -2337,9 +2337,6 @@ def sample_inputs_linalg_qr(op_info, device, dtype, requires_grad=False, **kwarg
     This function generates input for torch.linalg.qr
     The input is generated as the itertools.product of 'batches' and 'ns'.
     """
-    # TODO: add 0 to 'ns' and (0, ) to 'batches'
-    # Currently tests fail most probably because of
-    # https://github.com/pytorch/pytorch/issues/50576
     batches = [(), (0,), (2, ), (1, 1)]
     ns = [5, 2, 0]
     out = []
