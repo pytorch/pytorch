@@ -118,7 +118,8 @@ class TestSortAndSelect(TestCase):
             self.assertIsOrdered('descending', x, res2val, res2ind,
                                  'random with NaNs')
 
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    # FIXME: remove torch.bool from unsupported types once support is added for cub sort
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.bfloat16, torch.complex64, torch.complex128})
     def test_stable_sort(self, device, dtype):
         if self.device_type == 'cpu':
             sizes = (100, 1000, 10000)
@@ -194,7 +195,8 @@ class TestSortAndSelect(TestCase):
     def test_sort_discontiguous_slow(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
 
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    # FIXME: remove torch.bool from unsupported types once support is added for cub sort
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.bfloat16, torch.complex64, torch.complex128})
     def test_stable_sort_against_numpy(self, device, dtype):
         if dtype in torch.testing.floating_types_and(torch.float16):
             inf = float('inf')
