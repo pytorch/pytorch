@@ -3772,6 +3772,10 @@
   dispatch:
     CompositeExplicitAutograd: unsqueeze_
 
+# expand_dims, alias of unsqueeze
+- func: expand_dims(Tensor(a) self, int dim) -> Tensor(a)
+  variants: function, method
+
 - func: vander(Tensor x, int? N=None, bool increasing=False) -> Tensor
 
 - func: var(Tensor self, bool unbiased=True) -> Tensor

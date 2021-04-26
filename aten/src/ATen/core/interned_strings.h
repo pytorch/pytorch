@@ -262,6 +262,7 @@ namespace c10 {
   _(aten, transpose)                 \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
+  _(aten, expand_dims)               \
   _(aten, __getitem__)               \
   _(aten, _set_item)                 \
   _(aten, manual_seed)               \
