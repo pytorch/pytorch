@@ -1440,6 +1440,22 @@ class TestFX(JitTestCase):
         for node in to_erase:
             rn18_traced.graph.erase_node(node)
 
+
+    def test_replace_input(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        y : torch.fx.Node = graph.create_node('placeholder', 'y')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        b.replace_input_with(x, y)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        input_x = torch.randn(33, 44)
+        input_y = torch.randn(11, 22)
+        self.assertEqual(gm(input_x, input_y), torch.relu(input_y))
+
     def test_insertion_point(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         x : torch.fx.Node = graph.create_node('placeholder', 'x')
@@ -2288,7 +2304,7 @@ class TestOperatorSignatures(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
         known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot',
-                           'polygamma'}
+                           'polygamma', 'cdist'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2363,7 +2379,7 @@ class TestFunctionalTracing(JitTestCase):
         "adaptive_avg_pool3d": LEN_ERROR,
         "adaptive_max_pool2d_with_indices": LEN_ERROR,
         "adaptive_max_pool3d_with_indices": LEN_ERROR,
-        "instance_norm": LEN_ERROR,
+        "instance_norm": CONTROL_FLOW,
         "pad": LEN_ERROR,
 
         "adaptive_max_pool1d": PROXY_ITERABLE,
