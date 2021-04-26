@@ -65,12 +65,13 @@ def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> List[str]:
             return []
     return model_list
 
-def run_torchbench(torchbench_path: str, pr_num: str, conda_env: str):
+def run_torchbench(pytorch_path: str, torchbench_path: str, output_dir: str):
     # Copy system environment so that we will not override
     env = dict(os.environ)
-    env["BISECT_CONDA_ENV"] = conda_env
-    env["BISECT_ISSUE"] = f"pr{pr_num}"
-    command = ["bash", "./.github/scripts/run-bisection.sh"]
+    command = ["python", "--work-dir", os.path.join(output_dir, f'gh{os.environ["GITHUB_RUN_ID"]}'),
+               "--pytorch-src", pytorch_path, "--torchbench-src", torchbench_path,
+               "--config", os.path.join(output_dir, "config.yaml"),
+               "--output", os.path.join(output_dir, "result.txt")]
     subprocess.check_call(command, cwd=torchbench_path, env=env)
 
 if __name__ == "__main__":
@@ -79,7 +80,7 @@ if __name__ == "__main__":
     parser.add_argument('--pr-base-sha', required=True, type=str, help="The Pull Request base hash")
     parser.add_argument('--pr-head-sha', required=True, type=str, help="The Pull Request head hash")
     parser.add_argument('--pr-body', required=True, help="The file that contains body of a Pull Request")
-    parser.add_argument('--conda-env', required=True, type=str, help="Name of the conda env to run the test")
+    parser.add_argument('--pytorch-path', required=True, type=str, help="Path to pytorch repository")
     parser.add_argument('--torchbench-path', required=True, type=str, help="Path to TorchBench repository")
     args = parser.parse_args()
 
@@ -93,4 +94,4 @@ if __name__ == "__main__":
     # Run TorchBench with the generated config
     torchbench_config = gen_abtest_config(args.pr_base_sha, args.pr_head_sha, models)
     deploy_torchbench_config(output_dir, torchbench_config)
-    run_torchbench(repos["benchmark"], pr_num = args.pr_num, conda_env = args.conda_env)
+    run_torchbench(pytorch_path = args.pytorch_path, torchbench_path = args.torchbench_path, output_dir = output_dir)

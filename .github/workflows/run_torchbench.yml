@@ -31,14 +31,13 @@ jobs:
           conda install -y numpy=1.17 requests=2.22 ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six dataclasses
       - name: Run TorchBench
         run: |
-          TORCHBENCH_ROOT=${PWD}/benchmark
           PR_BODY_FILE=/tmp/pr-body.txt
           echo $PR_BODY > ${PR_BODY_FILE}
           pushd pytorch
           . activate pr-ci
           python3 ./.github/scripts/run_torchbench.py \
-                  --conda-env pr-ci \
-                  --torchbench-path $TORCHBENCH_ROOT \
+                  --pytorch-path ${PWD}/pytorch \
+                  --torchbench-path ${PWD}/benchmark \
                   --pr-num $PR_NUM \
                   --pr-base-sha $PR_BASE_SHA \
                   --pr-head-sha $PR_HEAD_SHA \
