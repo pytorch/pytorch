@@ -62,6 +62,9 @@ class EventList(list):
                 if (self[idx].cpu_parent is not None and
                         self[idx].cpu_parent.name == self[idx].name and
                         len(self[idx].cpu_parent.cpu_children) == 1):
+                    # Bypass distributed collectives as they don't have a concept of parent/child events.
+                    if any(backend in self[idx].name for backend in DIST_BACKENDS_BLOCKLIST):
+                        continue
                     self[idx].cpu_parent.cpu_children = self[idx].cpu_children
                     self[idx].cpu_parent.kernels = self[idx].kernels  # lift kernels up
                     for ch in self[idx].cpu_children:
@@ -1056,6 +1059,12 @@ class FunctionEventAvg(FormattedTimesMixin):
 
 ################################################################################
 # Utilities
+
+DIST_BACKENDS_BLOCKLIST = [
+    "mpi",
+    "nccl",
+    "gloo",
+]
 
 class StringTable(defaultdict):
     def __missing__(self, key):
