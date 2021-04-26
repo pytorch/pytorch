@@ -28,7 +28,8 @@ namespace at {
 namespace meta {
 
 // Unary float operations always produce floating point
-// outputs, even if their inputs are integer
+// outputs for floating point and integral types
+// For complex inputs, the output type should be the same as input type.
 #define CREATE_UNARY_FLOAT_META_FUNC(func)                  \
   TORCH_META_FUNC(func) (const Tensor& self) {        \
     build_unary_float_op(maybe_get_output(), self);   \
@@ -65,6 +66,7 @@ CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
+CREATE_UNARY_FLOAT_META_FUNC(conj_physical)
 
 // These are normal unary ops that preserve dtype
 #define CREATE_UNARY_META_FUNC(func)                  \
@@ -124,6 +126,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
+CREATE_UNARY_TORCH_IMPL_FUNC(conj_physical)
 
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
@@ -326,6 +329,12 @@ Tensor resolve_conj(const Tensor& self) {
   return result.copy_(self);
 }
 
+Tensor resolve_conj_(const Tensor& self) {
+  if (!self.is_conj()) { return self; }
+  self.set_conj(false);
+  return self.conj_physical_();
+}
+
 Tensor _conj(const Tensor& self) {
   Tensor self_;
   auto impl = c10::make_intrusive<TensorImpl>(
@@ -341,10 +350,6 @@ Tensor _conj(const Tensor& self) {
 Tensor conj(const Tensor& self) {
   return self.conj();
 }
-
-Tensor& conj_physical_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, conj_physical_stub); }
-Tensor conj_physical(const Tensor& self) { return unary_op_impl(self, at::conj_physical_out); }
-Tensor& conj_physical_(Tensor& self) { return unary_op_impl_out(self, self, conj_physical_stub); }
 
 Tensor& ceil_out(const Tensor& self, Tensor& result) {
   // Note: this is consistent with NumPy

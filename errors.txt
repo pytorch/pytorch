@@ -1,0 +1,56 @@
+[1/9] Generating proto/gen_proto_typestubs_helper.py
+[2/9] Building CXX object caffe2/CMakeFiles/torch_cpu.dir/__/aten/src/ATen/ConjugateFallback.cpp.o
+[3/9] Building CXX object third_party/tensorpipe/tensorpipe/CMakeFiles/tensorpipe.dir/core/pipe_impl.cc.o
+[4/9] Linking CXX static library lib/libtensorpipe.a
+[5/9] Linking CXX shared library lib/libtorch_cpu.so
+[6/9] Linking CXX shared library lib/libtensorpipe_agent.so
+[7/9] Linking CXX executable bin/test_cpp_rpc
+[8/9] Linking CXX shared library lib/libtorch_python.so
+[8/9] Install the project...
+-- Install configuration: "Release"
+-- Set runtime path of "/home/chourdiaanjali/pytorch/torch/lib/libtorch_cpu.so" to "$ORIGIN:/home/chourdiaanjali/anaconda3/lib"
+-- Set runtime path of "/home/chourdiaanjali/pytorch/torch/bin/test_cpp_rpc" to "$ORIGIN:/home/chourdiaanjali/anaconda3/lib"
+-- Set runtime path of "/home/chourdiaanjali/pytorch/torch/lib/libtorch_python.so" to "$ORIGIN:/home/chourdiaanjali/anaconda3/lib"
+Building wheel torch-1.9.0a0+gitaedb43d
+-- Building version 1.9.0a0+gitaedb43d
+cmake --build . --target install --config Release -- -j 48
+running develop
+running egg_info
+writing torch.egg-info/PKG-INFO
+writing dependency_links to torch.egg-info/dependency_links.txt
+writing entry points to torch.egg-info/entry_points.txt
+writing requirements to torch.egg-info/requires.txt
+writing top-level names to torch.egg-info/top_level.txt
+reading manifest file 'torch.egg-info/SOURCES.txt'
+reading manifest template 'MANIFEST.in'
+writing manifest file 'torch.egg-info/SOURCES.txt'
+running build_ext
+-- Building with NumPy bindings
+-- Not using cuDNN
+-- Not using CUDA
+-- Using MKLDNN
+-- Not using CBLAS in MKLDNN
+-- Not using NCCL
+-- Building with distributed package: 
+  -- USE_TENSORPIPE=True
+  -- USE_GLOO=True
+  -- USE_MPI=False
+
+Copying extension caffe2.python.caffe2_pybind11_state
+Copying caffe2.python.caffe2_pybind11_state from torch/lib/python3.8/site-packages/caffe2/python/caffe2_pybind11_state.cpython-38-x86_64-linux-gnu.so to /home/chourdiaanjali/pytorch/build/lib.linux-x86_64-3.8/caffe2/python/caffe2_pybind11_state.cpython-38-x86_64-linux-gnu.so
+copying build/lib.linux-x86_64-3.8/torch/_C.cpython-38-x86_64-linux-gnu.so -> torch
+copying build/lib.linux-x86_64-3.8/torch/_dl.cpython-38-x86_64-linux-gnu.so -> torch
+copying build/lib.linux-x86_64-3.8/caffe2/python/caffe2_pybind11_state.cpython-38-x86_64-linux-gnu.so -> caffe2/python
+Creating /home/chourdiaanjali/anaconda3/lib/python3.8/site-packages/torch.egg-link (link to .)
+torch 1.9.0a0+gitaedb43d is already the active version in easy-install.pth
+Installing convert-caffe2-to-onnx script to /home/chourdiaanjali/anaconda3/bin
+Installing convert-onnx-to-caffe2 script to /home/chourdiaanjali/anaconda3/bin
+
+Installed /home/chourdiaanjali/pytorch
+Processing dependencies for torch==1.9.0a0+gitaedb43d
+Searching for typing-extensions==3.7.4.3
+Best match: typing-extensions 3.7.4.3
+Adding typing-extensions 3.7.4.3 to easy-install.pth file
+
+Using /home/chourdiaanjali/anaconda3/lib/python3.8/site-packages
+Finished processing dependencies for torch==1.9.0a0+gitaedb43d
