@@ -20,8 +20,8 @@ class TestMisc(PackageTestCase):
 
     def test_file_structure(self):
         """
-        Tests package's Folder structure representation of a zip file. Ensures
-        that the returned Folder prints what is expected and filters
+        Tests package's Directory structure representation of a zip file. Ensures
+        that the returned Directory prints what is expected and filters
         inputs/outputs correctly.
         """
         buffer = BytesIO()
@@ -97,7 +97,7 @@ class TestMisc(PackageTestCase):
 
     def test_file_structure_has_file(self):
         """
-        Test Folder's has_file() method.
+        Test Directory's has_file() method.
         """
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:

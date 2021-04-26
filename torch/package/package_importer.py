@@ -12,7 +12,7 @@ from weakref import WeakValueDictionary
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
-from ._file_structure_representation import Folder, _create_folder_from_file_list
+from ._file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern
 from ._importlib import (
     _calc___package__,
@@ -225,7 +225,7 @@ class PackageImporter(Importer):
 
     def file_structure(
         self, *, include: "GlobPattern" = "**", exclude: "GlobPattern" = ()
-    ) -> Folder:
+    ) -> Directory:
         """Returns a file structure representation of package's zipfile.
 
         Args:
@@ -235,7 +235,7 @@ class PackageImporter(Importer):
 
             exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
         """
-        return _create_folder_from_file_list(
+        return _create_directory_from_file_list(
             self.filename, self.zip_reader.get_all_records(), include, exclude
         )
 
