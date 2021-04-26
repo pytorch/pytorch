@@ -103,7 +103,7 @@ std::ostream& operator<<(
 
 static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
   // 1-elem tensors are usually boxed scalars, so print them like it
-  if (tensor.numel() == 1) {
+  if (tensor.numel() == 1 && !tensor.is_mkldnn()) {
     auto scalar_tensor = tensor.view(std::vector<int64_t>{}).item();
     out << "{";
     if (scalar_tensor.isFloatingPoint()) {

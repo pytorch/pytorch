@@ -687,7 +687,7 @@ bool frozenMkldnnCompatibleConvNode(Node* n) {
 }
 
 // [mkldnn perf strategy]
-// Certain ops - aten::linear, aten::conv2d, aten::conv3d - provide a huge speed
+// Certain ops - aten::conv2d, aten::conv3d - provide a huge speed
 // up just by converting the constant weights to MKLDNN AOT, and then at runtime
 // converting the non-constant input to_mkldnn before the op, and then back to
 // its original layout after the op. The speed up holds even if you end up
@@ -767,8 +767,7 @@ class MKLDNNSubgraphSlicer {
       return true;
     }
     // see [mkldnn perf strategy]
-    return frozenMkldnnCompatibleLinearNode(node) ||
-        frozenMkldnnCompatibleConvNode(node);
+    return frozenMkldnnCompatibleConvNode(node);
   }
 
  private:
