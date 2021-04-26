@@ -575,6 +575,12 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
+TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
+  int64_t runtime_bytecode_version = _get_runtime_bytecode_version();
+  AT_ASSERT(
+      runtime_bytecode_version == caffe2::serialize::kProducedBytecodeVersion);
+}
+
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
   a.define(R"JIT(
