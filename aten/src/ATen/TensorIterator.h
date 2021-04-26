@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/FunctionRef.h>
+#include <c10/util/MaybeOwned.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/TypeCast.h>
 #include <ATen/core/Range.h>
@@ -73,14 +74,16 @@ struct DimCounter {
 struct TORCH_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
   OperandInfo() {}
-  explicit OperandInfo(Tensor&& t) : tensor(std::move(t)) {
-    if (tensor.defined()) {
-      device = tensor.device();
-      target_dtype = tensor.scalar_type();
+  C10_ALWAYS_INLINE explicit OperandInfo(c10::MaybeOwned<Tensor>&& t) : tensor(std::move(t)) {
+    if (tensor->defined()) {
+      device = tensor->device();
+      target_dtype = tensor->scalar_type();
       current_dtype = target_dtype;
     }
     validate();
   }
+
+  C10_ALWAYS_INLINE ~OperandInfo() = default;
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   StrideVector stride_bytes;
@@ -88,11 +91,11 @@ struct TORCH_API OperandInfo {
   /// The tensor operand. Note that the strides, data pointer, and
   /// other attributes may differ due to dimension reordering and
   /// coalescing.
-  Tensor tensor;
+  c10::MaybeOwned<Tensor> tensor;
 
   // Save the original tensor operand in cases when an output is modified
   // (e.g. if dtype is changed)
-  Tensor original_tensor;
+  c10::MaybeOwned<Tensor> original_tensor = c10::MaybeOwned<Tensor>::owned(c10::in_place);
 
   /// The desired device and type for the operand. For inputs, this specifies that
   /// the input should be converted to this type if necessary. For outputs, this
@@ -112,7 +115,7 @@ struct TORCH_API OperandInfo {
     return TensorOptions(target_dtype).device(device);
   }
 
-  /// The data pointer. This may be different from tensor.data_ptr() if the
+  /// The data pointer. This may be different from tensor->data_ptr() if the
   /// iterator is split.
   void* data = nullptr;
 
@@ -124,8 +127,8 @@ struct TORCH_API OperandInfo {
 
   void validate() {
     TORCH_CHECK(
-        !tensor.defined() || tensor.layout() == kStrided,
-        "unsupported tensor layout: ", tensor.layout());
+        !tensor->defined() || tensor->layout() == kStrided,
+        "unsupported tensor layout: ", tensor->layout());
   }
 };
 
@@ -201,12 +204,11 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
 
-  const Tensor& tensor(int arg) const { return operands_[arg].tensor; }
-  Tensor& tensor(int arg) { return operands_[arg].tensor; }
+  const Tensor& tensor(int arg) const { return *operands_[arg].tensor; }
 
   const Tensor& output(int arg=0) const {
     AT_ASSERT(arg < num_outputs_);
-    return operands_[arg].tensor;
+    return *operands_[arg].tensor;
   }
 
   // Copies from temporary outputs back to the original outputs
@@ -215,7 +217,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
 
   Tensor input(int arg=0) const {
     AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
-    return operands_[num_outputs_ + arg].tensor;
+    return *operands_[num_outputs_ + arg].tensor;
   }
 
   /// Removes an operand from this iterator
@@ -239,7 +241,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   template <typename T>
   T scalar_value(int arg) {
     auto& op = operands_[arg];
-    return c10::fetch_and_cast<T>(op.tensor.scalar_type(), op.data);
+    return c10::fetch_and_cast<T>(op.tensor->scalar_type(), op.data);
   }
 
 private:
@@ -333,6 +335,7 @@ public:
 
   void build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  void build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_unary_float_op(const Tensor& out, const Tensor& a);
   void build_unary_op(const Tensor& out, const Tensor& a);
 
@@ -357,7 +360,7 @@ protected:
 
 protected:
 
-  /// Records the "computation" shape of the output tensor.  The computation
+  /// Records the "computation" shape of the output tensor. The computation
   /// shape is different from the regular shape in a few ways:
   ///
   ///   - The shape may be permuted (via permute_dimensions) so that we
@@ -432,6 +435,10 @@ protected:
   /// this matches the dtype of the output tensors, but not always!
   ScalarType common_dtype_ = ScalarType::Undefined;
 
+  /// This is currently defined as kCPU, or the device of the first non-CPU
+  /// tensor argument. See TensorIteratorBase::compute_types for details.
+  Device common_device_ = kCPU;
+
   /// Set by split(), see should_accumulate() and is_final_output()
   bool accumulate_ = false;
   bool final_output_ = true;
@@ -473,6 +480,13 @@ public:
   /// Construction
   TensorIteratorConfig& add_output(const Tensor& output);
   TensorIteratorConfig& add_input(const Tensor& input);
+
+  // Advanced API: stores input/output Tensors without incrementing
+  // the reference count. The caller must ensure that these Tensors
+  // live at least as long as this TensorIteratorConfig and any
+  // TensorIteratorBase built from this TensorIteratorConfig.
+  TensorIteratorConfig& add_borrowed_output(const Tensor& output);
+  TensorIteratorConfig& add_borrowed_input(const Tensor& input);
 
   // Sets the check_mem_overlap_ flag, which is true by default.
   // If true, inputs are checked for partial overlap with the outputs and
@@ -584,7 +598,7 @@ public:
   }
 
 private:
-  SmallVector<Tensor, 4> tensors_;
+  SmallVector<c10::MaybeOwned<Tensor>, 4> tensors_;
   int num_outputs_ = 0;
   int num_inputs_ = 0;
 
