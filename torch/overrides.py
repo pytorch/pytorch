@@ -640,7 +640,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.fractional_max_pool3d_with_indices: (
             lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False,
             _random_samples=None: -1),
-        torch.nn.functional.gaussian_nll_loss: (lambda input, target, var, full=False, eps=1e-06, reduction='mean': -1),
+        torch.nn.functional.gaussian_nll_loss: lambda input, target, var, full=False, eps=1e-06, reduction='mean': -1,
         torch.nn.functional.gelu: lambda input: -1,
         torch.nn.functional.glu: lambda input, dim=-1: -1,
         torch.nn.functional.grid_sample: lambda input, grid, mode='bilinear', padding_mode='zeros', align_corners=None: -1,
@@ -839,6 +839,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.svd: lambda input, some=True, compute_uv=True, out=None: -1,
         torch.svd_lowrank: lambda input, q=6, niter=2, M=None: -1,
         torch.linalg.svd: lambda input, full_matrices=True, compute_uv=True, out=None: -1,
+        torch.linalg.svdvals: lambda input, out=None: -1,
         torch.symeig: lambda input, eigenvectors=False, upper=True, out=None: -1,
         torch.swapaxes: lambda input, dim0, dim1: -1,
         torch.swapdims: lambda input, axis0, axis1: -1,

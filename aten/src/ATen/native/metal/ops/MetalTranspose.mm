@@ -17,8 +17,8 @@ namespace metal {
 Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(input.is_metal());
   auto ndims = input.dim();
-  // Support maximus eight channels on mobile
-  TORCH_CHECK(ndims < 8);
+  // Support maximum eight channels on mobile
+  TORCH_CHECK(ndims <= 8);
   dim0 = maybe_wrap_dim(dim0, ndims);
   dim1 = maybe_wrap_dim(dim1, ndims);
   if (dim0 == dim1) {
