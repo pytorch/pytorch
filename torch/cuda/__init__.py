@@ -21,7 +21,7 @@ from .. import device as _device
 import torch._C
 
 try:
-    from torch._C import _cudart  # type: ignore
+    from torch._C import _cudart  # type: ignore[attr-defined]
 except ImportError:
     _cudart = None
 
@@ -36,7 +36,7 @@ _device_t = Union[_device, str, int, None]
 if hasattr(torch._C, '_CudaDeviceProperties'):
     _CudaDeviceProperties = torch._C._CudaDeviceProperties
 else:
-    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore
+    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore[assignment, misc]
 
 # Global variables dynamically populated by native code
 has_magma: bool = False
@@ -67,7 +67,7 @@ def _check_capability():
     old_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
     PyTorch no longer supports this GPU because it is too old.
-    The minimum cuda capability that we support is 3.5.
+    The minimum cuda capability supported by this library is %d.%d.
     """
 
     if torch.version.cuda is not None:  # on ROCm we don't want this check
@@ -77,8 +77,10 @@ def _check_capability():
             major = capability[0]
             minor = capability[1]
             name = get_device_name(d)
-            if capability == (3, 0) or major < 3:
-                warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
+            current_arch = major * 10 + minor
+            min_arch = min((int(arch.split("_")[1]) for arch in torch.cuda.get_arch_list()), default=35)
+            if current_arch < min_arch:
+                warnings.warn(old_gpu_warn.format(d, name, major, minor, min_arch // 10, min_arch % 10))
             elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
                 warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
@@ -336,7 +338,7 @@ class StreamContext(object):
     """
     cur_stream : Optional['torch.cuda.Stream']
 
-    def __init__(self, stream: Optional['torch.cuda.Stream']):  # type: ignore
+    def __init__(self, stream: Optional['torch.cuda.Stream']):
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
@@ -356,10 +358,10 @@ class StreamContext(object):
 
         # If the stream is not on the current device, then
         # set the current stream on the device
-        if self.src_prev_stream.device != cur_stream.device:  # type: ignore
+        if self.src_prev_stream.device != cur_stream.device:
             with device(cur_stream.device):
                 self.dst_prev_stream = torch.cuda.current_stream(cur_stream.device)
-        torch.cuda.set_stream(cur_stream)  # type: ignore
+        torch.cuda.set_stream(cur_stream)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
         # Local cur_stream variable for type refinement
@@ -370,11 +372,11 @@ class StreamContext(object):
 
         # Reset the stream on the original device
         # and destination device
-        if self.src_prev_stream.device != cur_stream.device:  # type: ignore
-            torch.cuda.set_stream(self.dst_prev_stream)  # type: ignore
-        torch.cuda.set_stream(self.src_prev_stream)  # type: ignore
+        if self.src_prev_stream.device != cur_stream.device:  # type: ignore[union-attr]
+            torch.cuda.set_stream(self.dst_prev_stream)  # type: ignore[arg-type]
+        torch.cuda.set_stream(self.src_prev_stream)  # type: ignore[arg-type]
 
-def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ignore
+def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:
     r"""Wrapper around the Context-manager StreamContext that
     selects a given stream.
 
@@ -534,7 +536,7 @@ class _CudaBase(object):
         # We could use a Protocol here to tell mypy that self has `get_device` method
         # but it is only available in the typing module on Python >= 3.8
         # or on typing_extensions module on Python >= 3.6
-        with device(self.get_device()):  # type: ignore
+        with device(self.get_device()):  # type: ignore[attr-defined]
             return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
 
     __new__ = _lazy_new

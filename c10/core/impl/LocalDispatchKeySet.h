@@ -59,7 +59,7 @@ struct C10_API LocalDispatchKeySet {
 };
 
 // thread_local variables cannot be C10_API on Windows.
-// Inlining this seems to break AutoNonVariableTypeGuard on Android.
+// Inlining this seems to break AutoDispatchBelowAutograd on Android.
 #if defined(_MSC_VER) || defined(C10_ANDROID)
 C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
 #else // defined(_MSC_VER) || defined(C10_ANDROID)
