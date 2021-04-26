@@ -1532,7 +1532,9 @@ except RuntimeError as e:
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_numpy_gen_state(self):
         from torch.utils.data._utils.worker import _generate_state
-        # Test case as ((worker_id, base_seed), expected_state)
+        # Using NumPy generated states as the reference to test `_generate_state`
+        # having the same result.
+        # Test case: ((worker_id, base_seed), expected_state)
         test_cases = [
             ((4, 13434589827475259383), (2884386318, 1088094898, 3523808998, 3860348662)),
             ((1, 15014285634777110771), (1934848465, 763213760, 2959016433, 179751970)),
