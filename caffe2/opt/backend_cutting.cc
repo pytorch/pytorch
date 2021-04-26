@@ -182,7 +182,7 @@ caffe2::NetDef ConvertToC2Net(
       net.add_op()->CopyFrom(op_def);
     }
   }
-  for (const auto kv : sub.external_input_refs) {
+  for (const auto& kv : sub.external_input_refs) {
     net.add_external_input(kv.first);
     VLOG(2) << "Adding external input: " << kv.first;
   }
@@ -253,10 +253,10 @@ void ReplaceSubgraph(
 
   // Convert new NetDef back to NNGraph
   std::unordered_map<std::string, NodeRef> tensor_map;
-  for (const auto kv : subgraph.external_input_refs) {
+  for (const auto& kv : subgraph.external_input_refs) {
     tensor_map.emplace(kv.first, kv.second);
   }
-  for (const auto kv : subgraph.external_output_refs) {
+  for (const auto& kv : subgraph.external_output_refs) {
     tensor_map.emplace(kv.first, kv.second);
   }
   for (auto& op : *net_opt.mutable_op()) {

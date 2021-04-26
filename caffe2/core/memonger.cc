@@ -250,7 +250,7 @@ class ComputeBlobRecyclingForDag {
     bool had_changes = true;
     while (had_changes) {
       had_changes = false;
-      for (const auto mapped_blob : mapping_) {
+      for (const auto& mapped_blob : mapping_) {
         if (has_key(renamed, mapped_blob.second) &&
             renamed[mapped_blob.second] != mapped_blob.second) {
           renamed[mapped_blob.first] = renamed[mapped_blob.second];
