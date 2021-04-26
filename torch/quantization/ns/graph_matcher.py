@@ -207,18 +207,6 @@ def _get_subgraph_relationship_type(
             return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
         else:
             return SubgraphTypeRelationship.NOT_RELATED
-    # TODO(before land): delete
-    elif node_a.op == 'call_method':
-        assert (subgraph_a.base_op_node == subgraph_a.start_node and
-                subgraph_b.base_op_node == subgraph_b.start_node), \
-            "Matching call_method patterns where base_op_node != start_node is not supported yet"
-        if node_a.target == node_b.target:
-            return SubgraphTypeRelationship.EQUAL
-        key = (node_a.target, node_b.target)
-        if key in type_a_related_to_b:
-            return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
-        else:
-            return SubgraphTypeRelationship.NOT_RELATED
     return SubgraphTypeRelationship.NOT_RELATED
 
 def _get_name_for_subgraph(
