@@ -2952,6 +2952,12 @@ class TestAutograd(TestCase):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
+    def test_sinc(self):
+        # The derivative of sinc(x) at x=0 has to be special cased.
+        # A naive computation will result in 0/0 -> NaN.
+        a = torch.tensor([0.0, 1.0], dtype=torch.double, requires_grad=True)
+        gradcheck(torch.sinc, a)
+
     def test_igamma(self):
         # 1e-3 offset to avoid zeros
         # NOTE: derivative for s is not implemented
