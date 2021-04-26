@@ -1171,5 +1171,22 @@ REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
     at::cpu::sub_out(out_t, in0_t, in1_t, alpha);
   };
 });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::clamp_min,
+    aten_clamp_min,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& in0_t = p_node->Input(0).toTensor();
+        const auto in1_s = p_node->Input(1).toScalar();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = create_empty_from(in0_t);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        at::native::clamp_min_out(in0_t, in1_s, out_t);
+      };
+    });
+
 } // namespace jit
 } // namespace torch
