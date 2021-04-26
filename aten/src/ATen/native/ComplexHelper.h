@@ -12,8 +12,9 @@ inline Tensor view_tensor(
     const Tensor &tensor, ScalarType dtype,
     int64_t offset, IntArrayRef sizes, IntArrayRef strides) {
   Storage storage = tensor.storage();
+  auto key_set = tensor.key_set().remove(DispatchKey::Conjugate);
   auto new_tensor = detail::make_tensor<TensorImpl>(
-      c10::TensorImpl::VIEW, std::move(storage), tensor.key_set(), scalarTypeToTypeMeta(dtype));
+      c10::TensorImpl::VIEW, std::move(storage), key_set, scalarTypeToTypeMeta(dtype));
   auto * impl = new_tensor.unsafeGetTensorImpl();
   impl->set_storage_offset(offset);
   impl->set_sizes_and_strides(sizes, strides);
@@ -48,8 +49,6 @@ Tensor view_as_real_physical(const Tensor& self) {
   auto new_storage_offset = 2 * self.storage_offset();
   const auto float_type = c10::toValueType(self.scalar_type());
   auto real_tensor = view_tensor(self, float_type, new_storage_offset, new_sizes, new_strides);
-  // unconditionally set conj bit to false
-  real_tensor.set_conj(false);
   return real_tensor;
 }
 

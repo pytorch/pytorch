@@ -347,6 +347,8 @@ Tensor empty_like(
     namedinference::propagate_names(result, self.names());
   }
 
+  // never propagate Conjugate key
+  result.set_conj(false);
   return result;
 }
 

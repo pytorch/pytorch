@@ -75,9 +75,8 @@ void negationFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_key
 
     auto tensor = std::move(ivalue).toTensor();
     if (mut_arg) {
-      // TODO: This is a waste if the argument is write only
-      native::neg_(tensor);
-      tensor.set_neg(false);
+      // TODO: This is a waste if the argument is write only (e.g. out= tensor)
+      native::resolve_neg_(tensor);
       mutable_inputs.emplace_back(tensor);
     } else {
       tensor = native::resolve_neg(tensor);
@@ -100,6 +99,10 @@ TORCH_LIBRARY_IMPL(_, Negative, m) {
 TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("copy_", torch::CppFunction::makeFallthrough());
   m.impl("conj", torch::CppFunction::makeFallthrough());
+  m.impl("_conj", torch::CppFunction::makeFallthrough());
+  m.impl("neg_", torch::CppFunction::makeFallthrough());
+  m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
+  m.impl("resolve_neg_", torch::CppFunction::makeFallthrough());
   m.impl("empty_like", torch::CppFunction::makeFallthrough());
   m.impl("empty.out", torch::CppFunction::makeFallthrough());
   m.impl("empty_strided", torch::CppFunction::makeFallthrough());

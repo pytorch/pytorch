@@ -313,6 +313,14 @@
 - func: resolve_neg(Tensor(a) self) -> Tensor(a)
   variants: function, method
 
+- func: resolve_neg_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+
+- func: neg_view(Tensor(a) self) -> Tensor(a)
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: neg
+
 - func: acos(Tensor self) -> Tensor
   variants: function, method
   structured_delegate: acos.out
