@@ -68,7 +68,6 @@ def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> List[str]:
 def run_torchbench(torchbench_path: str, pr_num: str, conda_env: str):
     # Copy system environment so that we will not override
     env = dict(os.environ)
-    # Always rebuild
     env["BISECT_CONDA_ENV"] = conda_env
     env["BISECT_ISSUE"] = f"pr{pr_num}"
     command = ["bash", "./.github/scripts/run-bisection.sh"]
@@ -94,4 +93,4 @@ if __name__ == "__main__":
     # Run TorchBench with the generated config
     torchbench_config = gen_abtest_config(args.pr_base_sha, args.pr_head_sha, models)
     deploy_torchbench_config(output_dir, torchbench_config)
-    # run_torchbench(repos["benchmark"], pr_num = args.pr_num, out_dir = output_dir, conda_env = args.conda_env)
+    run_torchbench(repos["benchmark"], pr_num = args.pr_num, conda_env = args.conda_env)

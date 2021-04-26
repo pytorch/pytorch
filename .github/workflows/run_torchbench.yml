@@ -7,7 +7,7 @@ env:
   PR_BODY: ${{ github.event.pull_request.body }}
   PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
   PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-  
+
 jobs:
   run-torchbench:
     # We don't accept running on non-pytorch repos because of security concerns
