@@ -74,7 +74,9 @@ All the unit tests can be found under the [test/distributed](../../test/distribu
 
 ```
 # Run the c10d unit test.
-python test/distributed/test_c10d.py
+python test/distributed/test_c10d_common.py
+python test/distributed/test_c10d_gloo.py
+python test/distributed/test_c10d_nccl.py
 
 # Run distributed tests, including tests for Distributed Data Parallel
 python test/run_test.py --verbose -i distributed/test_distributed_fork
