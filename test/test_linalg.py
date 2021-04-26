@@ -7410,7 +7410,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
     def test_geqrf(self, device, dtype):
 
         def run_test(shape):
@@ -7438,11 +7437,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         batches = [(), (0, ), (2, ), (2, 1)]
         ns = [5, 2, 0]
         for batch, (m, n) in product(batches, product(ns, ns)):
-            # TODO: CUDA path doesn't work with batched or empty inputs
-            if self.device_type == 'cuda' and (batch != () or m == 0 or n == 0):
-                with self.assertRaisesRegex(RuntimeError, "A should be non-empty 2 dimensional"):
-                    run_test((*batch, m, n))
-                continue
             run_test((*batch, m, n))
 
     @skipCUDAIfNoMagma
