@@ -78,7 +78,7 @@ class RegisterDispatchKey:
         elif isinstance(f, ExternalBackendFunctionsGroup):
             if f.structured:
                 raise AssertionError("structured kernels not implemented yet for external backends")
-            elif f.primary == f.functional and (self.target is Target.ANONYMOUS_DEFINITION or self.target is Target.REGISTRATION):
+            elif f.primary == f.functional:
                 # For external backends that specify that they'd like to primarily implement functional kernels (namely XLA),
                 # we can generate anonymous wrappers for the out and in-place kernels for them, even for un-structured operators.
                 # Note that we can't go the other way around (generate the functional using the out), since we don't know
@@ -118,18 +118,21 @@ class RegisterDispatchKey:
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
 
-    @method_with_native_function
     def gen_unstructured(
             self,
             native_or_external: Union[NativeFunction, ExternalBackendFunction],
+            *,
+            # Only applies to ExternalBackendFunction objects.
+            # True for inplace/out functions that don't have kernels, but do have corresponding functional kernels.
+            is_generated_wrapper: bool = False,
     ) -> Optional[str]:
         sig: Union[NativeSignature, DispatcherSignature]
         if isinstance(native_or_external, ExternalBackendFunction):
-            if not requires_backend_wrapper(native_or_external):
+            if not requires_backend_wrapper(native_or_external) and not is_generated_wrapper:
                 return None
             # If the backend doesn't have a kernel, we don't generate an anonymous wrapper or a dispatcher registration for it
             # (fallbacks to CPU are generated elsewhere).
-            if native_or_external.metadata is None:
+            if native_or_external.metadata is None and not is_generated_wrapper:
                 # TODO: Right now, we generate "fast-path" `at::xla::{op}` kernels for all non-composite ops,
                 # including those with CPU fallbacks. That logic will have to change if CPU fallbacks become a boxed kernel.
                 if self.target is not Target.NAMESPACED_DEFINITION and self.target is not Target.NAMESPACED_DECLARATION:
@@ -177,7 +180,10 @@ class RegisterDispatchKey:
             def generate_defn(cpp_sig: CppSignature) -> str:
                 # This is needed in order for namespaced definitions to call into CPU fallbacks,
                 # which live in a different namespace.
-                if isinstance(native_or_external, ExternalBackendFunction) and native_or_external.metadata is None:
+                # TODO: this logic will change if we implement a boxed CPU fallback.
+                if isinstance(native_or_external, ExternalBackendFunction) \
+                        and native_or_external.metadata is None \
+                        and not is_generated_wrapper:
                     # See Note [External Backends Follow Dispatcher convention]
                     kernel_name = f'{self.cpp_namespace}::AtenXlaTypeDefault::{dispatcher.name(f.func)}'
                 else:
@@ -250,39 +256,43 @@ namespace {{
 """
 
         elif self.target is Target.REGISTRATION:
-            return self.generate_registration(f, name)
+            if f.manual_kernel_registration:
+                return None
+            else:
+                payload = f"TORCH_FN({name})"
+                return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
             assert_never(self.target)
-
-
-    def generate_registration(self, f: NativeFunction, kernel_name: str) -> Optional[str]:
-        if f.manual_kernel_registration:
-            return None
-        else:
-            payload = f"TORCH_FN({kernel_name})"
-            return f'm.impl("{f.func.name}",\n{payload});\n'
 
     def external_backend_wrapper_sig(self, f: ExternalBackendFunction) -> DispatcherSignature:
         # See Note [External Backends Follow Dispatcher convention]
         return DispatcherSignature.from_schema(f.native_function.func, prefix='wrapper_', append_overload_name=True)
 
     def gen_out_inplace_wrappers(self, g: ExternalBackendFunctionsGroup) -> List[str]:
-        def gets_generated_wrapper(f: ExternalBackendFunction) -> bool:
+        def gets_generated_out_inplace_wrapper(f: ExternalBackendFunction) -> bool:
             return f.native_function.func.kind() is not SchemaKind.functional \
                 and f.metadata is None and g.functional.metadata is not None
 
         @with_native_function
         def gen_wrapper(f: ExternalBackendFunction) -> Optional[str]:
+            # Only anonymous definitions get "special treatment" for out/inplace wrappers.
+            # All other functionality can be directly pulled from gen_unstructured.
+            if self.target is not Target.ANONYMOUS_DEFINITION:
+                is_generated_wrapper = gets_generated_out_inplace_wrapper(f)
+                return self.gen_unstructured(f, is_generated_wrapper=is_generated_wrapper)
+
             if f.native_function.func.kind() is SchemaKind.functional:
-                # Wrappers are generated for out/inplace kernels, using the functional kernel.
+                # Wrappers are generated for out/inplace kernels, using the functional kernel,
+                # so the functional kernel itself is generated normally.
                 return self.gen_unstructured(f)
             if f.metadata is not None:
                 # If the backend provided their own out/inplace kernel, use it.
                 return self.gen_unstructured(f)
 
-            if not gets_generated_wrapper(f):
+            if not gets_generated_out_inplace_wrapper(f):
                 return None
 
+            # Special out/inplace wrapper logic starts here.
             dispatcher_sig = self.external_backend_wrapper_sig(f)
             name = dispatcher_sig.name()
 
@@ -315,18 +325,7 @@ namespace {{
 }}
 
 """
-        if self.target is Target.REGISTRATION:
-            return list(mapMaybe(lambda f: self.generate_registration(
-                f.native_function, self.external_backend_wrapper_sig(f).name())
-                if f.metadata is not None or gets_generated_wrapper(f)
-                else None
-                , g.functions()))
-        elif self.target is Target.ANONYMOUS_DEFINITION:
-            return list(mapMaybe(gen_wrapper, g.functions(functional_first=True)))
-        # Can't use mypy to help here, since this particular function is only meant to be used for a subset of the targets
-        raise AssertionError(f'invalid target: {self.target}')
-        return None
-
+        return list(mapMaybe(gen_wrapper, g.functions(functional_first=True)))
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
