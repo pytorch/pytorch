@@ -14,7 +14,7 @@ class Directory:
         self.children: Dict[str, Directory] = {}
 
     def get_dir(self, dirs: List[str]):
-        """Builds path of Directories if not yet built. Return last directory 
+        """Builds path of Directories if not yet built. Return last directory
         in list.
 
         Args:
@@ -29,11 +29,11 @@ class Directory:
         return self.children[dir_name].get_dir(dirs[1:])
 
     def add_file(self, file_path: str):
-        """Adds a file to a Directory. 
+        """Adds a file to a Directory.
 
         Args:
             file_path (str): Path of file to add. Last element is added as a file while
-                other paths items are added as directories. 
+                other paths items are added as directories.
         """
         *dirs, file = file_path.split("/")
         dir = self.get_dir(dirs)
@@ -111,9 +111,9 @@ def _create_directory_from_file_list(
         file_list (List[str]): List of files to add to the top-level directory.
 
         include (Union[List[str], str]): An optional pattern that limits what is included from the file_list to
-            files whose name matches the pattern. 
+            files whose name matches the pattern.
 
-        exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern. 
+        exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
     """
     glob_pattern = GlobGroup(include, exclude=exclude, separator="/")
 
