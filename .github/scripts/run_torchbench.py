@@ -53,6 +53,7 @@ def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> List[str]:
     model_list = []
     with open(prbody_file, "r") as pf:
         magic_lines = list(filter(lambda x: x.startswith(MAGIC_PREFIX), pf.readlines()))
+        print(f"Magic lines: {magic_lines}")
         if magic_lines:
             # Only the first magic line will be respected.
             model_list = list(map(lambda x: x.strip(), magic_lines[0][len(MAGIC_PREFIX):].split(",")))
