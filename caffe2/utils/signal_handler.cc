@@ -1,5 +1,6 @@
 #include "caffe2/utils/signal_handler.h"
 #include "caffe2/core/logging.h"
+#include <c10/util/Backtrace.h>
 
 #if defined(CAFFE2_SUPPORTS_SIGNAL_HANDLER)
 
@@ -149,61 +150,9 @@ const char* getSignalName(int signum) {
   return nullptr;
 }
 
-_Unwind_Reason_Code unwinder(struct _Unwind_Context* context, void* userInfo) {
-  auto& pcs = *reinterpret_cast<std::vector<uintptr_t>*>(userInfo);
-  pcs.push_back(_Unwind_GetIP(context));
-  return _URC_NO_REASON;
-}
-
-std::vector<uintptr_t> getBacktrace() {
-  std::vector<uintptr_t> pcs;
-  _Unwind_Backtrace(unwinder, &pcs);
-  return pcs;
-}
-
 void printBlobSizes() {
   ::caffe2::Workspace::ForEach(
       [&](::caffe2::Workspace* ws) { ws->PrintBlobSizes(); });
-}
-
-void printStacktrace() {
-  std::vector<uintptr_t> pcs = getBacktrace();
-  Dl_info info;
-  size_t i = 0;
-  for (uintptr_t pcAddr : pcs) {
-    const void* pc = reinterpret_cast<const void*>(pcAddr);
-    const char* path = nullptr;
-    const char* name = "???";
-    char* demangled = nullptr;
-    int offset = -1;
-
-    std::cerr << "[" << i << "] ";
-    if (dladdr(pc, &info)) {
-      path = info.dli_fname;
-      name = info.dli_sname ?: "???";
-      offset = reinterpret_cast<uintptr_t>(pc) -
-          reinterpret_cast<uintptr_t>(info.dli_saddr);
-
-      int status;
-      demangled = abi::__cxa_demangle(name, nullptr, nullptr, &status);
-      if (status == 0) {
-        name = demangled;
-      }
-    }
-    std::cerr << name;
-    if (offset >= 0) {
-      std::cerr << "+" << reinterpret_cast<void*>(offset);
-    }
-    std::cerr << "(" << pc << ")";
-    if (path) {
-      std::cerr << " in " << path;
-    }
-    std::cerr << std::endl;
-    if (demangled) {
-      free(demangled);
-    }
-    i += 1;
-  }
 }
 
 void callPreviousSignalHandler(
@@ -229,7 +178,7 @@ void stacktraceSignalHandler(bool needsLock) {
   pid_t tid = syscall(SYS_gettid);
   std::cerr << fatalSignalName << "(" << fatalSignum << "), PID: " << ::getpid()
             << ", Thread " << tid << ": " << std::endl;
-  printStacktrace();
+  std::cerr << c10::get_backtrace();
   std::cerr << std::endl;
   if (needsLock) {
     pthread_mutex_unlock(&writingMutex);
