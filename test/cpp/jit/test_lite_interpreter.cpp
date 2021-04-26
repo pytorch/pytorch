@@ -958,14 +958,12 @@ TEST(LiteInterpreterTest, DefaultArgsConv) {
       return torch.conv2d(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], 1)
   )");
 
-  m.get_method("forward").graph()->dump();
   inputs.push_back(torch::ones({1, 1, 28, 28}));
 
   auto outputref = m.forward(inputs).toTensor();
 
   std::stringstream ss;
   m._save_for_mobile(ss);
-  m._save_for_mobile("/Users/myuan/temp/args.ptl");
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 1; ++i) {
