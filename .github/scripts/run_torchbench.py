@@ -59,7 +59,7 @@ def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> List[str]:
     # Sanity check: make sure all the user specified models exist in torchbench repository
     full_model_list = os.listdir(os.path.join(torchbench_path, "torchbenchmark", "models"))
     for m in model_list:
-        if not m in full_model_list:
+        if m not in full_model_list:
             print(f"The model {m} you specified does not exist in TorchBench suite. Please double check.")
             return []
     return model_list
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     # Identify the specified models and verify the input
     models = extract_models_from_pr(args.torchbench_path, args.pr_body)
     if not models:
-        print(f"Can't parse the model filter from the pr body. Currently we only support allow-list.")
+        print("Can't parse the model filter from the pr body. Currently we only support allow-list.")
         exit(1)
     print(f"Ready to run TorchBench with benchmark. Result will be saved in the directory: {output_dir}.")
     # Run TorchBench with the generated config
