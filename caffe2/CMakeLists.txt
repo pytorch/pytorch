@@ -1710,9 +1710,21 @@ if(BUILD_PYTHON)
   # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,
   # fallback to ".pyd" if windows and ".so" for all others.
   pycmd(PY_EXT_SUFFIX "
-      import sysconfig
-      ext_suffix = sysconfig.get_config_var('EXT_SUFFIX')
-      print(ext_suffix if ext_suffix else '')
+      def get_ext_suffix():
+          import sys
+          if sys.version_info < (3, 8) and sys.platform == 'win32':
+              # Workaround for https://bugs.python.org/issue39825
+              import _imp
+              return _imp.extension_suffixes()[0]
+          else:
+              import sysconfig
+              return sysconfig.get_config_var('EXT_SUFFIX')
+
+      suffix = get_ext_suffix()
+      if suffix is not None:
+          print(suffix)
+      else:
+          print()
   ")
   if("${PY_EXT_SUFFIX}" STREQUAL "")
     if(MSVC)
