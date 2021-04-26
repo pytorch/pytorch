@@ -33,7 +33,7 @@ namespace c10 {
   _(prim, MKLDNNGroup)               \
   _(prim, MKLDNNHardSwish)           \
   _(prim, MKLDNNHardSigmoid)         \
-  _(prim, MKLDNNRelu6)               \
+  _(prim, MKLDNNHardTanh)            \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
@@ -337,6 +337,7 @@ namespace c10 {
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \
   _(aten, hardsigmoid_)              \
+  _(aten, hardtanh_)                 \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
