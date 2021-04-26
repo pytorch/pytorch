@@ -27,7 +27,7 @@ Matrix Properties
     cond
     matrix_rank
 
-Factorizations
+Decompositions
 --------------
 
 .. autosummary::
@@ -41,6 +41,7 @@ Factorizations
     eigh
     eigvalsh
     svd
+    svdvals
 
 Solvers
 -------

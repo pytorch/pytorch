@@ -123,7 +123,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
         :func:`torch.linalg.pinv` computes the pseudoinverse (Moore-Penrose inverse) of matrices
         of any shape.
 
-        :func:`torch.linalg.solve` computes :attr:`A`\ `.inv() @ \ `:attr:`B`.
+        :func:`torch.linalg.solve` computes :attr:`A`\ `.inv() @ \ `:attr:`B` with a stable algorithm.
 
         It is always prefered to use :func:`torch.linalg.solve` when possible, as it is
         faster and more stable than computing the inverse and then multiplying.
@@ -191,7 +191,7 @@ Args:
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
-Example::
+Examples::
 
     >>> a = torch.randn(3, 3)
     >>> a
@@ -256,8 +256,7 @@ Returns:
 
     `sign` will have the same dtype as :attr:`A`.
 
-
-Example::
+Examples::
 
     >>> A = torch.randn(3, 3)
     >>> A
@@ -337,7 +336,6 @@ Returns:
 
     `eigenvalues` and `eigenvectors` will always be complex-valued, even when :attr:`A` is real.
 
-
 Examples::
 
     >>> a = torch.randn(2, 2, dtype=torch.complex128)
@@ -388,8 +386,8 @@ Also supports batched inputs, and, if the input is batched, the output is batche
           respectively.
           For CUDA inputs, this function synchronizes that device with the CPU.
 
-.. note:: This function is not differentiable. Use :func:`torch.linalg.eig`
-          instead, which also computes the eigenvectors.
+.. note:: This function is not differentiable. If you need differentiability use
+          :func:`torch.linalg.eig` instead, which also computes the eigenvectors.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
@@ -551,8 +549,8 @@ The eigenvalues are returned in ascending order.
           CPU and CUDA symmetric / Hermitian inputs respectively.
           For CUDA inputs, this function synchronizes that device with the CPU.
 
-.. note:: This function is not differentiable. Please use :func:`torch.linalg.eigh`
-          instead, which also computes the eigenvectors.
+.. note:: This function is not differentiable. If you need differentiability use
+          :func:`torch.linalg.eigh` instead, which also computes the eigenvectors.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
@@ -566,7 +564,6 @@ Keyword args:
 Returns:
     A real-valued tensor cointaining the eigenvalues even when :attr:`A` is complex.
     The eigenvalues are returned in ascending order.
-
 
 Examples::
 
@@ -748,7 +745,7 @@ Keyword args:
 Returns:
     A named tuple `(solution, residuals, rank, singular_values)`.
 
-Example::
+Examples::
 
     >>> a = torch.tensor([[10, 2, 3], [3, 10, 5], [5, 6, 12]], dtype=torch.float)
     >>> a.unsqueeze_(0)
@@ -787,7 +784,7 @@ as :attr:`A`. If :attr:`n` is negative, it returns the inverse of each matrix
 
 .. seealso::
 
-        :func:`torch.linalg.solve` computes :attr:`A`\ `.inv() @ \ `:attr:`B`.
+        :func:`torch.linalg.solve` computes :attr:`A`\ `.inv() @ \ `:attr:`B` with a stable algorithm.
 
         It is always prefered to use :func:`~matrix_power` with :attr:`n`\ `> 0` followed
         by :func:`torch.linalg.solve` when possible, rather than
@@ -805,7 +802,7 @@ Raises:
     RuntimeError: if :attr:`n`\ `< 0` and the matrix :attr:`A` or any matrix in the
                   batch of matrices :attr:`A` is not invertible.
 
-Example::
+Examples::
 
     >>> a = torch.randn(3, 3)
     >>> a
@@ -979,20 +976,22 @@ the fewest arithmetic operations are performed.
 Supports inputs of float, double, cfloat and cdouble dtypes.
 This function does not support batched inputs.
 Every tensor in :attr:`tensors` must be 2D, except for the first and last which
-may be 1D. If the first tensor is a 1D vector of shape `n` it is treated as a row vector
-of shape `(1, n)`, similarly if the last tensor is a 1D vector of shape `n` it is treated
+may be 1D. If the first tensor is a 1D vector of shape `(n,)` it is treated as a row vector
+of shape `(1, n)`, similarly if the last tensor is a 1D vector of shape `(n,)` it is treated
 as a column vector of shape `(n, 1)`.
 
 If the first and last tensors are matrices, the output will be a matrix.
 However, if either is a 1D vector, then the output will be a 1D vector.
 
+Differences with `numpy.linalg.multi_dot`:
+
+- Unlike `numpy.linalg.multi_dot`, the first and last tensors must either be 1D or 2D
+  whereas NumPy allows them to be nD
+
 .. warning:: This function does not broadcast.
 
 .. note:: This function is implemented by chaining :func:`torch.mm` calls after
           computing the optimal matrix multiplication order.
-
-.. note:: This function is similar to NumPy's `multi_dot` except that the first and last
-          tensors must be either 1D or 2D whereas NumPy allows them to be nD.
 
 .. note:: The cost of multiplying two matrices with shapes `(a, b)` and `(b, c)` is
           `a * b * c`. Given matrices `A`, `B`, `C` with shapes `(10, 100)`,
@@ -1214,7 +1213,7 @@ Differences with `numpy.linalg.svd`:
   When :attr:`compute_uv`\ `= False`, `U`, `Vh` are empty tensors.
   This behavior may change in a future PyTorch release.
   Please use :func:`torch.linalg.svdvals`, which computes only the singular values,
-  instead of ``compute_uv=False``.
+  instead of `compute_uv=False`.
 
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv`\ `= True`.
 
@@ -1250,6 +1249,9 @@ Differences with `numpy.linalg.svd`:
 
 .. seealso::
 
+        :func:`torch.linalg.svdvals` computes only the singular values.
+        However, that function is not differentiable.
+
         :func:`torch.linalg.eig` for a function that computes another type of spectral
         decomposition of a matrix. The eigendecomposition works just on on square matrices.
 
@@ -1280,7 +1282,7 @@ Returns:
 
     `U` and `Vh` will have the same dtype as :attr:`A`.
 
-Example::
+Examples::
 
     >>> a = torch.randn(5, 3)
     >>> a
@@ -1316,31 +1318,32 @@ Example::
 """)
 
 svdvals = _add_docstr(_linalg.linalg_svdvals, r"""
-linalg.svdvals(input, *, out=None) -> Tensor
+linalg.svdvals(A, *, out=None) -> Tensor
 
 Computes the singular values of a matrix.
-
-The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
-then the singular values of each matrix in the batch are returned in descending order.
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
 
-.. note:: This function is not differentiable. Please use :func:`torch.linalg.svd`
-          instead, which also computes the singular vectors.
+The singular values are returned in descending order.
 
-.. note:: This function is equivalent to NumPy's ``linalg.svd`` with ``compute_uv=False``.
+.. note:: This function is not differentiable. If you need differentiability use
+          :func:`torch.linalg.svd` instead, which also computes the singular vectors.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+.. note:: This function is equivalent to NumPy's `linalg.svd(A, compute_uv=False)`.
+
+.. note:: For CUDA inputs, this function synchronizes that device with the CPU.
 
 Args:
-    input (Tensor): the `m \times n` matrix or the batch of such matrices of size
-                    `(*, m, n)` where `*` is one or more batch dimensions.
+    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
-Example::
+Returns:
+    A real-valued tensor, even when :attr:`A` is complex.
+
+Examples::
 
     >>> import torch
     >>> a = torch.randn(5, 3)
@@ -1435,7 +1438,6 @@ Raises:
         and the :attr:`A` matrix or any matrix in the batch :attr:`A` is not square
         or invertible.
 
-
 Examples::
 
     >>> a = torch.randn(3, 4, 4, dtype=torch.complex64)
@@ -1515,7 +1517,7 @@ that are below the specified :attr:`rcond` threshold are treated as zero and dis
 
         :func:`torch.linalg.inv` computes the inverse of a square matrix.
 
-        :func:`torch.linalg.lstsq` computes :attr:`A`\ `.pinv() @ \ `:attr:`B`.
+        :func:`torch.linalg.lstsq` computes :attr:`A`\ `.pinv() @ \ `:attr:`B` with a stable algorithm.
 
         It is always prefered to use :func:`torch.linalg.lstsq` when possible, as it is
         faster and more stable than computing the pseudoinverse and then multiplying.
@@ -1800,7 +1802,6 @@ Examples::
     True
 """)
 
-
 qr = _add_docstr(_linalg.linalg_qr, r"""
 qr(A, mode='reduced', *, out=None) -> (Tensor, Tensor)
 
@@ -1871,8 +1872,7 @@ Keyword args:
 Returns:
     A named tuple `(Q, R)`.
 
-
-Example::
+Examples::
 
     >>> a = torch.tensor([[12., -51, 4], [6, 167, -68], [-4, 24, -41]])
     >>> q, r = torch.linalg.qr(a)
