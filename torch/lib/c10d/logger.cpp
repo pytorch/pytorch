@@ -179,6 +179,13 @@ void Logger::calculate_avg_gpu_time(
 }
 #endif
 
+void Logger::reset_performance_stats() {
+  ddp_logging_data_->forward_compute_time = 0;
+  ddp_logging_data_->backward_comm_time = 0;
+  ddp_logging_data_->backward_compute_time = 0;
+  ddp_logging_data_->backward_compute_comm_overlap_time = 0;
+}
+
 void Logger::set_runtime_stats_and_log() {
   // Sync with reducer's data
   std::lock_guard<std::mutex> lock(reducer_->mutex_);
@@ -204,11 +211,7 @@ void Logger::set_runtime_stats_and_log() {
     ddp_logging_data_->rebuilt_bucket_sizes = get_bucket_sizes();
   }
 
-  // reset perforamnce stats for current iteration.
-  ddp_logging_data_->forward_compute_time = 0;
-  ddp_logging_data_->backward_comm_time = 0;
-  ddp_logging_data_->backward_compute_time = 0;
-  ddp_logging_data_->backward_compute_comm_overlap_time = 0;
+  reset_performance_stats();
 
   if (reducer_->replicas_[0][0].is_cuda()) {
 #ifdef USE_CUDA

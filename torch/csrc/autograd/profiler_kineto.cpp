@@ -41,13 +41,12 @@ inline int64_t getTimeUs() {
 // Caching linux pids and tids is not advisable in the general case,
 // but this is only for profiling purposes and we don't need to handle
 // special cases during fork, clone etc.
-pid_t cachedTid() {
-  static thread_local pid_t tid{(pid_t)syscall(SYS_gettid)};
-  return tid;
-}
+static thread_local pid_t cachedTid;
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
 std::string stacksToStr(const std::vector<std::string>& stacks);
+std::string dtypesToStr(const std::vector<std::string>& types);
+std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   using ProfilerThreadLocalState::ProfilerThreadLocalState;
@@ -71,19 +70,14 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     //   op.inputDims = shapesToStr(*ctx->shapes);
     // }
 
-    // Not setting atm
-#ifndef USE_KINETO_UPDATED
-    op.inputTypes = "[]";
-    op.arguments = "[]";
-    op.outputDims = "[]";
-    op.outputTypes = "[]";
-    op.inputNames = "[]";
-    op.outputNames = "[]";
-#endif
+    if (!cachedTid) {
+      cachedTid = (pid_t)syscall(SYS_gettid);
+      libkineto::api().activityProfiler().recordThreadInfo(cachedTid, pthread_self());
+    }
+
+    op.sysThreadId = cachedTid;
 
     // setting both pthread and linux tid for Kineto
-    op.sysThreadId = cachedTid();
-    op.pthreadId = pthread_self();
 
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
@@ -97,6 +91,9 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
           .scope(ctx->recFunScope);
       if (ctx->shapes && !ctx->shapes->empty()) {
         kineto_events_.back().shapes(*ctx->shapes);
+      }
+      if (ctx->dtypes && !ctx->dtypes->empty()) {
+        kineto_events_.back().dtypes(*ctx->dtypes);
       }
       if (ctx->stack && !ctx->stack->empty()) {
         kineto_events_.back().stack(*ctx->stack);
@@ -141,23 +138,16 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   void finalizeCPUTrace() {
     TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
     for (size_t idx = 0; idx < cpu_trace->activities.size(); ++idx) {
-#ifdef USE_KINETO_UPDATED
       if (kineto_events_[idx].hasShapes()) {
         cpu_trace->activities[idx].addMetadata("Input Dims", shapesToStr(kineto_events_[idx].shapes()));
       }
-#else
-      if (kineto_events_[idx].hasShapes()) {
-        cpu_trace->activities[idx].inputDims = shapesToStr(kineto_events_[idx].shapes());
-      } else {
-        cpu_trace->activities[idx].inputDims = "[]";
-      }
-#endif
+
       if (kineto_events_[idx].hasStack()) {
-#ifdef USE_KINETO_UPDATED
         cpu_trace->activities[idx].addMetadata("Call stack", stacksToStr(kineto_events_[idx].stack()));
-#else
-        cpu_trace->activities[idx].callStack = stacksToStr(kineto_events_[idx].stack());
-#endif
+      }
+
+      if (kineto_events_[idx].hasTypes()) {
+        cpu_trace->activities[idx].addMetadata("Input type", dtypesToStr(kineto_events_[idx].dtypes()));
       }
     }
   }
@@ -166,6 +156,27 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace =
       std::make_unique<libkineto::CpuTraceBuffer>();
 };
+
+std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
+  std::vector<std::string> types;
+  types.reserve(fn.inputs().size());
+  for (const c10::IValue& input : fn.inputs()) {
+    if (input.isTensor()) {
+      const at::Tensor& tensor = input.toTensor();
+      if (tensor.defined()) {
+        types.push_back(
+            static_cast<std::string>(input.toTensor().dtype().name()));
+      } else {
+        types.emplace_back();
+      }
+    } else if (input.isScalar() || input.isList()) {
+      types.push_back(input.tagKind());
+    } else {
+      types.emplace_back();
+    }
+  }
+  return types;
+}
 
 KinetoThreadLocalState* getProfilerTLSState() {
   const auto& state = c10::ThreadLocalDebugInfo::get(
@@ -193,6 +204,7 @@ void pushProfilingCallbacks() {
 
         if (state_ptr->config().report_input_shapes) {
           ctx_ptr->shapes = inputSizes(fn);
+          ctx_ptr->dtypes = inputTypes(fn);
         }
 
         if (state_ptr->config().with_flops) {
@@ -253,6 +265,22 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   }
   oss << "]";
   return oss.str();
+}
+
+std::string dtypesToStr(const std::vector<std::string>& types) {
+  if (types.empty()) {
+    return "[]";
+  } else {
+    std::ostringstream oss;
+    std::transform(
+        types.begin(),
+        types.end(),
+        std::ostream_iterator<std::string>(oss, ", "),
+        [](std::string s) -> std::string { return "\"" + s + "\""; });
+    auto rc = oss.str();
+    rc.erase(rc.length() - 2); // remove last ", "
+    return "[" + rc + "]";
+  }
 }
 
 std::string stacksToStr(const std::vector<std::string>& stacks) {
