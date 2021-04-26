@@ -6,7 +6,7 @@ One of the big distinctions between the various conditional representations is w
 
 It's clear that the fused approach is strictly more expressive than the unfused approach (each of the unfused operators can be implemented with the fused operator).  Thus the criteria for selecting between must be driven by either performance or ease of use.
 
-On the performance side, the fused approach can make a meaningful difference in performance when dealing with CPU vectors.  In the unfused approach the representation of a boolean is baked into the IR as either 0 or 1, since the comparison operation has to produce it for the selection operation to consume it.  In many vector ISAs, though, per-lane booleans are better represented as 0 or -1, or by using dedicated mask/predicate registers.  The fused approach effective defers the decision of how to represent the boolean to the code generator, allowing it to choose the representation that is right for the particular HW context.
+On the performance side, the fused approach can make a meaningful difference in performance when dealing with CPU vectors.  In the unfused approach the representation of a boolean is baked into the IR as either 0 or 1, since the comparison operation has to produce it for the selection operation to consume it.  In many vector ISAs, though, per-lane booleans are better represented as 0 or -1, or by using dedicated mask/predicate registers.  The fused approach effectively defers the decision of how to represent the boolean to the code generator, allowing it to choose the representation that is right for the particular HW context.
 
 On the ease of use side, there's not a clear winner.  The individual operations are simpler in the unfused approach, at the cost of a single logical operation sometimes requiring multiple operations.  The fused approach gets more done in a single operation at the cost of some mental overhead from having four operands - but often resulting in a smaller expression tree overall.  In either case, we will at some point need boolean expression simplification to simplify redundant conditions.
 
@@ -24,7 +24,7 @@ Statement conditionals, on the other hand, are needed to represent conditional s
 
 ## Lazy vs Eager Conditionals
 
-Within the space of expression conditionals, Tensor IR contains a distinction between eager conditionals (`CompareSelect`) and lazy (or short-circuit) conditionals (`IfThenElse`).  The important distinction between these two is when the selectands (the `C` and `D` sub-expressions in the operation `(A cmp B) ? C : D` ).  In eager conditionals, all of the operands are allowed to be evaluated before the conditional selection is made.  In lazy/short-circuit conditionals, the `A` sub-expression must be evaluated first, and then only one of `C` or `D` is evaluated.
+Within the space of expression conditionals, Tensor IR contains a distinction between eager conditionals (`CompareSelect`) and lazy (or short-circuit) conditionals (`IfThenElse`).  The important distinction between these two is when the selectands (the `C` and `D` sub-expressions in the operation `(A cmp B) ? C : D` ) are evaluated.  In eager conditionals, all of the operands are allowed to be evaluated before the conditional selection is made.  In lazy/short-circuit conditionals, the `A` sub-expression must be evaluated first, and then only one of `C` or `D` is evaluated.
 
 This may seem like an esoteric distinction, but it becomes an important distinction in kernels like concat loops.  In that situation, we often have code of the form:
 
