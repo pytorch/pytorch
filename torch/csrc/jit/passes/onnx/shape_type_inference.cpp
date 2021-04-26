@@ -1244,7 +1244,7 @@ void SpecialPostProcess(Node* n) {
         } else if (seq_node->kind() == ::c10::onnx::SequenceEmpty) {
           update_sequence_empty_dtype(seq_node, t_type);
         } else if (seq_node->kind() == prim::Param) {
-          // Check if insertion dtype is not the same with sequence empty dtype.
+          // Try to find original onnx::SequenceEmpty node in outer block.
           auto seq_empty_n = find_sequence_empty(n->input(0), t_type);
           if (seq_empty_n) {
             update_sequence_empty_dtype(seq_empty_n, t_type);
