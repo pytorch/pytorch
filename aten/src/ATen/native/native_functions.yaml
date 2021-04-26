@@ -2794,7 +2794,7 @@
   variants: function
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
-  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  variants: function, method
   dispatch:
     CompositeExplicitAutograd: permute
 
@@ -3322,6 +3322,24 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
+
+- func: hsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: hsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
+
+- func: vsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: vsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
+
+- func: dsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: dsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
   variants: function, method
@@ -5722,14 +5740,12 @@
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
-    CPU: legacy::cpu::_th_geqrf_out
-    CUDA: legacy::cuda::_th_geqrf_out
+    CPU, CUDA: geqrf_out
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_geqrf
-    CUDA: legacy::cuda::_th_geqrf
+    CPU, CUDA: geqrf
 
 # orgqr, alias for linalg_householder_product
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
@@ -8796,6 +8812,14 @@
   python_module: linalg
   variants: function
 
+- func: linalg_svdvals(Tensor input) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_svdvals.out(Tensor input, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
 - func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
   python_module: linalg
   variants: function
@@ -8890,6 +8914,14 @@
   variants: function
 
 - func: linalg_matrix_rank.out(Tensor self, float? tol=None, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
+- func: linalg_matrix_rank.tol_tensor(Tensor input, Tensor tol, bool hermitian=False) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_matrix_rank.out_tol_tensor(Tensor input, Tensor tol, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
