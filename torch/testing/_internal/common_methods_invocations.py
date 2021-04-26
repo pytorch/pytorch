@@ -3522,10 +3522,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
                    supports_out=False,
-                   skips=(
-                       # Reference: https://github.com/pytorch/pytorch/pull/55891
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-                   )),
+                   ),
     UnaryUfuncInfo('conj',
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool,
