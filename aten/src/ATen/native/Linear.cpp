@@ -243,8 +243,8 @@ Tensor einsum(std::string equation, TensorList operands) {
     const auto operand = operands[i];
     const auto labels = op_labels[i];
     const auto ndims = operand.dim();
-    auto nlabels = decltype(ndims){(labels.size())};
-    auto has_ellipsis = false;
+    int64_t nlabels = labels.size();
+    bool has_ellipsis = false;
 
     for (const auto& label : labels) {
       if (label == ELLIPSIS) {
@@ -317,7 +317,7 @@ Tensor einsum(std::string equation, TensorList operands) {
           TORCH_CHECK(
               einsum_check_label(label),
               "einsum() invalid subscript given at index ",
-              lhs.size() + 2 + i,
+            lhs.size() + 2 + i,
               " in the equation string, subscripts must be in [a-zA-Z]");
           const auto index = einsum_label_to_index(label);
           TORCH_CHECK(
