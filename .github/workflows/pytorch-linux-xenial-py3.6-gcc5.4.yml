@@ -144,7 +144,7 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
       - name: Unzip artifacts
         run: |
-          unzip -qof artifacts.zip
+          unzip -o artifacts.zip
       - name: Output disk space left
         run: |
           sudo df -H
