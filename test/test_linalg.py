@@ -3891,6 +3891,33 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_matrix_rank_tol(self, device, dtype):
+
+        def run_test_tol(shape0, shape1, batch):
+            a = make_tensor((*batch, shape0, shape1), dtype=dtype, device=device)
+            # Check against NumPy output
+            # Test float tol, and specific value for each matrix
+            tolerances = [float(torch.rand(1)), ]
+            # Test different types of tol tensor
+            for tol_type in all_types():
+                tolerances.append(make_tensor(a.shape[:-2], dtype=tol_type, device=device, low=0))
+            # Test broadcasting of tol
+            if a.ndim > 2:
+                tolerances.append(make_tensor(a.shape[-3], dtype=torch.float32, device=device, low=0))
+            for tol in tolerances:
+                actual = torch.linalg.matrix_rank(a, tol=tol)
+                numpy_tol = tol if isinstance(tol, float) else tol.cpu().numpy()
+                expected = np.linalg.matrix_rank(a.cpu().numpy(), tol=numpy_tol)
+                self.assertEqual(actual, expected)
+
+        shapes = (3, 13)
+        batches = ((), (0, ), (4, ), (3, 5, ))
+        for (shape0, shape1), batch in zip(itertools.product(shapes, reversed(shapes)), batches):
+            run_test_tol(shape0, shape1, batch)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_matrix_rank_empty(self, device, dtype):
         matrix_rank = torch.linalg.matrix_rank
 
