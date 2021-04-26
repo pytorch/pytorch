@@ -885,8 +885,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
   }
   at::assert_no_partial_overlap(self, mask);
 
-  Tensor b_mask;
-  std::tie(b_mask) = expand_inplace(self, mask, "masked_fill_");
+  c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
 
   auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
@@ -894,10 +893,10 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
       .resize_outputs(false)
       .add_output(self)
       .add_input(self)
-      .add_input(b_mask)
+      .add_input(*b_mask)
       .build();
 
-  if (b_mask.dtype() == at::ScalarType::Byte) {
+  if (b_mask->dtype() == at::ScalarType::Byte) {
     TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
     masked_fill_kernel<uint8_t>(iter, value);

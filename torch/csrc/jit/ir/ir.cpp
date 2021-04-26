@@ -1104,6 +1104,7 @@ bool Node::hasSideEffects() const {
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
+    case cuda::synchronize:
 #endif
     case prim::Enter:
     case prim::Exit:
@@ -1288,6 +1289,7 @@ Node* Node::replaceWithNewSymbol(Symbol new_symbol) {
     v->replaceAllUsesWith(new_out);
   }
   replace_node->copyMetadata(this);
+  replace_node->copyAttributes(*this);
   TORCH_INTERNAL_ASSERT(
       (replace_node->maybeOperator() != nullptr) == had_operator,
       "invalid symbol replacement:",

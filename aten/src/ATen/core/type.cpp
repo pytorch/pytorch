@@ -853,10 +853,17 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
     ss << name()->qualifiedName();
   } else {
     ss << "Tuple[";
-    for(size_t i = 0; i < elements().size(); ++i) {
-      if(i > 0)
-        ss << ", ";
-      ss << elements()[i]->annotation_str(printer);
+    if (elements().size() == 0) {
+      // `typing.Tuple` special-cases the annotation syntax for empty tuple
+      // with `typing.Tuple[()]`. See
+      // https://docs.python.org/3/library/typing.html#typing.Tuple
+      ss << "()";
+    } else {
+      for (size_t i = 0; i < elements().size(); ++i) {
+        if (i > 0)
+          ss << ", ";
+        ss << elements()[i]->annotation_str(printer);
+      }
     }
     ss << "]";
   }
@@ -1172,6 +1179,13 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
       "on a submodule the outer module is expecting" +
       " the same return type as the submodule's forward.";
   return return_string;
+}
+
+bool ClassType::isUnresolvedClassAttribute(const std::string& name) const {
+  return std::find(
+      unresolved_class_attributes_.begin(),
+      unresolved_class_attributes_.end(),
+      name) != unresolved_class_attributes_.end();
 }
 
 void checkForwardHookInputArguments(
@@ -1575,20 +1589,27 @@ ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
-    std::string doc_string) {
-  return ClassTypePtr(
-      new ClassType(std::move(qualifiedName), std::move(cu), is_module, std::move(doc_string)));
+    std::string doc_string,
+    std::vector<std::string> unresolved_class_attributes) {
+  return ClassTypePtr(new ClassType(
+      std::move(qualifiedName),
+      std::move(cu),
+      is_module,
+      std::move(doc_string),
+      std::move(unresolved_class_attributes)));
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module = false,
-    std::string doc_string = "")
+    bool is_module,
+    std::string doc_string,
+    std::vector<std::string> unresolved_class_attributes)
     : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)),
       isModule_(is_module),
-      doc_string_(std::move(doc_string)) {}
+      doc_string_(std::move(doc_string)),
+      unresolved_class_attributes_(std::move(unresolved_class_attributes)) {}
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;
