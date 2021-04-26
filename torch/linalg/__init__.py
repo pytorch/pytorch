@@ -1364,7 +1364,7 @@ linalg.cond(A, p=None, *, out=None) -> Tensor
 Computes the condition number of a matrix with respect to a matrix norm.
 
 Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
-The **condition number** :math:`\kappa` of a matrix
+the **condition number** :math:`\kappa` of a matrix
 :math:`A \in \mathbb{K}^{n \times n}` is defined as
 
 .. math::
@@ -1429,7 +1429,7 @@ Args:
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
-Returnsk:
+Returns:
     A real-valued tensor, even when :attr:`A` is complex.
 
 Raises:
