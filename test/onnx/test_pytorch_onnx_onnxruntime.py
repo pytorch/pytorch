@@ -713,30 +713,6 @@ class TestONNXRuntime(unittest.TestCase):
         d = torch.randn(2, 3)
         self.run_test(MyModel(), (a, b, c, d))
 
-    def test_output_format(self):
-        class Format(torch.nn.Module):
-            def forward(self, x):
-                return x
-
-        x = torch.randn(2, 3)
-        f = io.BytesIO()
-        m = Format()
-        example_output = m(x)
-        with self.assertRaises(RuntimeError):
-            torch.onnx.export(m, x, f,
-                              example_outputs=[example_output])
-
-        class Format(torch.nn.Module):
-            def forward(self, x):
-                return [x]
-
-        x = torch.randn(2, 3)
-        f = io.BytesIO()
-        m = Format()
-        example_output = m(x)
-        torch.onnx.export(m, x, f,
-                          example_outputs=(example_output,))
-
     def test_tuple_output(self):
         class MyModel(torch.nn.Module):
             def forward(self, a, b, c, d):
