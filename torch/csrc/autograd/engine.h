@@ -324,6 +324,9 @@ struct TORCH_API Engine {
   // Should be called after fork to notify that worker threads are gone
   void release_workers();
 
+  // Must be called by subclass before destructing to avoid a data-race-on-vptr.
+  void stop();
+
   // Initializes a device thread for the autograd engine.
   virtual void thread_init(
       int device,
@@ -395,7 +398,11 @@ private:
   // Destructor will wait for non-reentrant threads to finish
   std::condition_variable non_reentrant_device_thread_condvar_;
   std::mutex non_reentrant_device_thread_mutex_;
-
+  // stop() must be called before the destruction path goes down to the base
+  // class, in order to avoid a data-race-on-vptr. Use this boolean to guard
+  // whether stop() has already been called, so we can call this in every
+  // destructor of the class hierarchy.
+  bool stopped_{false};
 };
 
 // allow python_engine to override the default engine when it loads
