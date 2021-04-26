@@ -1,25 +1,25 @@
 #include <torch/csrc/jit/serialization/export.h>
 
+#include <ATen/ATen.h>
+#include <ATen/Utils.h>
+#include <ATen/core/functional.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/accumulate.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/onnx/onnx.h>
 
-#include <ATen/core/functional.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/instruction.h>
-
 #include <onnx/checker.h>
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
-
-#include <ATen/ATen.h>
-#include <c10/util/Optional.h>
 
 #include <fstream>
 #include <memory>
@@ -839,11 +839,8 @@ void GraphEncoder::EncodeTensor(
     tensor_proto->set_raw_data("__EXTERNAL");
   } else {
     AT_ASSERT(t.is_contiguous());
-    size_t tensorSize = static_cast<size_t>(std::accumulate(
-        std::begin(tensor.sizes()),
-        std::end(tensor.sizes()),
-        static_cast<int64_t>(1),
-        std::multiplies<int64_t>()));
+    size_t tensorSize = static_cast<size_t>(c10::multiply_integers(
+        std::begin(tensor.sizes()), std::end(tensor.sizes())));
     if (use_external_data_format &&
         tensorSize > ParamSizeThresholdForExternalStorage) {
       AT_ASSERT(!onnx_file_path.empty());

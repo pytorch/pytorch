@@ -14,24 +14,32 @@ namespace at { namespace native {
 enum class SCATTER_GATHER_OP: uint8_t {REDUCE_ADD, REDUCE_MULTIPLY};
 
 using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
+using index_fill_fn = void(*)(TensorIterator & iter, int64_t dim, int64_t self_dim_size, int64_t self_dim_stride, const Scalar& source);
+using index_copy_fn = void(*)(TensorIterator & iter, int64_t dim, int64_t self_dim_size, int64_t self_dim_stride);
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
 using index_put_accum_fn = void(*)(Tensor &, const c10::List<c10::optional<Tensor>> &, const Tensor &, bool unsafe);
-using masked_fill_fn = void(*)(TensorIterator &, Scalar scalar);
+using masked_fill_fn = void(*)(TensorIterator &, const Scalar& scalar);
+using put_fn = void(*)(TensorIterator & iter, const Tensor& self, const bool accumulate);
+using take_fn = void(*)(TensorIterator & iter, const Tensor& input);
 using masked_select_fn = void(*)(TensorIterator &, int64_t orig_stride);
 using masked_scatter_fn = void(*)(TensorIterator &, const Tensor &);
 
 using gather_fn = void (*)(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index);
 using scatter_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
-using scatter_fill_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, Scalar src);
+using scatter_fill_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Scalar& src);
 using scatter_add_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
 using scatter_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
                                   const Tensor& src, const SCATTER_GATHER_OP& reduce);
 using scatter_scalar_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
-                                         Scalar& value, const SCATTER_GATHER_OP& reduce);
+                                         const Scalar& value, const SCATTER_GATHER_OP& reduce);
 
 DECLARE_DISPATCH(index_fn, index_stub);
+DECLARE_DISPATCH(index_fill_fn, index_fill_stub);
+DECLARE_DISPATCH(index_copy_fn, index_copy_stub);
 DECLARE_DISPATCH(index_put_fn, index_put_stub);
 DECLARE_DISPATCH(index_put_accum_fn, index_put_accum_stub);
+DECLARE_DISPATCH(put_fn, put_stub);
+DECLARE_DISPATCH(take_fn, take_stub);
 DECLARE_DISPATCH(masked_fill_fn, masked_fill_stub);
 DECLARE_DISPATCH(masked_select_fn, masked_select_serial_stub);
 DECLARE_DISPATCH(masked_select_fn, masked_select_stub);

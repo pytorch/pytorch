@@ -565,7 +565,7 @@ static void eraseListConstruct(Node* n, int opset_version) {
     if (input->node()->kind() == prim::ListConstruct) {
       auto* lc_node = input->node();
       TypePtr elem =
-          lc_node->output()->type()->cast<ListType>()->getElementType();
+          lc_node->output()->type()->castRaw<ListType>()->getElementType();
       if (elem->cast<IntType>()) {
         // ListConstruct Int[] output case, we need to transform to ONNX
         // Concat to ensure the output is a single tensor(dynamic) type in
@@ -668,6 +668,24 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       auto prev = it->input(0)->node();
       Node* origNllLossNode = *it;
       Node* origLogSoftmaxNode;
+
+      // Check for patterns especially in cases with autocasting enabled
+      // in which a cast node is inserted before the NegativeLogLikelihoodLoss
+      // node and this causes the patterns below not to be recognizable by the
+      // fuseLogSoftmaxNllLoss function
+      // For example if the input is 2D
+      // graph(%input : Half(3, 5),
+      // %target : Long(3)):
+      // %4 : Half(3, 5) = onnx::LogSoftmaxaxis=1
+      // %8 : Float = onnx::Cast[to=1](%4)
+      // %9 : Float(3) = onnx::NegativeLogLikelihoodLoss[reduction="none"]
+      // return (%8)
+      Node* castNode = nullptr;
+      if (prev->kind() == onnx::Cast) {
+        castNode = prev;
+        prev = prev->input(0)->node();
+      }
+
       if (prev->kind() == onnx::LogSoftmax) {
         // if the input is 2D
         // graph(%input : Float(3, 5),
@@ -675,7 +693,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // %4 : Float(3, 5) = onnx::LogSoftmaxaxis=1
         // %8 : Float(3) = onnx::NegativeLogLikelihoodLoss[reduction="none"]
         // return (%8)
-        origLogSoftmaxNode = it->input(0)->node();
+        origLogSoftmaxNode = prev;
       } else if (
           prev->kind() == onnx::Transpose &&
           prev->input(0)->node()->kind() == onnx::LogSoftmax) {
@@ -751,6 +769,19 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         continue;
       }
 
+      // If the pattern indeed consists of a cast node before the
+      // NegativeLogLikelihoodLoss node, place a cast node in the beginning
+      // of the pattern instead
+      if (castNode != nullptr) {
+        auto onnx_type = castNode->i(attr::to);
+        Node* cast_node = b->owningGraph()->create(onnx::Cast, 1);
+        cast_node->addInput(origLogSoftmaxNode->inputs().at(0));
+        cast_node->i_(attr::to, onnx_type);
+        cast_node->insertBefore(origLogSoftmaxNode);
+        origLogSoftmaxNode->replaceInputWith(
+            origLogSoftmaxNode->inputs().at(0), cast_node->output());
+      }
+
       Node* softmaxCrossEntropyNode = b->owningGraph()->create(
           onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
       for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
@@ -820,6 +851,28 @@ static void removeSequenceSplitConcat(Block* b) {
   }
 }
 
+static void insertIdentityForInputUsedAsOutput(Block* b) {
+  // Resolving limitation from ONNX that the block input cannot be used directly
+  // as block output. Inserting an Identity node inside
+  // the block, linking with the value as workaround.
+  for (auto out : b->outputs()) {
+    auto n = out->node();
+    if (nullptr != n && n->kind() == prim::Param) {
+      Node* id_node = b->owningGraph()->create(onnx::Identity);
+      id_node->insertBefore(b->return_node());
+      id_node->addInput(out);
+      id_node->output()->setType(out->type());
+      b->return_node()->replaceInputWith(out, id_node->output());
+    }
+  }
+
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      insertIdentityForInputUsedAsOutput(child_block);
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -863,6 +916,7 @@ void PeepholeOptimizeONNX(
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
   removeSequenceSplitConcat(graph->block());
+  insertIdentityForInputUsedAsOutput(graph->block());
 }
 
 } // namespace jit

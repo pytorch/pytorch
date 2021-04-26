@@ -70,7 +70,22 @@ class CheckpointFunction(torch.autograd.Function):
             if torch.cuda._initialized:
                 ctx.had_cuda_in_fwd = True
                 ctx.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(*args)
-        ctx.save_for_backward(*args)
+
+        # Save non-tensor inputs in ctx, keep a placeholder None for tensors
+        # to be filled out during the backward.
+        ctx.inputs = []
+        ctx.tensor_indices = []
+        tensor_inputs = []
+        for i, arg in enumerate(args):
+            if torch.is_tensor(arg):
+                tensor_inputs.append(arg)
+                ctx.tensor_indices.append(i)
+                ctx.inputs.append(None)
+            else:
+                ctx.inputs.append(arg)
+
+        ctx.save_for_backward(*tensor_inputs)
+
         with torch.no_grad():
             outputs = run_function(*args)
         return outputs
@@ -78,8 +93,19 @@ class CheckpointFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *args):
         if not torch.autograd._is_checkpoint_valid():
-            raise RuntimeError("Checkpointing is not compatible with .grad(), please use .backward() if possible")
-        inputs = ctx.saved_tensors
+            raise RuntimeError(
+                "Checkpointing is not compatible with .grad() or when an `inputs` parameter"
+                " is passed to .backward(). Please use .backward() and do not pass its `inputs`"
+                " argument.")
+        # Copy the list to avoid modifying original list.
+        inputs = list(ctx.inputs)
+        tensor_indices = ctx.tensor_indices
+        tensors = ctx.saved_tensors
+
+        # Fill in inputs with appropriate saved tensors.
+        for i, idx in enumerate(tensor_indices):
+            inputs[idx] = tensors[i]
+
         # Stash the surrounding rng state, and mimic the state that was
         # present at this time during forward.  Restore the surrounding state
         # when we're done.
@@ -91,7 +117,7 @@ class CheckpointFunction(torch.autograd.Function):
                 torch.set_rng_state(ctx.fwd_cpu_state)
                 if ctx.had_cuda_in_fwd:
                     set_device_states(ctx.fwd_gpu_devices, ctx.fwd_gpu_states)
-            detached_inputs = detach_variable(inputs)
+            detached_inputs = detach_variable(tuple(inputs))
             with torch.enable_grad(), torch.cuda.amp.autocast(ctx.had_autocast_in_fwd):
                 outputs = ctx.run_function(*detached_inputs)
 
@@ -102,7 +128,7 @@ class CheckpointFunction(torch.autograd.Function):
         outputs_with_grad = []
         args_with_grad = []
         for i in range(len(outputs)):
-            if outputs[i].requires_grad:
+            if torch.is_tensor(outputs[i]) and outputs[i].requires_grad:
                 outputs_with_grad.append(outputs[i])
                 args_with_grad.append(args[i])
         if len(outputs_with_grad) == 0:
@@ -110,8 +136,9 @@ class CheckpointFunction(torch.autograd.Function):
                 "none of output has requires_grad=True,"
                 " this checkpoint() is not necessary")
         torch.autograd.backward(outputs_with_grad, args_with_grad)
-        grads = tuple(inp.grad if isinstance(inp, torch.Tensor) else inp
+        grads = tuple(inp.grad if isinstance(inp, torch.Tensor) else None
                       for inp in detached_inputs)
+
         return (None, None) + grads
 
 
@@ -132,9 +159,16 @@ def checkpoint(function, *args, **kwargs):
     :attr:`function` again, now tracking the intermediate activations, and then
     the gradients are calculated using these activation values.
 
+    The output of :attr:`function` can contain non-Tensor values and gradient
+    recording is only performed for the Tensor values. Note that if the output
+    consists of nested structures (ex: custom objects, lists, dicts etc.)
+    consisting of Tensors, these Tensors nested in custom structures will not
+    be considered as part of autograd.
+
     .. warning::
-        Checkpointing doesn't work with :func:`torch.autograd.grad`, but only
-        with :func:`torch.autograd.backward`.
+        Checkpointing currently only supports :func:`torch.autograd.backward`
+        and only if its `inputs` argument is not passed. :func:`torch.autograd.grad`
+        is not supported.
 
     .. warning::
         If :attr:`function` invocation during backward does anything different
@@ -190,8 +224,9 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
     See :func:`~torch.utils.checkpoint.checkpoint` on how checkpointing works.
 
     .. warning::
-        Checkpointing doesn't work with :func:`torch.autograd.grad`, but only
-        with :func:`torch.autograd.backward`.
+        Checkpointing currently only supports :func:`torch.autograd.backward`
+        and only if its `inputs` argument is not passed. :func:`torch.autograd.grad`
+        is not supported.
 
     .. warning:
         At least one of the inputs needs to have :code:`requires_grad=True` if

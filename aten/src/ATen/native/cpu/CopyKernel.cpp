@@ -15,8 +15,6 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
   if (dtype == iter.dtype(1)) {
     if (dtype == ScalarType::Half) {
       cpu_kernel(iter, [=](at::Half a) -> at::Half { return a; });
-    } else if (dtype == ScalarType::BFloat16) {
-      cpu_kernel(iter, [=](at::BFloat16 a) -> at::BFloat16 { return a; });
     } else if (dtype == ScalarType::ComplexHalf) {
       cpu_kernel(iter, [=](c10::complex<at::Half> a) -> c10::complex<at::Half> { return a; });
     } else if (isQIntType(dtype)) {
@@ -34,8 +32,8 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
             [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
         });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND(
-          ScalarType::Bool, dtype, "copy_kernel", [&] {
+      AT_DISPATCH_ALL_TYPES_AND2(
+          ScalarType::Bool, ScalarType::BFloat16,dtype, "copy_kernel", [&] {
             cpu_kernel_vec(
                 iter,
                 [=](scalar_t a) -> scalar_t { return a; },

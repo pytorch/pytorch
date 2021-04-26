@@ -68,7 +68,7 @@ struct TORCH_API UndefinedGradBackward : public Node {
 struct TORCH_API GraphRoot : public Node {
   GraphRoot(edge_list functions, variable_list inputs)
       : Node(std::move(functions)),
-        outputs(std::move(inputs)) {
+      outputs(std::move(inputs)) {
     // Ensures calls to stream() on a GraphRoot instance reflect current stream(s)
     // on devices of root grad tensors at the time the instance is constructed.
     for (const auto& t : outputs) {

@@ -169,7 +169,7 @@ Diagram::
   linear_weight_fp32
 
   # dynamically quantized model
-  # linear and conv weights are in int8
+  # linear and LSTM weights are in int8
   previous_layer_fp32 -- linear_int8_w_fp32_inp -- activation_fp32 -- next_layer_fp32
                        /
      linear_weight_int8
@@ -392,11 +392,11 @@ tutorial
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Quantization types supported by FX Graph Mode can be classified in two ways:
 
-1.
-- Post Training Quantization (apply quantization after training, quantization parameters are calculated based on sample calibration data)
-- Quantization Aware Training (simulate quantization during training so that the quantization parameters can be learned together with the model using training data)
+1. Post Training Quantization (apply quantization after training, quantization parameters are calculated based on sample calibration data)
+2. Quantization Aware Training (simulate quantization during training so that the quantization parameters can be learned together with the model using training data)
 
-2.
+And then each of these two may include any or all of the following types:
+
 - Weight Only Quantization (only weight is statically quantized)
 - Dynamic Quantization (weight is statically quantized, activation is dynamically quantized)
 - Static Quantization (both weight and activations are statically quantized)
@@ -472,9 +472,10 @@ API Example::
   model_fused = quantize_fx.fuse_fx(model_to_quantize)
 
 Please see the following tutorials for more information about FX Graph Mode Quantization:
-- `User Guide on Using FX Graph Mode Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_quant_guide_tutorial.html>`_
-- `FX Graph Mode Post Training Static Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_static_tutorial.html>`_
-- `FX Graph Mode Post Training Dynamic Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_dynamic_tutorial.html>`_
+
+- `User Guide on Using FX Graph Mode Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_quant_guide.html>`_
+- `FX Graph Mode Post Training Static Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_static.html>`_
+- `FX Graph Mode Post Training Dynamic Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_dynamic.html>`_
 
 Quantized Tensors
 ---------------------------------------

@@ -252,3 +252,59 @@ void THPPointer<THPStorage>::free() {
 }
 
 template class THPPointer<THPStorage>;
+
+namespace torch { namespace gdb {
+/* ~~~ misc debugging utilities ~~~
+ *
+ * torch::gdb::* functions are NOT meant to be called by general pytorch code,
+ * but only from within a gdb session. As such, utils.h does not contain any
+ * declaration for those.
+ */
+
+// This is a helper needed by the torch-tensor-repr gdb command.
+// Return an human-readable representation of the given Tensor. The resulting
+// string is stored into a malloc()ed buffer. The caller is responsible to
+// free() it. We use malloc() instead of new[] because it's much easier to
+// call free than delete[] from withing gdb.
+// Currently the code for computing the repr of a tensor is written in Python,
+// so we need to wrap the Tensor into a Python object first.
+char *tensor_repr(at::Tensor tensor) {
+  PyGILState_STATE gil = PyGILState_Ensure();
+  PyObject *pytensor = NULL;
+  PyObject *repr = NULL;
+  Py_ssize_t bufsize;
+  const char *buf = NULL;
+  char *result = NULL;
+
+  pytensor = THPVariable_Wrap(at::Tensor(tensor));
+  if (!pytensor)
+    goto error;
+  repr = PyObject_Repr(pytensor);
+  if (!repr)
+    goto error;
+  buf = PyUnicode_AsUTF8AndSize(repr, &bufsize);
+  if (!buf)
+    goto error;
+  result = static_cast<char*>(malloc(bufsize + 1)); // account for the trailing \0
+  if (!result) {
+    fprintf(stderr, "cannot allocate memory for the result\n");
+    goto error;
+  }
+  strcpy(result, buf);
+  Py_XDECREF(pytensor);
+  Py_XDECREF(repr);
+  PyGILState_Release(gil);
+  return result;
+
+error:
+  fprintf(stderr, "torch::gdb::tensor_repr: unexpected error\n");
+  if (PyErr_Occurred())
+    PyErr_Print();
+  Py_XDECREF(pytensor);
+  Py_XDECREF(repr);
+  free(result);
+  PyGILState_Release(gil);
+  return NULL;
+}
+
+}} // namespace torch::gdb

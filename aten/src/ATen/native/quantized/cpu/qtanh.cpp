@@ -46,6 +46,10 @@ Tensor qnnpack_tanh(Tensor input) {
     std::numeric_limits<uint8_t>::max() /* output max */,
     0 /* flags */,
     &tanh_op);
+
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+      qnnpack_uniq_ptr(tanh_op);
+
   TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
                         "failed to create QNNPACK TanH operator");
   qy = at::_empty_affine_quantized(

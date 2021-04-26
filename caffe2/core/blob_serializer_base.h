@@ -11,8 +11,11 @@ namespace caffe2 {
 
 class Blob;
 
-constexpr int kDefaultChunkSize = -1;
-constexpr int kNoChunking = 0;
+// Constants for use in the BlobSerializationOptions chunk_size field.
+// These should ideally be defined in caffe2.proto so they can be exposed across
+// languages, but protobuf does not appear to allow defining constants.
+constexpr int kDefaultChunkSize = 0;
+constexpr int kNoChunking = -1;
 
 /**
  * @brief BlobSerializerBase is an abstract class that serializes a blob to a
@@ -49,12 +52,12 @@ class BlobSerializerBase {
       const std::string& name,
       SerializationAcceptor acceptor) = 0;
 
-  virtual void SerializeWithChunkSize(
+  virtual void SerializeWithOptions(
       const void* pointer,
       TypeMeta typeMeta,
       const std::string& name,
       SerializationAcceptor acceptor,
-      int /*chunk_size*/) {
+      const BlobSerializationOptions& /*options*/) {
     // Base implementation.
     Serialize(pointer, typeMeta, name, acceptor);
   }

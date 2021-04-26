@@ -1,7 +1,16 @@
 #include <ATen/ATen.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 #include <c10/util/intrusive_ptr.h>
+#include <ATen/core/Dict.h>
+
+// Snippets for checking assembly.
+c10::IValue inspectTupleConstruction() {
+  std::tuple<std::string, std::string> s = std::make_tuple(
+      "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+  return c10::IValue(s);
+}
 
 namespace c10 {
 
@@ -77,6 +86,18 @@ TEST(IValueTest, Basic) {
   ASSERT_EQ(complex_tuple.toTuple()->elements()[1], foo1);
 }
 
+TEST(IValueTest, ComplexDict) {
+  typedef c10::complex<double> c_type;
+  c10::Dict<c_type, c_type> m;
+  auto num1 = c_type(2.3, -3.5);
+  auto num2 = c_type(0, 5);
+  m.insert(num1, 2 * num1);
+  m.insert(num2, 2 * num2);
+  IValue dict(std::move(m));
+  auto m_ = dict.toGenericDict();
+  ASSERT_EQ(m_.at(num1), 2 * num1);
+  ASSERT_EQ(m_.at(num2), 2 * num2);
+}
 static std::array<IValue, 5> makeSampleIValues() {
   return { at::rand({3, 4}), "hello", 42, true, 1.5 };
 }
@@ -294,6 +315,20 @@ TEST(IValueTest, FutureExceptions) {
   ASSERT_TRUE(f3->hasError());
   ASSERT_EQ(f3->tryRetrieveErrorMessage(), std::string("My Error"));
 }
+
+TEST(IValueTest, FutureSetError) {
+  auto f1 = c10::make_intrusive<ivalue::Future>(IntType::get());
+  f1->setError(std::make_exception_ptr(std::runtime_error("foo")));
+  try {
+    f1->setError(std::make_exception_ptr(std::runtime_error("bar")));
+    FAIL() << "Expected to throw";
+  } catch (std::exception& e) {
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("Error already set"));
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("foo"));
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("bar"));
+  }
+}
+
 
 TEST(IValueTest, ValueEquality) {
   EXPECT_EQ(IValue("asdf"), IValue("asdf"));
@@ -573,9 +608,9 @@ TEST(IValueTest, getSubValues) {
   IValue list(std::vector<at::Tensor>{t1, t2});
   IValue tuple(ivalue::Tuple::create({tv1, tv2}));
 
-  std::unordered_map<int64_t, at::Tensor> m;
-  m[1] = t1;
-  m[2] = t2;
+  c10::Dict<int64_t, at::Tensor> m;
+  m.insert(1, t1);
+  m.insert(2, t2);
 
   IValue dict(std::move(m));
 
@@ -603,6 +638,14 @@ TEST(IValueTest, getSubValues) {
 
     subvalues.clear();
   }
+}
+
+TEST(IValueTest, ScalarBool) {
+  Scalar expected(true);
+  IValue v(expected);
+  Scalar actual = v.toScalar();
+  EXPECT_TRUE(actual.isBoolean());
+  EXPECT_TRUE(actual.toBool());
 }
 
 // TODO(gmagogsfm): Add type conversion test?

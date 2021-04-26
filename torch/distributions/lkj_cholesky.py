@@ -109,6 +109,8 @@ class LKJCholesky(Distribution):
         # So the probability of a Cholesky factor is propotional to
         #   prod(L_ii ^ (2 * concentration - 2 + D - i)) = prod(L_ii ^ order_i)
         # with order_i = 2 * concentration - 2 + D - i
+        if self._validate_args:
+            self._validate_sample(value)
         diag_elems = value.diagonal(dim1=-1, dim2=-2)[..., 1:]
         order = torch.arange(2, self.dim + 1)
         order = 2 * (self.concentration - 1).unsqueeze(-1) + self.dim - order

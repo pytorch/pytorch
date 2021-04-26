@@ -1,10 +1,9 @@
-from torch.utils.data.dataset import IterableDataset as IterDataPipe
-
+from torch.utils.data import IterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames
+from typing import Iterable, Iterator, Tuple
+from io import BufferedIOBase
 
-from typing import Iterable, Iterator
-
-class LoadFilesFromDiskIterDataPipe(IterDataPipe):
+class LoadFilesFromDiskIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     r""" :class:`LoadFilesFromDiskIterDataPipe`.
 
     Iterable Datapipe to load file binary streams from given pathnames,
@@ -16,13 +15,13 @@ class LoadFilesFromDiskIterDataPipe(IterDataPipe):
 
     def __init__(
             self,
-            datapipe : Iterable,
+            datapipe : Iterable[str],
             length : int = -1):
         super().__init__()
         self.datapipe : Iterable = datapipe
         self.length : int = length
 
-    def __iter__(self) -> Iterator[tuple] :
+    def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]] :
         yield from get_file_binaries_from_pathnames(self.datapipe)
 
     def __len__(self):

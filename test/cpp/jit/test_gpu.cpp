@@ -1101,12 +1101,12 @@ TEST(NVFuserTest, FusionParser_CUDA) {
   // strides are not yet supported in the irparser.
   for (auto val : g->block()->inputs()) {
     if (val->isCompleteTensor())
-      val->setType(val->type()->cast<TensorType>()->contiguous());
+      val->setType(val->type()->castRaw<TensorType>()->contiguous());
   }
   for (auto node : g->block()->nodes()) {
     for (auto val : node->outputs()) {
       if (val->isCompleteTensor())
-        val->setType(val->type()->cast<TensorType>()->contiguous());
+        val->setType(val->type()->castRaw<TensorType>()->contiguous());
     }
   }
 
@@ -2426,9 +2426,9 @@ Val* gen_jit_operand(std::pair<ValType, DataType> desc) {
     else if (desc.second == DataType::Int)
       return new Int();
     else
-      TORCH_CHECK("Not currently supported type", desc.first);
+      TORCH_CHECK(false, "Not currently supported type", desc.first);
   } else {
-    TORCH_CHECK("Not currently supported type", desc.first);
+    TORCH_CHECK(false, "Not currently supported type", desc.first);
   }
   return nullptr;
 }

@@ -171,10 +171,10 @@ void cpublas_gemm_impl(
     at::ScalarType type,
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
-    Scalar alpha,
+    const Scalar& alpha,
     const void *a, int64_t lda,
     const void *b, int64_t ldb,
-    Scalar beta,
+    const Scalar& beta,
     void *c, int64_t ldc) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::kHalf, at::kBFloat16,
     type, "cpublas_gemm_impl",
@@ -189,9 +189,34 @@ void cpublas_gemm_impl(
       });
 }
 
+void cpublas_axpy_impl(at::ScalarType type, int64_t n, const Scalar& _a, const void *_x, int64_t incx, void *_y, int64_t incy){
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(type, "cpublas_axpy_impl",
+    [&] {
+      auto a = _a.to<scalar_t>();
+      auto x = static_cast<const scalar_t *>(_x);
+      auto y = static_cast<scalar_t *>(_y);
+      int64_t i;
+      for(i = 0; i < n; i++)
+        y[i*incy] += a*x[i*incx];
+    });
+}
+
+void cpublas_copy_impl(at::ScalarType type, int64_t n, const void *_x, int64_t incx, void *_y, int64_t incy){
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(type, "cpublas_copy_impl",
+    [&] {
+      auto x = static_cast<const scalar_t *>(_x);
+      auto y = static_cast<scalar_t *>(_y);
+      int64_t i;
+      for(i = 0; i < n; i++)
+        y[i*incy] = x[i*incx];
+    });
+}
+
 }}  // namespace cpublas::(anonymous)
 
 
 REGISTER_DISPATCH(cpublas::gemm_stub, &cpublas::cpublas_gemm_impl);
+REGISTER_DISPATCH(cpublas::axpy_stub, &cpublas::cpublas_axpy_impl);
+REGISTER_DISPATCH(cpublas::copy_stub, &cpublas::cpublas_copy_impl);
 
 }}  // namespace at::native

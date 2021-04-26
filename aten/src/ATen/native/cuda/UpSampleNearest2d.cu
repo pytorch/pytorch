@@ -112,7 +112,7 @@ __global__ void upsample_nearest2d_backward_out_frame(
 }
 
 static void upsample_nearest2d_out_cuda_template(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
     c10::optional<double> scales_h,
@@ -121,10 +121,10 @@ static void upsample_nearest2d_out_cuda_template(
   checkAllSameGPU(
       "upsample_nearest2d_out_cuda_template", {input_arg, output_arg});
 
-  TORCH_CHECK(
-      output_size.size() == 2,
-      "It is expected output_size equals to 2, but got size ",
-      output_size.size());
+  // TODO: remove this when the cuda kernel is updated to support the channels_last memory format.
+  // This is a temporary hack to prevent a silence correctness issue when calling this kernel
+  // with tensors in channels_last format.
+  auto output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
 
   int output_height = output_size[0];
   int output_width = output_size[1];
@@ -134,22 +134,7 @@ static void upsample_nearest2d_out_cuda_template(
   int input_height = input_.size(2);
   int input_width = input_.size(3);
 
-  upsample_2d_shape_check(
-      input_,
-      Tensor(),
-      nbatch,
-      channels,
-      input_height,
-      input_width,
-      output_height,
-      output_width);
-
-  AT_ASSERT(
-      input_height > 0 && input_width > 0 && output_height > 0 &&
-      output_width > 0);
-
   Tensor input = input_.contiguous();
-  output.resize_({nbatch, channels, output_height, output_width});
 
   if (input.numel() == 0) {
     return;
@@ -163,7 +148,7 @@ static void upsample_nearest2d_out_cuda_template(
   int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
   int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
 
-  // upsample_2d_shape_check makes sure input/output tensor is not empty;
+  // upsample_nearest2d meta call makes sure input/output tensor is not empty;
   int block_x = std::min<int>(
       maxThreadsDim[0], std::min<int>(lastPow2(output_width), max_threads));
   int block_y = std::min<int>(
@@ -192,7 +177,7 @@ static void upsample_nearest2d_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = input.data_ptr<scalar_t>();
-        auto odata = output.data_ptr<scalar_t>();
+        auto odata = output_c.data_ptr<scalar_t>();
 
         const float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
         const float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
@@ -210,10 +195,14 @@ static void upsample_nearest2d_out_cuda_template(
                 width_scale);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
+
+  if (!output.is_contiguous()) {
+      output.copy_(output_c);
+  }
 }
 
 static void upsample_nearest2d_backward_out_cuda_template(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
@@ -225,16 +214,6 @@ static void upsample_nearest2d_backward_out_cuda_template(
       "upsample_nearest2d_backward_out_cuda",
       {grad_output_arg, grad_input_arg});
 
-  TORCH_CHECK(
-      output_size.size() == 2,
-      "It is expected output_size equals to 2, but got size ",
-      output_size.size());
-
-  TORCH_CHECK(
-      input_size.size() == 4,
-      "It is expected input_size equals to 4, but got size ",
-      input_size.size());
-
   int output_height = output_size[0];
   int output_width = output_size[1];
 
@@ -243,24 +222,13 @@ static void upsample_nearest2d_backward_out_cuda_template(
   int input_height = input_size[2];
   int input_width = input_size[3];
 
-  upsample_2d_shape_check(
-      Tensor(),
-      grad_output_,
-      nbatch,
-      channels,
-      input_height,
-      input_width,
-      output_height,
-      output_width);
-
   Tensor grad_output = grad_output_.contiguous();
-  grad_input.resize_({nbatch, channels, input_height, input_width});
 
   if (grad_input.numel() == 0) {
     return;
   }
 
-  // upsample_2d_shape_check makes sure `nbatch != 0`
+  // upsample_nearest2d meta call makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
@@ -301,7 +269,7 @@ TORCH_IMPL_FUNC(upsample_nearest2d_out_cuda) (
     IntArrayRef output_size,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
-    Tensor& output) {
+    const Tensor& output) {
   upsample_nearest2d_out_cuda_template(output, input, output_size, scales_h, scales_w);
 }
 
@@ -311,38 +279,9 @@ TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_cuda) (
     IntArrayRef input_size,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
-    Tensor& grad_input) {
+    const Tensor& grad_input) {
   upsample_nearest2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales_h, scales_w);
-}
-
-using at::native::upsample::compute_output_size;
-using at::native::upsample_cuda::get_scale_value;
-
-Tensor upsample_nearest2d_cuda(
-    const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  upsample_nearest2d_out_cuda_template(output, input, osize, scale_h, scale_w);
-  return output;
-}
-
-Tensor upsample_nearest2d_backward_cuda(
-    const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_nearest2d_backward_out_cuda_template(
-      grad_input, grad_output, osize, input_size, scale_h, scale_w);
-  return grad_input;
 }
 
 } // namespace native

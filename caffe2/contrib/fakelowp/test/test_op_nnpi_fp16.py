@@ -195,7 +195,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=datetime.timedelta(seconds=10))
+    @settings(deadline=datetime.timedelta(seconds=20))
     def test_sigmoid(self, seed):
         np.random.seed(seed)
         opname = "Sigmoid"
@@ -209,7 +209,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=datetime.timedelta(seconds=10))
+    @settings(deadline=datetime.timedelta(seconds=20))
     def test_tanh(self, seed):
         np.random.seed(seed)
         opname = "Tanh"

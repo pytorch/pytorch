@@ -1,4 +1,4 @@
-from typing import Tuple, Dict, Optional, List, Any, overload
+from typing import Any, Dict, List, Optional, Tuple, Union, overload
 from datetime import timedelta
 import enum
 import torch
@@ -33,7 +33,7 @@ class WorkerInfo:
     def __repr__(self) -> str: ...
 
 class RpcAgent:
-    def join(self): ...
+    def join(self, shutdown: bool = False): ...
     def sync(self): ...
     def shutdown(self): ...
     @overload
@@ -77,6 +77,7 @@ class ProcessGroupRpcBackendOptions(RpcBackendOptions):
 class ProcessGroupAgent(RpcAgent):
     def __init__(
         self,
+        store: Store,
         worker_name: str,
         pg: ProcessGroup,
         numSendRecvThreads: int,
@@ -103,8 +104,9 @@ class _TensorPipeRpcBackendOptionsBase(RpcBackendOptions):
         _channels: Optional[List],
         rpc_timeout: float = _DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = _DEFAULT_INIT_METHOD,
-        device_maps: Dict[str, Dict[int, int]] = dict()): ...
-    def set_device_map(self, to: str, device_map: Dict[str, Dict[int, int]]): ...
+        device_maps: Dict[str, Dict[int, int]] = dict(),
+        devices: List[int] = list()): ...
+    def _set_device_map(self, to: str, device_map: Dict[int, int]): ...
 
 class TensorPipeAgent(RpcAgent):
     def __init__(

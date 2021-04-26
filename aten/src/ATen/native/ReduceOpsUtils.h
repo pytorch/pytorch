@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <ATen/ATen.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/WrapDimUtilsMulti.h>
 
@@ -60,7 +61,7 @@ inline Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
 }
 
 inline bool _dimreduce_return_trivial(Tensor &result, const Tensor &self,
-                                      Scalar ident, int64_t dim, bool keepdim) {
+                                      const Scalar& ident, int64_t dim, bool keepdim) {
   if (self.numel() == 1 && self.ndimension() == 0) {
     result.resize_({});
     result.fill_(self);
@@ -93,7 +94,7 @@ inline bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &sel
 
 inline c10::optional<Tensor> _allreduce_return_trivial(
     const Tensor& self,
-    Scalar ident) {
+    const Scalar& ident) {
   // Return identity
   if (self.numel() == 0) {
     return at::scalar_tensor(ident, self.options());
@@ -134,10 +135,7 @@ static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
   return mask;
 }
 
-static void allocate_reduction_result(
-    Tensor& result, const Tensor& self, DimMask mask, bool keepdim,
-    ScalarType dtype)
-{
+inline DimVector shape_from_dim_mask(const Tensor& self, DimMask mask, bool keepdim) {
   auto shape = DimVector(self.sizes());
   for (int dim = shape.size() - 1; dim >= 0; dim--) {
     if (mask[dim]) {
@@ -148,11 +146,24 @@ static void allocate_reduction_result(
       }
     }
   }
-  if (result.defined()) {
-    result.resize_(shape);
-  } else {
-    result = at::empty(shape, self.options().dtype(dtype));
-  }
+  return shape;
+}
+
+static void resize_reduction_result(
+    Tensor& result, const Tensor& self, DimMask mask, bool keepdim,
+    ScalarType dtype)
+{
+  auto shape = shape_from_dim_mask(self, mask, keepdim);
+  TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
+  at::native::resize_output(result, shape);
+}
+
+inline Tensor create_reduction_result(
+  const Tensor& self, IntArrayRef dim, bool keepdim, ScalarType dtype
+) {
+  DimMask mask = make_dim_mask(dim, self.dim());
+  auto shape = shape_from_dim_mask(self, mask, keepdim);
+  return at::empty(shape, self.options().dtype(dtype));
 }
 
 static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask, bool keepdim) {
@@ -184,7 +195,7 @@ static TensorIterator make_reduction(
       ".");
   int64_t ndim = self.dim();
   auto mask = make_dim_mask(dim, ndim);
-  allocate_reduction_result(result, self, mask, keepdim, out_dtype);
+  resize_reduction_result(result, self, mask, keepdim, out_dtype);
   auto viewed_result = review_reduce_result(result, ndim, mask, keepdim);
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
   if (self.scalar_type() == in_dtype) {
@@ -222,10 +233,10 @@ static TensorIterator make_reduction(
 
   int64_t ndim = self.dim();
   DimMask mask = make_dim_mask(dim, ndim);
-  allocate_reduction_result(result1, self, mask, keepdim, dtype1);
+  resize_reduction_result(result1, self, mask, keepdim, dtype1);
   auto viewed_result1 = review_reduce_result(result1, ndim, mask, keepdim);
 
-  allocate_reduction_result(result2, self, mask, keepdim, dtype2);
+  resize_reduction_result(result2, self, mask, keepdim, dtype2);
   auto viewed_result2 = review_reduce_result(result2, ndim, mask, keepdim);
 
   namedinference::propagate_names_for_reduction(result1, self, dim, keepdim);

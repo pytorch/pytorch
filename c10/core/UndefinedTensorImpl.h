@@ -23,11 +23,11 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
 #ifdef DEBUG
   bool has_storage() const override;
 #endif
-  const Storage& storage() const override;
   void set_storage_offset(int64_t offset) override;
 private:
   UndefinedTensorImpl();
   static UndefinedTensorImpl _singleton;
+  const char* tensorimpl_type_name() const override;
 };
 
 } // namespace c10

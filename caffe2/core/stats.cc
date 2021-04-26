@@ -20,7 +20,7 @@ StatValue* StatRegistry::add(const std::string& name) {
   if (it != stats_.end()) {
     return it->second.get();
   }
-  auto v = std::unique_ptr<StatValue>(new StatValue);
+  auto v = std::make_unique<StatValue>();
   auto value = v.get();
   stats_.insert(std::make_pair(name, std::move(v)));
   return value;

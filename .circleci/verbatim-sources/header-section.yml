@@ -15,13 +15,6 @@ parameters:
     type: boolean
     default: true
 
-docker_config_defaults: &docker_config_defaults
-  user: jenkins
-  aws_auth:
-    # This IAM user only allows read-write access to ECR
-    aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
-    aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
-
 executors:
   windows-with-nvidia-gpu:
     machine:

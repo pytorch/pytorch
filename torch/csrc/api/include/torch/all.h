@@ -13,6 +13,8 @@
 #include <torch/nn.h>
 #include <torch/optim.h>
 #include <torch/serialize.h>
+#include <torch/special.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 #include <torch/autograd.h>
+#include <torch/version.h>

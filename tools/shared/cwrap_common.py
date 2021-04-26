@@ -25,8 +25,6 @@ def set_declaration_defaults(declaration):
         # This happens for legacy TH bindings like
         # _thnn_conv_depthwise2d_backward
         declaration['schema_string'] = ''
-    if 'matches_jit_signature' not in declaration:
-        declaration['matches_jit_signature'] = False
     declaration.setdefault('arguments', [])
     declaration.setdefault('return', 'void')
     if 'cname' not in declaration:

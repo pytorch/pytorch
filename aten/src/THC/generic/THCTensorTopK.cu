@@ -52,7 +52,7 @@ void THCTensor_(topk)(THCState* state,
       static_cast<INDEX_T>(topKInfo.strides[collapseTopKDim]),          \
       indicesInfo,                                                      \
       static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]));   \
-  C10_CUDA_KERNEL_LAUNCH_CHECK()
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define RUN_DIR(INDEX_T, DIM)                   \
   if (dir) {                                    \
@@ -169,7 +169,10 @@ void THCTensor_(topk)(THCState* state,
       // allocated tensors to receive the results.
       THCTensor* sortedTopK = THCTensor_(new)(state);
       THCudaLongTensor* sortedIndices = THCudaLongTensor_new(state);
-      THCTensor_(sort)(state, sortedTopK, sortedIndices, topK, dim, dir);
+
+      auto sortedTopK_tensor = THTensor_wrap(sortedTopK);
+      auto sortedIndices_tensor = THTensor_wrap(sortedIndices);
+      at::native::sort_out_cuda(THTensor_wrap(topK), dim, dir, sortedTopK_tensor, sortedIndices_tensor);
 
       THCudaLongTensor* sortedTopKIndices = THCudaLongTensor_new(state);
 

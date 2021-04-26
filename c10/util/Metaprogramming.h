@@ -50,6 +50,27 @@ template <typename T>
 using infer_function_traits_t = typename infer_function_traits<T>::type;
 
 /**
+ * make_function_traits: creates a `function_traits` type given a Return type
+ * and a typelist of Argument types
+ *
+ * Example:
+ * bool f(int, int);
+ *
+ * infer_function_traits_t<f> == make_function_traits_t<bool, typelist::typelist<int, int>>
+ */
+template <typename Result, typename ArgList> struct make_function_traits {
+  static_assert(false_t<ArgList>::value, "In guts::make_function_traits<Result, TypeList>, the ArgList argument must be typelist<...>.");
+};
+
+template <typename Result, typename... Args>
+struct make_function_traits<Result, typelist::typelist<Args...>> {
+  using type = function_traits<Result(Args...)>;
+};
+
+template <typename Result, typename ArgList>
+using make_function_traits_t = typename make_function_traits<Result, ArgList>::type;
+
+/**
  * Use extract_arg_by_filtered_index to return the i-th argument whose
  * type fulfills a given type trait. The argument itself is perfectly forwarded.
  *

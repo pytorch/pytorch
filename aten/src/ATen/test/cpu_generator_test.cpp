@@ -18,7 +18,7 @@ TEST(CPUGeneratorImpl, TestGeneratorDynamicCast) {
 }
 
 TEST(CPUGeneratorImpl, TestDefaultGenerator) {
-  // Test Description: 
+  // Test Description:
   // Check if default generator is created only once
   // address of generator should be same in all calls
   auto foo = at::detail::getDefaultCPUGenerator();
@@ -27,7 +27,7 @@ TEST(CPUGeneratorImpl, TestDefaultGenerator) {
 }
 
 TEST(CPUGeneratorImpl, TestCloning) {
-  // Test Description: 
+  // Test Description:
   // Check cloning of new generators.
   // Note that we don't allow cloning of other
   // generator states into default generators.
@@ -47,9 +47,9 @@ void thread_func_get_engine_op(CPUGeneratorImpl* generator) {
 }
 
 TEST(CPUGeneratorImpl, TestMultithreadingGetEngineOperator) {
-  // Test Description: 
+  // Test Description:
   // Check CPUGeneratorImpl is reentrant and the engine state
-  // is not corrupted when multiple threads request for 
+  // is not corrupted when multiple threads request for
   // random samples.
   // See Note [Acquire lock when using random generators]
   auto gen1 = at::detail::createCPUGenerator();
@@ -74,7 +74,7 @@ TEST(CPUGeneratorImpl, TestMultithreadingGetEngineOperator) {
 }
 
 TEST(CPUGeneratorImpl, TestGetSetCurrentSeed) {
-  // Test Description: 
+  // Test Description:
   // Test current seed getter and setter
   // See Note [Acquire lock when using random generators]
   auto foo = at::detail::getDefaultCPUGenerator();
@@ -92,7 +92,7 @@ void thread_func_get_set_current_seed(Generator generator) {
 }
 
 TEST(CPUGeneratorImpl, TestMultithreadingGetSetCurrentSeed) {
-  // Test Description: 
+  // Test Description:
   // Test current seed getter and setter are thread safe
   // See Note [Acquire lock when using random generators]
   auto gen1 = at::detail::getDefaultCPUGenerator();
@@ -107,7 +107,7 @@ TEST(CPUGeneratorImpl, TestMultithreadingGetSetCurrentSeed) {
 }
 
 TEST(CPUGeneratorImpl, TestRNGForking) {
-  // Test Description: 
+  // Test Description:
   // Test that state of a generator can be frozen and
   // restored
   // See Note [Acquire lock when using random generators]
@@ -124,7 +124,7 @@ TEST(CPUGeneratorImpl, TestRNGForking) {
   ASSERT_EQ(target_value.sum().item<double>(), forked_value.sum().item<double>());
 }
 
-/** 
+/**
  * Philox CPU Engine Tests
  */
 
@@ -208,7 +208,7 @@ TEST(CPUGeneratorImpl, TestMT19937EngineReproducibility) {
   // Test Description:
   //   Tests if same inputs give same results when compared
   //   to std.
-  
+
   // test with zero seed
   at::mt19937 engine1(0);
   std::mt19937 engine2(0);
@@ -231,5 +231,5 @@ TEST(CPUGeneratorImpl, TestMT19937EngineReproducibility) {
   for(int i = 0; i < 10000; i++) {
     ASSERT_EQ(engine1(), engine2());
   }
-  
+
 }

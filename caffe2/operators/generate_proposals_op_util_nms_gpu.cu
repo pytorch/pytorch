@@ -137,6 +137,7 @@ void nms_gpu_upright(
       0,
       context->cuda_stream()>>>(
       d_desc_sorted_boxes, N, thresh, legacy_plus_one, mask_ld, d_delete_mask);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   host_delete_mask.Resize(N * mask_ld);
   int* h_delete_mask = host_delete_mask.template mutable_data<int>();
@@ -493,6 +494,7 @@ void nms_gpu_rotated(
       0,
       context->cuda_stream()>>>(
       d_desc_sorted_boxes, N, thresh, mask_ld, d_delete_mask);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   host_delete_mask.Resize(N * mask_ld);
   int* h_delete_mask = host_delete_mask.template mutable_data<int>();

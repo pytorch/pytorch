@@ -1,19 +1,7 @@
 #pragma once
 
-#include <sys/types.h>
-
-#include <chrono>
-#include <cstdint>
-#include <cstdlib>
-#include <functional>
-#include <limits>
-#include <string>
-#include <system_error>
-#include <tuple>
-#include <vector>
-
 #include <ATen/ATen.h>
-
+#include <c10/util/accumulate.h>
 #include <c10d/Types.hpp>
 
 #ifdef _WIN32
@@ -29,7 +17,36 @@ typedef SSIZE_T ssize_t;
 #include <fcntl.h>
 #endif
 
+#include <sys/types.h>
+
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <functional>
+#include <limits>
+#include <string>
+#include <system_error>
+#include <tuple>
+#include <vector>
+
 namespace c10d {
+
+// Distributed c10d debug levels
+enum DistributedDebugLevel {
+  OFF = 0,
+  DETAIL = 1,
+  INFO = 2,
+};
+
+// String debug log levels
+extern const char * kDistDebugEnvVar;
+extern const char* kDistDebugDetailLogLevel;
+extern const char* kDistDebugInfoLogLevel;
+extern const char* kDistDebugOffLogLevel;
+
+std::string parse_env(const char* env_var_name);
+
+DistributedDebugLevel parseDistDebugLevel();
 
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
@@ -405,7 +422,7 @@ inline void checkSplitSizes(
     TORCH_CHECK(
         split_sizes.size() == group_size,
         "Number of tensor splits not equal to group size");
-    int sum = std::accumulate(split_sizes.begin(), split_sizes.end(), 0);
+    const auto sum = c10::sum_integers(split_sizes);
     TORCH_CHECK(
         sum == tensor.size(0), "Split sizes doesn't match total dim 0 size");
   }

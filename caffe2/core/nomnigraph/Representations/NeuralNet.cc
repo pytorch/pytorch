@@ -49,7 +49,7 @@ NNGraph::NodeRef NNModule::createUniqueDataNode(const std::string& s) {
       }
     }
   } while (need_name);
-  return dataFlow.createNode(util::make_unique<nom::repr::Tensor>(curr_name));
+  return dataFlow.createNode(std::make_unique<nom::repr::Tensor>(curr_name));
 }
 
 void NNModule::replaceSubgraph(
@@ -237,7 +237,7 @@ void replaceAsConsumer(
 NNGraph::NodeRef
 createOutput(NNModule* nn, NNGraph::NodeRef producer, std::string name) {
   auto outputNode =
-      nn->dataFlow.createNode(util::make_unique<nom::repr::Tensor>(name));
+      nn->dataFlow.createNode(std::make_unique<nom::repr::Tensor>(name));
   nn->dataFlow.createEdge(producer, outputNode);
   return outputNode;
 }

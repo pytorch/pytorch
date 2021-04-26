@@ -37,7 +37,7 @@ parser.add_argument(
 )
 parser.add_argument(
     '--graph',
-    metavar='FILE.dot',
+    metavar='FILE.gv',
     help='write Graphviz DOT file with execution graph',
 )
 parser.add_argument(

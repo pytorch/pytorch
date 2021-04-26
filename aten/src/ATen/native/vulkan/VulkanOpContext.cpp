@@ -12,8 +12,8 @@ c10::intrusive_ptr<Conv2dOpContext> VulkanConv2dOpContext::create_context(
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   auto op_context = vulkan::detail::convolution2d::create(
       weight,
       bias,

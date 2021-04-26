@@ -39,6 +39,10 @@ Tensor qnnpack_hardsigmoid(Tensor input) {
     std::numeric_limits<uint8_t>::max(), // output max
     0, // flags
     &hardsigmoid_op);
+
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+      qnnpack_uniq_ptr(hardsigmoid_op);
+
   TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
                         "failed to create QNNPACK Hardsigmoid operator");
   Tensor qy = at::_empty_affine_quantized(

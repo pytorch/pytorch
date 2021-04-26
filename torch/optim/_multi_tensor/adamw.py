@@ -110,8 +110,8 @@ class AdamW(Optimizer):
 
             beta1, beta2 = group['betas']
 
-            bias_correction1 = [1 - beta1 ** state['step'] for state in states] 
-            bias_correction2 = [1 - beta2 ** state['step'] for state in states] 
+            bias_correction1 = [1 - beta1 ** state['step'] for state in states]
+            bias_correction2 = [1 - beta2 ** state['step'] for state in states]
 
             #
             # Decay the first and second moment running average coefficient

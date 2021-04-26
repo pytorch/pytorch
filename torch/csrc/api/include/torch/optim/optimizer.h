@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/arg.h>
 
 #include <algorithm>
 #include <functional>
@@ -52,10 +53,13 @@ class TORCH_API OptimizerOptions {
   virtual void serialize(torch::serialize::InputArchive& archive);
   virtual void serialize(torch::serialize::OutputArchive& archive) const;
   virtual ~OptimizerOptions() = default;
+  virtual double get_lr() const;
+  virtual void set_lr(const double lr);
 };
 
 template <typename Derived>
 class OptimizerCloneableOptions : public OptimizerOptions {
+private:
   std::unique_ptr<OptimizerOptions> clone() const override {
     return std::make_unique<Derived>(static_cast<const Derived&>(*this));
   }

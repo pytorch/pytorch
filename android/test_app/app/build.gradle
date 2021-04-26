@@ -149,8 +149,8 @@ dependencies {
     //nativeBuildImplementation(name: 'pytorch_android_torchvision-release', ext: 'aar')
     //extractForNativeBuild(name: 'pytorch_android-release', ext: 'aar')
 
-    nightlyImplementation 'org.pytorch:pytorch_android:1.8.0-SNAPSHOT'
-    nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.8.0-SNAPSHOT'
+    nightlyImplementation 'org.pytorch:pytorch_android:1.9.0-SNAPSHOT'
+    nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.9.0-SNAPSHOT'
 
     aarImplementation(name:'pytorch_android', ext:'aar')
     aarImplementation(name:'pytorch_android_torchvision', ext:'aar')

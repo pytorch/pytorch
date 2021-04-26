@@ -386,7 +386,11 @@ inline Tensor relu(Tensor input, const ReLUFuncOptions& options = {}) {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor relu6(Tensor input, bool inplace) {
-  return detail::hardtanh(input, /*min_val=*/0, /*max_val=*/6, /*inplace=*/inplace);
+  if (inplace) {
+    return torch::relu6_(input);
+  } else {
+    return torch::relu6(input);
+  }
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */

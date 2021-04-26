@@ -452,3 +452,51 @@ TEST(OptimTest, AddParameter_LBFGS) {
 
   // REQUIRE this doesn't throw
 }
+
+//Check whether the learning rate of the parameter groups in the optimizer are the
+//same as the expected learning rates given in the epoch:learning rate map
+void check_lr_change(
+    Optimizer& optimizer,
+    LRScheduler& lr_scheduler,
+    std::map<unsigned, double> expected_epoch_lrs) {
+
+  //Find maximum epoch in map
+  unsigned kIterations =
+    std::max_element(expected_epoch_lrs.begin(),
+                     expected_epoch_lrs.end(),
+                     [] (const std::pair<unsigned, double>& a,
+                         const std::pair<unsigned, double>& b) -> bool {
+                       return a.second > b.second;
+                     })->first;
+
+  for(unsigned i = 0; i <= kIterations; i++) {
+    const auto epoch_iter = expected_epoch_lrs.find(i);
+    if(epoch_iter != expected_epoch_lrs.end())
+    {
+      //Compare the similarity of the two floating point learning rates
+      ASSERT_TRUE(fabs(epoch_iter->second - optimizer.param_groups()[0].options().get_lr()) <
+                  std::numeric_limits<double>::epsilon());
+    }
+    optimizer.step();
+    lr_scheduler.step();
+  }
+
+}
+
+TEST(OptimTest, CheckLRChange_StepLR_Adam) {
+
+  torch::Tensor parameters = torch::zeros({1});
+  auto optimizer = Adam({parameters}, AdamOptions().lr(1e-3));
+
+  const unsigned step_size = 20;
+  const double gamma = 0.5;
+  StepLR step_lr_scheduler(optimizer, step_size, gamma);
+
+  //The learning rate should have halved at epoch 20
+  const std::map<unsigned, double> expected_epoch_lrs = {
+    {1, 1e-3},
+    {25, 5e-4}
+  };
+
+  check_lr_change(optimizer, step_lr_scheduler, expected_epoch_lrs);
+}

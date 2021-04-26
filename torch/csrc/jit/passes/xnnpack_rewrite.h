@@ -23,6 +23,7 @@ TORCH_API void FoldPrePackingOps(script::Module& module);
 TORCH_API script::Module optimizeForMobile(
     const script::Module& module,
     const std::set<MobileOptimizerType>& optimization_blocklist = {},
-    const std::vector<std::string>& preserved_methods = {});
+    const std::vector<std::string>& preserved_methods = {},
+    const std::vector<std::string>& methods_to_optimize = {});
 } // namespace jit
 } // namespace torch
