@@ -1,6 +1,9 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
+
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+
 
 #include <sstream>
 
@@ -115,9 +118,7 @@ void RRefContext::handleException(const JitFuture& jitFuture) {
 }
 
 RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
-    : agent_(std::move(agent)),
-      destroyed_(false),
-      currentStreamFactory_(agent_->currentStreamFactory()) {}
+    : agent_(std::move(agent)), destroyed_(false){}
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
@@ -789,10 +790,11 @@ c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
 
 void RRefContext::blockCurrentStreams(
     const std::vector<c10::Event>& events) const {
-  if (currentStreamFactory_) {
-    for (const c10::Event& event : events) {
-      event.block(currentStreamFactory_(event.device_index()));
-    }
+  for (const c10::Event& event : events) {
+    c10::Device device{event.device_type(), event.device_index()};
+    c10::Stream stream =
+        c10::impl::getDeviceGuardImpl(device.type())->getStream(device);
+    event.block(stream);
   }
 }
 

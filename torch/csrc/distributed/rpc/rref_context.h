@@ -332,9 +332,6 @@ class TORCH_API RRefContext {
   // or forward the UserRRef, and both would then require confirmations from the
   // owner.
   static thread_local bool recording_;
-
-  // A std::function that returns the current stream of the given device
-  const stream_factory_t currentStreamFactory_;
 };
 
 } // namespace rpc
