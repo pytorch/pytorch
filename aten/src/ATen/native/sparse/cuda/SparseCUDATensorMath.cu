@@ -64,12 +64,8 @@ void s_addmm_out_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int
   Tensor r__;
   if (cast_beta == 0) {
     r_.zero_();
-  } else if (cast_beta == 1) {
-    if (!is_same_tensor(t, r_)) {
-      r_.copy_(t);
-    }
-  } else {
-    at::mul_out(r_, t, scalar_to_tensor(beta));
+  } else if (!is_same_tensor(t, r_)) {
+    r_.copy_(t);
   }
 
   if(r_.stride(0) == 1 && r_.stride(1) == r_.size(0)) {
@@ -111,7 +107,9 @@ void s_addmm_out_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int
       r__.data_ptr<scalar_t>(),
       r__.stride(1));
   }
-  r_.copy_(r__);
+  if (!is_same_tensor(r__, r_)) {
+    r_.copy_(r__);
+  }
 }
 
 // --------------------------------------------------------------------
