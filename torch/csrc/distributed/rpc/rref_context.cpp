@@ -115,7 +115,9 @@ void RRefContext::handleException(const JitFuture& jitFuture) {
 }
 
 RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
-    : agent_(std::move(agent)), destroyed_(false) {}
+    : agent_(std::move(agent)),
+      destroyed_(false),
+      currentStreamFactory_(agent_->currentStreamFactory()) {}
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
@@ -783,6 +785,15 @@ c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
     deleteAllUsersCV_.notify_all();
   }
   return deletedRRef;
+}
+
+void RRefContext::blockCurrentStreams(
+    const std::vector<c10::Event>& events) const {
+  if (currentStreamFactory_) {
+    for (const c10::Event& event : events) {
+      event.block(currentStreamFactory_(event.device_index()));
+    }
+  }
 }
 
 } // namespace rpc

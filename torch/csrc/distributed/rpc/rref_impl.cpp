@@ -239,6 +239,9 @@ const IValue& OwnerRRef::getValue() const {
   if (future_->hasError()) {
     (void)future_->value(); // Throws the error.
   }
+  // Before accessing the value in this RRef, current CUDA streams must wait
+  // for pending CUDA operations that create the value.
+  RRefContext::getInstance().blockCurrentStreams(events_);
   return future_->constValue();
 }
 

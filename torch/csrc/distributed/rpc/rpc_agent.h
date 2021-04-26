@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/types.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #include <algorithm>
 #include <cctype>
@@ -264,6 +265,11 @@ class TORCH_API RpcAgent {
   // Retrieves the device map for the provided destination worker.
   virtual std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> getDeviceMap(
       const WorkerInfo& dest);
+
+  // Return a factory function that returns the current stream on the given
+  // device. By default, this method returns a nullptr as the factory function.
+  // RpcAgent derived classes must override this method if it supports CUDA.
+  virtual stream_factory_t currentStreamFactory() const;
 
  protected:
   const WorkerInfo workerInfo_;

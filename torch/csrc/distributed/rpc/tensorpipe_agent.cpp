@@ -1488,6 +1488,16 @@ tensorpipe::DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dest) {
   return it->second;
 }
 
+stream_factory_t TensorPipeAgent::currentStreamFactory() const {
+#ifdef USE_CUDA_NOT_ROCM
+  return [](c10::DeviceIndex index) {
+    return at::cuda::getCurrentCUDAStream(index);
+  };
+#else
+  return nullptr;
+#endif
+}
+
 size_t TensorPipeAgent::timeoutMapSize() {
   std::unique_lock<std::mutex> lock(timeoutMapMutex_);
   return timeoutMap_.size();

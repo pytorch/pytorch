@@ -206,6 +206,9 @@ class TORCH_API RRefContext {
 
   std::unordered_map<std::string, std::string> getDebugInfo();
 
+  // use the given Events to block current streams on corresponding devices
+  void blockCurrentStreams(const std::vector<c10::Event>& events) const;
+
  private:
   struct PendingUserState {
     PendingUserState(c10::intrusive_ptr<RRef> rref)
@@ -329,6 +332,9 @@ class TORCH_API RRefContext {
   // or forward the UserRRef, and both would then require confirmations from the
   // owner.
   static thread_local bool recording_;
+
+  // A std::function that returns the current stream of the given device
+  const stream_factory_t currentStreamFactory_;
 };
 
 } // namespace rpc
