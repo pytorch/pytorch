@@ -41,6 +41,7 @@ using TaskLauncher = std::function<void(std::function<void()>)>;
 
 struct TORCH_API Code {
   Code() : pImpl(nullptr) {}
+  explicit Code(CodeImpl* pImpl);
   // remaining_bailout_depth is irrelevant in a `Code` object unless the `Code`
   // is directly created by `GraphExecutor` in which case it's likely to contain
   // `prim::BailOut`s to control the maximum depth of bailout chains
@@ -62,6 +63,7 @@ struct TORCH_API Code {
   const std::vector<c10::IValue>& constant_table() const;
   const std::vector<c10::TypePtr>& type_table() const;
   const std::vector<Instruction>& instructions() const;
+  const std::unordered_map<std::string, int>& op_to_num_specified_args() const;
   const std::vector<Node*>& instructions_source() const;
   void request_bailout(size_t index);
   size_t register_size() const;
@@ -70,6 +72,14 @@ struct TORCH_API Code {
   std::shared_ptr<CodeImpl> pImpl;
   friend struct InterpreterStateImpl;
   friend std::ostream& operator<<(std::ostream& out, const Code& code);
+};
+
+struct TORCH_API MobileCode : Code {
+  explicit MobileCode(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name,
+      size_t remaining_bailout_depth = 0);
+  ~MobileCode();
 };
 
 struct InterpreterState {
