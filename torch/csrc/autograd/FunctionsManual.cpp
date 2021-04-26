@@ -3124,7 +3124,7 @@ Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, cons
   if (zero_infinity) {
     return at::where(
         loss.unsqueeze(0).unsqueeze(2) == 0,
-        at::zeros({0}, raw_grad.options()),
+        at::zeros({}, raw_grad.options()),
         raw_grad * grad_out.unsqueeze(0).unsqueeze(2));
   } else {
     return raw_grad * grad_out.unsqueeze(0).unsqueeze(2);
