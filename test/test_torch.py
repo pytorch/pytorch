@@ -5084,11 +5084,25 @@ else:
         with self.assertRaises(IndexError):
             a.index_copy_(1, idx, c)
 
+    @onlyCPU
+    def test_index_copy_deterministic(self, device):
+        m = 6
+        n = 3
+        x = torch.zeros(m, n, device=device)
+        elems = 20000
+        src = torch.rand(elems, n, device=device)
+        index = torch.randint(m, (elems,), device=device)
+        with DeterministicGuard(True):
+            y0 = torch.index_copy(x, 0, index, src)
+            for _ in range(10):
+                y = torch.index_copy(x, 0, index, src)
+                self.assertEqual(y, y0, atol=0, rtol=0)
+
     # Ensures that index_copy throws nondeterministic alerts in the correct cases
-    @onlyOnCPUAndCUDA
+    @onlyCUDA
     @dtypes(torch.double)
     def test_nondeterministic_alert_index_copy(self, device, dtype):
-        @expectedAlertNondeterministic('index_copy')
+        @expectedAlertNondeterministic('index_copy_cuda', 'cuda')
         def test_func(slf, device, call_type):
             S = 10
             a = torch.randn(S, device=device)
