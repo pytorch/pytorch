@@ -64,22 +64,22 @@ if _IS_MONKEYTYPE_INSTALLED:
             # then consolidate the type to `Any` and replace the entry
             # by type `Any`.
             for arg, types in all_args.items():
-                _all_type = " "
-                for _type in types:
+                all_type = " "
+                for arg_type in types:
                     # If the type is a type imported from typing
                     # like Tuple, List, Dict then replace "typing."
                     # with a null string.
-                    if inspect.getmodule(_type) == typing:
-                        _type_to_string = str(_type)
-                        _all_type += _type_to_string.replace('typing.', '') + ','
+                    if inspect.getmodule(arg_type) == typing:
+                        type_to_string = str(arg_type)
+                        all_type += type_to_string.replace('typing.', '') + ','
                     else:
-                        _all_type += _type.__name__ + ','
-                _all_type = _all_type.lstrip(" ")  # Remove any trailing spaces
+                        all_type += get_qualified_name(arg_type) + ','
+                all_type = all_type.lstrip(" ")  # Remove any trailing spaces
 
                 if len(types) > 1:
-                    all_args[arg] = {'Any'}
+                    all_args[arg] = 'Any'
                 else:
-                    all_args[arg] = {_all_type[:-1]}
+                    all_args[arg] = all_type[:-1]
             return all_args
 
         def get_args_types(self, qualified_name: str) -> Dict:
@@ -111,7 +111,7 @@ else:
 
     class JitTypeTraceStore:  # type:  ignore[no-redef]
         def __init__(self):
-            self.trace_records = None
+            pass
 
     class JitTypeTraceConfig:  # type:  ignore[no-redef]
         def __init__(self):
