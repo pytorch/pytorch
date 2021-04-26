@@ -38,7 +38,7 @@ void OptimizeGraph(
 #ifdef FBCODE_CAFFE2
   if (opts.enable_out_variant) {
     ReplaceWithCopy(graph);
-    FuseListUnpack(graph);
+    FuseSigridTransformsListUnpack(graph);
   }
 #endif
   ConstantPropagation(graph);
@@ -835,6 +835,7 @@ void StaticRuntime::benchmark(
                 << planner_->total_reused_tensors() << std::endl;
     }
   }
+  check_for_memory_leak();
 }
 
 float StaticRuntime::benchmark_model(
@@ -1013,6 +1014,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
       }
     }
   }
+  VLOG(1) << "Finished checking for memory leak";
 }
 
 static void assign_storage_to_managed_tensors(
