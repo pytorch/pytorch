@@ -11,6 +11,8 @@
 
 namespace tensorpipe {
 class Message;
+class Allocation;
+class Descriptor;
 } // namespace tensorpipe
 
 namespace torch {
@@ -70,17 +72,18 @@ tensorpipeSerialize(
 
 // Allocate the buffers that will hold the incoming data. They will be managed
 // by the returned holder, which must be kept alive until the asynchronous read
-// has finished. Pointers to these buffers will be stored in-place in the
-// TensorPipe message.
-TORCH_API TensorpipeReadBuffers tensorpipeAllocate(
-    tensorpipe::Message& tpMessage,
+// has finished. Pointers to these buffers will be stored in the returned
+// tensorpipe::Allocation struct.
+TORCH_API std::pair<tensorpipe::Allocation, TensorpipeReadBuffers>
+tensorpipeAllocate(
+    const tensorpipe::Descriptor& tpDescriptor,
     const std::shared_ptr<LazyStreamContext>& ctx = createLazyStreamContext());
 
 // Convert a TensorPipe message back into an RPC message. This requires the data
 // to be available and can thus only be performed once the asynchronous read has
 // completed. The holder can be destroyed once this function returns.
 TORCH_API Message tensorpipeDeserialize(
-    tensorpipe::Message&& tpMessage,
+    tensorpipe::Descriptor&& tpDescriptor,
     TensorpipeReadBuffers&& holder);
 
 } // namespace rpc

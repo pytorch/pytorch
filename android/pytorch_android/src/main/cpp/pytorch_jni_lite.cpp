@@ -24,7 +24,7 @@ struct LiteJITCallGuard {
   // always set NonVariableTypeMode for inference only use case.
   // TODO: avoid having to set this guard for custom mobile build with mobile
   // interpreter.
-  torch::AutoNonVariableTypeMode non_var_guard{true};
+  torch::AutoNonVariableTypeMode non_var_guard;
 };
 
 } // namespace
