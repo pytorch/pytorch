@@ -1063,7 +1063,7 @@ class TestCase(expecttest.TestCase):
                 col_indices = torch.randint(0, n_cols, size=[nnz_per_row * n_rows], dtype=index_dtype, device=device)
             else:
                 crow_indices = torch.zeros(n_rows + 1, dtype=index_dtype)
-                crow_indices[1:nnz + 1] = nnz_per_row
+                crow_indices[1:nnz + 1] = 1
                 crow_indices.cumsum_(dim=0)
                 col_indices = torch.randint(0, n_cols, size=[nnz], dtype=index_dtype, device=device)
             nnz = col_indices.shape[0]
