@@ -812,6 +812,13 @@ class TestForeach(TestCase):
     @skipMeta
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_list_slow_path(self, device, dtype):
+        # 0-strides
+        tensor1 = torch.rand(10, 10, device=device)
+        tensor2 = torch.rand(1, device=device).expand_as(tensor1)
+        res = torch._foreach_add([tensor1], [tensor2])
+        torch._foreach_add_([tensor1], [tensor2])
+        self.assertEqual(res, [tensor1])
+
         # different strides
         tensor1 = torch.zeros(10, 10, device=device, dtype=dtype)
         tensor2 = torch.ones(10, 10, device=device, dtype=dtype)
@@ -824,6 +831,13 @@ class TestForeach(TestCase):
         tensor2 = torch.randn(5, 2, 1, 3, device=device)[:, 0]
         self.assertFalse(tensor1.is_contiguous())
         self.assertFalse(tensor2.is_contiguous())
+        res = torch._foreach_add([tensor1], [tensor2])
+        torch._foreach_add_([tensor1], [tensor2])
+        self.assertEqual(res, [tensor1])
+
+        # sliced tensor
+        tensor1 = torch.randn(5, 2, 1, 3, device=device).to(dtype)
+        tensor2 = torch.randn(5, 2, 1, 3 * 7, device=device).to(dtype)[:, :, :, ::7]
         res = torch._foreach_add([tensor1], [tensor2])
         torch._foreach_add_([tensor1], [tensor2])
         self.assertEqual(res, [tensor1])
