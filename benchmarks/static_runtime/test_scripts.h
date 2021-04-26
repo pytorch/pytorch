@@ -195,6 +195,11 @@ const auto to_script_1 = R"JIT(
       return torch.to(input, dtype, non_blocking, copy)
 )JIT";
 
+const auto to_script_2 = R"JIT(
+  def forward(self, input:Tensor, other: Tensor, non_blocking: bool, copy: bool, memory_format: int):
+      return torch.to(input, other, non_blocking, copy, memory_format)
+)JIT";
+
 const std::string embedding_bag_default = R"JIT(
   def forward(self, a: Tensor, b: Tensor, c: Tensor):
       return torch.embedding_bag(a, b, c)
