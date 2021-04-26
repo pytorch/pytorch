@@ -1,12 +1,11 @@
-#include <caffe2/serialize/versions.h>
-#include <torch/csrc/jit/mobile/backport.h>
+#pragma once
+
+#include <caffe2/serialize/file_adapter.h>
 
 namespace torch {
 namespace jit {
 
-int64_t _get_runtime_bytecode_version() {
-  return caffe2::serialize::kProducedBytecodeVersion;
-}
+TORCH_API int64_t _get_runtime_bytecode_version();
 
 } // namespace jit
 } // namespace torch

@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/export.h>
