@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -573,6 +574,64 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   std::unordered_set<std::string> expected_result(
       {"top(C).forward", "top(C).A0(A).forward", "top(C).B0(B).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+TEST(LiteInterpreterTest, LoadAndRunByteCodeModel) {
+  // Test current runtime can load and run bytecode version 4 and 5.
+  std::string file_path(__FILE__);
+  auto test_model_file_v5 =
+      file_path.substr(0, file_path.find_last_of("/\\") + 1);
+  auto test_model_file_v4 = test_model_file_v5;
+  test_model_file_v4.append("script_module_v4.ptl");
+  test_model_file_v5.append("script_module_v5.ptl");
+  Module jit_module_v4 = load(test_model_file_v4);
+  Module jit_module_v5 = load(test_model_file_v5);
+  mobile::Module mobile_module_v4 = _load_for_mobile(test_model_file_v4);
+  mobile::Module mobile_module_v5 = _load_for_mobile(test_model_file_v4);
+
+  auto input_data = std::vector<IValue>({IValue(1)});
+  auto jit_module_v4_output = jit_module_v4.forward(input_data).toTensor();
+  auto jit_module_v5_output = jit_module_v5.forward(input_data).toTensor();
+  auto mobile_module_v4_output =
+      mobile_module_v4.forward(input_data).toTensor();
+  auto mobile_module_v5_output =
+      mobile_module_v5.forward(input_data).toTensor();
+
+  auto expected_result = at::ones({2, 4}, ScalarType::Double) * 3;
+
+  auto compare_tensor = [](at::Tensor actual, at::Tensor expect) {
+    std::stringstream actual_stream;
+    actual_stream << actual;
+    std::string actual_str = actual_stream.str();
+
+    std::stringstream expect_stream;
+    expect_stream << expect;
+    std::string expect_str = expect_stream.str();
+    return actual_str == expect_str;
+  };
+
+  AT_ASSERT(compare_tensor(jit_module_v4_output, expected_result));
+  AT_ASSERT(compare_tensor(jit_module_v5_output, expected_result));
+  AT_ASSERT(compare_tensor(mobile_module_v4_output, expected_result));
+  AT_ASSERT(compare_tensor(mobile_module_v5_output, expected_result));
+}
+
+TEST(LiteInterpreterTest, GetByteCodeVersion) {
+  // Load check in model: sequence.ptl
+  std::string filePath(__FILE__);
+  auto test_model_file_v4 =
+      filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file_v4.append("script_module_v4.ptl");
+
+  auto test_model_file_v5 =
+      filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file_v5.append("script_module_v5.ptl");
+
+  auto version_v4 = torch::jit::_get_bytecode_version(test_model_file_v4);
+  AT_ASSERT(version_v4 == 4);
+
+  auto version_v5 = torch::jit::_get_bytecode_version(test_model_file_v5);
+  AT_ASSERT(version_v5 == 5);
 }
 
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
