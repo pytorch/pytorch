@@ -31,6 +31,65 @@ __global__ void sort_postprocess_kernel(const scalar_t *in, scalar_t *out, int64
 
 namespace at { namespace native {
 
+template <typename T, bool descending>
+constexpr T get_padding_value() {
+  using limit = std::numeric_limits<T>;
+  if /*constexpr*/ (limit::has_infinity) {
+    if /*constexpr*/ (descending) {
+      return -limit::infinity();
+    } else {
+      return limit::infinity();
+    }
+  } else {
+    if /*constexpr*/ (descending) {
+      return limit::min();
+    } else {
+      return limit::max();
+    }
+  }
+}
+
+template<typename key_t, typename value_t, int block_size, int ilp, bool descending>
+C10_LAUNCH_BOUNDS_1(block_size)
+__global__ void block_sort_pairs(key_t *keys_in, key_t *keys_out, value_t *values_in, value_t *values_out, int nsort, int numel) {
+  keys_in += nsort * blockIdx.x;
+  keys_out += nsort * blockIdx.x;
+  values_in += nsort * blockIdx.x;
+  values_out += nsort * blockIdx.x;
+
+  using BlockRadixSort = cub::BlockRadixSort<key_t, block_size, ilp, value_t>;
+  __shared__ typename BlockRadixSort::TempStorage temp_storage;
+
+  key_t thread_keys[ilp];
+  value_t thread_values[ilp];
+
+  #pragma unroll
+  for (int i = 0; i < ilp; i++) {
+    int index = threadIdx.x + i * block_size;
+    if (index < nsort) {
+      thread_keys[i] = keys_in[index];
+      thread_values[i] = values_in[index];
+    } else {
+      thread_keys[i] = get_padding_value<key_t, descending>();
+    }
+  }
+
+  if /*constexpr*/ (descending) {
+    BlockRadixSort(temp_storage).SortDescending(thread_keys, thread_values);
+  } else {
+    BlockRadixSort(temp_storage).Sort(thread_keys, thread_values);
+  }
+
+  #pragma unroll
+  for (int i = 0; i < ilp; i++) {
+    int index = threadIdx.x + i * block_size;
+    if (index < nsort) {
+      keys_out[index] = thread_keys[i]
+      values_out[index] = thread_values[i];
+    }
+  }
+}
+
 bool should_use_th_sort(const Tensor &self, int64_t dim) {
   int64_t ndim = self.dim();
   dim = maybe_wrap_dim(dim, ndim);
