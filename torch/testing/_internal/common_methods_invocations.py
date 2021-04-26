@@ -2347,7 +2347,7 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     inputs = []
 
     # Vector operations
-    inputs.append(SampleInput(x, args=('i->',)))                        # sum
+    inputs.append(SampleInput([x], args=('i->',)))                      # sum
     inputs.append(SampleInput([x, y], args=('i,j->ij',)))               # outer
 
     # Matrix operations
@@ -4841,9 +4841,9 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            supports_out=False,
            sample_inputs_func=sample_inputs_einsum,
-           # test does not work with passing lambda for op
-           # there's a test `test_einsum` in `test_jit.py` to handle this case
            skips=(
+               # test does not work with passing lambda for op
+               # there's a test `test_einsum` in `test_jit.py` to handle this case
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # The following dtypes are only supported for some inputs, ideally we should have
                # checked this in the einsum code but to keep BC we'll just skip the tests for now.
