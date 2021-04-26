@@ -413,7 +413,6 @@ def fractional_max_pool2d_with_indices(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
-    # noqa
     r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -473,7 +472,6 @@ def _fractional_max_pool2d(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tensor:
-    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             fractional_max_pool2d,
@@ -508,7 +506,6 @@ def fractional_max_pool3d_with_indices(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
-    # noqa
     r"""Applies 3D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -573,7 +570,6 @@ def _fractional_max_pool3d(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tensor:
-    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             fractional_max_pool3d,
@@ -609,7 +605,6 @@ def max_pool1d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    # noqa
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
@@ -640,7 +635,6 @@ def _max_pool1d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d,
@@ -677,7 +671,6 @@ def max_pool2d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    # noqa
     r"""Applies a 2D max pooling over an input signal composed of several input
     planes.
 
@@ -708,7 +701,6 @@ def _max_pool2d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d,
@@ -745,7 +737,6 @@ def max_pool3d_with_indices(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    # noqa
     r"""Applies a 3D max pooling over an input signal composed of several input
     planes.
 
@@ -776,7 +767,6 @@ def _max_pool3d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d,
@@ -845,7 +835,6 @@ def max_unpool1d(
     padding: BroadcastingList1[int] = 0,
     output_size: Optional[BroadcastingList1[int]] = None
 ) -> Tensor:
-    # noqa
     r"""Computes a partial inverse of :class:`MaxPool1d`.
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
@@ -882,7 +871,6 @@ def max_unpool2d(
     padding: BroadcastingList2[int] = 0,
     output_size: Optional[BroadcastingList2[int]] = None
 ) -> Tensor:
-    # noqa
     r"""Computes a partial inverse of :class:`MaxPool2d`.
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
@@ -915,7 +903,6 @@ def max_unpool3d(
     padding: BroadcastingList3[int] = 0,
     output_size: Optional[BroadcastingList3[int]] = None
 ) -> Tensor:
-    # noqa
     r"""Computes a partial inverse of :class:`MaxPool3d`.
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
@@ -2048,6 +2035,7 @@ def embedding_bag(
     sparse: bool = False,
     per_sample_weights: Optional[Tensor] = None,
     include_last_offset: bool = False,
+    padding_idx: Optional[int] = None,
 ) -> Tensor:
     r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
@@ -2084,6 +2072,10 @@ def embedding_bag(
         include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
             The last element is the size of the input, or the ending index position of the last bag (sequence).
 
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
+                                     gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
+                                     during training, i.e. it remains as a fixed "pad". Note that the embedding
+                                     vector at :attr:`padding_idx` is excluded from the reduction.
 
     Shape:
         - :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
@@ -2111,9 +2103,17 @@ def embedding_bag(
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.tensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.tensor([0,4])
-        >>> F.embedding_bag(embedding_matrix, input, offsets)
+        >>> F.embedding_bag(input, embedding_matrix, offsets)
         tensor([[ 0.3397,  0.3552,  0.5545],
                 [ 0.5893,  0.4386,  0.5882]])
+
+        >>> # example with padding_idx
+        >>> embedding_matrix = torch.rand(10, 3)
+        >>> input = torch.tensor([2, 2, 2, 2, 4, 3, 2, 9])
+        >>> offsets = torch.tensor([0,4])
+        >>> F.embedding_bag(input, embedding_matrix, offsets, padding_idx=2, mode='sum')
+        tensor([[ 0.0000,  0.0000,  0.0000],
+                [-0.7082,  3.2145, -2.6251]])
     """
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
@@ -2129,6 +2129,7 @@ def embedding_bag(
             sparse=sparse,
             per_sample_weights=per_sample_weights,
             include_last_offset=include_last_offset,
+            padding_idx=padding_idx,
         )
     # Check for backward compatibility.
     # Used to be embedding_bag(weight, input, ...)
@@ -2202,7 +2203,7 @@ def embedding_bag(
         )
 
     ret, _, _, _ = torch.embedding_bag(
-        weight, input, offsets, scale_grad_by_freq, mode_enum, sparse, per_sample_weights, include_last_offset
+        weight, input, offsets, scale_grad_by_freq, mode_enum, sparse, per_sample_weights, include_last_offset, padding_idx
     )
     return ret
 
@@ -2237,7 +2238,6 @@ def batch_norm(
     momentum: float = 0.1,
     eps: float = 1e-5,
 ) -> Tensor:
-    # noqa
     r"""Applies Batch Normalization for each channel across a batch of data.
 
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
@@ -2264,6 +2264,15 @@ def batch_norm(
     )
 
 
+def _verify_spatial_size(size: List[int]) -> None:
+    # Verify that there is > 1 spatial element for instance norm calculation.
+    size_prods = 1
+    for i in range(2, len(size)):
+        size_prods *= size[i]
+    if size_prods == 1:
+        raise ValueError("Expected more than 1 spatial element when training, got input size {}".format(size))
+
+
 def instance_norm(
     input: Tensor,
     running_mean: Optional[Tensor] = None,
@@ -2274,7 +2283,6 @@ def instance_norm(
     momentum: float = 0.1,
     eps: float = 1e-5,
 ) -> Tensor:
-    # noqa
     r"""Applies Instance Normalization for each channel in each data sample in a
     batch.
 
@@ -2294,7 +2302,8 @@ def instance_norm(
             momentum=momentum,
             eps=eps,
         )
-    _verify_batch_size(input.size())
+    if use_input_stats:
+        _verify_spatial_size(input.size())
     return torch.instance_norm(
         input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, torch.backends.cudnn.enabled
     )
@@ -2564,7 +2573,14 @@ def poisson_nll_loss(
     return ret
 
 
-def gaussian_nll_loss(input, target, var, *, full=False, eps=1e-6, reduction='mean'):
+def gaussian_nll_loss(
+    input: Tensor,
+    target: Tensor,
+    var: Tensor,
+    full: bool = False,
+    eps: float = 1e-6,
+    reduction: str = "mean",
+) -> Tensor:
     r"""Gaussian negative log likelihood loss.
 
     See :class:`~torch.nn.GaussianNLLLoss` for details.
@@ -2574,31 +2590,47 @@ def gaussian_nll_loss(input, target, var, *, full=False, eps=1e-6, reduction='me
         target: sample from the Gaussian distribution.
         var: tensor of positive variance(s), one for each of the expectations
             in the input (heteroscedastic), or a single one (homoscedastic).
-        full: ``True``/``False`` (bool), include the constant term in the loss
-            calculation. Default: ``False``.
-        eps: value added to var, for stability. Default: 1e-6.
-        reduction: specifies the reduction to apply to the output:
-            `'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+        full (bool, optional): include the constant term in the loss calculation. Default: ``False``.
+        eps (float, optional): value added to var, for stability. Default: 1e-6.
+        reduction (string, optional): specifies the reduction to apply to the output:
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output is the average of all batch member losses,
             ``'sum'``: the output is the sum of all batch member losses.
             Default: ``'mean'``.
     """
-    if not torch.jit.is_scripting():
-        tens_ops = (input, target, var)
-        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
-            return handle_torch_function(
-                gaussian_nll_loss, tens_ops, input, target, var, full=full, eps=eps, reduction=reduction)
+    if has_torch_function_variadic(input, target, var):
+        return handle_torch_function(
+            gaussian_nll_loss,
+            (input, target, var),
+            input,
+            target,
+            var,
+            full=full,
+            eps=eps,
+            reduction=reduction,
+        )
 
-    # Inputs and targets much have same shape
-    input = input.view(input.size(0), -1)
-    target = target.view(target.size(0), -1)
-    if input.size() != target.size():
-        raise ValueError("input and target must have same size")
+    # Check var size
+    # If var.size == input.size, the case is heteroscedastic and no further checks are needed.
+    # Otherwise:
+    if var.size() != input.size():
 
-    # Second dim of var must match that of input or be equal to 1
-    var = var.view(input.size(0), -1)
-    if var.size(1) != input.size(1) and var.size(1) != 1:
-        raise ValueError("var is of incorrect size")
+        # If var is one dimension short of input, but the sizes match otherwise, then this is a homoscedastic case.
+        # e.g. input.size = (10, 2, 3), var.size = (10, 2)
+        # -> unsqueeze var so that var.shape = (10, 2, 1)
+        # this is done so that broadcasting can happen in the loss calculation
+        if input.size()[:-1] == var.size():
+            var = torch.unsqueeze(var, -1)
+
+        # This checks if the sizes match up to the final dimension, and the final dimension of var is of size 1.
+        # This is also a homoscedastic case.
+        # e.g. input.size = (10, 2, 3), var.size = (10, 2, 1)
+        elif input.size()[:-1] == var.size()[:-1] and var.size(-1) == 1:  # Heteroscedastic case
+            pass
+
+        # If none of the above pass, then the size of var is incorrect.
+        else:
+            raise ValueError("var is of incorrect size")
 
     # Check validity of reduction mode
     if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
@@ -2613,15 +2645,11 @@ def gaussian_nll_loss(input, target, var, *, full=False, eps=1e-6, reduction='me
     with torch.no_grad():
         var.clamp_(min=eps)
 
-    # Calculate loss (without constant)
-    loss = 0.5 * (torch.log(var) + (input - target)**2 / var).view(input.size(0), -1).sum(dim=1)
-
-    # Add constant to loss term if required
+    # Calculate the loss
+    loss = 0.5 * (torch.log(var) + (input - target)**2 / var)
     if full:
-        D = input.size(1)
-        loss = loss + 0.5 * D * math.log(2 * math.pi)
+        loss += 0.5 * math.log(2 * math.pi)
 
-    # Apply reduction
     if reduction == 'mean':
         return loss.mean()
     elif reduction == 'sum':
@@ -3055,7 +3083,7 @@ def margin_ranking_loss(
     r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
-    """  # noqa
+    """
     if has_torch_function_variadic(input1, input2, target):
         return handle_torch_function(
             margin_ranking_loss,
@@ -3093,7 +3121,7 @@ def hinge_embedding_loss(
     r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
-    """  # noqa
+    """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             hinge_embedding_loss,
@@ -3219,7 +3247,7 @@ def cosine_embedding_loss(
     r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
-    """  # noqa
+    """
     if has_torch_function_variadic(input1, input2, target):
         return handle_torch_function(
             cosine_embedding_loss,
@@ -4395,7 +4423,6 @@ def unfold(
     padding: BroadcastingList2[int] = 0,
     stride: BroadcastingList2[int] = 1
 ) -> Tensor:
-    # noqa
     r"""Extracts sliding local blocks from a batched input tensor.
 
     .. warning::
@@ -4435,7 +4462,6 @@ def fold(
     padding: BroadcastingList2[int] = 0,
     stride: BroadcastingList2[int] = 1
 ) -> Tensor:
-    # noqa
     r"""Combines an array of sliding local blocks into a large containing
     tensor.
 
