@@ -1264,7 +1264,8 @@ class TestNormalizeOperators(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Unsupported input types
-        if op.name in {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma'}:
+        if op.name in {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma',
+                       'hsplit', 'vsplit', 'dsplit'}:
             return
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {'stack', 'hstack', 'vstack', 'dstack',

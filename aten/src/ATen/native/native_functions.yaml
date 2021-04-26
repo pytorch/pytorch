@@ -3323,6 +3323,24 @@
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
 
+- func: hsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: hsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
+
+- func: vsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: vsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
+
+- func: dsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: dsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
+
 - func: squeeze(Tensor(a) self) -> Tensor(a)
   variants: function, method
   device_guard: False
