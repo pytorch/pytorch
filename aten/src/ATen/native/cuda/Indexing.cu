@@ -229,7 +229,7 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
       {
       // Sort the inputs into sorted with the corresponding indices
       auto range = at::arange(num_indices, linearIndex.options());
-      int64_t nbits = std::max<int64_t>(0, std::ceil(std::log2(double(largestIndex(self)) / sliceSize))) + 1;
+      int64_t nbits = cuda::cub::get_num_bits(largestIndex(self) / sliceSize);
       cuda::cub::sort_pairs(
         linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
         range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
