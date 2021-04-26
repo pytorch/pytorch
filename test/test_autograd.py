@@ -2930,7 +2930,7 @@ class TestAutograd(TestCase):
             x = torch.tensor(input, requires_grad=True)
             out = x.norm(inf, dim=dim, keepdim=True)
             out.backward(torch.ones(out.size()))
-            self.assertEqual(x.grad, expected)
+            self.assertEqual(x.grad, torch.tensor(expected))
 
         run_test([0., 0., 0.], [0., 0., 0.])
         run_test([1., 0., 1.], [0.5, 0., 0.5])
@@ -3217,7 +3217,8 @@ class TestAutograd(TestCase):
                 name_expected, input_shape_expected = next(expected_iter)
                 if name_expected is not None:
                     self.assertEqual(event.name, name_expected)
-                self.assertEqual(event.input_shapes, input_shape_expected)
+                for input_shape, expected_shape in zip(event.input_shapes, input_shape_expected):
+                    self.assertEqual(input_shape, expected_shape)
                 last_end = event.time_range.end
 
     def test_profiler_no_cuda(self):
@@ -6311,7 +6312,8 @@ class TestAutogradFunctional(TestCase):
     def _check_jacobian_vectorize_correctness(self, f, inputs):
         expected = autogradF.jacobian(f, inputs, vectorize=False)
         result = autogradF.jacobian(f, inputs, vectorize=True)
-        self.assertEqual(result, expected)
+        for result_, expected_ in zip(result, expected):
+            self.assertEqual(result_, expected_)
 
     def test_jacobian_vectorize_correctness_simple(self):
         def f(x):
@@ -6388,7 +6390,8 @@ class TestAutogradFunctional(TestCase):
     def _check_hessian_vectorize_correctness(self, f, inputs):
         expected = autogradF.hessian(f, inputs, vectorize=False)
         result = autogradF.hessian(f, inputs, vectorize=True)
-        self.assertEqual(result, expected)
+        for result_, expected_ in zip(result, expected):
+            self.assertEqual(result_, expected_)
 
     def test_hessian_vectorize_correctness_simple(self):
         def f(x):
@@ -8046,7 +8049,7 @@ class TestAutogradDeviceType(TestCase):
         v1 = x.narrow(0, 0, 1)
         v1.mul_(2)
         x.sum().backward()
-        self.assertEqual(root.grad.tolist(), [[2, 2], [1, 1]])
+        self.assertEqual(root.grad, torch.tensor([[2, 2], [1, 1]], dtype=root.dtype))
 
     def test_inplace_view_backprop_view_of_view(self, device):
         # modify view and backprop through view-of-view
@@ -8056,7 +8059,7 @@ class TestAutogradDeviceType(TestCase):
         v2 = x.narrow(0, 0, 1)
         v1.mul_(2)
         v2.sum().backward()
-        self.assertEqual(root.grad.tolist(), [[2, 2], [0, 0]])
+        self.assertEqual(root.grad, torch.tensor([[2, 2], [0, 0]], dtype=root.dtype))
 
     def test_inplace_view_of_view(self, device):
         # modify view-of-view and backprop through base
@@ -8066,7 +8069,7 @@ class TestAutogradDeviceType(TestCase):
         v2 = v1.narrow(1, 1, 1)
         v2.mul_(2)
         x.sum().backward()
-        self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1]])
+        self.assertEqual(root.grad, torch.tensor([[1, 2], [1, 1]], dtype=root.dtype))
 
     def test_inplace_view_then_no_grad(self, device):
         # Perform an in-place operation on a view of a non-leaf variable.
@@ -8193,7 +8196,7 @@ class TestAutogradDeviceType(TestCase):
         v2 = v1.narrow(1, 1, 1)
         v2.mul_(2)
         x.sum().backward()
-        self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
+        self.assertEqual(root.grad, torch.tensor([[1, 2], [1, 1], [1, 1]], dtype=root.dtype))
 
     def test_inplace_view_multi_output_unsafe(self, device):
         for f in [lambda t: t.unsafe_split(1),
