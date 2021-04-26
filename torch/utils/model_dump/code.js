@@ -404,10 +404,17 @@ class AuxContentPane extends Component {
     let blame_content = "";
     if (blame_info) {
       const {ist_file, line, ist_s_text, s_start, s_end} = blame_info;
+      let s_text = interned_strings[ist_s_text];
+      if (s_start != 0 || s_end != s_text.length) {
+        let prefix = s_text.slice(0, s_start);
+        let main = s_text.slice(s_start, s_end);
+        let suffix = s_text.slice(s_end);
+        s_text = html`${prefix}<strong>${main}</strong>${suffix}`;
+      }
       blame_content = html`
         <h3>${interned_strings[ist_file]}:${line}</h3>
-        <pre>${s_start}:${s_end}</pre><br/>
-        <pre>${interned_strings[ist_s_text]}</pre><br/>
+        <pre>${s_start}:${s_end}</pre>
+        <pre>${s_text}</pre><br/>
         `;
     }
     return html`

@@ -58,7 +58,7 @@ Possible improvements:
     - Add hyperlinking from debug info to Diffusion.
     - Make small tensor contents available.
     - Do something nice for quantized models
-      (they probably don't work at all right now). 
+      (they probably don't work at all right now).
 """
 
 import sys
@@ -202,7 +202,17 @@ def get_model_info(
                 raw_code = handle.read()
             with zf.open(zi.filename + ".debug_pkl") as handle:
                 raw_debug = handle.read()
-            debug_info = pickle.loads(raw_debug)
+
+            # Parse debug info and add begin/end markers if not present
+            # to ensure that we cover the entire source code.
+            debug_info_t = pickle.loads(raw_debug)
+            assert isinstance(debug_info_t, tuple)
+            debug_info = list(debug_info_t)
+            if not debug_info:
+                debug_info.append((0, (('', '', 0), 0, 0)))
+            if debug_info[-1][0] != len(raw_code):
+                debug_info.append((len(raw_code), (('', '', 0), 0, 0)))
+
             code_parts = []
             for di, di_next in zip(debug_info, debug_info[1:]):
                 start, source_range = di
@@ -211,15 +221,14 @@ def get_model_info(
                 source, s_start, s_end = source_range
                 s_text, s_file, s_line = source
                 # TODO: Handle this case better.  TorchScript ranges are in bytes,
-                # but JS doesn't really handle byte strings.  Bail out if
-                # bytes and chars are not equivalent for this string.
+                # but JS doesn't really handle byte strings.
+                # if bytes and chars are not equivalent for this string,
+                # zero out the ranges so we don't highlight the wrong thing.
                 if len(s_text) != len(s_text.encode("utf-8")):
-                    s_text = ""
                     s_start = 0
                     s_end = 0
                 text = raw_code[start:end]
                 code_parts.append([text.decode("utf-8"), ist(s_file), s_line, ist(s_text), s_start, s_end])
-            # TODO: Handle cases where debug info is missing or doesn't cover the full source.
             code_files[zi.filename] = code_parts
 
         extra_files_json_pattern = re.compile(re.escape(path_prefix) + "/extra/.*\\.json")
@@ -293,6 +302,10 @@ def burn_in_info(skeleton, info):
     have no external network dependencies for code or data.
     """
 
+    # Note that Python's json serializer does not escape slashes in strings.
+    # Since we're inlining this JSON directly into a script tag, a string
+    # containing "</script>" would end the script prematurely and
+    # mess up our page.  Unconditionally escape fixes that.
     return skeleton.replace(
         "BURNED_IN_MODEL_INFO = null",
         "BURNED_IN_MODEL_INFO = " + json.dumps(info).replace("/", "\\/"))
