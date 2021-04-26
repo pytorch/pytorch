@@ -25,7 +25,10 @@ class TestONNXShapeInference(unittest.TestCase):
             type_assertion_func(out.type())
 
     def create_empty_graph(self):
-        return torch._C.Graph()
+        g = torch._C.Graph()
+        # kick off initialization for ConstantMap.
+        torch._C._jit_pass_onnx_graph_shape_type_inference(g, {}, self.opset_version)
+        return g
 
     def insert_tensor_constant(self, g, tensor):
         return g.op("Constant", value_t=tensor)
