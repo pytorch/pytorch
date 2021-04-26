@@ -50,6 +50,36 @@ ExprHandle ExprHandle::operator<=(const ExprHandle& other) const {
   return CompareSelect::make(*this, other, CompareSelectOperation::kLE);
 }
 
+ExprHandle ExprHandle::operator&&(const ExprHandle& other) const {
+  auto compare = dynamic_cast<const CompareSelect*>(this->node());
+  CHECK(compare);
+  if (!compare->is_ret_default()) {
+    throw std::runtime_error("invalid && operator");
+  }
+  CompareSelect* ret = new CompareSelect(
+      compare->lhs(),
+      compare->rhs(),
+      other.node(),
+      new IntImm(0),
+      compare->compare_select_op());
+  return ExprHandle(ret);
+}
+
+ExprHandle ExprHandle::operator||(const ExprHandle& other) const {
+  auto compare = dynamic_cast<const CompareSelect*>(this->node());
+  CHECK(compare);
+  if (!compare->is_ret_default()) {
+    throw std::runtime_error("invalid || operator");
+  }
+  CompareSelect* ret = new CompareSelect(
+      compare->lhs(),
+      compare->rhs(),
+      new IntImm(1),
+      other.node(),
+      compare->compare_select_op());
+  return ExprHandle(ret);
+}
+
 ExprHandle ExprHandle::operator&(const ExprHandle& other) const {
   return And::make(*this, other);
 }
