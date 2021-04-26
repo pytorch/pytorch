@@ -294,8 +294,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 .. note:: The eigenvalues and eigenvectors of a real matrix may be complex.
 
 .. note:: This function is computed using LAPACK's and MAGMA's `geev` for CPU and CUDA inputs,
-          respectively.
-          For CUDA inputs, this function synchronizes that device with the CPU.
+          respectively. For CUDA inputs, this function synchronizes that device with the CPU.
 
 .. warning:: The eigenvectors of a matrix are not unique, nor are they continuous with respect to
              :attr:`A`. Due to this lack of uniqueness, different hardware and software may compute
@@ -1227,7 +1226,8 @@ Differences with `numpy.linalg.svd`:
           On CUDA, it uses cuSOLVER's `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later,
           and MAGMA's `gesdd` on earlier versions of CUDA.
 
-.. warning:: The `U` and `V` are not unique, nor are they continuous with respect to :attr:`A`.
+.. warning:: The returned tensors `U` and `V` are not unique, nor are they continuous with
+             respect to :attr:`A`.
              Due to this lack of uniqueness, different hardware and software may compute
              different singular vectors.
 
