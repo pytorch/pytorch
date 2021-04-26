@@ -378,7 +378,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
   TensorArg indices_arg{indices, "indices", 4};
 
   checkAllSameGPU(
-      "adaptive_max_pool3d_out_cuda",
+      "adaptive_max_pool3d_backward_cuda",
       {grad_input_arg, grad_output_arg, input_arg, indices_arg});
 
   const Tensor gradOutput_ = gradOutput.contiguous();
