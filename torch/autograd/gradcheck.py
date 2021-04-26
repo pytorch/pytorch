@@ -162,7 +162,7 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
                   "in a future version of PyTorch. If you have a specific use for "
                   "this or feature request for this to be a stable API, please file "
                   "us an issue at https://github.com/pytorch/pytorch/issues/new")
-    if grad_out != 1.0:
+    if grad_out != 1.0:  # grad_out param is only kept for backward compatibility reasons
         raise ValueError("Expected grad_out to be 1.0. get_numerical_jacobian no longer "
                          "supports values of grad_out != 1.0.")
 
@@ -408,7 +408,7 @@ def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
                   "in a future version of PyTorch. If you have a specific use for "
                   "this or feature request for this to be a stable API, please file "
                   "us an issue at https://github.com/pytorch/pytorch/issues/new")
-    if grad_out != 1.0:
+    if grad_out != 1.0:  # grad_out param is only kept for backward compatibility reasons
         raise ValueError("Expected grad_out to be 1.0. get_analytical_jacobian no longer "
                          "supports values of grad_out != 1.0.")
     if output.is_complex():
@@ -716,11 +716,11 @@ def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
 
-def get_notallclose_msg(analytical, numerical, output_idx, input_idx, complex_indices, inp_is_complex) -> str:
-    out_is_imag = complex_indices and output_idx in complex_indices
-    grad_output = "1j" if out_is_imag else "1"
-    prefix = "" if not inp_is_complex and not out_is_imag else \
-        f"Gradients failed to compare equal for grad output = {grad_output}"
+def get_notallclose_msg(analytical, numerical, output_idx, input_idx, complex_indices, test_imag=False) -> str:
+    out_is_complex = complex_indices and output_idx in complex_indices
+    part = "imaginary" if test_imag else "real"
+    prefix = "" if not out_is_complex else \
+        f"While considering the {part} part of complex outputs only, "
     return prefix + 'Jacobian mismatch for output %d with respect to input %d,\n' \
         'numerical:%s\nanalytical:%s\n' % (output_idx, input_idx, numerical, analytical)
 
@@ -749,19 +749,19 @@ def gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, ep
         imag_func_out = imag_fn(*tupled_inputs)
         imag_outputs = _differentiable_outputs(imag_func_out)
         gradcheck_fn(imag_fn, imag_func_out, tupled_inputs, imag_outputs, eps,
-                     rtol, atol, check_grad_dtypes, nondet_tol, complex_indices)
+                     rtol, atol, check_grad_dtypes, nondet_tol, complex_indices, test_imag=True)
 
         real_func_out = real_fn(*tupled_inputs)
         real_outputs = _differentiable_outputs(real_func_out)
         gradcheck_fn(real_fn, real_func_out, tupled_inputs, real_outputs, eps,
-                     rtol, atol, check_grad_dtypes, nondet_tol)
+                     rtol, atol, check_grad_dtypes, nondet_tol, complex_indices)
     else:
         gradcheck_fn(func, func_out, tupled_inputs, outputs, eps,
                      rtol, atol, check_grad_dtypes, nondet_tol)
 
 
 def slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
-                   atol, check_grad_dtypes, nondet_tol, complex_indices=None):
+                   atol, check_grad_dtypes, nondet_tol, complex_indices=None, test_imag=False):
     if not outputs:
         return check_no_differentiable_outputs(func, tupled_inputs, _as_tuple(func_out), eps)
 
@@ -774,7 +774,7 @@ def slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
         for j, (a, n, inp) in enumerate(zip(analytical, numerical[i], inp_tensors)):
             if a.numel() != 0 or n.numel() != 0:
                 if not torch.allclose(a, n, rtol, atol):
-                    raise GradcheckError(get_notallclose_msg(a, n, i, j, complex_indices, inp.is_complex()))
+                    raise GradcheckError(get_notallclose_msg(a, n, i, j, complex_indices, test_imag))
     return True
 
 
@@ -859,7 +859,7 @@ def run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output_
 
 
 def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
-                   atol, check_grad_dtypes, nondet_tol, complex_indices=None):
+                   atol, check_grad_dtypes, nondet_tol, complex_indices=None, test_imag=False):
     # Perform the fast version of gradcheck
     # See https://github.com/pytorch/pytorch/issues/53876 for details
     inp_tensors = [t for t in tupled_inputs if is_tensor_like(t) and t.requires_grad]
@@ -898,7 +898,7 @@ def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
             n = n.to(device=a.device)
             if not allclose_with_type_promotion(a, n, rtol, adjusted_atol(atol, all_u[i], all_v[j])):
                 jacobians_str = run_slow_mode_and_get_error(func, tupled_inputs, outputs, i, j, rtol, atol)
-                raise GradcheckError(get_notallclose_msg(a, n, j, i, complex_indices, inp.is_complex()) + jacobians_str)
+                raise GradcheckError(get_notallclose_msg(a, n, j, i, complex_indices, test_imag) + jacobians_str)
     return True
 
 
@@ -935,11 +935,14 @@ def gradcheck(
 
     The check between numerical and analytical gradients uses :func:`~torch.allclose`.
 
-    For complex functions, no notion of Jacobian exists. Gradcheck verifies if the numerical and
-    analytical values of Wirtinger and Conjugate Wirtinger derivative are consistent. The gradient
-    computation is done under the assumption that the overall function has a real valued output.
-    For functions with complex output, gradcheck treats them as if they are two separate functions
-    with real output. For more details, check out
+    For most of the complex functions we consider for optimization purposes, no notion of
+    Jacobian exists. Instead, gradcheck verifies if the numerical and analytical values of
+    the Wirtinger and Conjugate Wirtinger derivatives are consistent. Because the gradient
+    computation is done under the assumption that the overall function has a real-valued,
+    output we treat functions with complex output in a special way. For these functions,
+    gradcheck is applied to two real-valued functions corresponding to taking the real
+    components of the complex outputs for the first, and taking the imaginary components
+    of the complex outputs for the second. For more details, check out
     :ref:`complex_autograd-doc`.
 
     .. note::
