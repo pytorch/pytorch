@@ -139,6 +139,7 @@ class GenExternalAtenFallback:
                     return device_like[0].name
                 raise AssertionError("Need a tensor-like or device argument in order to determine the output device")
 
+            # See Note [External Backends Follow Dispatcher convention]
             dispatcher_sig = DispatcherSignature.from_schema(f.native_function.func)
             name = dispatcher_sig.name()
             args = dispatcher_sig.arguments()
@@ -159,6 +160,7 @@ class GenExternalAtenFallback:
                 assert_never(self.target)
 
             # Everything below here is where we generate the CPU fallback.
+            # See Note [External Backends Follow Dispatcher convention]
             dispatcher_order_args = dispatcher.jit_arguments(f.native_function.func)
 
             # Map each argument to it's intermediate variable name in the fallback

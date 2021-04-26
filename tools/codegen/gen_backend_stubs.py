@@ -72,7 +72,8 @@ Only the following keys are supported: {", ".join(valid_keys)}'
         for f in concatMap(lambda f: [f] if isinstance(f, NativeFunction) else list(f.functions()), grouped_native_functions)
     }
 
-    def kernel_name(func: FunctionSchema) -> str:
+    def external_kernel_name(func: FunctionSchema) -> str:
+        # Note [External Backends Follow Dispatcher convention]
         # For external backends, we enforce that their names and signatures match the dispatcher convention
         return dispatcher.name(func)
 
@@ -84,17 +85,17 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             m = metadata.get(f.func.name, None)
             dispatch_key = DispatchKey.parse(f'Autograd{backend}') \
                 if m is not None and m.is_autograd else DispatchKey.parse(backend)
-            kernel = kernel_name(f.func)
+            kernel = external_kernel_name(f.func)
             return ExternalBackendFunction(NativeFunction.with_dispatch_entry(f, dispatch_key, kernel), dispatch_key, m)
         elif isinstance(g, NativeFunctionsGroup):
             out_meta = metadata.get(g.out.func.name, None)
-            kernel = kernel_name(g.out.func)
+            kernel = external_kernel_name(g.out.func)
             dispatch_key = DispatchKey.parse(f'Autograd{backend}') \
                 if out_meta is not None and out_meta.is_autograd else DispatchKey.parse(backend)
             out = ExternalBackendFunction(NativeFunction.with_dispatch_entry(g.out, dispatch_key, kernel), dispatch_key, out_meta)
 
             functional_meta = metadata.get(g.functional.func.name, None)
-            kernel = kernel_name(g.functional.func)
+            kernel = external_kernel_name(g.functional.func)
             dispatch_key = DispatchKey.parse(f'Autograd{backend}') \
                 if functional_meta is not None and functional_meta.is_autograd else DispatchKey.parse(backend)
             functional = ExternalBackendFunction(
@@ -110,7 +111,7 @@ autograd key. They can not be mix and matched. If this is something you need, fe
             inplace = None
             if g.inplace:
                 inplace_meta = metadata.get(g.inplace.func.name, None)
-                kernel = kernel_name(g.inplace.func)
+                kernel = external_kernel_name(g.inplace.func)
                 dispatch_key = DispatchKey.parse(f'Autograd{backend}') \
                     if inplace_meta is not None and inplace_meta.is_autograd else DispatchKey.parse(backend)
                 inplace = ExternalBackendFunction(

@@ -178,6 +178,7 @@ class RegisterDispatchKey:
                 # This is needed in order for namespaced definitions to call into CPU fallbacks,
                 # which live in a different namespace.
                 if isinstance(native_or_external, ExternalBackendFunction) and native_or_external.metadata is None:
+                    # See Note [External Backends Follow Dispatcher convention]
                     kernel_name = f'{self.cpp_namespace}::AtenXlaTypeDefault::{dispatcher.name(f.func)}'
                 else:
                     kernel_name = sig.name()
@@ -262,8 +263,7 @@ namespace {{
             return f'm.impl("{f.func.name}",\n{payload});\n'
 
     def external_backend_wrapper_sig(self, f: ExternalBackendFunction) -> DispatcherSignature:
-        # See Note [External Backends Use Dispatcher Convention]
-        # TODO: add this note to the other sites where we assume dispatcher convention for external backends
+        # See Note [External Backends Follow Dispatcher convention]
         return DispatcherSignature.from_schema(f.native_function.func, prefix='wrapper_', append_overload_name=True)
 
     def gen_out_inplace_wrappers(self, g: ExternalBackendFunctionsGroup) -> List[str]:
@@ -286,6 +286,7 @@ namespace {{
             dispatcher_sig = self.external_backend_wrapper_sig(f)
             name = dispatcher_sig.name()
 
+            # See Note [External Backends Follow Dispatcher convention]
             dispatcher_order_args = dispatcher.jit_arguments(f.native_function.func)
             tensors = [a for a in dispatcher_order_args if a.type == BaseType(BaseTy.Tensor)]
             print_args_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensors])
