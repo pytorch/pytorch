@@ -34,8 +34,11 @@
 #define NOCLIPBOARD
 #endif
 
-#include <dbghelp.h>
+// dbghelp seems to require windows.h.
+// clang-format off
 #include <windows.h>
+#include <dbghelp.h>
+// clang-format on
 
 #undef VOID
 #undef DELETE
