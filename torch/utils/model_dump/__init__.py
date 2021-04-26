@@ -51,6 +51,9 @@ Possible improvements:
     - Clean up the JS.  There's a lot of copypasta because
       I don't really know how to use Preact.
     - Make the HTML render and work nicely inside a Jupyter notebook.
+    - Add the ability for JS to choose the URL to load the JSON based
+      on the page URL (query or hash).  That way we could publish the
+      inlined skeleton once and have it load various JSON blobs.
     - Add hyperlinking from data to code, and code to code.
     - Add hyperlinking from debug info to Diffusion.
     - Make small tensor contents available.

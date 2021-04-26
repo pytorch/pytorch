@@ -47,7 +47,11 @@ let blame = new Blamer();
 class Hider extends Component {
   constructor() {
     super();
-    this.state = { shown: this.props.shown === "true" };
+    this.state = { shown: null };
+  }
+
+  componentDidMount() {
+    this.setState({ shown: this.props.shown === "true" });
   }
 
   render(_, {shown}) {
