@@ -1172,7 +1172,7 @@ the **full SVD** of a matrix
 .. math::
 
     A = U \operatorname{diag}(S) V^{\text{H}}
-    \mathrlap{\qquad U \in \mathbb{K}^{m \times m}, \Lambda \in \mathbb{R}^k, V \in \mathbb{K}^{n \times n}}
+    \mathrlap{\qquad U \in \mathbb{K}^{m \times m}, S \in \mathbb{R}^k, V \in \mathbb{K}^{n \times n}}
 
 where :math:`\operatorname{diag}(S) \in \mathbb{K}^{m \times n}`,
 :math:`V^{\text{H}}` is the conjugate transpose when :math:`V` is complex, and the transpose when :math:`V` is real-valued.
@@ -1183,7 +1183,7 @@ When `m > n` (resp. `m < n`) we can drop the last `m - n` (resp. `n - m`) column
 .. math::
 
     A = U \operatorname{diag}(S) V^{\text{H}}
-    \mathrlap{\qquad U \in \mathbb{K}^{m \times k}, \Lambda \in \mathbb{R}^k, V \in \mathbb{K}^{k \times n}}
+    \mathrlap{\qquad U \in \mathbb{K}^{m \times k}, S \in \mathbb{R}^k, V \in \mathbb{K}^{k \times n}}
 
 where :math:`\operatorname{diag}(S) \in \mathbb{K}^{k \times k}`. In this case, :math:`U` and :math:`V` also have orthonormal columns.
 
