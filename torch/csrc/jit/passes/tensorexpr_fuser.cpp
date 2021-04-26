@@ -1167,27 +1167,6 @@ class TensorExprFuser {
   }
 #undef REQ
 
-  // TODO: support constant tensors instead of setting them as input
-  void liftTensorConstantsFromFusionGroups(Node* fusion_group) {
-    auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
-    WithInsertPoint guard(fusion_group);
-    for (auto it = subgraph->block()->nodes().begin();
-         it != subgraph->block()->nodes().end();
-         ++it) {
-      auto n = *it;
-      if (n->kind() == prim::Constant &&
-          n->output()->type()->cast<TensorType>()) {
-        auto constant =
-            fusion_group->owningGraph()->insertConstant(*toIValue(n->output()));
-        fusion_group->addInput(constant);
-        auto inputToGraph = subgraph->addInput();
-        inputToGraph->setType(n->output()->type());
-        n->output()->replaceAllUsesWith(inputToGraph);
-        it.destroyCurrent();
-      }
-    }
-  }
-
   void prepareFusionGroupAndGuardOutputs(Block* block) {
     std::vector<Node*> fusion_groups;
     for (Node* n : block->nodes()) {
@@ -1200,7 +1179,6 @@ class TensorExprFuser {
     }
     for (Node* fusion_group : fusion_groups) {
       removeOutputsUsedOnlyInSize(fusion_group);
-      liftTensorConstantsFromFusionGroups(fusion_group);
       insertTypeGuard(
           fusion_group,
           [](const TensorTypePtr& t) { return t; },
