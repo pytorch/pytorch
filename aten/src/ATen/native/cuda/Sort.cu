@@ -164,7 +164,7 @@ void sortKeyValueInplace(Tensor& key,
   // we are sorting on a per-block basis
   // The constructed key/value tensor info is used to select the slice
   // we are sorting on a per-block basis
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, key.scalar_type(), "sortKeyValueInplace", [&]  {
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, key.scalar_type(), "sortKeyValueInplace", [&]  {
     if (at::cuda::detail::canUse32BitIndexMath(key)) {
       at::cuda::detail::TensorInfo<scalar_t, unsigned int> keyInfo =
         at::cuda::detail::getTensorInfo<scalar_t, unsigned int>(key);
@@ -250,7 +250,14 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   int64_t nsort = self.sizes()[dim];
 
   TORCH_CHECK(nsort <= std::numeric_limits<int>::max(),
-    "The dimension being sorted can not have more than INT_MAX elsments.");
+    "The dimension being sorted can not have more than INT_MAX elements.");
+
+  const auto self_dtype = self.dtype();
+  // FIXME: remove this check once cub sort supports bool
+  TORCH_CHECK(self_dtype != ScalarType::Bool,
+    "Sort currently does not support bool dtype on CUDA.");
+  TORCH_CHECK(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,
+    "Sort currently does not support complex dtypes on CUDA.");
 
   if (ndim == 0) {
     if (!values.defined()) {
