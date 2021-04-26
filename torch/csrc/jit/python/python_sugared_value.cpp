@@ -1146,13 +1146,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::object builtin_name =
       py::module::import("torch.jit._builtins").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {
-    std::string symbol_name = py::str(builtin_name);
-    if (symbol_name == std::string("aten::dotmv")) {
-      symbol_name = "aten::addmv";
-    }
-    //std::cout << py::str(builtin_name) << "\n";
     return std::make_shared<BuiltinFunction>(
-        Symbol::fromQualString(symbol_name), c10::nullopt);
+        Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
   }
 
   if (py::cast<bool>(py::module::import("torch._jit_internal")

@@ -378,8 +378,6 @@
     CompositeExplicitAutograd: add_
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  alias: dotmv
-  alias_python_module: special
   structured_delegate: addmv.out
   variants: function, method
 
@@ -1643,6 +1641,7 @@
   device_guard: False
 
 - func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  alias: identity #with no namespace, will work for all overloads
 
 - func: eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 

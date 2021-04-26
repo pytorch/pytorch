@@ -138,16 +138,16 @@ def is_py_torch_function(f: NativeFunction) -> bool:
     return f.python_module is None and Variant.function in f.variants
 
 def is_py_nn_function(f: NativeFunction) -> bool:
-    return f.python_module == 'nn' or f.alias_python_module == 'nn'
+    return f.python_module == 'nn'
 
 def is_py_fft_function(f: NativeFunction) -> bool:
-    return f.python_module == 'fft' or f.alias_python_module == 'fft'
+    return f.python_module == 'fft'
 
 def is_py_linalg_function(f: NativeFunction) -> bool:
-    return f.python_module == 'linalg' or f.alias_python_module == 'linalg'
+    return f.python_module == 'linalg'
 
 def is_py_special_function(f: NativeFunction) -> bool:
-    return f.python_module == 'special' or f.alias_python_module == 'special'
+    return f.python_module == 'special'
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -643,17 +643,10 @@ def method_def(
     if module == "torch":
         flags += ' | METH_STATIC'
 
-    names: List[str] = []#[name,]
+    names: List[str] = [name,]
 
-    module_split: Optional[List[str]] = module.split('.') if module is not None else None
-    module_str: Optional[str] = module_split[len(module_split)-1] if module_split is not None else None
     for o in overloads:
-        if (o.function.python_module is None and module == "torch") or \
-           o.function.python_module == module_str or method:
-            names.append(str(name))
-        if o.function.alias is not None and \
-           ((o.function.alias_python_module is None and module == "torch") or \
-           o.function.alias_python_module == module_str or method):
+        if o.function.alias is not None:
             names.append(o.function.alias)
     names_set = set(names)
 
