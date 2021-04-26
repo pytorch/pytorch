@@ -2955,7 +2955,6 @@ void TensorExprKernel::compile() {
   nInputs_ = graph_->inputs().size();
   genInputDebugNames();
   for (auto const& input : graph_->inputs()) {
-    inputTypes_.push_back(input->type());
     if (Tensor* t = bindInput(input)) {
       block->append_stmt(t->stmt());
     }
