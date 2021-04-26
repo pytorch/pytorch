@@ -211,6 +211,15 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return initializer_;
   };
 
+  bool hasConstantDims() const {
+    for (auto d : dims_) {
+      if (!d->isConstant()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
  private:
   const Var* base_handle_;
   std::vector<const Expr*> dims_;
