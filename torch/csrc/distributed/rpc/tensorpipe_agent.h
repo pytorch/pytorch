@@ -90,12 +90,14 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
       optional<std::vector<std::string>> channels,
       float rpc_timeout,
       std::string init_method,
-      std::unordered_map<std::string, tensorpipe::DeviceMap> device_maps = {})
+      std::unordered_map<std::string, tensorpipe::DeviceMap> device_maps = {},
+      std::vector<c10::DeviceIndex> devices = {})
       : RpcBackendOptions(rpc_timeout, init_method),
         numWorkerThreads(numWorkerThreads),
         transports(std::move(transports)),
         channels(std::move(channels)),
-        deviceMaps(std::move(device_maps)) {
+        deviceMaps(std::move(device_maps)),
+        devices(std::move(devices)) {
     TORCH_CHECK(
         numWorkerThreads > 0,
         "num_worker_threads must be positive, got ",
@@ -138,6 +140,7 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
   const optional<std::vector<std::string>> transports;
   const optional<std::vector<std::string>> channels;
   std::unordered_map<std::string, tensorpipe::DeviceMap> deviceMaps;
+  std::vector<c10::DeviceIndex> devices;
 };
 
 // Struct to track the network source metrics
@@ -193,9 +196,7 @@ class TensorPipeAgent : public RpcAgent {
   std::vector<WorkerInfo> getWorkerInfos() const override;
   void setReverseDeviceMaps(
       const std::unordered_map<std::string, tensorpipe::DeviceMap>&
-          reverseDeviceMaps) {
-    reverseDeviceMaps_ = reverseDeviceMaps;
-  }
+          reverseDeviceMaps);
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
@@ -283,15 +284,18 @@ class TensorPipeAgent : public RpcAgent {
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
-    AtomicJitFuture(bool noCuda = true) {
+    explicit AtomicJitFuture(
+        const std::vector<c10::DeviceIndex>& devices,
+        bool noCuda = true) {
 #ifdef USE_CUDA_NOT_ROCM
       if (!noCuda) {
-        jitFuture =
-            std::make_shared<at::cuda::CUDAFuture>(at::AnyClassType::get());
+        jitFuture = std::make_shared<at::cuda::CUDAFuture>(
+            at::AnyClassType::get(), devices);
       } else {
 #else
       {
 #endif
+        TORCH_INTERNAL_ASSERT(devices.empty());
         jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
       }
     }
@@ -317,6 +321,10 @@ class TensorPipeAgent : public RpcAgent {
 
   const TensorPipeRpcBackendOptions opts_;
   std::unordered_map<std::string, tensorpipe::DeviceMap> reverseDeviceMaps_;
+  // Local devices used by this agent. If application didn't specify this
+  // field, it will be initialized using corresponding local devices in
+  // opts_.deviceMaps and reverseDeviceMaps_;
+  std::vector<c10::DeviceIndex> devices_;
 
   ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;
