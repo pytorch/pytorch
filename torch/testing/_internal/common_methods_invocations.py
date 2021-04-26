@@ -2669,6 +2669,22 @@ def sample_inputs_polygamma(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
+def sample_inputs_mvlgamma(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    tensor_shapes = ((S, S), ())
+    ns = (1, 2, 3, 4, 5)
+
+    def compute_min_val(d):
+        return (d - 1.) / 2
+
+    def generator():
+        for shape, n in product(tensor_shapes, ns):
+            min_val = compute_min_val(n)
+            yield SampleInput(make_arg(shape, low=min_val), args=(n,))
+
+    return list(generator())
+
+
 def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
     low, _ = op_info.domain
 
@@ -3131,6 +3147,14 @@ def reference_polygamma(x, n):
     # Thus we cast output to the default torch dtype.
     np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
     return scipy.special.polygamma(n, x).astype(np_dtype)
+
+
+def reference_mvlgamma(x, d):
+    if x.dtype == np.float16:
+        return scipy.special.multigammaln(x, d).astype(np.float16)
+
+    return scipy.special.multigammaln(x, d)
+
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     """Gradcheck wrapper for functions that take Hermitian matrices as input.
@@ -4317,6 +4341,100 @@ op_db: List[OpInfo] = [
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_mode,),
+    UnaryUfuncInfo('mvlgamma',
+                   ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
+                   variant_test_name='mvlgamma_p_1',
+                   domain=(1e-4, float('inf')),
+                   decorators=(precisionOverride({torch.float16: 5e-2}),),
+                   dtypes=floating_types(),
+                   dtypesIfCPU=floating_types(),
+                   dtypesIfCUDA=floating_types_and(torch.half),
+                   sample_inputs_func=sample_inputs_mvlgamma,
+                   supports_out=False,
+                   skips=(
+                       # outside domain values are hard error for mvlgamma op.
+                       SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
+                   ),
+                   sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
+    UnaryUfuncInfo('mvlgamma',
+                   ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
+                   variant_test_name='mvlgamma_p_2',
+                   domain=(0.6, float('inf')),
+                   decorators=(precisionOverride({torch.float16: 5e-2}),),
+                   dtypes=floating_types(),
+                   dtypesIfCPU=floating_types(),
+                   dtypesIfCUDA=floating_types_and(torch.half),
+                   sample_inputs_func=sample_inputs_mvlgamma,
+                   supports_out=False,
+                   skips=(
+                       # Redundant tests
+                       SkipInfo('TestGradients'),
+                       SkipInfo('TestOpInfo'),
+                       SkipInfo('TestCommon'),
+                       # outside domain values are hard error for mvlgamma op.
+                       SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
+                   ),
+                   sample_kwargs=lambda device, dtype, input: ({'p': 2}, {'d': 2})),
+    UnaryUfuncInfo('mvlgamma',
+                   ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
+                   domain=(1.1, float('inf')),
+                   decorators=(precisionOverride({torch.float16: 5e-2}),),
+                   variant_test_name='mvlgamma_p_3',
+                   dtypes=floating_types(),
+                   dtypesIfCPU=floating_types(),
+                   dtypesIfCUDA=floating_types_and(torch.half),
+                   sample_inputs_func=sample_inputs_mvlgamma,
+                   supports_out=False,
+                   skips=(
+                       # Redundant tests
+                       SkipInfo('TestGradients'),
+                       SkipInfo('TestOpInfo'),
+                       SkipInfo('TestCommon'),
+                       # outside domain values are hard error for mvlgamma op.
+                       SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
+                   ),
+                   sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
+    UnaryUfuncInfo('mvlgamma',
+                   ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
+                   domain=(1.6, float('inf')),
+                   decorators=(precisionOverride({torch.float16: 5e-2}),),
+                   variant_test_name='mvlgamma_p_4',
+                   dtypes=floating_types(),
+                   dtypesIfCPU=floating_types(),
+                   dtypesIfCUDA=floating_types_and(torch.half),
+                   sample_inputs_func=sample_inputs_mvlgamma,
+                   supports_out=False,
+                   skips=(
+                       # Redundant tests
+                       SkipInfo('TestGradients'),
+                       SkipInfo('TestOpInfo'),
+                       SkipInfo('TestCommon'),
+                       # outside domain values are hard error for mvlgamma op.
+                       SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
+                   ),
+                   sample_kwargs=lambda device, dtype, input: ({'p': 4}, {'d': 4})),
+    UnaryUfuncInfo('mvlgamma',
+                   ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
+                   domain=(2.1, float('inf')),
+                   variant_test_name='mvlgamma_p_5',
+                   decorators=(precisionOverride({torch.float16: 5e-2}),),
+                   dtypes=floating_types(),
+                   dtypesIfCPU=floating_types(),
+                   dtypesIfCUDA=floating_types_and(torch.half),
+                   sample_inputs_func=sample_inputs_mvlgamma,
+                   supports_out=False,
+                   skips=(
+                       # Redundant tests
+                       SkipInfo('TestGradients'),
+                       SkipInfo('TestOpInfo'),
+                       SkipInfo('TestCommon'),
+                       # outside domain values are hard error for mvlgamma op.
+                       SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
+                   ),
+                   sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
     OpInfo('ne',
            aliases=('not_equal',),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -5587,10 +5705,6 @@ def method_tests():
         ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs_coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs', (True, ['aten::add', 'aten::mm'])),
         ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs_coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('mvlgamma', torch.empty(S,).uniform_(0.5, 1), [1], "p=1"),
-        ('mvlgamma', torch.empty(S,).uniform_(1, 2), [2], "p=2"),
-        ('mvlgamma', torch.empty(S, S).uniform_(1.5, 3), [3], "p=3"),
-        ('mvlgamma', torch.empty(S, S).uniform_(2.5, 5), [5], "p=5"),
         ('zero_', (S, S, S), NO_ARGS),
         ('zero_', (), NO_ARGS, 'scalar'),
         ('norm', (S, S), (), 'default'),
