@@ -217,7 +217,6 @@ class TestMisc(PackageTestCase):
         self.assertTrue(imported_mod.is_from_package())
         self.assertFalse(mod.is_from_package())
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "sentencepiece not available in fbcode")
     def test_broken_modules(self):
         """
         When created with raise_packaging_errors=True, PackageExporter
@@ -232,7 +231,7 @@ class TestMisc(PackageTestCase):
                 dedent(
                     """\
                     import os
-                    import sentencepiece
+                    import mkl
 
                     def fn():
                         pass
@@ -242,7 +241,7 @@ class TestMisc(PackageTestCase):
 
         broken_modules = [module.name for module in pe.broken_modules]
         self.assertEqual(len(broken_modules), 3)
-        self.assertIn("_sentencepiece", broken_modules)
+        self.assertIn("mkl._mklinit", broken_modules)
 
         for module in pe.broken_modules:
             self.assertRegex(module.reason, r"could not be found")
