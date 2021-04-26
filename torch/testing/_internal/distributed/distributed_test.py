@@ -97,6 +97,7 @@ PROFILING_SUPPORTED_BACKENDS = [
 CUDA_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
     dist.Backend.MPI,
+    dist.Backend.NCCL,
 ]
 
 # Allowlist of distributed backends where profiling is supported for p2p ops
@@ -1670,6 +1671,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_all_reduce_sum_cuda(self):
+            torch.cuda.set_device(self.rank)
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
             self._test_all_reduce_helper(
@@ -1690,6 +1692,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_all_reduce_sum_cuda_async(self):
+            torch.cuda.set_device(self.rank)
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
             self._test_all_reduce_helper(
@@ -1734,6 +1737,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_all_reduce_sum_cuda_complex(self):
+            torch.cuda.set_device(self.rank)
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
             self._test_all_reduce_helper(
