@@ -881,6 +881,26 @@ def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
                                      low=None, high=None,
                                      requires_grad=requires_grad))),)
 
+
+def sample_inputs_transpose_swapdims(self, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((1, 2, 3), (-1, -2)),
+             ((1, 2, 3), (-1, 2)),
+             ((1, 2, 3), (1, -2)),
+             ((1, 2, 3), (1, 2)),
+             ((), (0, 0)),
+             ((1, ), (0, 0)),
+             ((M, M), (0, 1)),
+             ((S, S, S), (2, 0)), )
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
+
+
 def sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates always invertible input for linear algebra ops using
@@ -2040,6 +2060,33 @@ def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
     return list(generate_samples())
 
 
+def sample_inputs_roll(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    args = ((0, 0), (1, 2), (0, 2), (2, 0), (-1, 0), (10000, 1), (2,), ((1, 2, -1), (0, 1, 2)))
+
+    def generator():
+        for arg in args:
+            yield SampleInput(make_arg((S, S, S)), args=arg)
+
+    return list(generator())
+
+
+def sample_inputs_rot90(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    args = ((1, (0, 1),),
+            (1, (1, 2),),
+            (1, (1, -1),),
+            ())
+
+    def generator():
+        for arg in args:
+            yield SampleInput(make_arg((S, S, S)), args=arg)
+
+    return list(generator())
+
+
 def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     tensor_nd = make_tensor((S, S, S), device=device, dtype=dtype,
                             low=None, high=None, requires_grad=requires_grad)
@@ -2142,6 +2189,22 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
         out.append(SampleInput(a, kwargs=kwargs, output_process_fn_grad=out_fn))
 
     return out
+
+
+def sample_inputs_permute(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = [((1, 2, 3, 4), (0, 2, 3, 1)),
+             ((1, 2, 3, 4), (0, -2, -1, 1)),
+             ((), ()),
+             ((1, 2, 3, 4), (2, 1, 3, 0))]
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=(args,))
+
+    return list(generator())
+
 
 # Based on erstwhile method_tests tests & some tensor_op_tests for pow
 def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
@@ -4282,6 +4345,12 @@ op_db: List[OpInfo] = [
            aliases=('ger', ),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_outer,),
+    OpInfo('permute',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_permute),
     OpInfo('pow',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_pow,
@@ -4345,6 +4414,16 @@ op_db: List[OpInfo] = [
                        # Skip since real and imag don't have out variants.
                        SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                    )),
+    OpInfo('roll',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           dtypesIfROCM=all_types_and_complex_and(torch.bool, torch.half),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_roll),
+    OpInfo('rot90',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_rot90),
     UnaryUfuncInfo('round',
                    ref=np.round,
                    dtypes=floating_types_and(torch.half),
@@ -5067,6 +5146,12 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_out=False,
            sample_inputs_func=sample_inputs_trace),
+    OpInfo('transpose',
+           aliases=('swapdims', 'swapaxes'),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_transpose_swapdims),
     OpInfo('kron',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -5417,21 +5502,6 @@ def method_tests():
         ('float_power', torch.rand(S, S, S) + 1e-3, (uniform_scalar(0.1),), 'scalar_broadcast_rhs'),
         ('float_power', uniform_scalar(1e-3, requires_grad=True), (torch.rand(S, S, S) + 0.1,), 'scalar_broadcast_lhs'),
         ('float_power', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant'),
-        ('transpose', (1, 2, 3), (1, 2), 'dim', (False,), [0, 1]),
-        ('transpose', (), (0, 0), 'scalar', (False,)),
-        ('transpose', (1,), (0, 0), '1d', (False,)),
-        ('transpose', (L, L), (0, 1), '2d', (False,)),
-        ('transpose', (S, S, S), (2, 0), '3d', (False,)),
-        ('swapdims', (1, 2, 3), (1, 2), 'dim', (False,), [0, 1]),
-        ('swapdims', (), (0, 0), 'scalar', (False,)),
-        ('swapdims', (1,), (0, 0), '1d', (False,)),
-        ('swapdims', (L, L), (0, 1), '2d', (False,)),
-        ('swapdims', (S, S, S), (2, 0), '3d', (False,)),
-        ('swapaxes', (1, 2, 3), (1, 2), 'dim', (False,), [0, 1]),
-        ('swapaxes', (), (0, 0), 'scalar', (False,)),
-        ('swapaxes', (1,), (0, 0), '1d', (False,)),
-        ('swapaxes', (L, L), (0, 1), '2d', (False,)),
-        ('swapaxes', (S, S, S), (2, 0), '3d', (False,)),
         ('t', (1, 2), NO_ARGS, '', (False,)),
         ('view', (S, S, S), (S * S, S), '', (False,)),
         ('view', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
@@ -5447,18 +5517,6 @@ def method_tests():
         ('reshape_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
         ('reshape_as', (), (non_differentiable(torch.tensor(42.)),), 'scalar'),
         ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
-        ('roll', (S, S, S), (0, 0), 'd0'),
-        ('roll', (S, S, S), (1, 2), 'd12'),
-        ('roll', (S, S, S), (0, 2,), 'd02'),
-        ('roll', (S, S, S), (2, 0,), 'd20'),
-        ('roll', (S, S, S), (-1, 0), 'neg_shift'),
-        ('roll', (S, S, S), (10000, 1), 'loop_shift'),
-        ('roll', (S, S, S), (2,), 'flattened'),
-        ('roll', (S, S, S), ([1, 2, -1], [0, 1, 2]), 'three_dims'),
-        ('rot90', (S, S, S), (1, [0, 1],), 'k1_d01'),
-        ('rot90', (S, S, S), (1, [1, 2],), 'k1_d12'),
-        ('rot90', (S, S, S), (1, [1, -1],), 'k1_neg_d'),
-        ('rot90', (S, S, S), (), 'default'),
         ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
         ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
         ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
@@ -5606,9 +5664,6 @@ def method_tests():
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
         ('fill_', (S, S, S), ((),), 'variable'),
-        ('permute', (1, 2, 3, 4), (0, 2, 3, 1), '', (True,)),
-        ('permute', (1, 2, 3, 4), (0, -2, -1, 1), 'neg_dim', (True,)),
-        ('permute', (), (dont_convert(()),), 'scalar', (True,)),
         ('select', (S, S, S), (1, 2), 'dim', (), [0]),
         ('select', (S, S, S), (1, -1), 'wrap_dim', (), [0]),
         ('select', (S,), (0, 2), '1d'),
