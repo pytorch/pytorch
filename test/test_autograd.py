@@ -4246,9 +4246,12 @@ class TestAutograd(TestCase):
         self.assertEqual(jacobian[0], 2 * torch.eye(4))
 
         with self.assertWarnsRegex(UserWarning, "get_numerical_jacobian was part of PyTorch's private API"):
-            jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6)
+            jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6, grad_out=1)
         self.assertEqual(jacobian[0], 2 * torch.eye(4))
         self.assertEqual(jacobian[1], 1 * torch.eye(4))
+
+        with self.assertRaisesRegex(ValueError, "Expected grad_out to be 1.0"):
+            jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6, grad_out=2.0)
 
     def test_gradcheck_get_analytical_jacobian(self):
         from torch.autograd.gradcheck import get_analytical_jacobian
@@ -4280,6 +4283,9 @@ class TestAutograd(TestCase):
         with self.assertWarnsRegex(UserWarning, "get_analytical_jacobian was part of PyTorch's private API"):
             jacobians, reentrant, correct_grad_sizes, correct_grad_types = get_analytical_jacobian((a,), outputs)
         self.assertFalse(reentrant)
+
+        with self.assertRaisesRegex(ValueError, "Expected grad_out to be 1.0"):
+            jacobians, _, _, _ =  get_analytical_jacobian((a,), outputs, grad_out=2.0)
 
     def test_gradcheck_custom_error(self):
         from torch.autograd.gradcheck import GradcheckError
