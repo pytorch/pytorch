@@ -1,11 +1,13 @@
 #include <torch/csrc/jit/mobile/import.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
@@ -696,6 +698,46 @@ std::set<std::string> _export_operator_list(
     }
   }
   return operator_list;
+}
+
+std::map<std::string, OperatorInfo> _export_operators_and_info(
+    torch::jit::mobile::Module& module) {
+  std::map<std::string, OperatorInfo> operator_map;
+
+  for (Method func : module.get_methods()) {
+    const Function& function = func.function();
+    const std::shared_ptr<Code> cptr = function.get_code();
+    // op_names below isn't a list of unique operator names. In fact
+    // it can contain the same operator name many many times, so we need
+    // to de-dup the list by adding all the operator names into
+    // our map and attaching the appropriate info
+    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    for (auto& op_name : op_names) {
+      if (operator_map.find(toString(op_name)) == operator_map.end()) {
+        int num_args = -1;
+
+        // new op lets try the dispatcher first to find a schema
+        auto op_handle = c10::Dispatcher::singleton().findSchema(op_name);
+        if (op_handle) {
+          num_args = op_handle->schema().arguments().size();
+        } else {
+          // No luck in the dispatcher lets try jit ops
+          auto jitOperators = torch::jit::getAllOperators();
+          for (const auto& full_op : jitOperators) {
+            auto op = full_op->schema();
+            std::string jit_op_name = op.overload_name().size() != 0
+                ? op.name() + "." + op.overload_name()
+                : op.name();
+            if (jit_op_name == toString(op_name)) {
+              num_args = op.arguments().size();
+            }
+          }
+        }
+        operator_map.emplace(toString(op_name), OperatorInfo{num_args});
+      }
+    }
+  }
+  return operator_map;
 }
 
 } // namespace mobile

@@ -74,6 +74,10 @@ void _load_extra_only_for_mobile(
 
 namespace mobile {
 
+struct OperatorInfo {
+  int num_args;
+};
+
 /**
  * Given a torch::jit::mobile::Module, return a set of operator names
  * (with overload name) that are used by any method in this mobile
@@ -85,6 +89,9 @@ namespace mobile {
  *
  */
 TORCH_API std::set<std::string> _export_operator_list(
+    torch::jit::mobile::Module& module);
+
+TORCH_API std::map<std::string, OperatorInfo> _export_operators_and_info(
     torch::jit::mobile::Module& module);
 
 } // namespace mobile
