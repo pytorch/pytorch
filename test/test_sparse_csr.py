@@ -26,6 +26,8 @@ class TestSparseCSR(TestCase):
                                          torch.tensor(values), dtype=dtype, device=device)
         self.assertEqual(torch.tensor(crow_indices, dtype=torch.int64), sparse.crow_indices())
         self.assertEqual((len(crow_indices) - 1, max(col_indices) + 1), sparse.shape)
+        self.assertEqual(dtype, sparse.dtype)
+        self.assertEqual(torch.device(device), sparse.device)
 
     @onlyCPU
     @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False,
@@ -180,16 +182,21 @@ class TestSparseCSR(TestCase):
         self.assertEqual(coo.matmul(vec), csr.matmul(vec))
 
     @onlyCPU
-    @dtypes(torch.double)
+    @dtypes(torch.float, torch.double)
     def test_mkl_matvec_warnings(self, device, dtype):
         if torch.has_mkl:
-            sp = torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),
-                                         torch.tensor([0, 1, 0, 1]),
-                                         torch.tensor([1, 2, 3, 4], dtype=dtype, device=device))
-            vec = torch.randn((2, 1), dtype=dtype, device=device)
-            with warnings.catch_warnings(record=True) as w:
-                sp.matmul(vec)
-                self.assertEqual(len(w), 2)
+            for index_dtype in [torch.int32, torch.int64]:
+                sp = torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),
+                                             torch.tensor([0, 1, 0, 1]),
+                                             torch.tensor([1, 2, 3, 4], dtype=dtype, device=device))
+                vec = torch.randn((2, 1), dtype=dtype, device=device)
+                with warnings.catch_warnings(record=True) as w:
+                    sp.matmul(vec)
+                    self.assertEqual(len(w), 2)
+                    self.assertIn("Pytorch is compiled with MKL LP64 and will convert crow_indices to int32",
+                                  str(w[0].message))
+                    self.assertIn("Pytorch is compiled with MKL LP64 and will convert col_indices to int32",
+                                  str(w[1].message))
 
     @dtypes(torch.double)
     def test_dense_convert_error(self, device, dtype):
