@@ -28,8 +28,7 @@ where :math:`L` is a lower triangular matrix and
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
 
-.. note:: This function uses LAPACK's and MAGMA's `potrf` for CPU and CUDA inputs respectively.
-          For CUDA inputs, this function synchronizes that device with the CPU.
+.. note:: For CUDA inputs, this function synchronizes that device with the CPU.
 
 .. seealso::
 
@@ -112,11 +111,7 @@ the inverse is unique.
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
 
-.. note:: This function is computed using LAPACK's `getrf` and `getri` for CPU inputs.
-          For CUDA inputs, cuSOLVER's `getrf` and `getrs` as well as cuBLAS' `getrf`
-          and `getri` are used if CUDA version >= 10.1.243, otherwise MAGMA's `getrf`
-          and `getri` are used instead.
-          For CUDA inputs, this function synchronizes that device with the CPU.
+.. note:: For CUDA inputs, this function synchronizes that device with the CPU.
 
 .. seealso::
 
@@ -292,8 +287,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
 .. note:: The eigenvalues and eigenvectors of a real matrix may be complex.
 
-.. note:: This function is computed using LAPACK's and MAGMA's `geev` for CPU and CUDA inputs,
-          respectively. For CUDA inputs, this function synchronizes that device with the CPU.
+.. note:: For CUDA inputs, this function synchronizes that device with the CPU.
 
 .. warning:: The eigenvectors of a matrix are not unique, nor are they continuous with respect to
              :attr:`A`. Due to this lack of uniqueness, different hardware and software may compute
@@ -382,9 +376,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
           The eigenvalues of a matrix are always well-defined, even when the matrix is not diagonalizable.
 
-.. note:: This function is computed using LAPACK's and MAGMA's `geev` for CPU and CUDA inputs,
-          respectively.
-          For CUDA inputs, this function synchronizes that device with the CPU.
+.. note:: For CUDA inputs, this function synchronizes that device with the CPU.
 
 .. note:: This function is not differentiable. If you need differentiability use
           :func:`torch.linalg.eig` instead, which also computes the eigenvectors.
@@ -435,10 +427,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
 The eigenvalues are returned in ascending order.
 
-.. note:: If the inputs are symmetric, this function is computed using LAPACK's and MAGMA's
-          `syevd` for CPU and CUDA inputs,
-          If the inputs are Hermitian, it is computed using LAPACK's and MAGMA's `heevd`.
-          For CUDA inputs, this function synchronizes that device with the CPU.
+.. note:: For CUDA inputs, this function synchronizes that device with the CPU.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
@@ -545,9 +534,7 @@ The eigenvalues are returned in ascending order.
 - If :attr:`UPLO`\ `= 'L'` (default), only the lower triangular part of the matrix is used in the computation.
 - If :attr:`UPLO`\ `= 'U'`, only the upper triangular part of the matrix is used.
 
-.. note:: This function is computed using LAPACK's and MAGMA's `syevd` / `heevd` for
-          CPU and CUDA symmetric / Hermitian inputs respectively.
-          For CUDA inputs, this function synchronizes that device with the CPU.
+.. note:: For CUDA inputs, this function synchronizes that device with the CPU.
 
 .. note:: This function is not differentiable. If you need differentiability use
           :func:`torch.linalg.eigh` instead, which also computes the eigenvectors.
@@ -615,9 +602,6 @@ See `Representation of Orthogonal or Unitary Matrices`_ for further details.
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
-
-.. note:: This function is computed using LAPACK's `orgqr` for CPU inputs,
-          and cuSOLVER's `orgqr` for CUDA inputs if CUDA version >= 10.1.243.
 
 .. note:: This function only uses the values strictly below the main diagonal of :attr:`A`.
           The other values are ignored.
@@ -1208,10 +1192,6 @@ Differences with `numpy.linalg.svd`:
 .. note:: When :attr:`full_matrices`\ `= True`, the gradients with respect to `U[..., :, min(m, n):]`
           and `Vh[..., min(m, n):, :]` will be ignored, as those vectors can be arbitrary bases
           of the corresponding subspaces.
-
-.. note:: On CPU, this function uses LAPACK's `gesdd` instead of `gesvd` for speed.
-          On CUDA, it uses cuSOLVER's `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later,
-          and MAGMA's `gesdd` on earlier versions of CUDA.
 
 .. warning:: The returned tensors `U` and `V` are not unique, nor are they continuous with
              respect to :attr:`A`.
@@ -1835,8 +1815,6 @@ Differences with `numpy.linalg.qr`:
 .. note:: The elements in the diagonal of `R` are not necessarily positive.
 
 .. note:: :attr:`mode`\ `= 'r'` does not support backpropagation. Use :attr:`mode`\ `= 'reduced'` instead.
-
-.. note:: This function uses LAPACK and MAGMA for CPU and CUDA inputs respectively.
 
 .. warning:: The QR decomposition is only unique up to the sign of the diagonal of `R` when the
              first `k = min(m, n)` columns of :attr:`A` are linearly independent.
