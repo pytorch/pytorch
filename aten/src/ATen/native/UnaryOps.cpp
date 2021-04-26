@@ -322,7 +322,6 @@ Tensor imag(const Tensor& self) {
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
   auto result = at::empty_like(self, self.options());
-  result.set_conj(false);
   // conjugation is handled in `copy_()`
   return result.copy_(self);
 }
