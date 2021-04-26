@@ -3847,7 +3847,7 @@ class TestTorchDeviceType(TestCase):
     def test_copy_transpose_same_type(self, device, dtype):
         # CPU has a fast path in copy tranpose when src and dst have the same dtype
         x = torch.randn(1000, 100, dtype=dtype, device=device).t()
-        x2 = x.float() if dtype==torch.bfloat16 else x.double()
+        x2 = x.float() if dtype == torch.bfloat16 else x.double()
         y = torch.empty(100, 1000, dtype=dtype, device=device)
         y2 = torch.empty(100, 1000, dtype=dtype, device=device)
 
