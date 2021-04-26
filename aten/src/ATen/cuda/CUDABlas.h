@@ -206,7 +206,7 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
 
 template <class Dtype>
 void geqrfBatched(CUDABLAS_GEQRF_BATCHED_ARGTYPES(Dtype)) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       false,
       "at::cuda::blas::geqrfBatched: not implemented for ",
       typeid(Dtype).name());
