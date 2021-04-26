@@ -139,7 +139,7 @@ class CallbackManager {
       at::bumpRecordAllFunctions();
     }
     auto handle = next_unique_callback_handle();
-    auto& entry = sorted_global_callbacks_.emplace_back(std::move(cb), handle);
+    sorted_global_callbacks_.emplace_back(std::move(cb), handle);
     num_enabled_global_callbacks_.fetch_add(1, std::memory_order_relaxed);
     return handle;
   }
@@ -147,7 +147,7 @@ class CallbackManager {
   void removeCallback(CallbackHandle handle) {
     // This could be implemented more efficiently, but callback
     // addition/removal is not intended to run in performance-critical
-    // paths it's not thread-safe and should be done during
+    // paths (it's not thread-safe and should be done during
     // initialization).
     disableCallback(handle);
     auto found = findAndRemoveCallback(rf_tls_.sorted_tls_callbacks_, handle);
