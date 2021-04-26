@@ -462,7 +462,8 @@ class {module_name}(torch.nn.Module):
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
-        self._in_spec = self._graph._in_spec
+        if self._graph._pytree_info is not None:
+            self._in_spec = self._graph._pytree_info.in_spec
         python_code = self._graph.python_code(root_module='self')
         self._code = python_code.src
 

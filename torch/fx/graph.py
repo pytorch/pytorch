@@ -229,6 +229,13 @@ class _node_list:
     def __reversed__(self):
         return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
 
+class _PyTreeInfo(NamedTuple):
+    """
+    Contains extra info stored when we're using Pytrees
+    """
+    orig_args: List[str]
+    in_spec: TreeSpec
+
 class Graph:
     """
     ``Graph`` is the main data structure used in the FX Intermediate Representation.
@@ -283,8 +290,7 @@ class Graph:
         self._graph_namespace = _Namespace()
         self._owners = 0
         self._owning_module = owning_module
-        self._in_spec: Optional[TreeSpec] = None
-        self._orig_args: Optional[List[str]] = None
+        self._pytree_info: Optional[_PyTreeInfo] = None
 
     @property
     def owning_module(self):
@@ -927,25 +933,24 @@ class Graph:
             # have been emitted. To continue to have valid Python code, emit a
             # single pass statement
             body.append('pass\n')
-        if self._in_spec is not None:
-            assert(self._orig_args is not None)
-            orig_vars = self._orig_args
-            has_orig_self = (orig_vars[0] == 'self')
+        if self._pytree_info is not None:
+            orig_args = self._pytree_info.orig_args
+            has_orig_self = (orig_args[0] == 'self')
             if has_orig_self:
                 free_vars.insert(0, 'self')
             if len(free_vars) > 0:  # pytree has no placeholders in it
-                body.insert(0, f"{', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(orig_vars)}], self._in_spec)\n")
+                body.insert(0, f"{', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(orig_args)}], self._in_spec)\n")
         else:
-            orig_vars = free_vars
+            orig_args = free_vars
 
         # If the original function didn't have self as its first argument, we
         # would have added it.
-        if len(orig_vars) == 0 or orig_vars[0] != 'self':
-            orig_vars.insert(0, 'self')
+        if len(orig_args) == 0 or orig_args[0] != 'self':
+            orig_args.insert(0, 'self')
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""
-def forward({', '.join(orig_vars)}){maybe_return_annotation[0]}:
+def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
 {code}"""
 
         return PythonCode(fn_code,

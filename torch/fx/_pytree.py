@@ -12,7 +12,8 @@ def tree_flatten_spec(pytree: PyTree, spec: TreeSpec) -> List[Any]:
         return [pytree]
     flatten_fn_spec = SUPPORTED_NODES[spec.type]
     if flatten_fn_spec is None:
-        raise RuntimeError(f"Cannot flatten pytree {type(pytree)} from spec")
+        raise RuntimeError(
+            f"{type(pytree)} does not have a flatten_fn_spec associated with it. Please register one with torch.fx._pytree._register_pytree_flatten_spec")
     child_pytrees = flatten_fn_spec(pytree, spec)
     result = []
     for child, child_spec in zip(child_pytrees, spec.children_specs):

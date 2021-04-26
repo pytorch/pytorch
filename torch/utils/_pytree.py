@@ -29,32 +29,6 @@ PyTree = Any
 FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
 UnflattenFunc = Callable[[List, Context], PyTree]
 
-# A TreeSpec represents the structure of a pytree. It holds:
-# "type": the type of root Node of the pytree
-# context: some context that is useful in unflattening the pytree
-# children_specs: specs for each child of the root Node
-# num_leaves: the number of leaves
-class TreeSpec:
-    def __init__(self, typ: Any, context: Context, children_specs: List['TreeSpec']) -> None:
-        self.type = typ
-        self.context = context
-        self.children_specs = children_specs
-        self.num_leaves: int = sum([spec.num_leaves for spec in children_specs])
-
-    def __repr__(self) -> str:
-        return f'TreeSpec({self.type.__name__}, {self.context}, {self.children_specs})'
-
-    def __eq__(self, other: Any) -> bool:
-        result = self.type == other.type and self.context == other.context \
-            and self.children_specs == other.children_specs \
-            and self.num_leaves == other.num_leaves
-        # This should really not be necessary, but mypy errors out without it.
-        return cast(bool, result)
-
-    def __ne__(self, other: Any) -> bool:
-        return not self.__eq__(other)
-
-
 class NodeDef(NamedTuple):
     flatten_fn: FlattenFunc
     unflatten_fn: UnflattenFunc
@@ -90,6 +64,31 @@ _register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten)
 # A leaf is defined as anything that is not a Node.
 def _is_leaf(pytree: PyTree) -> bool:
     return type(pytree) not in SUPPORTED_NODES.keys()
+
+# A TreeSpec represents the structure of a pytree. It holds:
+# "type": the type of root Node of the pytree
+# context: some context that is useful in unflattening the pytree
+# children_specs: specs for each child of the root Node
+# num_leaves: the number of leaves
+class TreeSpec:
+    def __init__(self, typ: Any, context: Context, children_specs: List['TreeSpec']) -> None:
+        self.type = typ
+        self.context = context
+        self.children_specs = children_specs
+        self.num_leaves: int = sum([spec.num_leaves for spec in children_specs])
+
+    def __repr__(self) -> str:
+        return f'TreeSpec({self.type.__name__}, {self.context}, {self.children_specs})'
+
+    def __eq__(self, other: Any) -> bool:
+        result = self.type == other.type and self.context == other.context \
+            and self.children_specs == other.children_specs \
+            and self.num_leaves == other.num_leaves
+        # This should really not be necessary, but mypy errors out without it.
+        return cast(bool, result)
+
+    def __ne__(self, other: Any) -> bool:
+        return not self.__eq__(other)
 
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:

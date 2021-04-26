@@ -13,7 +13,7 @@ import torch.utils._pytree as pytree
 
 import sys
 from .node import Argument, map_aggregate
-from .graph import Graph
+from .graph import Graph, _PyTreeInfo
 from .graph_module import GraphModule
 from .proxy import TracerBase, Proxy
 
@@ -88,7 +88,14 @@ class _CPatchManager(object):
     def __exit__(self, type, value, tb):
         sys.setprofile(None)
 
-PH = object()
+class PHBase(object):
+    """
+    Object representing an input placeholder to `concrete_args`
+    """
+    def __repr__(self):
+        return 'PH'
+
+PH = PHBase()
 
 class Tracer(TracerBase):
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -355,17 +362,20 @@ class Tracer(TracerBase):
             root_fn = _patch_function(root_fn, len(args))
 
         flat_args, in_spec = pytree.tree_flatten(tuple(args))
-        if in_spec.num_leaves == len(args) and all(isinstance(i, pytree.LeafSpec) for i in in_spec.children_specs):
-            return root_fn, args
+        if not all(isinstance(i, pytree.LeafSpec) for i in in_spec.children_specs):
+            # In the case that we have pytree-flattened inputs in
+            # `concrete_args`, generate a flattening wrapper around the
+            # original root function and return that.
+            self.graph._pytree_info = _PyTreeInfo(orig_args[:total_args], in_spec)
+            self.graph._orig_args = orig_args[:total_args]
 
-        self.graph._in_spec = in_spec
-        self.graph._orig_args = orig_args[:total_args]
+            def flatten_fn(*args):
+                tree_args = pytree.tree_unflatten(list(args), in_spec)
+                return root_fn(*tree_args)
 
-        def flatten_fn(*args):
-            tree_args = pytree.tree_unflatten(list(args), in_spec)
-            return root_fn(*tree_args)
+            return flatten_fn, flat_args
 
-        return flatten_fn, flat_args
+        return root_fn, args
 
 
     def _module_getattr(self, attr, attr_val, parameter_proxy_cache):

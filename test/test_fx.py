@@ -2345,9 +2345,6 @@ class TestFX(JitTestCase):
             (f_custom_dict, Foo({'a': PH, 'b': PH}, PH)),
             # (f_return_custom, Foo(PH, PH)), # Don't currently support output pytrees
         ]
-        val = {'a': PH, 'z': []}
-        # spec = pytree.tree_flatten(val)[1]
-        # print(pytree.tree_flatten_spec(val, spec))
 
         def verify_pytree(f, inp):
             val = pytree.tree_map(inp, lambda x: torch.randn(3) if x == PH else x)
