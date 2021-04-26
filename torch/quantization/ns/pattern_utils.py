@@ -95,6 +95,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             torch.add,
             toq.add,
             operator.add,  # x + y
+            toq.add_relu,
         ]),
         # cat
         'torch.cat': set([
@@ -106,6 +107,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             torch.mul,
             toq.mul,
             operator.mul,
+            toq.mul_relu,
         ]),
         # relu
         'torch.relu': set([
