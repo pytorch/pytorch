@@ -4145,7 +4145,7 @@ class TestAutograd(TestCase):
             self.assertFalse(gradcheck(fn, (x,), raise_exception=False, fast_mode=fast_mode))
 
             x_c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
-            with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
+            with self.assertRaisesRegex(RuntimeError, 'While considering the imaginary part of complex outputs only'):
                 gradcheck(fn, (x_c,), fast_mode=False)
             self.assertFalse(gradcheck(fn, (x_c,), raise_exception=False, fast_mode=False))
 
@@ -4154,7 +4154,7 @@ class TestAutograd(TestCase):
                 y.register_hook(lambda x: x + 1e-2)
                 return y
             x = torch.ones(2, 2, requires_grad=True)
-            with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
+            with self.assertRaisesRegex(RuntimeError, 'While considering the imaginary part of complex outputs only'):
                 gradcheck(fn2, (x,), fast_mode=False)
             self.assertFalse(gradcheck(fn2, (x,), raise_exception=False, fast_mode=False))
 
