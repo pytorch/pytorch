@@ -223,9 +223,17 @@ bool ReadyQueue::empty() const {
 
 Engine::Engine() : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_count_(0) {}
 
+Engine::~Engine() {
+  stop();
+}
+
 // Send shutdown tasks to all device_ready_queues_ if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest priority
-Engine::~Engine() {
+void Engine::stop() {
+  if (stopped_) {
+    return;
+  }
+  stopped_ = true;
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
   auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
