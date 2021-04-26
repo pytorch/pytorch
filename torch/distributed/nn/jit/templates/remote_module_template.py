@@ -48,9 +48,9 @@ def _remote_forward(
     # and a device map is explicitly provided to TensorPipe backend,
     # we can leave the forward output on CUDA device and avoid the post-processing here.
     ret = ()
-    for arg in module.forward(*out_args, {kwargs}):
-        arg = (arg.cpu(),) if isinstance(arg, Tensor) else (arg,)
-        ret = ret + arg
+    for i in module.forward(*out_args, {kwargs}):
+        i = (i.cpu(),) if isinstance(i, Tensor) else (i,)
+        ret = ret + i
     return ret
 
 
