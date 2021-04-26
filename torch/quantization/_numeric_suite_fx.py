@@ -23,9 +23,10 @@ from .ns.graph_passes import (
 from .ns.ns_types import (
     NSSingleResultValuesType,
     NSResultsType,
+    NSNodeTargetType,
 )
 
-from typing import Dict, Tuple, Callable, List
+from typing import Dict, Tuple, Callable, List, Optional, Set
 
 RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 
@@ -132,8 +133,10 @@ def _extract_weights_impl(
     gm_a: GraphModule,
     model_name_b: str,
     gm_b: GraphModule,
+    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> NSResultsType:
-    matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
+    matched_subgraph_pairs = get_matching_subgraph_pairs(
+        gm_a, gm_b, base_name_to_sets_of_related_ops)
 
     # split the subgraph pairs into one data structure for each model
     nodes_and_names_to_instrument_a: List[Tuple[Node, str]] = []
@@ -158,6 +161,7 @@ def extract_weights(
     model_a: nn.Module,
     model_name_b: str,
     model_b: nn.Module,
+    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> NSResultsType:
     base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
@@ -170,7 +174,8 @@ def extract_weights(
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    return _extract_weights_impl(model_name_a, gm_a, model_name_b, gm_b)
+    return _extract_weights_impl(
+        model_name_a, gm_a, model_name_b, gm_b, base_name_to_sets_of_related_ops)
 
 
 def _add_loggers_one_model(
@@ -203,8 +208,11 @@ def _add_loggers_impl(
     gm_b: GraphModule,
     logger_cls: Callable,
     should_log_inputs: bool,
+    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> Tuple[nn.Module, nn.Module]:
-    matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
+    matched_subgraph_pairs = get_matching_subgraph_pairs(
+        gm_a, gm_b,
+        base_name_to_sets_of_related_ops)
     nodes_and_names_to_instrument_inputs_a = []
     nodes_and_names_to_instrument_inputs_b = []
     nodes_and_names_to_instrument_outputs_a = []
@@ -236,6 +244,7 @@ def add_loggers(
     model_b: nn.Module,
     logger_cls: Callable,
     should_log_inputs : bool = False,
+    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> Tuple[nn.Module, nn.Module]:
     # TODO(future PR): expose these
     skipped_module_names: List[str] = []
@@ -246,7 +255,8 @@ def add_loggers(
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
     return _add_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
-        should_log_inputs=should_log_inputs)
+        should_log_inputs=should_log_inputs,
+        base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
 
 
 def _extract_logger_info_one_model(
