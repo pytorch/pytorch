@@ -7,6 +7,7 @@ import torch.distributed.rpc as rpc
 from torch import Tensor
 from torch._jit_internal import Future
 from torch.distributed.rpc import RRef
+from typing import List, Tuple, Any
 
 
 {assign_module_interface_cls}
@@ -20,19 +21,20 @@ def _remote_forward(
     module = module_rref.local_value()
     device = torch.device(device)
 
+    return module.forward({args}, {kwargs})
+
     if device.type != "cuda":
         return module.forward({args}, {kwargs})
 
     # If the module is on a cuda device,
     # move any CPU tensor in args or kwargs to the same cuda device.
     # Since torch script does not support generator expression,
-    # have to use tuple concatenation instead of
-    # ``tuple(i.to(device) if isinstance(i, Tensor) else i for i in *args)``.
+    # have to use concatenation instead of
+    # ``list(i.to(device) if isinstance(i, Tensor) else i for i in *args)``.
     args = ({args},)
-    out_args = ()
+    out_args: List[Any] = []
     for arg in args:
-        arg = (arg.to(device),) if isinstance(arg, Tensor) else (arg,)
-        out_args = out_args + arg
+        out_args.append((arg.to(device),) if isinstance(arg, Tensor) else (arg,))
 
     kwargs = {{{kwargs}}}
     for k, v in kwargs.items():
@@ -42,12 +44,12 @@ def _remote_forward(
     # Since only CPU tensors are allowed to send over wire,
     # need to move any GPU tensor to CPU in the output.
     # Since torch script does not support generator expression,
-    # have to use tuple concatenation instead of
+    # have to use concatenation instead of
     # ``tuple(i.cpu() if isinstance(i, Tensor) else i for i in module.forward(*out_args, {kwargs}))``.
     # TODO: Once process group RPC backend is deprecated,
     # and a device map is explicitly provided to TensorPipe backend,
     # we can leave the forward output on CUDA device and avoid the post-processing here.
-    ret = ()
+    ret: Tuple[Any] = ()
     for i in module.forward(*out_args, {kwargs}):
         i = (i.cpu(),) if isinstance(i, Tensor) else (i,)
         ret = ret + i
