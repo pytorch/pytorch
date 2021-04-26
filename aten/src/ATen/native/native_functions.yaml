@@ -705,6 +705,22 @@
     CPU: binary_cross_entropy_cpu
     CUDA: binary_cross_entropy_cuda
 
+- func: dummy_function(Tensor self, Tensor target) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: dummy_function
+
+- func: dummy_function2(Tensor self, Tensor target) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: dummy_function
+
+- func: dummy_nn_function(Tensor self, Tensor target) -> Tensor
+  python_module: nn
+  variants: function
+  dispatch:
+    CPU, CUDA: dummy_nn_function
+
 - func: binary_cross_entropy.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   variants: function

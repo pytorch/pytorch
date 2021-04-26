@@ -117,6 +117,18 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   return grad_input;
 }
 
+Tensor dummy_function(const Tensor& self, const Tensor& target) {
+  return self + target;
+}
+
+Tensor dummy_function2(const Tensor& self, const Tensor& target) {
+  return self + target;
+}
+
+Tensor dummy_nn_function(const Tensor& self, const Tensor& target) {
+  return self + target;
+}
+
 Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);

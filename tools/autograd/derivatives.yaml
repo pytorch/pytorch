@@ -1301,6 +1301,16 @@
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
 
+- name: dummy_function(Tensor self, Tensor target) -> Tensor
+  self: dummy_function_backward(grad, self, target)
+
+- name: dummy_function2(Tensor self, Tensor target) -> Tensor
+  self: dummy_function_backward(grad, self, target)
+  target: non_differentiable
+
+- name: dummy_nn_function(Tensor self, Tensor target) -> Tensor
+  self: dummy_nn_function_backward(grad, self, target)
+
 - name: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_double_backward(grad_output, grad, self, target, weight, reduction)
   grad_output: binary_cross_entropy_double_backward_grad_output(grad, self, target, weight, reduction)

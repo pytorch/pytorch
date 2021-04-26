@@ -2978,6 +2978,9 @@ def smooth_l1_loss(
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
     return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
 
+def dummy_nn_function(self, target):
+    return torch._C._nn.dummy_nn_function(self, target)
+
 
 def huber_loss(
     input: Tensor,

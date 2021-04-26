@@ -230,6 +230,9 @@ std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);
 
+Tensor dummy_function_backward(const Tensor& grad, const Tensor& self, const Tensor& target);
+Tensor dummy_nn_function_backward(const Tensor& grad, const Tensor& self, const Tensor& target);
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
