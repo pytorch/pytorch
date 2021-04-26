@@ -13,6 +13,8 @@ from torch.distributed.rpc import RRef
 
 
 {jit_script_decorator}
+# WARNING: If the module is on a cuda device, any CPU tensor stored in a nested ``arg`` or `kwargs``,
+# will not be implicitly moved to the same cuda device.
 def _remote_forward(
     module_rref: RRef[module_interface_cls], device: str, {arg_types}){arrow_and_return_type}:
     module = module_rref.local_value()
@@ -44,7 +46,7 @@ def _remote_forward(
     # ``tuple(i.cpu() if isinstance(i, Tensor) else i for i in module.forward(*out_args, {kwargs}))``.
     # TODO: Once process group RPC backend is deprecated,
     # and a device map is explicitly provided to TensorPipe backend,
-    # do no move any input on cuda devices back to CPU.
+    # we can leave the forward output on CUDA device and avoid the post-processing here.
     ret = ()
     for arg in module.forward(*out_args, {kwargs}):
         arg = (arg.cpu(),) if isinstance(arg, Tensor) else (arg,)
