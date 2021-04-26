@@ -146,6 +146,45 @@ allows dynamic learning rate reducing based on some validation measurements.
 Learning rate scheduling should be applied after optimizer's update; e.g., you
 should write your code this way:
 
+Example::
+
+    model = [Parameter(torch.randn(2, 2, requires_grad=True))]
+    optimizer = SGD(model, 0.1)
+    scheduler = ExponentialLR(optimizer, gamma=0.9)
+
+    for epoch in range(20):
+        for input, target in dataset:
+            optimizer.zero_grad()
+            output = model(input)
+            loss = loss_fn(output, target)
+            loss.backward()
+            optimizer.step()
+        scheduler.step()
+
+Most learning rate schedulers can be called back-to-back (also referred to as
+chaining schedulers). The result is that each scheduler is applied one after the
+other on the learning rate obtained by the one preceding it.
+
+Example::
+
+    model = [Parameter(torch.randn(2, 2, requires_grad=True))]
+    optimizer = SGD(model, 0.1)
+    scheduler1 = ExponentialLR(optimizer, gamma=0.9)
+    scheduler2 = MultiStepLR(optimizer, milestones=[30,80], gamma=0.1)
+
+    for epoch in range(20):
+        for input, target in dataset:
+            optimizer.zero_grad()
+            output = model(input)
+            loss = loss_fn(output, target)
+            loss.backward()
+            optimizer.step()
+        scheduler1.step()
+        scheduler2.step()
+
+In many places in the documentation, we will use the following template to refer to schedulers
+algorithms.
+
     >>> scheduler = ...
     >>> for epoch in range(100):
     >>>     train(...)
