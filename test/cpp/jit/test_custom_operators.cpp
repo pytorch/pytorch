@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 
-#include "test/cpp/jit/test_utils.h"
+#include <test/cpp/jit/test_utils.h>
 
-#include "torch/csrc/jit/ir/alias_analysis.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/jit/runtime/register_ops_utils.h"
-#include "torch/jit.h"
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/jit.h>
 
 namespace torch {
 namespace jit {
@@ -194,7 +194,7 @@ graph(%x: Tensor, %y: Tensor):
 
 static constexpr char op_list[] = "foofoo::bar.template;foo::another";
 #define TORCH_SELECTIVE_NAME_IN_SCHEMA(l, n)                                   \
-  torch::detail::SelectiveStr<c10::impl::op_whitelist_contains_name_in_schema( \
+  torch::detail::SelectiveStr<c10::impl::op_allowlist_contains_name_in_schema( \
       l, n)>(n)
 
 TEST(TestCustomOperator, OperatorGeneratorUndeclared) {

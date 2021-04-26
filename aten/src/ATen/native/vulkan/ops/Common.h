@@ -35,6 +35,11 @@ struct Layout final {
   };
 };
 
+uint32_t batch_size(const Tensor& tensor);
+uint32_t channels_size(const Tensor& tensor);
+uint32_t height_size(const Tensor& tensor);
+uint32_t width_size(const Tensor& tensor);
+
 } // namespace ops
 } // namespace vulkan
 } // namespace native

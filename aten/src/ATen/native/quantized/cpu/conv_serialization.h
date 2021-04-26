@@ -125,7 +125,22 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
     return std::tie(version, non_optional, optional);
   } else if (version == 2) {
     // version 2
-    return v.to<ConvParamsSerializationType>();
+    auto elements = v.toTuple()->elements();
+    std::vector<at::Tensor> non_optional = elements[1].toTensorList().vec();
+    std::vector<c10::optional<at::Tensor>> optional;
+
+    if (elements[2].isTensorList()) {
+      for (const auto& elem : elements[2].toTensorList()) {
+        optional.emplace_back(static_cast<at::Tensor>(elem));
+      }
+    } else {
+      for (const auto& elem : elements[2].toList()) {
+        optional.emplace_back(static_cast<c10::IValue>(elem).toOptional<at::Tensor>());
+      }
+    }
+
+    std::string version = "2";
+    return std::tie(version, non_optional, optional);
   } else {
     TORCH_INTERNAL_ASSERT(false, "Unexpected serialized qconv version: ",
         version);

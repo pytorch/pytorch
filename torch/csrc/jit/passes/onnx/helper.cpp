@@ -7,7 +7,7 @@ namespace jit {
 namespace onnx {
 using namespace ::c10::onnx;
 
-}
+} // namespace onnx
 
 ValueToParamPairMap buildValueToParamsMap(
     Block* b,
@@ -80,7 +80,7 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
     case ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16:
       return at::kBFloat16;
     default:
-      TORCH_CHECK("unexpected tensor scalar type");
+      TORCH_CHECK(false, "unexpected tensor scalar type");
   }
   return c10::optional<at::ScalarType>{};
 }
@@ -95,6 +95,44 @@ Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {
 
 Value* addInputToBlock(Block* block) {
   return block->addInput();
+}
+
+namespace {
+::ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType_aux(
+    at::ScalarType at_type) {
+  switch (at_type) {
+    case at::kDouble:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_DOUBLE;
+    case at::kFloat:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT;
+    case at::kHalf:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16;
+    case at::kByte:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_UINT8;
+    case at::kChar:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT8;
+    case at::kShort:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT16;
+    case at::kInt:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
+    case at::kLong:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT64;
+    case at::kBool:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_BOOL;
+    case at::kQInt8:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT8;
+    case at::kQUInt8:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_UINT8;
+    case at::kQInt32:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
+    default:
+      AT_ERROR("unexpected tensor scalar type");
+  }
+}
+} // namespace
+
+int ATenTypeToOnnxType(at::ScalarType at_type) {
+  return static_cast<int>(ATenTypeToOnnxType_aux(at_type));
 }
 
 Node* createONNXUnsqueeze(

@@ -273,10 +273,9 @@ TORCH_MODULE(CosineEmbeddingLoss);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SmoothL1Loss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that uses a squared term if the absolute
-/// element-wise error falls below 1 and an L1 term otherwise.
+/// element-wise error falls below beta and an L1 term otherwise.
 /// It is less sensitive to outliers than the `MSELoss` and in some cases
-/// prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
-/// Also known as the Huber loss.
+/// prevents exploding gradients (e.g. see the paper `Fast R-CNN` by Ross Girshick).
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.SmoothL1Loss to learn
 /// about the exact behavior of this module.
 ///
@@ -285,7 +284,7 @@ TORCH_MODULE(CosineEmbeddingLoss);
 ///
 /// Example:
 /// ```
-/// SmoothL1Loss model(SmoothL1LossOptions(torch::kNone));
+/// SmoothL1Loss model(SmoothL1LossOptions().reduction(torch::kNone).beta(0.5));
 /// ```
 struct TORCH_API SmoothL1LossImpl : public Cloneable<SmoothL1LossImpl> {
   explicit SmoothL1LossImpl(const SmoothL1LossOptions& options_ = {});
@@ -307,6 +306,41 @@ struct TORCH_API SmoothL1LossImpl : public Cloneable<SmoothL1LossImpl> {
 /// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(SmoothL1Loss);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ HuberLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Creates a criterion that uses a squared term if the absolute
+/// element-wise error falls below delta and a delta-scaled L1 term otherwise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.HuberLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::HuberLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// HuberLoss model(HuberLossOptions().reduction(torch::kNone).delta(0.5));
+/// ```
+struct TORCH_API HuberLossImpl : public Cloneable<HuberLossImpl> {
+  explicit HuberLossImpl(const HuberLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `HuberLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  HuberLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `HuberLossImpl`.
+/// See the documentation for `HuberLossImpl` class to learn what methods it
+/// provides, and examples of how to use `HuberLoss` with `torch::nn::HuberLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(HuberLoss);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiLabelMarginLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

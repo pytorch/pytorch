@@ -205,57 +205,6 @@ void sparse_matmul_kernel(
 
 } // end anonymous namespace
 
-Tensor sparse_matrix_mask_helper_cpu(
-  const SparseTensor& t,
-  const Tensor& mask_indices
-) {
-  /*
-    This is a helper function which filter values from `t._values()` using the `mask_indices`.
-    This CPU implementation uses a simple hash_map to filter values by matching the `mask_indices`
-    with the indices at tensor input `t`.
-
-    Inputs:
-      `t`             - tensor input
-      `mask_indices`  - mask indices tensor
-  */
-  int64_t r_nnz = mask_indices.size(1);
-  auto t_v = t._values();
-  Tensor r_values = at::zeros({r_nnz}, t_v.options());
-  auto t_i = t._indices();
-  auto t_nnz = t._nnz();
-
-  std::unordered_map<int64_t, int64_t> t_flatten_indices = std::unordered_map<int64_t, int64_t>{};
-
-  // Step 1: flatten the sparse indices `t._indices()` tensor and then  map this flatten value `index` to the original position `i`
-  auto t_indices_accessor = t_i.accessor<int64_t, 2>();
-  for(int64_t i = 0; i < t_nnz; i++) {
-    int64_t index = t_indices_accessor[0][i] * t.size(1) + t_indices_accessor[1][i];
-    t_flatten_indices[index] = i;
-  }
-
-  // Step 2: Filter `t._values()` values by matching the flatten `mask_indices` with the flatten `t._indices()` using the
-  // hash_map `t_flatten_indices`
-  AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
-    auto r_values_accessor = r_values.accessor<scalar_t, 1>();
-    auto t_values = t_v.accessor<scalar_t, 1>();
-    auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
-    at::parallel_for(0, r_nnz, 0, [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-        auto x = mask_indices_accessor[0][i];
-        auto y = mask_indices_accessor[1][i];
-        int64_t index = (x * t.size(1) + y);
-        auto iter = t_flatten_indices.find(index);
-        if (iter != t_flatten_indices.end()) {
-          assert(iter->second < t_nnz);
-          assert(i < r_nnz);
-          r_values_accessor[i] = t_values[ iter->second ];
-        }
-      }
-    });
-  });
-  return r_values;
-}
-
 Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_INTERNAL_ASSERT(mat1_.is_sparse());
   TORCH_INTERNAL_ASSERT(mat2_.is_sparse());

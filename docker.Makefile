@@ -8,22 +8,25 @@ $(warning WARNING: No docker user found using results from whoami)
 DOCKER_ORG                = $(shell whoami)
 endif
 
-CUDA_VERSION              = 11.0
+CUDA_VERSION              = 11.1
 CUDNN_VERSION             = 8
 BASE_RUNTIME              = ubuntu:18.04
 BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu18.04
 
+# The conda channel to use to install cudatoolkit
+CUDA_CHANNEL              = nvidia
 # The conda channel to use to install pytorch / torchvision
 INSTALL_CHANNEL           = pytorch
 
 PYTHON_VERSION            = 3.7
-PYTORCH_VERSION           = $(shell git describe --tags)
+PYTORCH_VERSION           = $(shell git describe --tags --always)
 # Can be either official / dev
 BUILD_TYPE                = dev
 BUILD_PROGRESS            = auto
 BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
 							--build-arg CUDA_VERSION=$(CUDA_VERSION) \
+							--build-arg CUDA_CHANNEL=$(CUDA_CHANNEL) \
 							--build-arg PYTORCH_VERSION=$(PYTORCH_VERSION) \
 							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL)
 EXTRA_DOCKER_BUILD_FLAGS ?=

@@ -1,5 +1,5 @@
 import torch
-import torch._C.te as te
+import torch._C._te as te
 import time
 import numpy as np
 import pandas as pd
@@ -101,8 +101,8 @@ binary_ops = [
 
 def nnc_relu(A, B):
     def f(i, j):
-        return torch._C.te.ifThenElse(A.load([i, j]) < torch._C.te.ExprHandle.float(0),
-                                      torch._C.te.ExprHandle.float(0), A.load([i, j]))
+        return torch._C._te.ifThenElse(A.load([i, j]) < torch._C._te.ExprHandle.float(0),
+                                       torch._C._te.ExprHandle.float(0), A.load([i, j]))
     return f
 
 def pt_relu(a, b, c):
@@ -167,26 +167,26 @@ def run_benchmarks(benchmarks, sizes):
 
                     def get_nnc_type(dtype):
                         if dtype == torch.float:
-                            return torch._C.te.Dtype.Float
+                            return torch._C._te.Dtype.Float
                         elif dtype == torch.long:
-                            return torch._C.te.Dtype.Long
+                            return torch._C._te.Dtype.Long
 
                     dtype = get_nnc_type(tA.dtype)
 
-                    dM = torch._C.te.ExprHandle.int(M)
-                    dN = torch._C.te.ExprHandle.int(N)
+                    dM = torch._C._te.ExprHandle.int(M)
+                    dN = torch._C._te.ExprHandle.int(N)
 
-                    A = torch._C.te.Placeholder('A', dtype, [dM, dN])
-                    B = torch._C.te.Placeholder('B', dtype, [dM, dN])
+                    A = torch._C._te.Placeholder('A', dtype, [dM, dN])
+                    B = torch._C._te.Placeholder('B', dtype, [dM, dN])
 
-                    dim_args = [torch._C.te.DimArg(*args) for args in [(dM, 'm'), (dN, 'n')]]
+                    dim_args = [torch._C._te.DimArg(*args) for args in [(dM, 'm'), (dN, 'n')]]
 
                     compute = nnc_fun(A, B)
-                    X = torch._C.te.Compute('X', dim_args, compute)
-                    loopnest = torch._C.te.LoopNest([X])
+                    X = torch._C._te.Compute('X', dim_args, compute)
+                    loopnest = torch._C._te.LoopNest([X])
                     loopnest.prepare_for_codegen()
-                    stmt = torch._C.te.simplify(loopnest.root_stmt())
-                    cg = torch._C.te.construct_codegen('llvm', stmt, [torch._C.te.BufferArg(x) for x in [A, B, X]])
+                    stmt = torch._C._te.simplify(loopnest.root_stmt())
+                    cg = torch._C._te.construct_codegen('llvm', stmt, [torch._C._te.BufferArg(x) for x in [A, B, X]])
 
 
                     # warmup

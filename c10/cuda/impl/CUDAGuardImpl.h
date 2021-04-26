@@ -25,7 +25,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return DeviceType::CUDA;
   }
   Device exchangeDevice(Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.is_cuda());
     Device old_device = getDevice();
     if (old_device.index() != d.index()) {
       C10_CUDA_CHECK(cudaSetDevice(d.index()));
@@ -47,7 +47,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return Device(DeviceType::CUDA, device);
   }
   void setDevice(Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.is_cuda());
     Device current_device = getDevice();
     if (current_device != d) {
       C10_CUDA_CHECK(cudaSetDevice(d.index()));

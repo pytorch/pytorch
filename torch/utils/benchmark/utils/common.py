@@ -28,6 +28,7 @@ class TaskSpec:
     """Container for information used to define a Timer. (except globals)"""
     stmt: str
     setup: str
+    global_setup: str = ""
     label: Optional[str] = None
     sub_label: Optional[str] = None
     description: Optional[str] = None
@@ -216,15 +217,16 @@ class Measurement:
   {'Median: ' if n > 1 else ''}{self._median / time_scale:.2f} {time_unit}
   {iqr_filter}IQR:    {self.iqr / time_scale:.2f} {time_unit} ({self._p25 / time_scale:.2f} to {self._p75 / time_scale:.2f})
   {n} measurement{'s' if n > 1 else ''}, {self.number_per_run} runs {'per measurement,' if n > 1 else ','} {self.num_threads} thread{'s' if self.num_threads > 1 else ''}
-{newline.join(self._warnings)}""".strip() # noqa
+{newline.join(self._warnings)}""".strip()  # noqa: B950
 
         return "\n".join(l for l in repr_str.splitlines(keepends=False) if skip_line not in l)
 
     @staticmethod
     def merge(measurements):  # type: (Iterable[Measurement]) -> List[Measurement]
         """Convenience method for merging replicates.
-        NB: merge will extrapolate times to `number_per_run=1` and will not
-            transfer any metadata (since it might differ between replicates)
+
+        Merge will extrapolate times to `number_per_run=1` and will not
+        transfer any metadata. (Since it might differ between replicates)
         """
         grouped_measurements: DefaultDict[TaskSpec, List[Measurement]] = collections.defaultdict(list)
         for m in measurements:

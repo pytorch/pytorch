@@ -2,7 +2,7 @@
 
 #include <functional>
 #include <vector>
-
+#include <c10/util/complex.h>
 namespace c10 {
 
 // NOTE: hash_combine is based on implementation from Boost
@@ -138,5 +138,14 @@ template <typename... Types>
 size_t get_hash(const Types&... args) {
   return c10::hash<decltype(std::tie(args...))>()(std::tie(args...));
 }
+
+// Specialization for c10::complex
+template <typename T>
+struct hash<c10::complex<T>> {
+  size_t operator()(const c10::complex<T>& c) const {
+    return get_hash(c.real(), c.imag());
+  }
+};
+
 
 } // namespace c10

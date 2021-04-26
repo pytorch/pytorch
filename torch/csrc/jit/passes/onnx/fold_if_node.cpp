@@ -4,6 +4,7 @@
 #include <torch/torch.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 
 namespace torch {
@@ -36,7 +37,7 @@ static bool isStaticCondition(Node* node) {
     for (size_t i = 0; i < compare_node->inputs().size(); i++) {
       auto sym = compare_node->inputs()[i]
                      ->type()
-                     ->cast<TensorType>()
+                     ->castRaw<TensorType>()
                      ->symbolic_sizes();
       if (!(compare_node->inputs()[i]->node()->kind() == onnx::Constant ||
             compare_node->inputs()[i]->node()->kind() == onnx::Size ||
@@ -44,8 +45,10 @@ static bool isStaticCondition(Node* node) {
         return false;
       if (compare_node->inputs()[i]->node()->kind() != onnx::Constant) {
         auto shape_node = compare_node->inputs()[i]->node()->input()->node();
-        auto shape =
-            shape_node->input()->type()->cast<TensorType>()->symbolic_sizes();
+        auto shape = shape_node->input()
+                         ->type()
+                         ->castRaw<TensorType>()
+                         ->symbolic_sizes();
 
         // ONNX shape and type inference cannot determine the shape of the input
         if (!shape.rank())
@@ -127,7 +130,7 @@ static bool constantFoldedConditionValue(Node* node) {
     } else { // input_node is either onnx::Size or onnx::ReduceProd
       auto shape_node = input_node->input()->node();
       auto shape =
-          shape_node->input()->type()->cast<TensorType>()->symbolic_sizes();
+          shape_node->input()->type()->castRaw<TensorType>()->symbolic_sizes();
 
       at::Tensor val;
       if (input_node->kind() == onnx::Size) {
@@ -136,7 +139,7 @@ static bool constantFoldedConditionValue(Node* node) {
       } else if (input_node->kind() == onnx::ReduceProd) {
         auto sizes = shape.sizes();
         int64_t prod = 1;
-        for (int64_t i = 0; i < (int64_t)*shape.rank(); i++) {
+        for (const auto i : c10::irange((int64_t)*shape.rank())) {
           auto dim = sizes.value()[i].static_size();
           prod *= dim;
         }

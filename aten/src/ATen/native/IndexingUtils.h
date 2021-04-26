@@ -71,6 +71,15 @@ inline torch::List<c10::optional<Tensor>> toListOfOptionalTensors(ArrayRef<Tenso
   return result;
 }
 
+inline torch::List<c10::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValue> list) {
+  torch::List<c10::optional<Tensor>> result;
+  result.reserve(list.size());
+  for (const IValue& a : list) {
+    result.push_back(a.toTensor());
+  }
+  return result;
+}
+
 static bool hasContiguousSubspace(TensorList tl) {
   // true if all the non-null tensors are adjacent
   auto isDefined = [](const Tensor & tensor){ return tensor.defined(); };

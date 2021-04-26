@@ -2,6 +2,7 @@
 #include <torch/nn/functional/padding.h>
 #include <torch/nn/modules/conv.h>
 
+#include <c10/util/irange.h>
 #include <torch/enum.h>
 #include <torch/expanding_array.h>
 #include <torch/nn/init.h>
@@ -172,7 +173,7 @@ std::vector<int64_t> ConvTransposeNdImpl<D, Derived>::_output_padding(
 
     std::vector<int64_t> min_sizes;
     std::vector<int64_t> max_sizes;
-    for (int64_t d = 0; d < k; d++) {
+    for(const auto d : c10::irange(k)) {
       int64_t dim_size = ((input.sizes()[d + 2] - 1) * (*stride)[d] - 2 * (*padding)[d] + (*kernel_size)[d]);
       min_sizes.push_back(dim_size);
       max_sizes.push_back(min_sizes[d] + (*stride)[d] - 1);
@@ -189,7 +190,7 @@ std::vector<int64_t> ConvTransposeNdImpl<D, Derived>::_output_padding(
       }
     }
 
-    for (int64_t d = 0; d < k; d++) {
+    for(const auto d : c10::irange(k)) {
       ret.push_back(output_size_.value()[d] - min_sizes[d]);
     }
   }
@@ -218,11 +219,12 @@ Tensor ConvTranspose1dImpl::forward(
     TORCH_CHECK(false, "Only `zeros` padding mode is supported for ConvTranspose1d");
   }
 
+  const auto & pad = padding();
   std::vector<int64_t> output_padding = _output_padding(
-    input, output_size, options.stride(), options.padding(), options.kernel_size());
+    input, output_size, options.stride(), pad, options.kernel_size());
 
   return F::detail::conv_transpose1d(
-    input, weight, bias, options.stride(), options.padding(),
+    input, weight, bias, options.stride(), pad,
     output_padding, options.groups(), options.dilation());
 }
 
@@ -247,11 +249,12 @@ Tensor ConvTranspose2dImpl::forward(
     TORCH_CHECK(false, "Only `zeros` padding mode is supported for ConvTranspose2d");
   }
 
+  const auto & pad = padding();
   std::vector<int64_t> output_padding = _output_padding(
-    input, output_size, options.stride(), options.padding(), options.kernel_size());
+    input, output_size, options.stride(), pad, options.kernel_size());
 
   return F::detail::conv_transpose2d(
-    input, weight, bias, options.stride(), options.padding(),
+    input, weight, bias, options.stride(), pad,
     output_padding, options.groups(), options.dilation());
 }
 
@@ -276,11 +279,12 @@ Tensor ConvTranspose3dImpl::forward(
     TORCH_CHECK(false, "Only `zeros` padding mode is supported for ConvTranspose3d");
   }
 
+  const auto & pad = padding();
   std::vector<int64_t> output_padding = _output_padding(
-    input, output_size, options.stride(), options.padding(), options.kernel_size());
+    input, output_size, options.stride(), pad, options.kernel_size());
 
   return F::detail::conv_transpose3d(
-    input, weight, bias, options.stride(), options.padding(),
+    input, weight, bias, options.stride(), pad,
     output_padding, options.groups(), options.dilation());
 }
 

@@ -14,13 +14,13 @@ namespace {
 std::string getTypeStr(const c10::TypePtr& type) {
   switch (type->kind()) {
     case c10::TypeKind::FunctionType:
-      return type->cast<c10::FunctionType>()->name()->qualifiedName();
+      return type->castRaw<c10::FunctionType>()->name()->qualifiedName();
     case c10::TypeKind::TupleType:
-      return type->cast<c10::TupleType>()->name()->qualifiedName();
+      return type->castRaw<c10::TupleType>()->name()->qualifiedName();
     case c10::TypeKind::ClassType:
-      return type->cast<c10::ClassType>()->name()->qualifiedName();
+      return type->castRaw<c10::ClassType>()->name()->qualifiedName();
     case c10::TypeKind::InterfaceType:
-      return type->cast<c10::InterfaceType>()->name()->qualifiedName();
+      return type->castRaw<c10::InterfaceType>()->name()->qualifiedName();
     default:
       return type->annotation_str();
   }
@@ -256,6 +256,25 @@ void OwnerRRef::setValue(IValue&& value) {
 
 void OwnerRRef::setError(std::exception_ptr eptr) {
   future_->setErrorIfNeeded(std::move(eptr));
+}
+
+void OwnerRRef::recordAllStreams(
+    const std::shared_ptr<LazyStreamContext>& ctx) {
+  if (ctx) {
+    for (auto stream : ctx->getReservedStreams()) {
+      c10::Event event{ctx->deviceType()};
+      event.record(stream);
+      events_.push_back(std::move(event));
+    }
+  }
+}
+
+void OwnerRRef::blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx) {
+  if (ctx) {
+    for (c10::Event& event : events_) {
+      event.block(ctx->getStream(event.device_index()));
+    }
+  }
 }
 
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {

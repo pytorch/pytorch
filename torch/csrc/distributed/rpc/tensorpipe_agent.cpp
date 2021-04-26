@@ -3,10 +3,14 @@
 #ifdef USE_TENSORPIPE
 
 #include <limits>
+#include <tuple>
+#include <utility>
 
 #include <fmt/format.h>
 #include <tensorpipe/tensorpipe.h>
 
+#include <torch/csrc/distributed/rpc/agent_utils.h>
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -75,6 +79,65 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
   return deviceIndices;
 }
 
+// A helper function that first creates a LazyStreamContext and then grabs a
+// CUDA stream for each device in the given device list.
+std::shared_ptr<LazyStreamContext> createCalleeStreamContext(
+    std::vector<c10::DeviceIndex> devices) {
+  auto ctx = createLazyStreamContext();
+  for (const auto& device : devices) {
+    ctx->getStream(device);
+  }
+  return ctx;
+}
+
+// Retrieve local devices (i.e., device keys) from the given map.
+std::unordered_set<c10::DeviceIndex> getLocalDevices(
+    const std::unordered_map<std::string, tensorpipe::DeviceMap>& deviceMap) {
+  std::unordered_set<c10::DeviceIndex> deviceSet;
+  for (const auto& entry : deviceMap) {
+    for (const auto& device : entry.second) {
+      deviceSet.insert(device.first);
+    }
+  }
+  return deviceSet;
+}
+
+// 1) checks there is no duplication in the devices field
+// 2) checks all local devices in the deviceSet are included in deviceOpt
+void checkValidDevicesOption(
+    const std::unordered_set<c10::DeviceIndex>& deviceSet,
+    const std::vector<c10::DeviceIndex>& deviceOpt) {
+  std::unordered_set<c10::DeviceIndex> optsDeviceSet(
+      deviceOpt.begin(), deviceOpt.end());
+
+  // no duplications are allowed in opts_.devices
+  TORCH_CHECK(
+      deviceOpt.size() == optsDeviceSet.size(),
+      "Detected duplication in TensorPipeRpcBackendOptions devices field.");
+
+  // opts_.devices must be a superset of local devices in reverseDeviceMaps_
+  std::vector<c10::DeviceIndex> cut;
+  std::set_difference(
+      deviceSet.begin(),
+      deviceSet.end(),
+      optsDeviceSet.begin(),
+      optsDeviceSet.end(),
+      std::back_inserter(cut));
+
+  if (!cut.empty()) {
+    std::ostringstream oss;
+    std::copy(
+        cut.begin(), cut.end(), std::ostream_iterator<int32_t>(oss, ", "));
+    TORCH_CHECK(
+        false,
+        "The devices field in TensorPipeRpcBackendOptions must either be "
+        "None or contain all local devices use by its agent. However, "
+        "local devices ",
+        oss.str(),
+        "are used in (peer) device_maps but not included the devices field.");
+  }
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -86,27 +149,32 @@ C10_DEFINE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
 
-std::string TensorPipeAgent::guessUvAddress(
-    tensorpipe::transport::uv::Context& uvContext) {
-  tensorpipe::Error error;
-  std::string uvAddress;
-  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
-  if (ifnameEnv != nullptr) {
-    std::tie(error, uvAddress) = uvContext.lookupAddrForIface(ifnameEnv);
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for interface "
-                   << ifnameEnv << " (" << error.what() << "), defaulting to "
-                   << kDefaultUvAddress;
-      uvAddress = kDefaultUvAddress;
+const std::string& TensorPipeAgent::guessAddress() {
+  static const std::string uvAddress = []() {
+    tensorpipe::Error error;
+    std::string result;
+    char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
+    if (ifnameEnv != nullptr) {
+      std::tie(error, result) =
+          tensorpipe::transport::uv::lookupAddrForIface(ifnameEnv);
+      if (error) {
+        LOG(WARNING) << "Failed to look up the IP address for interface "
+                     << ifnameEnv << " (" << error.what() << "), defaulting to "
+                     << kDefaultUvAddress;
+        return kDefaultUvAddress;
+      }
+    } else {
+      std::tie(error, result) =
+          tensorpipe::transport::uv::lookupAddrForHostname();
+      if (error) {
+        LOG(WARNING) << "Failed to look up the IP address for the hostname ("
+                     << error.what() << "), defaulting to "
+                     << kDefaultUvAddress;
+        return kDefaultUvAddress;
+      }
     }
-  } else {
-    std::tie(error, uvAddress) = uvContext.lookupAddrForHostname();
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
-                   << error.what() << "), defaulting to " << kDefaultUvAddress;
-      uvAddress = kDefaultUvAddress;
-    }
-  }
+    return result;
+  }();
   return uvAddress;
 }
 
@@ -127,21 +195,21 @@ constexpr int64_t kMultiplexedUvChannelPriority = 100;
 constexpr int64_t kBasicChannelPriority = 0;
 
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaIpcChannelPriority = 300;
+constexpr int64_t kCudaIpcChannelPriority = 301;
 #endif
 
 #if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaGdrChannelPriority = 200;
+constexpr int64_t kCudaGdrChannelPriority = 201;
 #endif
 
 #ifdef USE_CUDA_NOT_ROCM
-constexpr int64_t kCudaXthChannelPriority = 400;
-constexpr int64_t kCudaBasicChannelPriority = 100;
+constexpr int64_t kCudaXthChannelPriority = 401;
+constexpr int64_t kCudaBasicChannelPriority = 101;
 #endif
 
 std::unique_ptr<TransportRegistration> makeUvTransport() {
-  auto context = std::make_shared<tensorpipe::transport::uv::Context>();
-  std::string address = TensorPipeAgent::guessUvAddress(*context);
+  auto context = tensorpipe::transport::uv::create();
+  std::string address = TensorPipeAgent::guessAddress();
   return std::make_unique<TransportRegistration>(TransportRegistration{
       std::move(context), kUvTransportPriority, std::move(address)});
 }
@@ -165,7 +233,7 @@ std::string createUniqueShmAddr() {
 }
 
 std::unique_ptr<TransportRegistration> makeShmTransport() {
-  auto context = std::make_shared<tensorpipe::transport::shm::Context>();
+  auto context = tensorpipe::transport::shm::create();
   std::string address = createUniqueShmAddr();
   return std::make_unique<TransportRegistration>(TransportRegistration{
       std::move(context), kShmTransportPriority, std::move(address)});
@@ -182,32 +250,9 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
 
 #if TENSORPIPE_HAS_IBV_TRANSPORT
 
-std::string guessIbvAddress(tensorpipe::transport::ibv::Context& ibvContext) {
-  tensorpipe::Error error;
-  std::string ibvAddress;
-  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
-  if (ifnameEnv != nullptr) {
-    std::tie(error, ibvAddress) = ibvContext.lookupAddrForIface(ifnameEnv);
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for interface "
-                   << ifnameEnv << " (" << error.what() << "), defaulting to "
-                   << kDefaultUvAddress;
-      ibvAddress = kDefaultUvAddress;
-    }
-  } else {
-    std::tie(error, ibvAddress) = ibvContext.lookupAddrForHostname();
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
-                   << error.what() << "), defaulting to " << kDefaultUvAddress;
-      ibvAddress = kDefaultUvAddress;
-    }
-  }
-  return ibvAddress;
-}
-
 std::unique_ptr<TransportRegistration> makeIbvTransport() {
-  auto context = std::make_shared<tensorpipe::transport::ibv::Context>();
-  std::string address = guessIbvAddress(*context);
+  auto context = tensorpipe::transport::ibv::create();
+  std::string address = TensorPipeAgent::guessAddress();
   return std::make_unique<TransportRegistration>(TransportRegistration{
       std::move(context), kIbvTransportPriority, std::move(address)});
 }
@@ -223,7 +268,7 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, ibv, makeIbvTransport);
 #endif // TENSORPIPE_HAS_IBV_TRANSPORT
 
 std::unique_ptr<CpuChannelRegistration> makeBasicChannel() {
-  auto context = std::make_shared<tensorpipe::channel::basic::Context>();
+  auto context = tensorpipe::channel::basic::create();
   return std::make_unique<CpuChannelRegistration>(
       CpuChannelRegistration{std::move(context), kBasicChannelPriority});
 }
@@ -236,7 +281,7 @@ C10_REGISTER_CREATOR(TensorPipeCpuChannelRegistry, basic, makeBasicChannel);
 #if TENSORPIPE_HAS_CMA_CHANNEL
 
 std::unique_ptr<CpuChannelRegistration> makeCmaChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cma::Context>();
+  auto context = tensorpipe::channel::cma::create();
   return std::make_unique<CpuChannelRegistration>(
       CpuChannelRegistration{std::move(context), kCmaChannelPriority});
 }
@@ -257,12 +302,12 @@ std::unique_ptr<CpuChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
   for (int laneIdx = 0; laneIdx < kNumUvThreads; ++laneIdx) {
-    auto context = std::make_shared<tensorpipe::transport::uv::Context>();
-    std::string address = TensorPipeAgent::guessUvAddress(*context);
+    auto context = tensorpipe::transport::uv::create();
+    std::string address = TensorPipeAgent::guessAddress();
     contexts.push_back(std::move(context));
     listeners.push_back(contexts.back()->listen(address));
   }
-  auto context = std::make_shared<tensorpipe::channel::mpt::Context>(
+  auto context = tensorpipe::channel::mpt::create(
       std::move(contexts), std::move(listeners));
   return std::make_unique<CpuChannelRegistration>(CpuChannelRegistration{
       std::move(context), kMultiplexedUvChannelPriority});
@@ -283,7 +328,7 @@ C10_REGISTER_CREATOR(
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
 
 std::unique_ptr<CudaChannelRegistration> makeCudaIpcChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_ipc::Context>();
+  auto context = tensorpipe::channel::cuda_ipc::create();
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaIpcChannelPriority});
 }
@@ -300,7 +345,7 @@ C10_REGISTER_CREATOR(
 #if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
 
 std::unique_ptr<CudaChannelRegistration> makeCudaGdrChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_gdr::Context>();
+  auto context = tensorpipe::channel::cuda_gdr::create();
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaGdrChannelPriority});
 }
@@ -324,7 +369,7 @@ C10_REGISTER_CREATOR(
 #ifdef USE_CUDA_NOT_ROCM
 
 std::unique_ptr<CudaChannelRegistration> makeCudaXthChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_xth::Context>();
+  auto context = tensorpipe::channel::cuda_xth::create();
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaXthChannelPriority});
 }
@@ -337,8 +382,8 @@ C10_REGISTER_CREATOR(
     makeCudaXthChannel);
 
 std::unique_ptr<CudaChannelRegistration> makeCudaBasicChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_basic::Context>(
-      std::make_shared<tensorpipe::channel::basic::Context>());
+  auto context = tensorpipe::channel::cuda_basic::create(
+      tensorpipe::channel::basic::create());
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaBasicChannelPriority});
 }
@@ -368,8 +413,19 @@ struct MultiStreamGuard {
   explicit MultiStreamGuard(
       const std::shared_ptr<LazyStreamContext>& /* unused */) {}
 #else
+  static inline std::vector<at::cuda::CUDAStream> toCUDAStreams(
+      const std::vector<c10::Stream>& streams) {
+    std::vector<at::cuda::CUDAStream> cudaStreams;
+    cudaStreams.reserve(streams.size());
+    std::transform(
+        streams.begin(),
+        streams.end(),
+        std::back_inserter(cudaStreams),
+        [](c10::Stream s) { return at::cuda::CUDAStream(s); });
+    return cudaStreams;
+  }
   explicit MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& ctx)
-      : guard(ctx->getReservedStreams()) {}
+      : guard(toCUDAStreams(ctx->getReservedStreams())) {}
 
  private:
   at::cuda::CUDAMultiStreamGuard guard;
@@ -396,12 +452,19 @@ float TensorPipeAgent::TimeSeriesMetricsTracker::computeAverage() const {
 
 ////////////////////////  TensorpipeRpcAgent  /////////////////////////////////
 
-void TensorPipeAgent::removeFromTimeoutMap(
-    uint64_t messageId,
-    steady_clock_time_point expirationTime) {
+void TensorPipeAgent::removeFromTimeoutMap(uint64_t messageId) {
   // Remove entry from timeoutMap_.
   {
     std::unique_lock<std::mutex> lock(timeoutMapMutex_);
+    auto it = messageIdToTimeout_.find(messageId);
+    if (it == messageIdToTimeout_.end()) {
+      // Already removed from the map by pollTimeoutRpcs(), no need to
+      // process further.
+      return;
+    }
+
+    auto& expirationTime = it->second;
+
     auto& timedOutFuturesVector = timeoutMap_[expirationTime];
     for (auto it = timedOutFuturesVector.begin();
          it != timedOutFuturesVector.end();
@@ -415,35 +478,19 @@ void TensorPipeAgent::removeFromTimeoutMap(
     if (timedOutFuturesVector.empty()) {
       timeoutMap_.erase(expirationTime);
     }
+
+    // Remove from messageId to timeout map as well.
+    messageIdToTimeout_.erase(messageId);
   }
 }
 
-void TensorPipeAgent::collectNames() {
-  const worker_id_t selfId = workerInfo_.id_;
-  const std::string& selfName = workerInfo_.name_;
+void TensorPipeAgent::prepareNames() {
+  auto nameToId = collectNames(
+      rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
 
-  std::vector<uint8_t> selfNameVector(
-      (uint8_t*)selfName.c_str(),
-      (uint8_t*)selfName.c_str() + selfName.length());
-  rankToNameStore_.set(c10::to_string(selfId), selfNameVector);
-
-  workerIdToInfo_.emplace(selfId, WorkerInfo(selfName, selfId));
-  workerNameToInfo_.emplace(selfName, WorkerInfo(selfName, selfId));
-  for (worker_id_t workerId = 0; workerId < worldSize_; ++workerId) {
-    if (workerId == selfId) {
-      continue;
-    }
-    std::vector<uint8_t> workerNameVector =
-        rankToNameStore_.get(c10::to_string(workerId));
-    std::string workerName(
-        (char*)workerNameVector.data(), workerNameVector.size());
-
-    TORCH_CHECK(
-        workerNameToInfo_.find(workerName) == workerNameToInfo_.end(),
-        "RPC worker name ",
-        workerName,
-        " is not unique.");
-
+  for (const auto& entry : nameToId) {
+    const auto& workerName = entry.first;
+    const auto& workerId = entry.second;
     workerIdToInfo_.emplace(workerId, WorkerInfo(workerName, workerId));
     workerNameToInfo_.emplace(workerName, WorkerInfo(workerName, workerId));
   }
@@ -470,7 +517,22 @@ TensorPipeAgent::TensorPipeAgent(
       nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       processGroup_(std::move(processGroup)) {
-  collectNames();
+  prepareNames();
+
+  {
+    // If devices was not specified in the options, use local devices in the
+    // deviceMap to initialize devices. Later, when setting reverseDeviceMaps_,
+    // the devices_ will be updated again using local devices in
+    // reverseDeviceMaps_.
+    auto deviceSet = getLocalDevices(opts_.deviceMaps);
+    if (opts_.devices.empty()) {
+      std::copy(
+          deviceSet.begin(), deviceSet.end(), std::back_inserter(devices_));
+    } else {
+      checkValidDevicesOption(deviceSet, opts_.devices);
+      devices_ = opts_.devices;
+    }
+  }
 
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
@@ -479,6 +541,26 @@ TensorPipeAgent::TensorPipeAgent(
 TensorPipeAgent::~TensorPipeAgent() {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is being destroyed";
   shutdown();
+}
+
+void TensorPipeAgent::setReverseDeviceMaps(
+    const std::unordered_map<std::string, tensorpipe::DeviceMap>&
+        reverseDeviceMaps) {
+  reverseDeviceMaps_ = reverseDeviceMaps;
+
+  // If devices wasn't specified in the options, update devices_ with local
+  // devices in reverseDeviceMaps_.
+  auto deviceSet = getLocalDevices(reverseDeviceMaps_);
+  if (opts_.devices.empty()) {
+    std::copy(
+        devices_.begin(),
+        devices_.end(),
+        std::inserter(deviceSet, deviceSet.begin()));
+    devices_.clear();
+    std::copy(deviceSet.begin(), deviceSet.end(), std::back_inserter(devices_));
+  } else {
+    checkValidDevicesOption(deviceSet, opts_.devices);
+  }
 }
 
 void TensorPipeAgent::startImpl() {
@@ -621,25 +703,26 @@ void TensorPipeAgent::pipeRead(
         const tensorpipe::Error&,
         Message&&,
         std::shared_ptr<LazyStreamContext>)> fn) noexcept {
-  pipe->readDescriptor([fn{std::move(fn)}, pipe](
+  pipe->readDescriptor([this, fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
-                           tensorpipe::Message tpMessage) mutable {
+                           tensorpipe::Descriptor tpDescriptor) mutable {
     if (error) {
       fn(error, Message(), nullptr);
       return;
     }
 
-    auto ctx = createLazyStreamContext();
-    TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage, ctx);
+    auto ctx = createCalleeStreamContext(devices_);
+    tensorpipe::Allocation tpAllocation;
+    TensorpipeReadBuffers tpBuffers;
+    std::tie(tpAllocation, tpBuffers) = tensorpipeAllocate(tpDescriptor, ctx);
 
     pipe->read(
-        std::move(tpMessage),
-        [tpBuffers{
+        std::move(tpAllocation),
+        [tpDescriptor{std::move(tpDescriptor)},
+         tpBuffers{
              std::make_shared<TensorpipeReadBuffers>(std::move(tpBuffers))},
          fn{std::move(fn)},
-         ctx{std::move(ctx)}](
-            const tensorpipe::Error& error,
-            tensorpipe::Message tpMessage) mutable {
+         ctx{std::move(ctx)}](const tensorpipe::Error& error) mutable {
           if (error) {
             fn(error, Message(), nullptr);
             return;
@@ -648,7 +731,7 @@ void TensorPipeAgent::pipeRead(
           // FIXME This does some unpickling, which could be a bit expensive:
           // perhaps it would be best to perform it inside the worker threads?
           Message rpcMessage = tensorpipeDeserialize(
-              std::move(tpMessage), std::move(*tpBuffers));
+              std::move(tpDescriptor), std::move(*tpBuffers));
 
           fn(error, std::move(rpcMessage), std::move(ctx));
         });
@@ -674,10 +757,7 @@ void TensorPipeAgent::pipeWrite(
       [tpBuffers{
            std::make_shared<TensorpipeWriteBuffers>(std::move(tpBuffers))},
        fn{std::move(fn)},
-       ctx{std::move(ctx)}](
-          const tensorpipe::Error& error, tensorpipe::Message /* unused */) {
-        fn(error);
-      });
+       ctx{std::move(ctx)}](const tensorpipe::Error& error) { fn(error); });
 }
 
 void TensorPipeAgent::sendCompletedResponseMessage(
@@ -700,11 +780,40 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     Message&& responseMessage =
         std::move(*futureResponseMessage->value().toCustomClass<Message>());
     responseMessage.setId(messageId);
+
     std::vector<c10::DeviceIndex> devices;
     try {
       devices = getDevicesForRemote(pipe->getRemoteName(), responseMessage);
     } catch (const std::exception& e) {
       responseMessage = createExceptionResponse(e.what(), messageId);
+    }
+
+    auto ctxDevices = ctx->devices();
+    if (!ctxDevices.empty()) {
+      // FIXME: skipping this check when ctxDevices is empty to allow
+      // RRef.to_here().
+      for (const auto& tensor : responseMessage.tensors()) {
+        const auto device = tensor.device().index();
+        if (device != -1 && ctxDevices.find(device) == ctxDevices.end()) {
+          std::ostringstream oss;
+          std::copy(
+              ctxDevices.begin(),
+              ctxDevices.end(),
+              // interpreting c10::DeviceIndex as int32_t to avoid printing
+              // it as a char.
+              std::ostream_iterator<int32_t>(oss, ", "));
+          responseMessage = createExceptionResponse(
+              c10::str(
+                  "RPC detected that a user-function output tensor on device ",
+                  int32_t(device),
+                  ". This device is not one of the input tensor devices: ",
+                  oss.str(),
+                  "which is not yet supported. Please file a feature request "
+                  "issue in PyTorch GitHub repo."),
+              messageId);
+          break;
+        }
+      }
     }
 
     pipeWrite(
@@ -758,19 +867,13 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
           Message&& requestMessage,
           std::shared_ptr<LazyStreamContext> ctx) mutable {
         if (error) {
-          // FIXME This is not a correct way to check whether this error was
-          // "intentionally" caused by the remote end shutting down. We should
-          // find a better way, Perhaps sending an empty message?
-          if ((error.isOfType<tensorpipe::PipeClosedError>() &&
-               !rpcAgentRunning_.load()) ||
-              error.isOfType<tensorpipe::EOFError>()) {
+          if (shuttingDown_) {
             // This is expected.
           } else {
             LOG(WARNING)
                 << "RPC agent for " << workerInfo_.name_
                 << " encountered error when reading incoming request from "
-                << pipe->getRemoteName() << ": " << error.what()
-                << " (this is expected to happen during shutdown)";
+                << pipe->getRemoteName() << ": " << error.what();
           }
           return;
         }
@@ -799,7 +902,10 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
-            futureResponseMessage = cb_->operator()(requestMessage);
+            // The `ctx` needs to be propagated to `process***Call` methods
+            // to synchronize CUDA streams there to make sure that we fetch
+            // the correct value from `to_here()` call.
+            futureResponseMessage = cb_->operator()(requestMessage, ctx);
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
                 std::make_shared<JitFuture>(at::AnyClassType::get());
@@ -854,26 +960,34 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
 
   const auto& url = findWorkerURL(toWorkerInfo);
 
-  std::unique_lock<std::mutex> lock(mutex_);
+  decltype(connectedPipes_)::iterator it;
+  {
+    std::unique_lock<std::mutex> lock(connectedPipesMutex_);
 
-  // See if we already have a connection to this address or not
-  auto it = connectedPipes_.find(toWorkerInfo.id_);
-  if (it == connectedPipes_.end()) {
-    std::tie(it, std::ignore) = connectedPipes_.emplace(
-        toWorkerInfo.id_,
-        ClientPipe(context_->connect(
-            url, tensorpipe::PipeOptions().remoteName(toWorkerInfo.name_))));
+    // See if we already have a connection to this address or not
+    it = connectedPipes_.find(toWorkerInfo.id_);
+    if (it == connectedPipes_.end()) {
+      // An instance of ClientPipe cannot be copied or moved as it contains a
+      // mutex, and to force in-place construction in GCC 5 we need piecewise
+      // construction in order to work around an issue.
+      std::tie(it, std::ignore) = connectedPipes_.emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(toWorkerInfo.id_),
+          std::forward_as_tuple(context_->connect(
+              url, tensorpipe::PipeOptions().remoteName(toWorkerInfo.name_))));
+    }
   }
   ClientPipe& clientPipe = it->second;
-  auto& pendingResponseMessage = clientPipe.pendingResponseMessage_;
 
   auto futureResponseMessage = std::make_shared<AtomicJitFuture>(
       reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
   uint64_t messageId = nextMessageID_++;
   requestMessage.setId(messageId);
-  pendingResponseMessage[messageId] = futureResponseMessage;
 
-  lock.unlock();
+  {
+    std::unique_lock<std::mutex> lock(clientPipe.mutex_);
+    clientPipe.pendingResponseMessage_[messageId] = futureResponseMessage;
+  }
 
   // Get devices for tensors in the request message. This can throw if device
   // maps are not configured properly for this request.
@@ -913,6 +1027,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
     {
       std::unique_lock<std::mutex> lock(timeoutMapMutex_);
       auto& timeoutFuturesVector = timeoutMap_[expirationTime];
+      messageIdToTimeout_.emplace(std::make_pair(messageId, expirationTime));
       timeoutFuturesVector.emplace_back(
           messageId, futureResponseMessage, timeout);
     }
@@ -929,8 +1044,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
       std::move(requestMessage),
       std::move(devices),
       std::move(ctx),
-      [this, &clientPipe, messageId, expirationTime](
-          const tensorpipe::Error& error) mutable {
+      [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {
         if (error) {
           if (error.isOfType<tensorpipe::PipeClosedError>() &&
               !rpcAgentRunning_.load()) {
@@ -942,11 +1056,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                          << clientPipe.pipe_->getRemoteName() << ": "
                          << error.what();
           }
-          auto pendingFutIt =
-              clientPipe.pendingResponseMessage_.find(messageId);
-          if (pendingFutIt != clientPipe.pendingResponseMessage_.end()) {
-            markFutureWithError(pendingFutIt->second, error.what());
-          }
+          handleClientError(clientPipe, error);
           return;
         }
 
@@ -955,7 +1065,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
 
         pipeRead(
             clientPipe.pipe_,
-            [this, &clientPipe, expirationTime](
+            [this, &clientPipe](
                 const tensorpipe::Error& error,
                 Message&& responseMessage,
                 std::shared_ptr<LazyStreamContext> ctx) {
@@ -970,22 +1080,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                       << clientPipe.pipe_->getRemoteName() << ": "
                       << error.what();
                 }
-                // We may get garbage content in responseMessage upon error.
-                // Flushing all future messages belonging to this pipe due to
-                // error state.
-                decltype(clientPipe.pendingResponseMessage_) pendingMsgs;
-                {
-                  std::lock_guard<std::mutex> lock(mutex_);
-                  std::swap(clientPipe.pendingResponseMessage_, pendingMsgs);
-                  clientPipe.readError_ = true;
-                }
-                std::string errorMsg = error.what();
-                for (auto& p : pendingMsgs) {
-                  markFutureWithError(std::move(p.second), errorMsg);
-                }
-
-                // Remove entry from timeoutMap_.
-                removeFromTimeoutMap(responseMessage.id(), expirationTime);
+                handleClientError(clientPipe, error);
                 return;
               }
 
@@ -998,11 +1093,11 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
 
               std::shared_ptr<AtomicJitFuture> futureResponseMessage;
               {
-                std::lock_guard<std::mutex> lock(mutex_);
+                std::lock_guard<std::mutex> lock(clientPipe.mutex_);
                 // A read error will lead all following callbacks to be
                 // invoked with error, and shouldn't reach here.
                 TORCH_INTERNAL_ASSERT(
-                    !clientPipe.readError_, "Shouldn't in error state");
+                    !clientPipe.inError_, "Shouldn't be in error state");
                 auto it = clientPipe.pendingResponseMessage_.find(messageId);
                 TORCH_INTERNAL_ASSERT(
                     it != clientPipe.pendingResponseMessage_.end(),
@@ -1014,7 +1109,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
               }
 
               // Remove entry from timeoutMap_.
-              removeFromTimeoutMap(messageId, expirationTime);
+              removeFromTimeoutMap(messageId);
 
               if (responseMessage.type() == MessageType::EXCEPTION) {
                 markFutureWithError(
@@ -1033,6 +1128,27 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
       deviceMap);
 
   return futureResponseMessage->jitFuture;
+}
+
+void TensorPipeAgent::handleClientError(
+    ClientPipe& clientPipe,
+    const tensorpipe::Error& error) {
+  // When an error occurs on a pipe all pending operations will be aborted and
+  // all callbacks invoked with error, hence we immediately flush all future
+  // messages belonging to this pipe.
+  decltype(clientPipe.pendingResponseMessage_) pendingMsgs;
+  {
+    std::lock_guard<std::mutex> lock(clientPipe.mutex_);
+    std::swap(clientPipe.pendingResponseMessage_, pendingMsgs);
+    clientPipe.inError_ = true;
+  }
+  std::string errorMsg = error.what();
+  for (auto& p : pendingMsgs) {
+    markFutureWithError(std::move(p.second), errorMsg);
+
+    // Remove entry from timeoutMap_.
+    removeFromTimeoutMap(p.first);
+  }
 }
 
 void TensorPipeAgent::pollTimeoutRpcs() {
@@ -1062,10 +1178,15 @@ void TensorPipeAgent::pollTimeoutRpcs() {
     // outside the lock.
     std::vector<TimeoutMessageMetadata> timedOutFutures =
         std::move(timeoutMap_.begin()->second);
+
     // We can safely remove this key from the timeoutMap_ since all these
     // futures will be processed.
     timeoutMap_.erase(timeoutMap_.begin());
 
+    for (auto& timeoutMetadata : timedOutFutures) {
+      // Remove from messageIdToTimeout map.
+      messageIdToTimeout_.erase(timeoutMetadata.messageId);
+    }
     lock.unlock();
 
     // Set an error on futures added to the timedOutFutures vector. We do this
@@ -1087,7 +1208,7 @@ void TensorPipeAgent::sync() {
 }
 
 // TODO: Remove join()
-void TensorPipeAgent::join() {
+void TensorPipeAgent::join(bool shutdown) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
   // This method behaves like a barrier, as it can only return once all workers
   // have no more requests pending, including "nested" requests (triggered from
@@ -1131,6 +1252,10 @@ void TensorPipeAgent::join() {
               << (*totalClientActiveCalls[0].data_ptr<int64_t>())
               << " active client calls across all workers";
       if (*totalClientActiveCalls[0].data_ptr<int64_t>() == 0) {
+        if (shutdown) {
+          shuttingDown_ = true;
+          processGroup_->barrier()->wait();
+        }
         break;
       }
     }
@@ -1290,8 +1415,13 @@ void TensorPipeAgent::markFutureAsComplete(
                      message{std::move(message)},
                      ctx{std::move(ctx)}]() mutable {
       MultiStreamGuard guard(ctx);
+      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+      for (const auto& tensor : message.tensors()) {
+        data_ptrs.emplace_back(tensor.storage().data_ptr());
+      }
       atomicFuture->jitFuture->markCompleted(
-          IValue(c10::make_intrusive<Message>(std::move(message))));
+          IValue(c10::make_intrusive<Message>(std::move(message))),
+          std::move(data_ptrs));
       // The future's callbacks may schedule further RPCs, increasing the count.
       // Thus we must decrease it after completing the future, otherwise it may
       // briefly dip to zero and trick join into thinking all work is done.
@@ -1364,12 +1494,13 @@ size_t TensorPipeAgent::timeoutMapSize() {
 }
 
 size_t TensorPipeAgent::numPendingResponses() {
-  size_t totalPending = 0;
-  std::unique_lock<std::mutex> lock(mutex_);
-  for (const auto& entry : connectedPipes_) {
-    totalPending += entry.second.pendingResponseMessage_.size();
-  }
-  return totalPending;
+  std::unique_lock<std::mutex> lock(callCountMutex_);
+  return clientActiveCalls_;
+}
+
+size_t TensorPipeAgent::messageIdToTimeoutMapSize() {
+  std::unique_lock<std::mutex> lock(timeoutMapMutex_);
+  return messageIdToTimeout_.size();
 }
 
 } // namespace rpc

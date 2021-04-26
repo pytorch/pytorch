@@ -66,7 +66,12 @@ function get_bazel() {
   chmod +x tools/bazel
 }
 
-TORCHVISION_COMMIT=ae0d80b3c52dc98b3a9763bdb974c3ef7b6eb83d
+function install_monkeytype {
+  # Install MonkeyType
+  pip_install MonkeyType
+}
+
+TORCHVISION_COMMIT=8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db
 
 function install_torchvision() {
   # Check out torch/vision at Jun 11 2020 commit

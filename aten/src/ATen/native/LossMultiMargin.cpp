@@ -91,7 +91,7 @@ void multi_margin_loss_out_cpu_template(
     const Tensor& input,
     const Tensor& target,
     int p,
-    Scalar margin,
+    const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
   int64_t nframe, dim;
@@ -199,13 +199,13 @@ void multi_margin_loss_backward_out_cpu_template(
     const Tensor& input,
     const Tensor& target,
     int p,
-    Scalar margin,
+    const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
   int64_t nframe, dim;
   auto target_arg = TensorArg(target, "target", 2);
   const auto ndims = input.dim();
-  
+
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
 
   multi_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
@@ -250,24 +250,27 @@ void multi_margin_loss_backward_out_cpu_template(
 Tensor multi_margin_loss_cpu(
     const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
-    const Tensor& weight,
+    const Scalar& p,
+    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
     int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   auto output = at::empty({0}, input.options());
   multi_margin_loss_out_cpu_template(
       output, input, target, p.toInt(), margin, weight, reduction);
   return output;
 }
 
-Tensor& multi_margin_loss_cpu_out(
-    Tensor& output,
-    const Tensor& input,
+Tensor& multi_margin_loss_cpu_out(const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
-    const Tensor& weight,
-    int64_t reduction) {
+    const Scalar& p,
+    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    int64_t reduction,
+    Tensor& output) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   multi_margin_loss_out_cpu_template(
       output, input, target, p.toInt(), margin, weight, reduction);
   return output;
@@ -277,10 +280,12 @@ Tensor multi_margin_loss_cpu_backward(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
-    const Tensor& weight,
+    const Scalar& p,
+    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
     int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   auto grad_input = at::empty({0}, input.options());
   multi_margin_loss_backward_out_cpu_template(
       grad_input,
@@ -294,15 +299,16 @@ Tensor multi_margin_loss_cpu_backward(
   return grad_input;
 }
 
-Tensor& multi_margin_loss_cpu_backward_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
+Tensor& multi_margin_loss_cpu_backward_out(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
-    const Tensor& weight,
-    int64_t reduction) {
+    const Scalar& p,
+    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    int64_t reduction,
+    Tensor& grad_input) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   multi_margin_loss_backward_out_cpu_template(
       grad_input,
       grad_output,

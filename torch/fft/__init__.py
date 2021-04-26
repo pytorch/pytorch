@@ -1,7 +1,7 @@
 import sys
 
 import torch
-from torch._C import _add_docstr, _fft  # type: ignore
+from torch._C import _add_docstr, _fft  # type: ignore[attr-defined]
 from torch._torch_docs import factory_common_args
 
 __all__ = ['fft', 'ifft', 'fft2', 'ifft2', 'fftn', 'ifftn',
@@ -226,7 +226,7 @@ Args:
 Example:
 
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
-    >>> fftn = torch.fft.fftn(t)
+    >>> fftn = torch.fft.fftn(x)
 
     The discrete Fourier transform is separable, so :func:`~torch.fft.fftn`
     here is equivalent to two one-dimensional :func:`~torch.fft.fft` calls:
@@ -268,7 +268,7 @@ Args:
 Example:
 
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
-    >>> ifftn = torch.fft.ifftn(t)
+    >>> ifftn = torch.fft.ifftn(x)
 
     The discrete Fourier transform is separable, so :func:`~torch.fft.ifftn`
     here is equivalent to two one-dimensional :func:`~torch.fft.ifft` calls:

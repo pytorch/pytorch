@@ -40,6 +40,14 @@ void AdamWOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, amsgrad);
 }
 
+double AdamWOptions::get_lr() const {
+  return lr();
+}
+
+void AdamWOptions::set_lr(const double lr) {
+  this->lr(lr);
+}
+
 bool operator==(const AdamWParamState& lhs, const AdamWParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
           torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&

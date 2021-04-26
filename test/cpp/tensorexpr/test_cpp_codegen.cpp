@@ -2,10 +2,10 @@
 
 #include <test/cpp/tensorexpr/test_base.h>
 
+#include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
+#include <torch/csrc/jit/tensorexpr/mem_arena.h>
+#include <torch/csrc/jit/tensorexpr/stmt.h>
 #include <torch/csrc/jit/testing/file_check.h>
-#include "torch/csrc/jit/tensorexpr/cpp_codegen.h"
-#include "torch/csrc/jit/tensorexpr/mem_arena.h"
-#include "torch/csrc/jit/tensorexpr/stmt.h"
 
 namespace torch {
 namespace jit {
@@ -13,11 +13,11 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(CppPrinter, AllocateOnStackThenFree) {
-  constexpr int dim0 = 2, dim1 = 3;
   KernelScope kernel_scope;
-  VarHandle var("x", kHandle);
-  Allocate* alloc = Allocate::make(var, kInt, {dim0, dim1});
-  Free* free = Free::make(var);
+  std::vector<const Expr*> dims = {new IntImm(2), new IntImm(3)};
+  const Buf* buf = new Buf("x", dims, kInt);
+  Allocate* alloc = new Allocate(buf);
+  Free* free = new Free(buf);
   Block* block = Block::make({alloc, free});
 
   std::stringstream ss;
@@ -32,11 +32,12 @@ TEST(CppPrinter, AllocateOnStackThenFree) {
 }
 
 TEST(CppPrinter, AllocateOnHeapThenFree) {
-  constexpr int dim0 = 20, dim1 = 50, dim2 = 3;
   KernelScope kernel_scope;
-  VarHandle var("y", kHandle);
-  Allocate* alloc = Allocate::make(var, kLong, {dim0, dim1, dim2});
-  Free* free = Free::make(var);
+  std::vector<const Expr*> dims = {
+      new IntImm(20), new IntImm(50), new IntImm(3)};
+  const Buf* buf = new Buf("y", dims, kLong);
+  Allocate* alloc = new Allocate(buf);
+  Free* free = new Free(buf);
   Block* block = Block::make({alloc, free});
 
   std::stringstream ss;

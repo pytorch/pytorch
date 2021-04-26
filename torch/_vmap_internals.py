@@ -80,7 +80,7 @@ def _create_batched_inputs(
     batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [arg if in_dim is None else
-                      torch._add_batch_dim(arg, in_dim, vmap_level)  # type: ignore
+                      torch._add_batch_dim(arg, in_dim, vmap_level)
                       for in_dim, arg in zip(flat_in_dims, flat_args)]
     return tree_unflatten(batched_inputs, args_spec), batch_size
 
@@ -100,8 +100,8 @@ def _unwrap_batched(
     # with '_', see #40397.
     if isinstance(batched_outputs, Tensor):
         out_dim = out_dims_as_tuple[0]
-        return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore
-    return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)  # type: ignore
+        return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore[return-value]
+    return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
                  for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
 
 # Checks that `fn` returned one or more Tensors and nothing else.
@@ -245,7 +245,10 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         '`torch._C._debug_only_display_vmap_fallback_warnings(True) '
         'before the call to `vmap`.',
         stacklevel=2)
+    return _vmap(func, in_dims, out_dims)
 
+# A version of vmap but without the initial "experimental prototype" warning
+def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
     @functools.wraps(func)
     def wrapped(*args):
         _check_out_dims_is_int_or_int_tuple(out_dims, func)

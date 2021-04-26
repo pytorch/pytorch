@@ -738,6 +738,7 @@ struct TORCH_API DictType : public Type {
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
+      case TypeKind::ComplexType:
       case TypeKind::StringType:
       case TypeKind::TensorType:
         return DictTypePtr(new DictType(key, value));
@@ -745,7 +746,7 @@ struct TORCH_API DictType : public Type {
         AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
-            "', only int, float, Tensor and string keys are supported");
+            "', only int, float, complex, Tensor and string keys are supported");
     }
   }
 
@@ -974,7 +975,7 @@ struct TORCH_API TupleType : public NamedType {
     }
 
     const auto& l_elements = elements();
-    const auto& r_elements = rhs.cast<TupleType>()->elements();
+    const auto& r_elements = rhs.castRaw<TupleType>()->elements();
     if (l_elements.size() != r_elements.size())
       return false;
     for (size_t i = 0; i < l_elements.size(); ++i) {
@@ -1106,7 +1107,7 @@ using NumberTypePtr = std::shared_ptr<NumberType>;
 // Subtype hierarchy for Number Types (NumberType as the base type):
 // IntType <: NumberType
 // FloatType <: NumberType
-// ComplexDoubleType <:NumberType
+// ComplexType <:NumberType
 struct TORCH_API NumberType : public Type {
   static NumberTypePtr create() {
     return NumberTypePtr(new NumberType()); // NOLINT(modernize-make-shared)
@@ -1158,12 +1159,12 @@ struct TORCH_API FloatType : public NumberType {
   }
 };
 
-struct ComplexDoubleType;
-using ComplexDoubleTypePtr = std::shared_ptr<ComplexDoubleType>;
+struct ComplexType;
+using ComplexTypePtr = std::shared_ptr<ComplexType>;
 // This type represents a Python float number
-struct TORCH_API ComplexDoubleType : public NumberType {
-  static ComplexDoubleTypePtr create() {
-    return ComplexDoubleTypePtr(new ComplexDoubleType()); // NOLINT(modernize-make-shared)
+struct TORCH_API ComplexType : public NumberType {
+  static ComplexTypePtr create() {
+    return ComplexTypePtr(new ComplexType()); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -1174,12 +1175,12 @@ struct TORCH_API ComplexDoubleType : public NumberType {
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
     return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
-  static const TypeKind Kind = TypeKind::ComplexDoubleType;
+  static const TypeKind Kind = TypeKind::ComplexType;
   // global singleton
-  static ComplexDoubleTypePtr get();
+  static ComplexTypePtr get();
 
  private:
-  ComplexDoubleType() : NumberType(TypeKind::ComplexDoubleType) {}
+  ComplexType() : NumberType(TypeKind::ComplexType) {}
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     return "complex";
   }
@@ -1323,7 +1324,7 @@ struct TORCH_API NoneType : public Type {
     return rhs.kind() == kind();
   }
   std::string str() const override {
-    return "None";
+    return "NoneType";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const override {
     if (rhs->kind() == OptionalType::Kind) {
@@ -1540,6 +1541,8 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const Stride& s);
 // what is the type, ignoring extra size/shape information?
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
+// xxx: be careful with calls because this can be very slow. If calling this on a graph
+// use `EraseShapeInformation` in shape_analysis.h
 inline TypePtr unshapedType(const TypePtr& type) {
   if (type->isSubtypeOf(TensorType::get())) {
     return TensorType::get();
@@ -1551,14 +1554,14 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
   if (typ->isSubtypeOf(IntType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {
-    return TensorType::createContiguous(at::kFloat, at::kCPU, {});
+    return TensorType::createContiguous(at::kDouble, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
-    return TensorType::createContiguous(at::kLong, at::kCPU, {});
+    return TensorType::createContiguous(at::kBool, at::kCPU, {});
   }
   TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }
 inline TypePtr TensorType::fromBoolType() {
-  return TensorType::createContiguous(at::kLong, at::kCPU, {});
+  return TensorType::createContiguous(at::kBool, at::kCPU, {});
 }
 
 inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
@@ -1574,7 +1577,7 @@ inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePt
 
 inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   auto result = tryScalarTypeFromJitType(type);
-  AT_ASSERTM(
+  TORCH_CHECK(
       result,
       "Add new condition, expected Float, Complex, Int, or Bool but got",
       type->str());
@@ -1651,7 +1654,7 @@ struct getTypePtr_<double> final {
 template <>
 struct getTypePtr_<c10::complex<double>> final {
   static TypePtr call() {
-    return ComplexDoubleType::get();
+    return ComplexType::get();
   }
 };
 template <>
@@ -1880,8 +1883,8 @@ struct TORCH_API ClassType : public NamedType {
   // getter and (optional) setter for that attribute.
   struct Property {
     std::string name;
-    const torch::jit::Function* getter;
-    const torch::jit::Function* setter;
+    torch::jit::Function* getter;
+    torch::jit::Function* setter;
   };
 
   // Create a class type with name `name` and its methods stored in `cu`.
@@ -1889,7 +1892,8 @@ struct TORCH_API ClassType : public NamedType {
       c10::optional<QualifiedName> qualifiedName,
       std::weak_ptr<CompilationUnit> cu,
       bool is_module = false,
-      std::string doc_string = "");
+      std::string doc_string = "",
+      std::vector<std::string> unresolved_class_attributes = {});
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
@@ -1990,6 +1994,8 @@ struct TORCH_API ClassType : public NamedType {
         attributes_.cend();
   }
 
+  bool isUnresolvedClassAttribute(const std::string& name) const;
+
   at::ArrayRef<TypePtr> containedTypes() const override {
     return attributeTypes_;
   }
@@ -2048,6 +2054,10 @@ struct TORCH_API ClassType : public NamedType {
   c10::optional<ClassType::Property> getProperty(const std::string& name);
   // Add a property named \p name with \p getter and \p setter as its getter and setter.
   void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
+
+  const std::vector<Property> properties() const {
+    return properties_;
+  }
 
   bool hasConstant(const std::string& name) const {
     return std::find_if(
@@ -2175,6 +2185,9 @@ struct TORCH_API ClassType : public NamedType {
   torch::jit::Function& getHook(const std::string& name) const;
   bool hasMethod(const std::string& name) const;
 
+  torch::jit::Function* findStaticMethod(const std::string& name) const;
+  void addStaticMethod(torch::jit::Function* method);
+
   // [Internal Only] Remove method from the ClassType
   // caller is responsible to make sure the modification is safe:
   // it is unsafe to having existing allocations
@@ -2204,8 +2217,9 @@ struct TORCH_API ClassType : public NamedType {
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module,
-      std::string doc_string);
+      bool is_module = false,
+      std::string doc_string = "",
+      std::vector<std::string> unresolved_class_attributes = {});
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     const auto& n = name().value();
@@ -2237,6 +2251,7 @@ struct TORCH_API ClassType : public NamedType {
 
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
+  std::vector<torch::jit::Function*> staticmethods_;
 
   // List of hooks to be run before/after forward.
   std::vector<torch::jit::Function*> forward_hooks_;
@@ -2249,6 +2264,9 @@ struct TORCH_API ClassType : public NamedType {
 
   // Doc string of class.
   std::string doc_string_ = "";
+
+  // For error reporting accesses to class level attributes.
+  std::vector<std::string> unresolved_class_attributes_;
 };
 
 struct InterfaceType;
@@ -2439,7 +2457,7 @@ inline bool IValue::isDoubleList() const {
 
 inline bool IValue::isComplexDoubleList() const {
   // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexDoubleType::Kind;
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexType::Kind;
 }
 
 inline bool IValue::isTensorList() const {

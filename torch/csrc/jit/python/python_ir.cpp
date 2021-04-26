@@ -21,6 +21,11 @@
 namespace torch {
 namespace jit {
 
+// Controls whether graph source ranges are printed by default
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+bool global_print_source_ranges = true;
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
 using c10::Type;
@@ -209,11 +214,30 @@ Node* Graph::createPythonOp(
 
 void initPythonIRBindings(PyObject* module_) {
   auto m = py::handle(module_).cast<py::module>();
+
+  py::class_<AliasDb, std::shared_ptr<AliasDb>>(m, "AliasDb")
+      .def("dump", &AliasDb::dump)
+      .def("to_graphviz_str", &AliasDb::toGraphviz)
+      .def("__str__", &AliasDb::toString);
+
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
       .def(py::init<>())
-      .def("__repr__", [](Graph& g) { return g.toString(); })
+      .def(
+          "__repr__",
+          [&](Graph& g) { return g.toString(global_print_source_ranges); })
       .def("str", &Graph::toString, py::arg("print_source_ranges") = true)
+      .def_readonly_static(
+          "global_print_source_ranges", &global_print_source_ranges)
+      .def_static(
+          "set_global_print_source_ranges",
+          [&](const bool enabled) { global_print_source_ranges = enabled; },
+          py::arg("enabled") = true)
+      .def(
+          "alias_db",
+          [](std::shared_ptr<Graph> g) {
+            return std::make_shared<AliasDb>(std::move(g));
+          })
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
@@ -316,18 +340,22 @@ void initPythonIRBindings(PyObject* module_) {
           "inputs",
           [](Graph& g) {
             return py::make_iterator(g.inputs().begin(), g.inputs().end());
-          })
+          },
+          py::keep_alive<0, 1>())
       .def(
           "outputs",
           [](Graph& g) {
             return py::make_iterator(g.outputs().begin(), g.outputs().end());
-          })
-      // TODO: Iterator invalidation might make this hazardous
+          },
+          py::keep_alive<0, 1>())
+      // We keep the graph alive while the iterator lives. Destroying
+      // nodes might still be hazardous.
       .def(
           "nodes",
           [](Graph& g) {
             return py::make_iterator(g.nodes().begin(), g.nodes().end());
-          })
+          },
+          py::keep_alive<0, 1>())
       .def(
           "findNode",
           [](Graph& g, const std::string& kind, bool recurse) {
@@ -396,7 +424,7 @@ void initPythonIRBindings(PyObject* module_) {
 #undef GS
 
 #define VS(name) def(#name, &Value ::name)
-  py::class_<Value, std::unique_ptr<Value, py::nodelete>>(m, "Value")
+  py::class_<Value, unwrapping_shared_ptr<Value>>(m, "Value")
       .def(
           "__repr__",
           [](Value& n) {
@@ -439,7 +467,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
 
-  py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
+  py::class_<Block, unwrapping_shared_ptr<Block>>(m, "Block")
       .def(
           "nodes",
           [](Block& b) {
@@ -484,7 +512,7 @@ void initPythonIRBindings(PyObject* module_) {
       });
 
 #define NS(name) def(#name, &Node ::name)
-  py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")
+  py::class_<Node, unwrapping_shared_ptr<Node>>(m, "Node")
       .def(
           "__repr__",
           [](Node& n) {
@@ -587,6 +615,7 @@ void initPythonIRBindings(PyObject* module_) {
   })
       .CREATE_ACCESSOR(Float, f)
       .CREATE_ACCESSOR(Floats, fs)
+      .CREATE_ACCESSOR(Complex, c)
       .CREATE_ACCESSOR(String, s)
       .CREATE_ACCESSOR(Strings, ss)
       .CREATE_ACCESSOR(Int, i)
@@ -757,9 +786,15 @@ void initPythonIRBindings(PyObject* module_) {
             }
             return self->isSubtypeOf(other);
           })
-      .def("is_interface_type", [](const std::shared_ptr<Type>& self) {
-        return self->cast<InterfaceType>() != nullptr;
-      });
+      .def(
+          "is_interface_type",
+          [](const std::shared_ptr<Type>& self) {
+            return self->cast<InterfaceType>() != nullptr;
+          })
+      .def_property_readonly(
+          "annotation_str", [](const std::shared_ptr<Type>& self) {
+            return self->annotation_str();
+          });
 
   py::class_<AnyType, Type, std::shared_ptr<AnyType>>(m, "AnyType")
       .def_static("get", &AnyType::get);
@@ -769,9 +804,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &IntType::get);
   py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
       .def_static("get", &FloatType::get);
-  py::class_<ComplexDoubleType, Type, std::shared_ptr<ComplexDoubleType>>(
-      m, "ComplexDoubleType")
-      .def_static("get", &ComplexDoubleType::get);
+  py::class_<ComplexType, Type, std::shared_ptr<ComplexType>>(m, "ComplexType")
+      .def_static("get", &ComplexType::get);
   py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
       .def_static("get", &TensorType::get)
       .def_static("getInferred", &TensorType::getInferred);
@@ -834,7 +868,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
-      .def("name", [](ClassType& self) { return self.name()->name(); });
+      .def("name", [](ClassType& self) { return self.name()->name(); })
+      .def("qualified_name", [](ClassType& self) {
+        return self.name()->qualifiedName();
+      });
   py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
       .def(py::init([](const std::string& qualified_name,
                        TypePtr value_type,

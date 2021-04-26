@@ -4,6 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <aten/src/ATen/ExpandUtils.h>
 #include <c10/core/DefaultDtype.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/utils.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -100,7 +101,7 @@ void storeLastDimension(
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     *(DTYPE*)data = obj[i].to<DTYPE>();
     data += strides[dim] * elementSize;
   }
@@ -116,7 +117,7 @@ void storeLastDimensionFloat(
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     *(float*)data = static_cast<float>(obj[i].to<double>());
     data += strides[dim] * elementSize;
   }
@@ -132,7 +133,7 @@ void storeLastDimensionHalf(
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     *(at::Half*)data = at::convert<at::Half, double>(obj[i].to<double>());
     data += strides[dim] * elementSize;
   }
@@ -151,7 +152,7 @@ void recursiveStore(
   auto seq = obj.toListRef();
   checkSequenceSize(n, dim, seq.size());
   if (dim + 1 < static_cast<long>(ndim)) {
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       recursiveStore(data, sizes, strides, dim + 1, tenElementSize, seq[i]);
       data += strides[dim] * tenElementSize;
     }
@@ -295,12 +296,24 @@ RegisterOperators reg({
         double,
         at::native::scalar_tensor(
             scalar_val,
-            at::device(at::kCPU).dtype(c10::get_default_dtype())))
+            typeMetaToScalarType(c10::get_default_dtype()),
+            c10::nullopt /* layout */,
+            at::kCPU,
+            c10::nullopt /* pin_memory*/))
         DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
             DEFINE_TORCH_TENSOR_OP(
                 bool,
                 bool,
                 at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
+                DEFINE_TORCH_TENSOR_OP(
+                    complex,
+                    c10::complex<double>,
+                    at::native::scalar_tensor(
+                        scalar_val,
+                        typeMetaToScalarType(c10::get_default_complex_dtype()),
+                        c10::nullopt /* layout */,
+                        at::kCPU,
+                        c10::nullopt /* pin_memory */))
 
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp

@@ -75,7 +75,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
-    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType, const char* profilingTitle = nullptr);
+    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType, const char* profilingTitle = nullptr, const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -182,18 +182,20 @@ class ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
-  struct Options : torch::CustomClassHolder {
-    explicit Options();
+  struct Options : ProcessGroup::Options {
+    // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
+    // operations. This is only used when blockingWait_ is enabled.
+    explicit Options(
+        bool is_high_priority_stream = false);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
-        std::chrono::milliseconds timeout = kNoTimeout,
-        bool isHighStream = false) {
-      return c10::make_intrusive<Options>();
+        bool is_high_priority_stream = false) {
+      return c10::make_intrusive<Options>(is_high_priority_stream);
     }
 
-    std::chrono::milliseconds opTimeout;
-    bool isHighPriorityStream;
+    // Schedule NCCL operations on high priority CUDA streams
+    bool is_high_priority_stream;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -228,6 +230,10 @@ class ProcessGroupNCCL : public ProcessGroup {
       : ProcessGroupNCCL(store, rank, size, options) {}
 
   virtual ~ProcessGroupNCCL();
+
+  c10::intrusive_ptr<Options> getOptions() {
+    return options_;
+  }
 
   const std::string getBackendName() const override {
       return std::string(NCCL_BACKEND_NAME);
@@ -314,7 +320,14 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
-  static const int64_t kProcessGroupNCCLOpTimeoutMillis;
+   // Agrees on an initial sequence number for the whole group by having rank 0
+  // create it and broadcast it to other ranks using the store.
+  void setSequenceNumberForGroup() override;
+
+  // Retrieves the current sequence number for the whole group, which should be
+  // in sync. If the returned number is not consistent across the group, it
+  // may indicate that there is some sort of collective desynchronization.
+  uint64_t getSequenceNumberForGroup() override;
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
@@ -341,7 +354,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Device> devices,
       int rank,
       OpType opType,
-      const char* profilingTitle=nullptr);
+      const char* profilingTitle=nullptr,
+      const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
 
  private:
   // Helper that encapsulates work shared across all collective communication
@@ -417,6 +431,8 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
   c10::intrusive_ptr<Store> store_;
+
+  const c10::intrusive_ptr<Options> options_;
 
   // The number of NCCL communicators that have been created during
   // the lifetime of this process group. This sequence number is
@@ -526,17 +542,11 @@ class ProcessGroupNCCL : public ProcessGroup {
   // handling.
   bool asyncErrorHandling_ = false;
 
-  // Timeout for operations. This is only used when blockingWait_ is enabled.
-  std::chrono::milliseconds opTimeout_;
-
   // Set of communicators that this process group has aborted and their
   // ncclUniqueId has been written to the store. We don't need a lock
   // for this map since only the watchdog thread accesses this set. The
   // set contains the string representation of ncclUniqueId.
   std::unordered_set<std::string> abortedComms_;
-
-  // Schedule NCCL operations on high priority CUDA streams.
-  bool isHighPriorityStream_ = false;
 
   // The number of active ncclGroupStart() calls. This counter will be increased
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()

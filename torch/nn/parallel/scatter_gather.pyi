@@ -14,7 +14,7 @@ def scatter(inputs: Tensor, target_gpus: _devices_t, dim: int = ...) -> Tuple[Te
 # untyped module. Thus to mypy, the first definition of `scatter` looks strictly more general
 # than this overload.
 @overload
-def scatter(inputs: T, target_gpus: _devices_t, dim: int = ...) -> List[T]: ...  # type: ignore 
+def scatter(inputs: T, target_gpus: _devices_t, dim: int = ...) -> List[T]: ...  # type: ignore
 
 
 # TODO More precise types here.

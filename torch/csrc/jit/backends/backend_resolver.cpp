@@ -47,6 +47,8 @@ struct LoweredModuleResolver : public Resolver {
       return std::make_shared<BuiltinModule>("aten");
     } else if (name == "__torch__") {
       return std::make_shared<ClassNamespaceValue>(c10::QualifiedName(name));
+    } else if (name == "Exception") {
+      return std::make_shared<ExceptionValue>(name);
     }
 
     return nullptr;

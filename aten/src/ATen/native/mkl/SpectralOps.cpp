@@ -1,8 +1,9 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Config.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SpectralOpsUtils.h>
-#include <ATen/Config.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/accumulate.h>
 
 #if !AT_MKL_ENABLED()
 
@@ -22,18 +23,18 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-Tensor& _fft_r2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool onesided) {
+Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool onesided, Tensor& out) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-Tensor& _fft_c2r_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         int64_t last_dim_size) {
+Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         int64_t last_dim_size, Tensor& out) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-Tensor& _fft_c2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool forward) {
+Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool forward, Tensor& out) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
@@ -188,7 +189,7 @@ static void _fft_fill_with_conjugate_symmetry_cpu_(
     is_mirrored_dim[dim] = true;
   }
 
-  const auto numel = at::prod_intlist(signal_half_sizes);
+  const auto numel = c10::multiply_integers(signal_half_sizes);
   AT_DISPATCH_COMPLEX_TYPES(dtype, "_fft_fill_with_conjugate_symmetry", [&] {
     at::parallel_for(0, numel, at::internal::GRAIN_SIZE,
         [&](int64_t begin, int64_t end) {
@@ -267,7 +268,7 @@ static DftiDescriptor _plan_mkl_fft(
   }
   // rescale if requested
   const auto norm = static_cast<fft_norm_mode>(normalization);
-  int64_t signal_numel = at::prod_intlist(IntArrayRef(sizes.data() + 1, signal_ndim));
+  int64_t signal_numel = c10::multiply_integers(IntArrayRef(sizes.data() + 1, signal_ndim));
   if (norm != fft_norm_mode::none) {
     const double scale = (
       (norm == fft_norm_mode::by_root_n) ?
@@ -397,8 +398,8 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return _exec_fft(out, input, out_sizes, dim, normalization, /*forward=*/false);
 }
 
-Tensor& _fft_c2r_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         int64_t last_dim_size) {
+Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         int64_t last_dim_size, Tensor& out) {
   auto result = _fft_c2r_mkl(self, dim, normalization, last_dim_size);
   resize_output(out, result.sizes());
   return out.copy_(result);
@@ -425,8 +426,8 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return out;
 }
 
-Tensor& _fft_r2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool onesided) {
+Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool onesided, Tensor& out) {
   auto result = _fft_r2c_mkl(self, dim, normalization, /*onesided=*/true);
   if (onesided) {
     resize_output(out, result.sizes());
@@ -451,8 +452,8 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return _exec_fft(out, self, self.sizes(), sorted_dims, normalization, forward);
 }
 
-Tensor& _fft_c2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool forward) {
+Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool forward, Tensor& out) {
   auto result = _fft_c2c_mkl(self, dim, normalization, forward);
   resize_output(out, result.sizes());
   return out.copy_(result);

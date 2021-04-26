@@ -59,10 +59,16 @@ BUILD_ROOT = os.path.join(
 #   analysis and the shims no longer justify their maintenance and code
 #   complexity costs) back testing paths will be removed.
 
+CXX_FLAGS: Optional[List[str]]
 if hasattr(torch.__config__, "_cxx_flags"):
-    CXX_FLAGS = torch.__config__._cxx_flags().strip().split()
-    if "-g" not in CXX_FLAGS:
-        CXX_FLAGS.append("-g")
+    try:
+        CXX_FLAGS = torch.__config__._cxx_flags().strip().split()
+        if CXX_FLAGS is not None and "-g" not in CXX_FLAGS:
+            CXX_FLAGS.append("-g")
+
+    except RuntimeError:
+        # We are in FBCode.
+        CXX_FLAGS = None
 else:
     # FIXME: Remove when back testing is no longer required.
     CXX_FLAGS = ["-O2", "-fPIC", "-g"]
@@ -92,8 +98,16 @@ def get_compat_bindings() -> CallgrindModuleType:
     return COMPAT_CALLGRIND_BINDINGS
 
 
-def _compile_template(stmt: str, setup: str, src: str, is_standalone: bool) -> Any:
+def _compile_template(
+    *,
+    stmt: str,
+    setup: str,
+    global_setup: str,
+    src: str,
+    is_standalone: bool
+) -> Any:
     for before, after, indentation in (
+        ("// GLOBAL_SETUP_TEMPLATE_LOCATION", global_setup, 0),
         ("// SETUP_TEMPLATE_LOCATION", setup, 4),
         ("// STMT_TEMPLATE_LOCATION", stmt, 8)
     ):
@@ -134,21 +148,21 @@ def _compile_template(stmt: str, setup: str, src: str, is_standalone: bool) -> A
     )
 
 
-def compile_timeit_template(stmt: str, setup: str) -> TimeitModuleType:
+def compile_timeit_template(*, stmt: str, setup: str, global_setup: str) -> TimeitModuleType:
     template_path: str = os.path.join(SOURCE_ROOT, "timeit_template.cpp")
     with open(template_path, "rt") as f:
         src: str = f.read()
 
-    module = _compile_template(stmt, setup, src, is_standalone=False)
+    module = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=False)
     assert isinstance(module, TimeitModuleType)
     return module
 
 
-def compile_callgrind_template(stmt: str, setup: str) -> str:
+def compile_callgrind_template(*, stmt: str, setup: str, global_setup: str) -> str:
     template_path: str = os.path.join(SOURCE_ROOT, "valgrind_wrapper", "timer_callgrind_template.cpp")
     with open(template_path, "rt") as f:
         src: str = f.read()
 
-    target = _compile_template(stmt, setup, src, is_standalone=True)
+    target = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=True)
     assert isinstance(target, str)
     return target

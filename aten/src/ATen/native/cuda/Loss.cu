@@ -58,7 +58,7 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
         });
     });
   }
-  else { 
+  else {
     grad_input = -at::exp(target) * grad;
     if (reduction == at::Reduction::Mean) {
       grad_input /= input.numel();
@@ -68,12 +68,19 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
   return grad_input;
 }
 
-Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     Tensor loss = at::empty_like(input);
-    return at::native::binary_cross_entropy_out_cuda(loss, input, target, weight, reduction);
+    return at::native::binary_cross_entropy_out_cuda(
+        input, target, weight, reduction, loss);
 }
 
-Tensor& binary_cross_entropy_out_cuda(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor& loss) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   Tensor loss_squeezed = at::squeeze(loss);
 
   TensorIterator iter = TensorIteratorConfig()
@@ -117,12 +124,19 @@ Tensor& binary_cross_entropy_out_cuda(Tensor& loss, const Tensor& input, const T
   return loss;
 }
 
-Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   Tensor grad_input = at::empty_like(input);
-  return at::native::binary_cross_entropy_backward_out_cuda(grad_input, grad, input, target, weight, reduction);
+  return at::native::binary_cross_entropy_backward_out_cuda(
+      grad, input, target, weight, reduction, grad_input);
 }
 
-Tensor& binary_cross_entropy_backward_out_cuda(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor& binary_cross_entropy_backward_out_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor& grad_input) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   Tensor grad_expand = grad.expand_as(input);
   binary_cross_entropy_backward_out_kernel(grad_input, grad_expand, input, target);
 

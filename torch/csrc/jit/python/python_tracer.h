@@ -30,7 +30,8 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& var_name_lookup_fn,
     bool strict,
     bool force_outplace,
-    Module* self = nullptr);
+    Module* self = nullptr,
+    const std::vector<std::string>& argument_names = {});
 } // namespace tracer
 } // namespace jit
 } // namespace torch

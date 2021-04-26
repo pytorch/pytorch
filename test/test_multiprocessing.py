@@ -841,7 +841,7 @@ if __name__ == "__main__":
         p.join()
 
     def test_empty_shared(self):
-        t = torch.Tensor()
+        t = torch.tensor([])
         t.share_memory_()
 
     def _test_is_shared(self):

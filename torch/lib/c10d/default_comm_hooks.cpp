@@ -8,7 +8,8 @@ namespace c10d {
 
 c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
     GradBucket& bucket) {
-  auto allreduce_work = state_->allreduce(bucket.getTensorsRef());
+  std::vector<at::Tensor> tensors = {bucket.getTensorRef()};
+  auto allreduce_work = state_->allreduce(tensors);
 
   auto div_by_process_group_size = [allreduce_work, this]() {
     auto tensor = allreduce_work->result()[0] / state_->getSize();
@@ -21,10 +22,9 @@ c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
 
 c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
     GradBucket& bucket) {
-  auto& tensors = bucket.getTensorsRef();
-  for (auto& tensor : tensors) {
-    tensor.copy_(tensor.to(torch::kFloat16));
-  }
+  auto& tensor = bucket.getTensorRef();
+  tensor.copy_(tensor.to(torch::kFloat16));
+  std::vector<at::Tensor> tensors = {tensor};
   auto allreduce_work = state_->allreduce(tensors);
 
   auto decompress_and_div_by_process_group_size = [allreduce_work, this]() {

@@ -2,15 +2,16 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/Fill.h>
+#include <ATen/native/TensorIterator.h>
 #include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor& fill_out(Tensor& self, Scalar value) {
+Tensor& fill_out(Tensor& self, const Scalar& value) {
   if (self.is_quantized()) {
     at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
     out = out.to(self.device());
@@ -31,7 +32,7 @@ Tensor& fill_out(Tensor& self, Scalar value) {
   return self;
 }
 
-Tensor& fill_(Tensor& self, Scalar value) {
+Tensor& fill_(Tensor& self, const Scalar& value) {
   return fill_out(self, value);
 }
 
@@ -40,11 +41,20 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
   return fill_out(self, value.item());
 }
 
+Tensor& fill_meta_(Tensor& self, const Scalar& value) {
+  return self;
+}
+
+Tensor& fill_meta_(Tensor& self, const Tensor& value) {
+  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
+  return self;
+}
+
 DEFINE_DISPATCH(fill_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill_diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {
+Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
   int64_t nDims = self.dim();
   TORCH_CHECK(nDims >= 2, "dimensions must larger than 1");
 
@@ -104,13 +114,17 @@ Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
 }
 
 Tensor& zero_(Tensor &self) {
-  int64_t nelements = at::prod_intlist(self.sizes());
+  int64_t nelements = c10::multiply_integers(self.sizes());
   if (self.device() == at::kCPU &&
       self.is_non_overlapping_and_dense() &&
       nelements < internal::GRAIN_SIZE) {
     return zero_cpu_(self, nelements);
   }
   return self.fill_(0);
+}
+
+Tensor& zero_meta_(Tensor& self) {
+  return self;
 }
 
 } // namespace native

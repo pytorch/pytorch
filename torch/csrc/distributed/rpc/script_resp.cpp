@@ -36,7 +36,7 @@ std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {
       payload,
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &message.tensors());
+      message.tensors());
   return std::make_unique<ScriptResp>(std::move(value));
 }
 
