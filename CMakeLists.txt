@@ -204,6 +204,7 @@ option(USE_GLOG "Use GLOG" OFF)
 option(USE_LEVELDB "Use LEVELDB" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" OFF)
+option(USE_MAGMA "Use MAGMA" ON)
 option(USE_METAL "Use Metal for Caffe2 iOS build" ON)
 option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
@@ -282,7 +283,7 @@ option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 cmake_dependent_option(
-    USE_DEPLOY "Build embedded torch::deploy interpreter" OFF
+    USE_DEPLOY "Build embedded torch::deploy interpreter.  See torch/csrc/deploy/README.md for more info." OFF
     "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 
