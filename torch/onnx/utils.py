@@ -445,12 +445,6 @@ def _model_to_graph(model, args, verbose=False,
     graph, params, torch_out, module = _create_jit_graph(model, args,
                                                          _retain_param_name)
 
-    if (isinstance(example_outputs, tuple) and len(example_outputs) == 1 and isinstance(example_outputs[0], list)):
-        example_outputs = example_outputs[0]
-
-    if (torch_out is not None and example_outputs is not None and (isinstance(torch_out, list) ^ isinstance(example_outputs, list))):
-        raise RuntimeError('example_outputs is not in the correct format.')
-
     params_dict = _get_named_param_dict(graph, params)
 
     graph = _optimize_graph(graph, operator_export_type,
