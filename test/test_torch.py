@@ -2173,7 +2173,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                               lambda: self.assertEqual(x, xv, rtol=4))
 
             self.assertRaisesRegex(TypeError, "takes from 3 to 4 positional arguments",
-                                   lambda: self.assertEqual(x, xv, "", 1.0))  # type: ignore
+                                   lambda: self.assertEqual(x, xv, "", 1.0))  # type: ignore[misc]
 
         def test_new(self) -> None:
             x = torch.autograd.Variable(torch.tensor([]))
@@ -3766,6 +3766,17 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor([10], dtype=dtype, device=device).geometric_(0.5)
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
+
+    def test_repeat_interleave(self, device):
+        y = torch.tensor([[1, 2], [3, 4]], device=device)
+        for dtype in [torch.int, torch.long]:
+            a = torch.repeat_interleave(
+                y,
+                torch.tensor([1, 2], dtype=dtype, device=device),
+                dim=0,
+            )
+            self.assertEqual(a.dtype, y.dtype)
+            self.assertEqual(a.size(), torch.Size([3, 2]))
 
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
     @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
