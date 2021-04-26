@@ -49,6 +49,7 @@ from torch.testing._internal.common_distributed import (
     create_device,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
+    create_tcp_store,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -299,27 +300,9 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         return c10d.PrefixStore(self.prefix, self.filestore)
 
-
-def create_tcp_store(addr, world_size=1, wait_for_workers=True):
-    """
-    Creates a TCP store. Retries if the chosen port is already in use.
-    """
-    ports = []
-    for _ in range(10):
-        try:
-            port = common.find_free_port()
-            ports.append(port)
-            return c10d.TCPStore(addr, port, world_size, True, wait_for_workers=wait_for_workers)
-        except RuntimeError as error:
-            if str(error) == "Address already in use":
-                continue
-            raise
-    raise RuntimeError("Unable to find free port (tried %s)" % ", ".join(ports))
-
-
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
-        store = create_tcp_store("localhost")
+        store = create_tcp_store()
         store.set_timeout(timedelta(seconds=300))
         return store
 
@@ -329,7 +312,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         else:
             err_msg_reg = "^Address already in use$"
         with self.assertRaisesRegex(RuntimeError, err_msg_reg):
-            addr = "localhost"
+            addr = DEFAULT_HOSTNAME
             port = common.find_free_port()
 
             # Use noqa to silence flake8.
@@ -418,7 +401,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super(PrefixTCPStoreTest, self).setUp()
-        self.tcpstore = create_tcp_store("localhost")
+        self.tcpstore = create_tcp_store()
         self.prefix = "test_prefix"
         self.tcpstore.set_timeout(timedelta(seconds=300))
 
@@ -652,7 +635,7 @@ class RendezvousFileTest(TestCase):
 @skip_if_win32()
 class RendezvousTCPTest(TestCase):
     def create_tcp_url(self):
-        addr = "localhost"
+        addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
         url = "tcp://%s:%d?world_size=%d" % (addr, port, 1)
         return url
@@ -780,16 +763,16 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self._fork_processes()
 
     def opts(self, threads=2):
-        opts = c10d.ProcessGroupGloo.Options()
-        opts.timeout = 5.0
+        opts = c10d.ProcessGroupGloo._Options()
+        opts._timeout = 5.0
         opts._devices = [create_device(interface=LOOPBACK)]
         opts._threads = threads
         return opts
 
     def test_multi_device_constructor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        opts = c10d.ProcessGroupGloo.Options()
-        opts.timeout = 5.0
+        opts = c10d.ProcessGroupGloo._Options()
+        opts._timeout = 5.0
         opts._devices = [
             create_device(interface=LOOPBACK),
             create_device(interface=LOOPBACK),
@@ -2415,7 +2398,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
     ):
         store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo.Options()
+        options = c10d.ProcessGroupGloo._Options()
         options._devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(
             store, self.rank, self.world_size, options
@@ -4882,7 +4865,7 @@ class CommTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_broadcast_coalesced_gloo_cuda(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo.Options()
+        options = c10d.ProcessGroupGloo._Options()
         options._devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(
             store, self.rank, self.world_size, options
@@ -4895,7 +4878,7 @@ class CommTest(MultiProcessTestCase):
     @requires_gloo()
     def test_broadcast_coalesced_gloo_cpu(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo.Options()
+        options = c10d.ProcessGroupGloo._Options()
         options._devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(
             store, self.rank, self.world_size, options
@@ -4905,63 +4888,57 @@ class CommTest(MultiProcessTestCase):
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
 
-    @requires_gloo()
-    def test_pass_gloo_options(self):
-        pg_opts = c10d.ProcessGroupGloo.Options()
-        pg_opts.timeout = timedelta(seconds=10)
-        pg_opts._devices = [create_device(interface=LOOPBACK)]
-        pg_opts._threads = 2
-
+    def _test_sequence_num_set_default_pg(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
-
         dist.init_process_group(
-            "gloo",
+            backend,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
-            pg_options=pg_opts
         )
 
         default_pg = c10d.distributed_c10d._get_default_group()
-
-        # Test properly set devices on options if user don't set devices
-        no_device_thread_pg_opts = c10d.ProcessGroupGloo.Options(timeout=timedelta(seconds=10))
-        no_device_thread_pg = dist.new_group([0, 1], pg_options=no_device_thread_pg_opts)
-        self.assertTrue(len(no_device_thread_pg.options._devices) != 0)
-        # ensure created pg have the correct timeout set instead of default time out
-        self.assertEqual(no_device_thread_pg.options.timeout, timedelta(seconds=10))
-
-        # Test if user pass in Options, set threads, but not set devices, should error out
-        no_device_pg_opts = c10d.ProcessGroupGloo.Options(timeout=timedelta(seconds=10))
-        no_device_pg_opts._threads = 4
-
-        with self.assertRaisesRegex(
-            RuntimeError, "threads and devices must be passed in together"
-        ):
-            no_device_pg = dist.new_group([0, 1], pg_options=no_device_pg_opts)
-
-        dist.destroy_process_group(default_pg)
-        self.assertFalse(dist.is_initialized())
-
+        seq_num = default_pg._get_sequence_number_for_group()
+        obj_list = [None for _ in range(dist.get_world_size())]
+        dist.all_gather_object(obj_list, seq_num)
+        self.assertEqual(len(set(obj_list)), 1)
 
     @requires_gloo()
-    def test_pass_gloo_options_and_timeout(self):
-        pg_opts = c10d.ProcessGroupGloo.Options()
-        pg_opts.timeout = timedelta(seconds=10)
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_default_pg_gloo(self):
+        self._test_sequence_num_set_default_pg(backend="gloo")
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_default_pg_nccl(self):
+        torch.cuda.set_device(self.rank)
+        self._test_sequence_num_set_default_pg(backend="nccl")
+
+    def _test_sequence_num_set_new_group(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
-        # Test timeout and pg_options both set, should error out
-        with self.assertRaisesRegex(
-            RuntimeError, "timeout value defined in pg_options are conflicting"
-        ):
-            dist.init_process_group(
-                "gloo",
-                world_size=self.world_size,
-                rank=self.rank,
-                store=store,
-                timeout=timedelta(20),
-                pg_options=pg_opts
-            )
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        subgroup = dist.new_group([0, 1])
+        subgroup_seq = subgroup._get_sequence_number_for_group()
+        obj_list = [None for _ in range(dist.get_world_size())]
+        dist.all_gather_object(obj_list, subgroup_seq)
+        self.assertEqual(len(set(obj_list)), 1)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_gloo_new_group(self):
+        self._test_sequence_num_set_new_group(backend="gloo")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_nccl_new_group(self):
+        torch.cuda.set_device(self.rank)
+        self._test_sequence_num_set_new_group(backend="nccl")
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
