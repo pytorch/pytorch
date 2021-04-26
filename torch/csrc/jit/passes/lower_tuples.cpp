@@ -157,7 +157,8 @@ static void VisitNode(Node* n, Node* insert_point) {
   for (size_t i = 0; i < n->outputs().size();) {
     Value* output = n->outputs()[i];
     if (!output->hasUses()) {
-      return;
+      i++;
+      continue;
     }
 
     // (a, b, tup, c) -> (a, b, t0, t1, c)
