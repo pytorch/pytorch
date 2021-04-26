@@ -239,6 +239,41 @@ class AllgatherNCCLTest : public NCCLTest {
   }
 };
 
+class AllgatherBaseNCCLTest : public NCCLTest {
+ public:
+  AllgatherBaseNCCLTest(const std::string& path, int worldSize)
+      : NCCLTest(path, worldSize) {
+        output_tensor_ = at::empty({worldSize_, 3, 3}, at::kCUDA);
+      }
+
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
+    // For the duration of this function, make THC use our streams
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+
+    launchDeviceSleep();
+    valueInitialization();
+    // contains at least one element otherwise wouldn't run.
+    // this is a flattened allgather, hence one rank contributes
+    // only 1 tensor, regardless of number of devices
+    return pg_->_allgather_base(output_tensor_, tensors_[0]);
+  }
+
+  at::Tensor getOutputTensor() {
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    return output_tensor_.cpu();
+  }
+
+  at::Tensor getInputTensor() {
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    return tensors_[0].cpu();
+  }
+
+
+  private:
+    at::Tensor output_tensor_;
+};
+
+
 struct ReduceScatterNCCLTest : NCCLTest {
   ReduceScatterNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
@@ -363,6 +398,27 @@ void testAllgather(const std::string& path, int rank, int size) {
   }
 }
 
+void testAllgatherBase(const std::string& path, int rank, int size) {
+  auto test = AllgatherBaseNCCLTest(path, size);
+  test.initialize(rank, size);
+  auto work = test.run();
+  // Wait for work to finish
+  test.wait(work);
+  // Validation
+  auto output_tensor = test.getOutputTensor();
+  auto input_tensor = test.getInputTensor();
+
+  auto data = output_tensor.data_ptr<float>();
+
+  // Rank index
+  for (const auto i : c10::irange(output_tensor.numel())) {
+    // expected is i // input.numel() <- rank, and each rank contributed rank * num_gpu
+    const auto expected = (i / input_tensor.numel()) * test.numDevices();
+    EXPECT_EQ(data[i], expected)
+          << "Allgather_base outputs do not match expected outputs";
+  }
+}
+
 void testReduceScatter(const std::string& path, int rank, int size) {
   auto test = ReduceScatterNCCLTest(path, size);
   test.initialize(rank, size);
@@ -482,6 +538,16 @@ TEST_F(ProcessGroupNCCLTest, testAllgather) {
   {
     TemporaryFile file;
     testAllgather(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testAllgatherBase) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testAllgatherBase(file.path, rank_, size_);
   }
 }
 
