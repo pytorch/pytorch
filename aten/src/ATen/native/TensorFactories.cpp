@@ -893,7 +893,7 @@ Tensor& randperm_out(int64_t n, Tensor& result) {
 Tensor& randperm_out_cpu(int64_t n, c10::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
-  check_supported_max_int_with_precision(n, result);
+  check_supported_max_int_with_precision(n>0?n-1:n, result);
   result.resize_({n});
   auto gen = get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
