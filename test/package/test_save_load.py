@@ -86,6 +86,35 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(module_a_i.result, "module_a")
         self.assertIsNot(module_a, module_a_i)
 
+    def test_dunder_imports(self):
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
+            import package_b
+            obj = package_b.PackageBObject
+            he.save_pickle("res", "obj.pkl", obj)
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        loaded_obj = hi.load_pickle("res", "obj.pkl")
+
+        package_b = hi.import_module("package_b")
+        self.assertEqual(package_b.result, "package_b")
+
+        math = hi.import_module("math")
+        self.assertEqual(math.__name__, "math")
+
+        xml_sub_sub_package = hi.import_module("xml.sax.xmlreader")
+        self.assertEqual(xml_sub_sub_package.__name__, "xml.sax.xmlreader")
+
+        subpackage_1 = hi.import_module("package_b.subpackage_1")
+        self.assertEqual(subpackage_1.result, "subpackage_1")
+
+        subpackage_2 = hi.import_module("package_b.subpackage_2")
+        self.assertEqual(subpackage_2.result, "subpackage_2")
+
+        subsubpackage_0 = hi.import_module("package_b.subpackage_0.subsubpackage_0")
+        self.assertEqual(subsubpackage_0.result, "subsubpackage_0")
+
     def test_save_module_binary(self):
         f = BytesIO()
         with PackageExporter(f, verbose=False) as he:
