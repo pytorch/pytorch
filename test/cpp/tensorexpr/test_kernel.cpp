@@ -76,12 +76,10 @@ TEST_F(Kernel, InliningIntermediates) {
       // aten_mul only has one use, inlined completely
       torch::jit::testing::FileCheck().check_not("aten_mul")->run(oss.str());
 
-      // aten_sub should be removed in cuda, exist in cpu
-      // 5 uses: allocate, initialize, free and two reads
+      // aten_sub should be removed by the CUDA backend by metavar rewriting
+      // and by the CPU backend by horizontal fusion.
       size_t num_out1_uses = use_cuda ? 0 : 5;
-      torch::jit::testing::FileCheck()
-          .check_count("aten_sub", num_out1_uses, /*exactly*/ true)
-          ->run(oss.str());
+      torch::jit::testing::FileCheck().check_not("aten_sub")->run(oss.str());
     }
   }
 }
@@ -574,7 +572,7 @@ TEST_F(Kernel, CatWoConditionals) {
 namespace {
 
 std::string dtypeConstant(ScalarType scalar_type) {
-  if (scalar_type == ScalarType::None) {
+  if (scalar_type == ScalarType::Undefined) {
     return "None = prim::Constant()";
   } else {
     TemplateEnv env_dtype;
@@ -608,7 +606,7 @@ TEST_F(Kernel, DISABLED_SumAllAxes) {
         return (%2))IR";
   auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
-  for (auto scalar_type : {ScalarType::None, ScalarType::Double}) {
+  for (auto scalar_type : {ScalarType::Undefined, ScalarType::Double}) {
     KernelScope kernel_scope;
     TemplateEnv env;
     env.s("dtype", dtypeConstant(scalar_type));
@@ -619,7 +617,7 @@ TEST_F(Kernel, DISABLED_SumAllAxes) {
 
     auto o = at::empty({}, TensorOptions(kCPU));
     c10::optional<c10::ScalarType> dtype;
-    if (scalar_type != ScalarType::None) {
+    if (scalar_type != ScalarType::Undefined) {
       dtype = static_cast<c10::ScalarType>(scalar_type);
     }
     auto ref = a.sum(/*dtype=*/dtype);
@@ -672,18 +670,18 @@ TEST_F(Kernel, SumOneAxis) {
 
   for (int dim = -a.dim(); dim < a.dim(); ++dim) {
     for (bool keepdim : {false, true}) {
-      for (auto scalar_type : {ScalarType::None, ScalarType::Double}) {
+      for (auto scalar_type : {ScalarType::Undefined, ScalarType::Double}) {
         KernelScope kernel_scope;
         TemplateEnv env;
         env.d("dim", dim);
         env.d("keepdim", keepdim);
         env.s("dtype", dtypeConstant(scalar_type));
         c10::optional<c10::ScalarType> dtype;
-        if (scalar_type != ScalarType::None) {
+        if (scalar_type != ScalarType::Undefined) {
           dtype = static_cast<c10::ScalarType>(scalar_type);
         }
         auto ref = a.sum({dim}, /*keepdim=*/keepdim, /*dtype=*/dtype);
-        if (scalar_type == ScalarType::None) {
+        if (scalar_type == ScalarType::Undefined) {
           env.s("out_dtype", "Float");
         } else {
           env.s("out_dtype", "Double");
@@ -745,7 +743,7 @@ TEST_F(Kernel, SumMultipleAxes) {
         env.d("dim1", dim1);
         env.d("dim2", dim2);
         env.d("keepdim", keepdim);
-        env.s("dtype", dtypeConstant(ScalarType::None));
+        env.s("dtype", dtypeConstant(ScalarType::Undefined));
         auto o = at::empty({}, TensorOptions(kCPU));
         auto ref = a.sum(IntArrayRef{dim1, dim2}, /*keepdim=*/keepdim);
 
