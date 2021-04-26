@@ -443,9 +443,6 @@ Tensor & index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& ind
 }
 
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("index_copy");
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK_INDEX(index.dim() < 2, "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
