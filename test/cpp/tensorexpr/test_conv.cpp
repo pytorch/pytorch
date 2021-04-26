@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/torch.h>
 
@@ -9,6 +11,46 @@ namespace jit {
 
 namespace te = torch::jit::tensorexpr;
 namespace F = torch::nn::functional;
+
+// Generate test data with few bits of precision, to minimize error
+// accumulation from floating-point reordering.
+static at::Tensor genTestData(c10::IntArrayRef args) {
+  return at::trunc(at::randn(args) * 256.0f) / 256.0f;
+}
+
+#ifdef TORCH_ENABLE_LLVM
+TEST(Conv, DepthwiseConv2D) {
+  te::KernelScope kernel_scope;
+  constexpr int N = 1, C = 72, H = 56, W = 56;
+  constexpr int K = 72, R = 3, S = 3;
+  constexpr int kPad = 1, kStride = 2, kGroups = C;
+  constexpr int CperG = C / kGroups;
+
+  te::Placeholder input("input", te::kFloat, {N, C, H, W});
+  te::Placeholder weight("weight", te::kFloat, {K, CperG, R, S});
+  te::Placeholder bias("bias", te::kFloat, {K});
+  te::Tensor* output = te::conv2d_depthwise(
+      input.handle(), weight.handle(), bias.handle(), kStride, kPad, kGroups);
+
+  te::LoopNest loop({output});
+  loop.simplify();
+  loop.prepareForCodegen();
+  te::LLVMCodeGen cg(loop.root_stmt(), {input, weight, bias, output});
+
+  auto it = genTestData({N, C, H, W});
+  auto wt = genTestData({K, CperG, R, S});
+  auto bt = genTestData({K});
+  auto ref = at::conv2d(it, wt, bt, kStride, kPad, /*dilation=*/1, kGroups);
+  auto ot = at::zeros_like(ref);
+  cg.call(
+      {it.data_ptr<float>(),
+       wt.data_ptr<float>(),
+       bt.data_ptr<float>(),
+       ot.data_ptr<float>()});
+
+  ASSERT_TRUE(at::allclose(ref, ot));
+}
+#endif
 
 TEST(Conv, Conv2D) {
   te::KernelScope kernel_scope;

@@ -3,8 +3,9 @@ from pprint import pformat
 
 import argparse
 
-from tools.codegen.model import *
-from tools.codegen.api.python import *
+from tools.codegen.model import Variant
+from tools.codegen.api.python import (PythonSignatureGroup,
+                                      PythonSignatureNativeFunctionPair)
 from tools.codegen.gen import FileManager
 from typing import Sequence, List, Dict
 
@@ -147,7 +148,7 @@ def sig_for_ops(opname: str) -> List[str]:
         return ['def {}(self, other: Any) -> Tensor: ...'.format(opname)]
     elif name in comparison_ops:
         # unsafe override https://github.com/python/mypy/issues/5704
-        return ['def {}(self, other: Any) -> Tensor: ...  # type: ignore'.format(opname)]
+        return ['def {}(self, other: Any) -> Tensor: ...  # type: ignore[override]'.format(opname)]
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
     elif name in to_py_type_ops:
@@ -294,6 +295,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],'
                               ' size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,'
                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
+        'sparse_csr_tensor' : ['def sparse_csr_tensor(crow_indices: Tensor, col_indices: Tensor,'
+                               ' values: Tensor, size: Optional[_size]=None,'
+                               ' *, dtype: Optional[_dtype]=None,'
+                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
         '_sparse_coo_tensor_unsafe': ['def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],'
                                       ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
                                       ' requires_grad: bool = False) -> Tensor: ...'],
@@ -446,6 +451,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
         'is_sparse': ['is_sparse: _bool'],
+        'is_sparse_csr' : ['is_sparse_csr: _bool'],
         'is_quantized': ['is_quantized: _bool'],
         'is_meta': ['is_meta: _bool'],
         'is_mkldnn': ['is_mkldnn: _bool'],

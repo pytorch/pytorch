@@ -8,6 +8,7 @@ from torch import Tensor
 
 _DEFAULT_FIRST_BUCKET_BYTES: int
 _DEFAULT_NO_TIMEOUT: timedelta
+_DEFAULT_PG_TIMEOUT: timedelta
 
 class BuiltinCommHookType(Enum):
     ALLREDUCE = ...
@@ -137,9 +138,10 @@ class TCPStore(Store):
         self,
         host_name: str,
         port: int,
-        world_size: int,
-        is_master: bool,
-        timeout: timedelta,
+        world_size: int = ...,
+        is_master: bool = ...,
+        timeout: timedelta = ...,
+        wait_for_workers: bool = ...
     ): ...
 
 class PrefixStore(Store):
@@ -221,6 +223,12 @@ class ProcessGroup:
         self,
         output_tensors: List[Tensor],
         input_tensor: Tensor,
+    ) -> Work: ...
+    def _allgather_base(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts = AllGatherOptions(),
     ) -> Work: ...
     def allgather_coalesced(
         self,
@@ -375,9 +383,6 @@ def _broadcast_coalesced(
     src: int,
 ): ...
 def _test_python_store(store: Store): ...
-def _verify_replicas_within_process(
-    replicas: List[List[Tensor]], expect_sparse_gradient: List[List[bool]]
-): ...
 def _verify_model_across_ranks(
     process_group: ProcessGroup, replicas: List[List[Tensor]]
 ): ...

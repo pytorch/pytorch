@@ -861,21 +861,21 @@ class TestOldViewOps(TestCase):
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_narrow(self, device):
-        x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
-        self.assertEqual(x.narrow(0, 0, 1), torch.Tensor([[0, 1, 2]]))
-        self.assertEqual(x.narrow(0, 0, 2), torch.Tensor([[0, 1, 2], [3, 4, 5]]))
-        self.assertEqual(x.narrow(0, 1, 1), torch.Tensor([[3, 4, 5]]))
-        self.assertEqual(x.narrow(0, -1, 1), torch.Tensor([[6, 7, 8]]))
-        self.assertEqual(x.narrow(0, -2, 2), torch.Tensor([[3, 4, 5], [6, 7, 8]]))
-        self.assertEqual(x.narrow(0, -3, 3), torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]]))
-        self.assertEqual(x.narrow(-1, -1, 1), torch.Tensor([[2], [5], [8]]))
-        self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
+        x = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+        self.assertEqual(x.narrow(0, 0, 1), torch.tensor([[0, 1, 2]]))
+        self.assertEqual(x.narrow(0, 0, 2), torch.tensor([[0, 1, 2], [3, 4, 5]]))
+        self.assertEqual(x.narrow(0, 1, 1), torch.tensor([[3, 4, 5]]))
+        self.assertEqual(x.narrow(0, -1, 1), torch.tensor([[6, 7, 8]]))
+        self.assertEqual(x.narrow(0, -2, 2), torch.tensor([[3, 4, 5], [6, 7, 8]]))
+        self.assertEqual(x.narrow(0, -3, 3), torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]]))
+        self.assertEqual(x.narrow(-1, -1, 1), torch.tensor([[2], [5], [8]]))
+        self.assertEqual(x.narrow(-2, -1, 1), torch.tensor([[6, 7, 8]]))
 
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_narrow_tensor(self, device):
-        x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
-        self.assertEqual(x.narrow(0, torch.tensor(0), 1), torch.Tensor([[0, 1, 2]]))
+        x = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+        self.assertEqual(x.narrow(0, torch.tensor(0), 1), torch.tensor([[0, 1, 2]]))
         with self.assertRaises(Exception):
             x.narrow(0, torch.tensor(0.), 1)
         with self.assertRaises(Exception):
