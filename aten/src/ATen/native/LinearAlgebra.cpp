@@ -1032,6 +1032,9 @@ Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, con
 }
 
 Tensor &addmm_cpu_(Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+  TORCH_CHECK(((self.dim() == 2) && (self.sizes()[0] == mat1.sizes()[0]) && (self.sizes()[1] == mat2.sizes()[1])),
+  "The input tensor must be a matrix with size ", mat1.sizes()[0], "x", mat2.sizes()[1], ", but got a ", self.dim(),
+  "-D tensor with size ", self.sizes()[0], "x", self.sizes()[1]);
   return addmm_cpu_out(self, mat1, mat2, beta, alpha, self);
 }
 
