@@ -82,7 +82,7 @@ if __name__ == "__main__":
     parser.add_argument('conda-env', required=True, type=str, help="Name of the conda env to run the test")
     parser.add_argument('torchbench-path', required=True, type=str, help="Path to TorchBench repository")
     args = parser.parse_args()
-    
+
     output_dir: str = os.path.join(os.environ("HOME"), ".torchbench", "bisection", f"pr{}")
     # Identify the specified models and verify the input
     models = extract_models_from_pr(args.torchbench_path, args.pr_body)

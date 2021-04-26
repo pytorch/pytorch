@@ -43,6 +43,3 @@ jobs:
       - name: Remove conda environment
         run: |
           conda env remove --name pr-ci
-      - name: Upload testing result as artifacts
-        run: |
-          pass
