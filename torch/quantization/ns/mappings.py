@@ -14,7 +14,7 @@ import torch.nn.qat as nnqat
 
 from .ns_types import NSNodeTargetType
 
-from typing import Callable, Set, Dict
+from typing import Set, Dict
 
 # TODO(future PR): clean this up
 def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
@@ -213,36 +213,46 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         'meths_io_type_fp32_or_int8': METHS_IO_TYPE_FP32_OR_INT8,
     }
 
-FUNS_UNMATCHABLE: Set[Callable] = set([
-    torch.quantize_per_tensor,
-    operator.getitem,
-])
-MODS_UNMATCHABLE: Set[Callable] = set([
-    torch.quantization.ObserverBase,
-    torch.quantization.FakeQuantizeBase,
-])
 
-METHS_UNMATCHABLE = set([
-    'to',
-    'dequantize',
-    'reshape',
-    'view',
-    'unsqueeze_',
-    'unsqueeze',
-    'transpose',
-    'squeeze_',
-    'squeeze',
-    'size',
-    'shape',
-    'resize_',
-    'repeat_interleave',
-    'repeat',
-    'permute',
-    'numel',
-    'mean',
-    'detach_',
-    'detach',
-    'contiguous',
-    'clamp',
-    'chunk',
-])
+def get_unmatchable_types_map() -> Dict[str, Set[NSNodeTargetType]]:
+
+    FUNS_UNMATCHABLE: Set[NSNodeTargetType] = set([
+        torch.quantize_per_tensor,
+        operator.getitem,
+    ])
+
+    MODS_UNMATCHABLE: Set[NSNodeTargetType] = set([
+        torch.quantization.ObserverBase,
+        torch.quantization.FakeQuantizeBase,
+    ])
+
+    METHS_UNMATCHABLE: Set[NSNodeTargetType] = set([
+        'to',
+        'dequantize',
+        'reshape',
+        'view',
+        'unsqueeze_',
+        'unsqueeze',
+        'transpose',
+        'squeeze_',
+        'squeeze',
+        'size',
+        'shape',
+        'resize_',
+        'repeat_interleave',
+        'repeat',
+        'permute',
+        'numel',
+        'mean',
+        'detach_',
+        'detach',
+        'contiguous',
+        'clamp',
+        'chunk',
+    ])
+
+    return {
+        'funs_unmatchable': FUNS_UNMATCHABLE,
+        'mods_unmatchable': MODS_UNMATCHABLE,
+        'meths_unmatchable': METHS_UNMATCHABLE,
+    }
