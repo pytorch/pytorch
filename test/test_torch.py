@@ -3842,6 +3842,19 @@ class TestTorchDeviceType(TestCase):
         num_zeros = (torch.bernoulli(b) == 0).sum()
         self.assertEqual(num_zeros, 0)
 
+    @onlyCPU
+    @dtypesIfCPU(torch.bfloat16, torch.float32)
+    def test_copy_transpose_same_type(self, device, dtype):
+        # CPU has a fast path in copy tranpose when src and dst have the same dtype
+        x = torch.randn(1000, 100, dtype=dtype, device=device).t()
+        x2 = x.float() if dtype==torch.bfloat16 else x.double()
+        y = torch.empty(100, 1000, dtype=dtype, device=device)
+        y2 = torch.empty(100, 1000, dtype=dtype, device=device)
+
+        y.copy_(x)
+        y2.copy_(x2)
+        self.assertEqual(y, y2)
+
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_exponential(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).exponential_(0.5)

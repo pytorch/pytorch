@@ -5,6 +5,8 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/TypeCast.h>
+#include <ATen/Parallel.h>
+#include <ATen/cpu/vec256/vec256.h>
 
 namespace at {
 namespace native {
@@ -65,9 +67,66 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
   }
 }
 
+template <typename scalar_t>
+void transpose_copy_kernel_impl(Tensor& self, const Tensor& src) {
+  scalar_t* self_data = self.data_ptr<scalar_t>();
+  scalar_t* src_data = src.data_ptr<scalar_t>();
+
+  int64_t M = src.size(0);
+  int64_t N = src.size(1);
+
+  constexpr int64_t BLOCK_SIZE = 8;
+  int64_t K = divup(M, BLOCK_SIZE);
+
+  // parallel on outer most dimension
+  // TODO: vectorize the remainder
+  int64_t grain_size = at::internal::GRAIN_SIZE / N / BLOCK_SIZE;
+  at::parallel_for(0, K, grain_size, [&] (int64_t begin, int64_t end) {
+    int64_t rbegin = begin * BLOCK_SIZE;
+    int64_t rend = std::min(end * BLOCK_SIZE, M);
+
+    int64_t i = rbegin;
+    for (; i < rend - (rend % BLOCK_SIZE); i += BLOCK_SIZE) {
+      int64_t j = 0;
+      for (; j < N - (N % BLOCK_SIZE); j += BLOCK_SIZE) {
+        vec256::tranpose_kernel_8x8<scalar_t>(
+            &src_data[j * M + i], M, &self_data[i * N + j], N);
+      }
+      for (; j < N; j++) {
+        for (int64_t k = i; k < i + BLOCK_SIZE; k++) {
+          self_data[k * N + j] = src_data[j * M + k];
+        }
+      }
+    }
+    for (; i < rend; i++) {
+      for (int64_t j = 0; j < N; j++) {
+        self_data[i * N + j] = src_data[j * M + i];
+      }
+    }
+  });
+}
+
+static void  transpose_copy_kernel(Tensor& self, const Tensor& src) {
+  TORCH_CHECK(self.is_contiguous(), "self is not contiguous");
+  TORCH_CHECK(src.numel() > 0, "expect src number of elements > 0");
+  TORCH_CHECK(src.dim() == 2 && self.dim() == 2,
+      "expect src and self dims to be 2, self dim: ", src.dim(),
+      "; self dim: ", self.dim());
+  TORCH_CHECK(src.stride(0) == 1, "src first dimension is not contiguous");
+  TORCH_CHECK(src.stride(1) == src.size(0), "expect src.stride(1) == src.size(0)");
+  TORCH_CHECK(src.scalar_type() == self.scalar_type(),
+      "expect same data type for src and self, src data type: ", src.scalar_type(),
+      "; self data type: ", self.scalar_type());
+
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, src.scalar_type(), "transpose_copy_kernel", [&] {
+    transpose_copy_kernel_impl<scalar_t>(self, src);
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(copy_stub, &copy_kernel);
+REGISTER_DISPATCH(transpose_copy_stub, &transpose_copy_kernel);
 
 } // namespace native
 } // namespace at

@@ -229,6 +229,11 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   // TODO: if we need to, we can also enable this path for quantized tensor
   if (device_type == kCPU && copy_transpose_valid(self, src) && !self.is_quantized()) {
+    auto st = self.scalar_type();
+    if (st == ScalarType::Float || st == ScalarType::BFloat16) {
+      transpose_copy_stub(kCPU, self, src);
+      return self;
+    }
     copy_same_type_transpose_(self, src);
     return self;
   }
@@ -251,6 +256,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
 }
 
 DEFINE_DISPATCH(copy_stub);
+DEFINE_DISPATCH(transpose_copy_stub);
 
 } // namespace native
 } // namespace at
