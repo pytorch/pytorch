@@ -136,8 +136,6 @@ enum class DispatchKey : uint8_t {
 
   FuncTorchPython, // See Note [Out-of-tree vmap+grad prototype]
 
-  FuncTorchDynamicLayerBackMode, // See Note [Out-of-tree vmap+grad prototype]
-
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
   // this dispatch key doesn't do any of the substantive functionality for named
@@ -151,6 +149,11 @@ enum class DispatchKey : uint8_t {
   // has named dimension propagation that doesn't match that of its
   // constituent parts.
   Named,
+
+  // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
+  // is to insert code after the "autograd subsystem" runs, so this key should
+  // be directly after InplaceOrView and all of the autograd keys.
+  FuncTorchDynamicLayerBackMode,
 
   // Note [InplaceOrView key]
   // InplaceOrView key is used by inplace or view ops to register a kernel
