@@ -21,7 +21,8 @@ private:
   __m256d values;
 public:
   using value_type = double;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 4;
   }
   Vec256() {}
@@ -95,6 +96,9 @@ public:
     __m256d cmp = _mm256_cmp_pd(values, _mm256_set1_pd(0.0), _CMP_EQ_OQ);
     return _mm256_movemask_pd(cmp);
   }
+  Vec256<double> isnan() const {
+    return _mm256_cmp_pd(values, _mm256_set1_pd(0.0), _CMP_UNORD_Q);
+  }
   Vec256<double> map(double (*f)(double)) const {
     __at_align32__ double tmp[size()];
     store(tmp);
@@ -139,6 +143,9 @@ public:
   }
   Vec256<double> atan2(const Vec256<double> &b) const {
     return Vec256<double>(Sleef_atan2d4_u10(values, b));
+  }
+  Vec256<double> copysign(const Vec256<double> &sign) const {
+    return Vec256<double>(Sleef_copysignd4(values, sign));
   }
   Vec256<double> erf() const {
     return Vec256<double>(Sleef_erfd4_u10(values));

@@ -138,6 +138,7 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
         DispatchKey.CUDA,
         DispatchKey.QuantizedCUDA,
         DispatchKey.SparseCUDA,
+        DispatchKey.SparseCsrCUDA,
         DispatchKey.AutogradCUDA,
         DispatchKey.CUDATensorId,
     }
@@ -167,6 +168,10 @@ class NativeFunction:
     # defined later in the file.  I opted for this ordering of the
     # classes for expository clarity.)
     func: 'FunctionSchema'
+
+    # Whether or not to generate mutable tensor arguments like regular
+    # ones
+    use_const_ref_for_mutable_tensors: bool
 
     # Whether or not to omit automatic generation of a DeviceGuard
     device_guard: bool
@@ -263,6 +268,9 @@ class NativeFunction:
         assert isinstance(cpp_no_default_args_list, list)
         cpp_no_default_args = set(cpp_no_default_args_list)
 
+        use_const_ref_for_mutable_tensors = e.pop('use_const_ref_for_mutable_tensors', False)
+        assert isinstance(use_const_ref_for_mutable_tensors, bool)
+
         variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
         variants: Set[Variant] = set()
@@ -340,6 +348,7 @@ class NativeFunction:
 
         return NativeFunction(
             func=func,
+            use_const_ref_for_mutable_tensors=use_const_ref_for_mutable_tensors,
             variants=variants,
             structured=structured,
             structured_delegate=structured_delegate,
@@ -741,7 +750,7 @@ class Annotation:
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
-        m = re.match(r'^([a-z])(!?)$', ann)
+        m = re.match(r'^([a-z])(!?)(!?)$', ann)
         assert m is not None, f'unrecognized alias annotation {ann}'
         alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
@@ -1334,6 +1343,100 @@ class OperatorName:
             return f"{self.name}.{self.overload_name}"
         else:
             return f"{self.name}"
+
+@dataclass(frozen=True)
+class ExternalBackendMetadata:
+
+    operator: OperatorName
+    backend: str
+    is_autograd: bool
+
+    structured: bool = False  # TODO: this will eventually become per-op metadata in the yaml file
+
+@dataclass(frozen=True)
+class ExternalBackendFunction:
+
+    native_function: NativeFunction
+    metadata: Optional[ExternalBackendMetadata]
+
+    @property
+    def structured(self) -> bool:
+        # An external backend op is only considered structured if it's been marked structured both in-tree and out-of-tree
+        return self.native_function.structured and self.metadata is not None and self.metadata.structured
+
+    @property
+    def is_autograd_kernel(self) -> bool:
+        return self.metadata is not None and self.metadata.is_autograd
+
+    def __post_init__(self) -> None:
+        if self.metadata is not None:
+            assert self.metadata.operator == self.native_function.func.name, \
+                f'Metadata and native function names do not match: {self.metadata.operator} and {self.native_function.func.name}'
+        kind = self.native_function.func.kind()
+        if kind == SchemaKind.out or kind == SchemaKind.inplace:
+            assert self.metadata is None or not self.metadata.structured, \
+                "Found an out/inplace operator marked with the structured keyword." \
+                f" Only functional operators can be marked as structured. operator={str(self.native_function.func.name)}"
+
+@dataclass(frozen=True)
+class ExternalBackendFunctionsGroup:
+    functional: ExternalBackendFunction
+    inplace: Optional[ExternalBackendFunction]
+    out: ExternalBackendFunction
+
+    @property
+    def structured(self) -> bool:
+        return self.primary.structured
+
+    @property
+    def primary(self) -> ExternalBackendFunction:
+        # TODO: hardcoding that XLA will only implement functional variants of structured kernel.
+        # This will eventually be toggleable per backend.
+        return self.functional
+
+    @property
+    def is_autograd_kernel(self) -> bool:
+        return self.primary.metadata is not None and self.primary.metadata.is_autograd
+
+    def __post_init__(self) -> None:
+        # Note: I didn't want to copy-paste the post_init checks that NativeFunctionsGroup performs.
+        # ExternalBackendFunctionsGroup objects should be created using `from_function_group` (below),
+        # which guarantees that the relevant checks have already been performed.
+        if self.structured:
+            for f in self.functions():
+                if f == self.primary:
+                    continue
+                # For ops marked as structured externally, we expect external backends to
+                # only include either the functional or out variant in their yaml
+                assert f.metadata is None, \
+                    f"{str(self.primary.native_function.func.name)} is marked as structured. " \
+                    f"variant, {str(f.native_function.func.name)} will be generated for you " \
+                    "and doesn't need to live in the yaml."
+
+    def functions(self) -> Iterator[ExternalBackendFunction]:
+        yield self.out
+        yield self.functional
+        if self.inplace is not None:
+            yield self.inplace
+
+    @staticmethod
+    def from_function_group(
+            g: NativeFunctionsGroup,
+            metadata: Dict[OperatorName, ExternalBackendMetadata]
+    ) -> 'ExternalBackendFunctionsGroup':
+        out_meta = metadata.get(g.out.func.name, None)
+        out = ExternalBackendFunction(g.out, out_meta)
+
+        functional_meta = metadata.get(g.functional.func.name, None)
+        functional = ExternalBackendFunction(g.functional, functional_meta)
+
+        inplace = None
+        if g.inplace:
+            inplace_meta = metadata.get(g.inplace.func.name, None)
+            inplace = ExternalBackendFunction(g.inplace, inplace_meta)
+
+        return ExternalBackendFunctionsGroup(functional, inplace, out)
+
 
 # Helper functions for parsing argument lists (both inputs and returns)
 
