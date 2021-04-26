@@ -11,10 +11,10 @@ from torch.onnx.symbolic_opset9 import permute, _reshape_from_tensor
 
 # This file exports ONNX ops for opset 12
 
-@parse_args('s', 'v')
-def einsum(g, equation, tensor_list):
+@parse_args('s', 'v', 'is')
+def einsum(g, equation, tensor_list, optimize=None):
     tensors = sym_help._unpack_list(tensor_list)
-    return g.op("Einsum", *tensors, equation_s=equation)
+    return g.op("Einsum", *tensors, equation_s=equation, optimize_is=optimize)
 
 @parse_args('v', 'v')
 def outer(g, input, other):
