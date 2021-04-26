@@ -1185,7 +1185,7 @@ When `m > n` (resp. `m < n`) we can drop the last `m - n` (resp. `n - m`) column
     A = U \operatorname{diag}(S) V^{\text{H}}
     \mathrlap{\qquad U \in \mathbb{K}^{m \times k}, \Lambda \in \mathbb{R}^k, V \in \mathbb{K}^{k \times n}}
 
-where :math:`\operatorname{diag}(S) \in \mathbb{K}^{k \times k}`,
+where :math:`\operatorname{diag}(S) \in \mathbb{K}^{k \times k}`. In this case, :math:`U` and :math:`V` also have orthonormal columns.
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
@@ -1195,17 +1195,13 @@ which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.
 
 The singular values are returned in descending order.
 
-The parameter :attr:`full_matrices` controls the shape of the output. If :attr:`A` has shape
-`(*, m, n)`, denoting `k = min(m, n)`
+The parameter :attr:`full_matrices` chooses between the full and reduced SVD.
+If :attr:`A` has shape `(*, m, n)`, denoting `k = min(m, n)`
 
-- :attr:`full_matrices`\ `= True` (default): Returns the full SVD decomposition.
+- :attr:`full_matrices`\ `= True` (default): Returns the full SVD.
   The returned tensors `(U, S, Vh)` will have shapes `(*, m, m)`, `(*, k)`, `(*, n, n)` respectively.
-- :attr:`full_matrices`\ `= False`: Returns the reduced SVD decomposition.
+- :attr:`full_matrices`\ `= False`: Returns the reduced SVD.
   The returned tensors `(U, S, Vh)` will have shapes `(*, m, k)`, `(*, k)`, `(*, k, n)` respectively.
-
-If :attr:`compute_uv`\ `= False`, the returned `U` and `Vh` will be empty
-tensors with no elements and the same device as :attr:`A`. The
-:attr:`full_matrices` argument has no effect when :attr:`compute_uv`\ `= False`.
 
 Differences with `numpy.linalg.svd`:
 
@@ -1213,9 +1209,7 @@ Differences with `numpy.linalg.svd`:
   When :attr:`compute_uv`\ `= False`, `U`, `Vh` are empty tensors.
   This behavior may change in a future PyTorch release.
   Please use :func:`torch.linalg.svdvals`, which computes only the singular values,
-  instead of `compute_uv=False`.
-
-.. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv`\ `= True`.
+  instead of :attr:`compute_uv`\ `= False`.
 
 .. note:: When :attr:`full_matrices`\ `= True`, the gradients with respect to `U[..., :, min(m, n):]`
           and `Vh[..., min(m, n):, :]` will be ignored, as those vectors can be arbitrary bases
