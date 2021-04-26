@@ -8,9 +8,6 @@
 #import <Foundation/Foundation.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
-#include <caffe2/fb/custom_ops/maskrcnn/roi_align.h>
-#import <ATen/native/metal/ops/MetalRoIAlign.h>
-
 #include <sstream>
 
 #define ITER_COUNT 5
@@ -843,70 +840,5 @@ bool test_mean_dim3() {
       auto Y2 = at::mean(X2, {0,1,2,3}).cpu();
       PRINT_TENSOR("Y2", Y2);
       return almostEqual(Y1, Y2);
-    });
-}
-
-
-bool test_chunk() {
-__block std::vector<int64_t> size{1, 4, 2, 2};
-return TEST(size, __PRETTY_FUNCTION__, ^bool {
-  auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  auto Y1 = at::chunk(X1, 2, 1);
-  auto X2 = X1.metal();
-  auto Y2 = at::chunk(X2, 2, 1);
-  auto A1 = Y1[0].contiguous();
-  auto A2 = Y1[1].contiguous();
-  auto Z1 = Y2[0].cpu();
-  auto Z2 = Y2[1].cpu();
-  bool b1 = checkRtol(A1 - Z1, {A1, Z1});
-  bool b2 = checkRtol(A2 - Z2, {A2, Z2});
-  return b1 && b2;
-});
-}
-
-bool test_chunk2() {
-__block std::vector<int64_t> size{1, 9, 2, 2};
-return TEST(size, __PRETTY_FUNCTION__, ^bool {
-  auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  auto Y1 = at::chunk(X1, 2, 1);
-  auto X2 = X1.metal();
-  auto Y2 = at::chunk(X2, 2, 1);
-  auto A1 = Y1[0].contiguous();
-  auto A2 = Y1[1].contiguous();
-  auto Z1 = Y2[0].cpu();
-  auto Z2 = Y2[1].cpu();
-  bool b1 = checkRtol(A1 - Z1, {A1, Z1});
-  bool b2 = checkRtol(A2 - Z2, {A2, Z2});
-  return b1 && b2;
-});
-}
-
-bool test_chunk3() {
-__block std::vector<int64_t> size{1, 16, 2, 2};
-return TEST(size, __PRETTY_FUNCTION__, ^bool {
-  auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  auto Y1 = at::chunk(X1, 2, 1);
-  auto X2 = X1.metal();
-  auto Y2 = at::chunk(X2, 2, 1);
-  auto A1 = Y1[0].contiguous();
-  auto A2 = Y1[1].contiguous();
-  auto Z1 = Y2[0].cpu();
-  auto Z2 = Y2[1].cpu();
-  bool b1 = checkRtol(A1 - Z1, {A1, Z1});
-  bool b2 = checkRtol(A2 - Z2, {A2, Z2});
-  return b1 && b2;
-});
-}
-
-bool test_roi_align() {
-    __block std::vector<int64_t> features_sizes{1, 5, 16, 16};
-    return TEST(features_sizes, __PRETTY_FUNCTION__, ^bool{
-        auto features = at::rand(features_sizes, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-        std::vector<float> rois_data {9.25, 6.0, 15.25, 10.0};
-        auto rois = torch::from_blob(rois_data.data(), {1,4});
-        auto Y1 = caffe2::fb::RoIAlignCPUKernel(features, rois, "NCHW", 1, 4, 4, 0, true, {});
-        auto Y2 = torch::fb::metal::RoIAlign(features.metal(), rois, "NCHW", 1, 4, 4, 0, true, {}).cpu();
-        return almostEqual(Y1, Y2);
-        return true;
     });
 }
