@@ -1521,7 +1521,8 @@ std::tuple<Tensor, Tensor> lstm_cell(
     const Tensor& input, TensorList hx,
     const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  const Tensor& b_ih = *b_ih_maybe_owned;
   const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
 
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
@@ -1540,7 +1541,8 @@ _thnn_differentiable_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_op
     const Tensor& cx,
     const Tensor& cy) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& grad_hy = c10::value_or_else(grad_hy_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> grad_hy_maybe_owned = at::borrow_from_optional_tensor(grad_hy_opt);
+  const Tensor& grad_hy = *grad_hy_maybe_owned;
   const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
   const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
   const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
@@ -1593,7 +1595,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
     const Tensor& hidden_gates,
     const Tensor& hx, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt){
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> input_bias_maybe_owned = at::borrow_from_optional_tensor(input_bias_opt);
+  const Tensor& input_bias = *input_bias_maybe_owned;
   const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
 
   Tensor in_g = input_gates;
@@ -1632,7 +1635,8 @@ Tensor gru_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  const Tensor& b_ih = *b_ih_maybe_owned;
   const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
 
   check_rnn_cell_forward_input(input, w_ih.size(1));
@@ -1645,7 +1649,8 @@ Tensor rnn_tanh_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  const Tensor& b_ih = *b_ih_maybe_owned;
   const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
 
   static at::Tensor undefined;
@@ -1658,7 +1663,8 @@ Tensor rnn_relu_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  const Tensor& b_ih = *b_ih_maybe_owned;
   const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
 
   static at::Tensor undefined;
