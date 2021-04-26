@@ -169,9 +169,8 @@ Tensor& addmm_out_sparse_dense_cuda(
     const Scalar& alpha,
     Tensor& result
 ) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return s_addmm_out_sparse_dense_cuda(result, b_self, mat1, mat2, beta, alpha);
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_out_sparse_dense_cuda(result, *b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor s_addmm_sparse_dense_cuda(
@@ -193,9 +192,8 @@ Tensor addmm_sparse_dense_cuda(
     const Scalar& beta,
     const Scalar& alpha
 ) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return s_addmm_sparse_dense_cuda(b_self, mat1, mat2, beta, alpha);
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_sparse_dense_cuda(*b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor& s_addmm_sparse_dense_cuda_(
@@ -371,15 +369,6 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 
     Tensor indices1D = flatten_indices(indices, sparse.sizes(), 0);
 
-    // FIXME: at some point we can wrap the scale into indexAdd
-    // NB: Purposely not inplace!
-    AT_DISPATCH_ALL_TYPES_AND2(
-      at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
-        if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
-          values = values.mul(value);
-        }
-      });
-
     int64_t view_rows = 1;
     int64_t view_columns = 1;
     for (int i = 0; i < nDimI; i++) {
@@ -391,7 +380,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 
     Tensor r_view = r.view({view_rows, view_columns});
     values = values.reshape({nnz, view_columns});
-    r_view.index_add_(0, indices1D, values);
+    r_view.index_add_(0, indices1D, values, value);
   }
   THCudaCheck(cudaGetLastError());
 
@@ -560,17 +549,16 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
 // see NOTE [ sparse.sum() backward ]
 // --------------------------------------------------------------------
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void _sparse_sum_backward_cuda_kernel(
-  int64_t total_threads,
-  const TensorInfo<int64_t, int64_t> grad_indices_ti,
-  const TensorInfo<int64_t, int64_t> input_indices_ti,
-  const TensorInfo<int64_t, int64_t> input_indices_pos_ti,
-  const TensorInfo<scalar_t, int64_t> grad_values_expand_ti,
-  TensorInfo<scalar_t, int64_t> grad_input_values_ti
-) {
+    int64_t total_threads,
+    const TensorInfo<int64_t, int64_t> grad_indices_ti,
+    const TensorInfo<int64_t, int64_t> input_indices_ti,
+    const TensorInfo<int64_t, int64_t> input_indices_pos_ti,
+    const TensorInfo<scalar_t, int64_t> grad_values_expand_ti,
+    TensorInfo<scalar_t, int64_t> grad_input_values_ti) {
   const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= total_threads) return;
   const int64_t j = input_indices_pos_ti.data[i];
@@ -861,7 +849,7 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
 
   // First need to coalesce to get all of the first dimension indices
   // in order since we'll be sending each matrix into the MM operation
-  SparseTensor self_coalesced = coalesce_sparse_cuda(self);
+  SparseTensor self_coalesced = self.coalesce();
 
   int64_t nnz =        self_coalesced._nnz();
   Tensor indices = self_coalesced._indices();

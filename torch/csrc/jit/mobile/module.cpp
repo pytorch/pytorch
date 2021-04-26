@@ -80,7 +80,12 @@ void slot_named_params_recurse(
     std::string name =
         parent_name.size() == 0 ? parent_name : parent_name + ".";
     name += obj->type()->getAttributeName(i);
-    if (slot.isTensor()) {
+    // TODO: Fix this filter. Requires_grad is not the appropriate
+    // filter of a parameter, but is a temporary hack to help probable
+    // users of this api. The correct behavior is to filter by the
+    // obj->type->is_parameter() but this currently always returns
+    // false on mobile.
+    if (slot.isTensor() && slot.toTensor().requires_grad()) {
       (*params)[name] = slot.toTensor();
     } else if (slot.isObject()) {
       slot_named_params_recurse(slot.toObject(), params, name);
@@ -95,6 +100,10 @@ const std::vector<at::Tensor> Module::parameters() const {
   return params;
 }
 
+// Returns a mapping for all attributes that requires_grad=True in a module.
+// This behavior differs from full torch script modules. This is a bug,
+// but currently there is no way to correctly label parameters in the
+// loading of a mobile module. TODO
 const std::map<std::string, at::Tensor> Module::named_parameters() const {
   std::map<std::string, at::Tensor> params;
   const std::string name = "";

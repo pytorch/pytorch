@@ -12,23 +12,16 @@ _TRIVIAL_2D = GroupedSetup(
 )
 
 
+_TRIVIAL_3D = GroupedSetup(
+    r"x = torch.ones((4, 4, 4))",
+    r"auto x = torch::ones({4, 4, 4});"
+)
+
+
 _TRIVIAL_4D = GroupedSetup(
     r"x = torch.ones((4, 4, 4, 4))",
     r"auto x = torch::ones({4, 4, 4, 4});"
 )
-
-
-_GENERIC = GroupedSetup(*parse_stmts(
-    r"""
-        Python                                   | C++
-        ---------------------------------------- | ----------------------------------------
-        torch.manual_seed(138_10_23)             | torch::manual_seed(1381023);
-        x = torch.rand((4, 4))                   | auto x = torch::rand({4, 4});
-        y_float = torch.ones((4, 4))             | auto y_float = torch::ones({4, 4});
-        y_int = torch.ones(                      | auto y_int = torch::ones({4, 4}, at::kInt);
-            (4, 4), dtype=torch.int32)           |
-    """
-))
 
 
 _TRAINING = GroupedSetup(*parse_stmts(
@@ -52,6 +45,6 @@ _TRAINING = GroupedSetup(*parse_stmts(
 
 class Setup(enum.Enum):
     TRIVIAL_2D = _TRIVIAL_2D
+    TRIVIAL_3D = _TRIVIAL_3D
     TRIVIAL_4D = _TRIVIAL_4D
-    GENERIC = _GENERIC
     TRAINING = _TRAINING

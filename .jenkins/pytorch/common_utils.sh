@@ -50,7 +50,7 @@ function get_exit_code() {
 }
 
 function file_diff_from_base() {
-  # The fetch may fail on Docker hosts, but it's not always necessary.
+  # The fetch may fail on Docker hosts, this fetch is necessary for GHA
   set +e
   git fetch origin master --quiet
   set -e
@@ -64,6 +64,11 @@ function get_bazel() {
   echo '753434f4fa730266cf5ce21d1fdd425e1e167dd9347ad3e8adc19e8c0d54edca  tools/bazel' | sha256sum --quiet -c
 
   chmod +x tools/bazel
+}
+
+function install_monkeytype {
+  # Install MonkeyType
+  pip_install MonkeyType
 }
 
 TORCHVISION_COMMIT=8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db

@@ -14,6 +14,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/UnaryOps.h>
 
 #include <algorithm>
 #include <cctype>
@@ -618,7 +619,7 @@ Tensor scalar_tensor(const Scalar& s,
     // revert this to following:
     //   auto result = at::empty({}, options);
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     auto result = empty_cpu({}, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
     at::native::fill_(result, s);
     return result;
@@ -819,8 +820,8 @@ Tensor normal(double mean, double std, IntArrayRef size,
   return result.normal_(mean, std, generator);
 }
 
-Tensor& normal_out(Tensor& result, double mean, double std,
-                   IntArrayRef size, c10::optional<Generator> generator) {
+Tensor& normal_out(double mean, double std,
+                   IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(mean, std, generator);
 }

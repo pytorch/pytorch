@@ -155,127 +155,6 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
 #undef HANDLE_A_CASE
 }
 
-void THCTensor_(sortViaThrust)(THCState* state,
-                               THCTensor* sorted,
-                               THCudaLongTensor* indices,
-                               THCTensor* input,
-                               int dim, bool dir) {
-  int nDims = THCTensor_(nDimensionLegacyAll)(state, input);
-
-  ptrdiff_t totalElements = THCTensor_(nElement)(state, input);
-  int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
-  int64_t sliceStride = THTensor_strideLegacyNoScalars(input, dim);
-
-  // We perform a vectorized segmented sort in Thrust.
-  // Say we are sorting a (2, 3) tensor. We have in flattened form:
-  // values 0.4 1.2 5.3 6.2 1.3 2.3
-  // indices  0   1   2   3   4   5
-  // where indices is a global index (across all slices)
-
-  // First we sort by values, globally:
-  // values 6.2 5.3 2.3 1.2 1.3 0.4
-  // indices  3   2   5   1   4   0
-
-  // Then we stable sort by segment, which is index / 3:
-  // values 5.3 1.2 0.4 6.2 2.3 1.3
-  // indices  2   1   0   3   5   4
-
-  // Then we translate the global index to a per-slice Lua index
-  // (index % 3) + 1:
-  // values 5.3 1.2 0.4 6.2 2.3 1.3
-  // indices  3   2   1   1   3   2
-
-  // This method can only work if the slice we are sorting (`dim`) is
-  // innermost, and both values and indices are contiguous. We do this
-  // by re-arranging the input into this form as needed, which will
-  // unfortunately allocate memory if the request is not in this form.
-  // Vectorized sort is slower than iterated sort if the number of
-  // slices is small (since we're sorting twice, instead of invoking a
-  // smaller sort `numSlices` times), but the Thrust sort
-  // implementation here is a catch-all, so we're not looking for
-  // efficiency, but instead correctness.
-  THCTensor_(copy)(state, sorted, input);
-  THCTensor* trKeys = THCTensor_(newWithTensor)(state, sorted);
-  THCudaLongTensor* trIndices = THCudaLongTensor_newWithTensor(state, indices);
-
-  // Transpose dim to innermost
-  if (dim != nDims - 1) {
-    THCTensor_(transpose)(state, trKeys, NULL, dim, nDims - 1);
-    THCudaLongTensor_transpose(state, trIndices, NULL, dim, nDims - 1);
-  }
-
-  // Thrust must operate on a contiguous layout
-  THCTensor* trContigKey = THCTensor_(newContiguous)(state, trKeys);
-  THCudaLongTensor* trContigIndices = THCudaLongTensor_newContiguous(state, trIndices);
-
-  THCTensor_(free)(state, trKeys);
-  THCudaLongTensor_free(state, trIndices);
-
-  THCThrustAllocator thrustAlloc(state);
-
-  thrust::device_ptr<scalar_t> keyIter(THCTensor_(data)(state, trContigKey));
-
-  // Since we are composing a global index across all segments rather
-  // than a per-segment index, we treat the memory as int so we don't
-  // have problems sorting slices < 2^24 but where the entire tensor
-  // has more than 2^24 elements
-  thrust::device_ptr<int64_t>
-    indexIter((int64_t*) THCudaLongTensor_data(state, trContigIndices));
-
-  // Fill the indices with a global index across all slices
-  thrust::counting_iterator<int64_t> countIter(0);
-  thrust::copy(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
-    countIter, countIter + totalElements, indexIter);
-    auto begin = thrust::make_zip_iterator(thrust::make_tuple(indexIter, keyIter));
-  if (dir){
-    if (totalElements < INT_MAX)
-       thrust::sort(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
-       begin, begin + totalElements, ThrustSliceGTOp<scalar_t, int, true>(sliceSize));
-    else
-       thrust::sort(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
-       begin, begin + totalElements, ThrustSliceGTOp<scalar_t, int64_t, true>(sliceSize));
-  } else {
-    if (totalElements < INT_MAX)
-       thrust::sort(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
-       begin, begin + totalElements, ThrustSliceLTOp<scalar_t, int, true>(sliceSize));
-    else
-       thrust::sort(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
-       begin, begin + totalElements, ThrustSliceLTOp<scalar_t, int64_t, true>(sliceSize));
-  }
-  // Translate the global integer 0-based index to a per-slice real
-  // Lua index
-  thrust::for_each(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
-    indexIter, indexIter + totalElements,
-    GlobalIndexToPerSliceIndex(sliceSize));
-
-  // Reverse the transposition as needed
-  if (dim != nDims - 1) {
-    THCTensor_(transpose)(state, trContigKey, NULL, dim, nDims - 1);
-    THCudaLongTensor_transpose(state, trContigIndices, NULL, dim, nDims - 1);
-  }
-  // Then copy back to the expected output
-  THCTensor_(freeCopyTo)(state, trContigKey, sorted);
-  THCudaLongTensor_freeCopyTo(state, trContigIndices, indices);
-}
-
 void THCTensor_(sort)(THCState* state,
                       THCTensor *sorted,
                       THCudaLongTensor *indices,
@@ -302,12 +181,8 @@ void THCTensor_(sort)(THCState* state,
   // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
   // and so for the double word types,
   // we get "too many resources requested for launch" in the 2048 case
-#if CUDA_VERSION >= 8000
 #if defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_LONG)
   int maxSliceSize = 1024;
-#else
-  int maxSliceSize = 2048;
-#endif
 #else
   int maxSliceSize = 2048;
 #endif
@@ -324,9 +199,7 @@ void THCTensor_(sort)(THCState* state,
     // layout
     THCTensor_(sortKeyValueInplace)(state, sorted, indices, dim, order);
   } else {
-    // Otherwise, fall back upon Thrust, which handles all other cases
-    // (potentially slowly, with extra copies/memory allocations)
-    THCTensor_(sortViaThrust)(state, sorted, indices, input, dim, (bool) order);
+    TORCH_INTERNAL_ASSERT(false);
   }
 
   THCudaCheck(cudaGetLastError());

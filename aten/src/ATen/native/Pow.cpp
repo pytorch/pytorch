@@ -26,8 +26,8 @@ TORCH_META_FUNC2(pow, Tensor_Scalar) (const Tensor& base, const Scalar& exp) {
 TORCH_META_FUNC2(pow, Scalar) (const Scalar& base, const Tensor& exp) {
     // This overload doesn't directly use TensorIterator. It attempts to short-circuit,
     // but otherwise redispatches to the Tensor_Tensor overload.
-    auto dtype = at::result_type(base, exp);
-    set_output(0, exp.sizes(), {}, exp.options().dtype(dtype), exp.names());
+    auto dtype = maybe_get_output().defined() ? maybe_get_output().scalar_type() : at::result_type(base, exp);
+    set_output(0, exp.sizes(), {}, exp.options().dtype(dtype), exp.has_names() ? exp.names() : ArrayRef<Dimname>());
 }
 
 } // namespace meta
@@ -62,11 +62,11 @@ TORCH_IMPL_FUNC(pow_Scalar_out) (const Scalar& base, const Tensor& exp, const Te
   } else if (!base.isComplex() && base.toDouble() == 1.0) {
     out.fill_(1);
   } else {
-    at::pow_out(const_cast<Tensor&>(out), c10::scalar_to_tensor(base, exp.device()), exp); // redispatch!
+    at::pow_out(const_cast<Tensor&>(out), wrapped_scalar_tensor(base, exp.device()), exp); // redispatch!
   }
 }
 
-Tensor& float_power_out(Tensor& result, const Tensor& base, const Tensor& exp) {
+Tensor& float_power_out(const Tensor& base, const Tensor& exp, Tensor& result) {
   auto dtype = (at::isComplexType(base.scalar_type()) || at::isComplexType(exp.scalar_type())) ?
                 at::kComplexDouble : at::kDouble;
   TORCH_CHECK(result.scalar_type() == dtype,
@@ -76,7 +76,7 @@ Tensor& float_power_out(Tensor& result, const Tensor& base, const Tensor& exp) {
   return at::pow_out(result, base.to(dtype), exp.to(dtype));
 }
 
-Tensor& float_power_out(Tensor& result, const Tensor& base, const Scalar& exp) {
+Tensor& float_power_out(const Tensor& base, const Scalar& exp, Tensor& result) {
   auto dtype = (at::isComplexType(base.scalar_type()) || exp.isComplex()) ? at::kComplexDouble : at::kDouble;
   TORCH_CHECK(result.scalar_type() == dtype,
               "the output given to float_power has dtype ", result.scalar_type(),
@@ -88,7 +88,7 @@ Tensor& float_power_out(Tensor& result, const Tensor& base, const Scalar& exp) {
   return at::pow_out(result, base.to(dtype), casted_exp);
 }
 
-Tensor& float_power_out(Tensor& result, const Scalar& base, const Tensor& exp) {
+Tensor& float_power_out(const Scalar& base, const Tensor& exp, Tensor& result) {
   auto dtype = (at::isComplexType(exp.scalar_type()) || base.isComplex()) ? at::kComplexDouble : at::kDouble;
   TORCH_CHECK(result.scalar_type() == dtype,
               "the output given to float_power has dtype ", result.scalar_type(),

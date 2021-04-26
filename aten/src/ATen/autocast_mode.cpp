@@ -282,6 +282,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), fp16)
   KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), fp16)
   KERNEL(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), fp16)
+  KERNEL(ADD_NS(linalg_multi_dot), "linalg_multi_dot", Tensor (TensorList), fp16)
   // The macro doesn't like these (I think it chokes on commas inside <>) so write them manually
   m.impl(TORCH_SELECTIVE_NAME("aten::_thnn_fused_lstm_cell"),
          TORCH_FN((&WrapFunction<CastPolicy::fp16,
