@@ -625,7 +625,6 @@ kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),func
                       texture2d<half, access::write> out_tex[[texture(1), function_constant(transpose_out_is_tex)]],
                       constant ushort* inSizeBuffer [[buffer(0)]],
                       constant ushort* outSizeBuffer [[buffer(1)]],
-                      device ushort* indexBuffer [[buffer(2)]],
                       ushort3 gid[[thread_position_in_grid]]) {
 
     const ushort dim0 = ushort_arg_0;
@@ -659,6 +658,8 @@ kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),func
     const ushort n2 = gid.z / slices2;
     const ushort s2 = gid.z - n2 * slices2;
     half4 value;
+    ushort4 threadIndexBufferLower{1, 1, 1, 1};
+    ushort4 threadIndexBufferUpper{1, 1, 1 ,1};
     for (int idx = 0; idx < 4; ++idx){
         ushort offset = 4 * s2 + idx;
         size_t linear_idx2 = n2 * C2 * H2 * W2 + offset * H2 * W2 + gid.y * W2 + gid.x;
@@ -670,20 +671,45 @@ kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),func
         ushort d2 = 0;
         for(int j = dim-1; j>=0; --j){
             d2  = outSizeBuffer[j];
-            indexBuffer[j] = linear_idx2 % d2;
+            if(j > 3) {
+                threadIndexBufferUpper[j-3] = linear_idx2 % d2;
+            } else {
+                threadIndexBufferLower[j] = linear_idx2 % d2;
+            }
             linear_idx2 /= d2;
         }
 
         // swap dims
-        ushort tmp = indexBuffer[dim0];
-        indexBuffer[dim0] = indexBuffer[dim1];
-        indexBuffer[dim1] = tmp;
+        ushort tmp;
+        if(dim0 > 3) {
+            tmp = threadIndexBufferUpper[dim0-3];
+        } else {
+            tmp = threadIndexBufferLower[dim0];
+        }
+        if(dim0 > 3 && dim1 > 3) {
+            threadIndexBufferUpper[dim0-3] = threadIndexBufferUpper[dim1-3];
+        } else if (dim0 > 3 && dim1 < 3) {
+            threadIndexBufferUpper[dim0-3] = threadIndexBufferLower[dim1];
+        } else if (dim0 < 3 && dim1 > 3) {
+            threadIndexBufferLower[dim0] = threadIndexBufferUpper[dim1-3];
+        } else {
+            threadIndexBufferLower[dim0] = threadIndexBufferLower[dim1];
+        }
+        if(dim1 > 3) {
+            threadIndexBufferUpper[dim1-3] = tmp;
+        } else {
+            threadIndexBufferLower[dim1] = tmp;
+        }
 
         size_t linear_idx1 = 0;
         ushort m = 1;
         ushort d1 = 0;
         for(int k = dim-1; k>=0; --k) {
-            d1 = indexBuffer[k];
+            if(k > 3) {
+                d1 = threadIndexBufferUpper[k-3];
+            } else {
+                d1 = threadIndexBufferLower[k];
+            }
             linear_idx1 += d1 * m;
             m *= inSizeBuffer[k];
         }
