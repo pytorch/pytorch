@@ -636,7 +636,8 @@ Tensor & _th_copy_ignoring_overlaps_(Tensor & self, const Tensor & src) {
 }
 Tensor & _thnn_multi_margin_loss_forward_out(const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor & output) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -679,7 +680,8 @@ Tensor & _thnn_multi_margin_loss_forward_out(const Tensor & self, const Tensor &
 }
 Tensor _thnn_multi_margin_loss_forward(const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -720,7 +722,8 @@ Tensor _thnn_multi_margin_loss_forward(const Tensor & self, const Tensor & targe
 }
 Tensor & _thnn_multi_margin_loss_backward_out(const Tensor & grad_output, const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor & grad_input) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -766,7 +769,8 @@ Tensor & _thnn_multi_margin_loss_backward_out(const Tensor & grad_output, const 
 }
 Tensor _thnn_multi_margin_loss_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -978,7 +982,8 @@ Tensor _thnn_multilabel_margin_loss_backward(const Tensor & grad_output, const T
 }
 std::tuple<Tensor &,Tensor &> _thnn_nll_loss_forward_out(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output, Tensor & total_weight) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -1027,7 +1032,8 @@ std::tuple<Tensor &,Tensor &> _thnn_nll_loss_forward_out(const Tensor & self, co
 }
 std::tuple<Tensor,Tensor> _thnn_nll_loss_forward(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -1071,7 +1077,8 @@ std::tuple<Tensor,Tensor> _thnn_nll_loss_forward(const Tensor & self, const Tens
 }
 Tensor & _thnn_nll_loss_backward_out(const Tensor & grad_output, const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, const Tensor & total_weight, Tensor & grad_input) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -1124,7 +1131,8 @@ Tensor & _thnn_nll_loss_backward_out(const Tensor & grad_output, const Tensor & 
 }
 Tensor _thnn_nll_loss_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -1174,7 +1182,8 @@ Tensor _thnn_nll_loss_backward(const Tensor & grad_output, const Tensor & self, 
 }
 std::tuple<Tensor &,Tensor &> _thnn_nll_loss2d_forward_out(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output, Tensor & total_weight) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -1223,7 +1232,8 @@ std::tuple<Tensor &,Tensor &> _thnn_nll_loss2d_forward_out(const Tensor & self, 
 }
 std::tuple<Tensor,Tensor> _thnn_nll_loss2d_forward(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -1267,7 +1277,8 @@ std::tuple<Tensor,Tensor> _thnn_nll_loss2d_forward(const Tensor & self, const Te
 }
 Tensor & _thnn_nll_loss2d_backward_out(const Tensor & grad_output, const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, const Tensor & total_weight, Tensor & grad_input) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -1320,7 +1331,8 @@ Tensor & _thnn_nll_loss2d_backward_out(const Tensor & grad_output, const Tensor 
 }
 Tensor _thnn_nll_loss2d_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -1715,7 +1727,8 @@ Tensor & _thnn_rrelu_with_noise_forward_(Tensor & self, const Tensor & noise, co
 }
 std::tuple<Tensor &,Tensor &,Tensor &> _thnn_conv2d_forward_out(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding, Tensor & output, Tensor & columns, Tensor & ones) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -1780,7 +1793,8 @@ std::tuple<Tensor &,Tensor &,Tensor &> _thnn_conv2d_forward_out(const Tensor & s
 }
 std::tuple<Tensor,Tensor,Tensor> _thnn_conv2d_forward(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -1979,7 +1993,8 @@ std::tuple<Tensor,Tensor,Tensor> _thnn_conv2d_backward(const Tensor & grad_outpu
 }
 Tensor & _thnn_conv_depthwise2d_forward_out(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, Tensor & output) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -2040,7 +2055,8 @@ Tensor & _thnn_conv_depthwise2d_forward_out(const Tensor & self, const Tensor & 
 }
 Tensor _thnn_conv_depthwise2d_forward(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
