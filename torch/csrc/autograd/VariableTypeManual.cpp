@@ -90,7 +90,7 @@ Tensor _fw_primal(const Tensor & self, int64_t level) {
     grad_fn->set_next_edges(collect_next_edges( self ));
   }
   auto tmp = ([&]() {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     return self_.alias();
   })();
   std::function<at::Tensor(const at::Tensor&)> func=nullptr;
@@ -131,7 +131,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     grad_fn->src_device = src.device();
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
   rebase_history(self , std::move(grad_fn));
@@ -156,9 +156,9 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   return self;
 }
 
-Tensor& resize_(
+const Tensor& resize_(
     c10::DispatchKeySet ks,
-    Tensor& self,
+    const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
@@ -166,7 +166,7 @@ Tensor& resize_(
     AT_ERROR("cannot resize variables that require grad");
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::resize_(ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
   }
 
@@ -177,9 +177,9 @@ Tensor& resize_(
   return self;
 }
 
-Tensor& resize_as_(
+const Tensor& resize_as_(
     c10::DispatchKeySet ks,
-    Tensor& self,
+    const Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
@@ -188,7 +188,7 @@ Tensor& resize_as_(
     AT_ERROR("cannot resize variables that require grad");
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::resize_as_(ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
   }
 
