@@ -430,9 +430,6 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
 }
 
 Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("index_add_cuda_");
   dim = maybe_wrap_dim(dim, self.dim());
 
   TensorArg self_arg{self, "self", 1}, index_arg{index, "index", 3}, source_arg{source, "source", 4};
@@ -462,6 +459,16 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   at::assert_no_internal_overlap(self);
   at::assert_no_partial_overlap(self, index);
   at::assert_no_partial_overlap(self, source);
+
+  if (globalContext().deterministicAlgorithms()){
+    torch::List<c10::optional<Tensor>> indices;
+    indices.reserve(dim + 1);
+    for (int64_t i = 0; i < dim; i++) {
+      indices.emplace_back();
+    }
+    indices.emplace_back(index);
+    return self.index_put_(indices, source * alpha, true);
+  }
 
   // The `source` is partitioned into two parts:
   // -the size of each slice we are indexing, which is the
