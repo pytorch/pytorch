@@ -306,6 +306,7 @@ def get_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn):
 
 
 def reshape_tensor_or_tuple(u, shape):
+    # We don't need to reshape when input corresponding to u is sparse
     if isinstance(u, tuple):
         if u[0].layout != torch.sparse_coo:
             return (u[0].reshape(shape), u[1].reshape(shape))
@@ -872,12 +873,14 @@ def get_inp_tensors(tupled_inputs):
 
 
 def adjusted_atol(atol, u, v):
-    # In slow gradcheck, we compare A and B element-wise, i.e., for some a, b we allow |a - b| < atol + rtol * b
-    # but since we now compare q1 = v^T A u and q2 = v^T B u, we must allow |q1 - q2| < v^T E u + rtol * v^T B u
-    # where E is the correctly sized matrix where each entry is atol
+    # In slow gradcheck, we compare A and B element-wise, i.e., for some a, b we allow:
+    # |a - b| < atol + rtol * b. But since we now compare q1 = v^T A u and q2 = v^T B u,
+    # we must allow |q1 - q2| < v^T E u + rtol * v^T B u, where E is the correctly sized
+    # matrix in which each entry is atol.
     #
     # We see that atol needs to be scaled by v^T M u (where M is an all-ones M x N matrix):
     # v^T M u = \sum_{i} \sum_{j} u_i * v_j = (\sum_{i} u_i)(\sum_{i} v_i)
+    # TODO: properly handle case when u is tuple instead of only taking first element
     u = u[0] if isinstance(u, tuple) else u
     sum_u = torch.sparse.sum(u) if u.layout == torch.sparse_coo else u.sum()
     sum_v = torch.sparse.sum(v) if v.layout == torch.sparse_coo else v.sum()
@@ -955,7 +958,6 @@ def check_analytical_numerical_equal(all_analytical, all_numerical, complex_indi
         for j, n in enumerate(all_numerical_for_input_i):
             a = all_analytical[j][i]
             n = n.to(device=a.device)
-            # TODO: Update adjusted atol to correctly handle complex case
             if not allclose_with_type_promotion(a, n.to(a.device), rtol, adjusted_atol(atol, all_u[i], all_v[j])):
                 jacobians_str = run_slow_mode_and_get_error(func, tupled_inputs, outputs, i, j, rtol, atol)
                 raise GradcheckError(get_notallclose_msg(a, n, j, i, complex_indices, test_imag) + jacobians_str)
@@ -1017,8 +1019,8 @@ def gradcheck(
     For most of the complex functions we consider for optimization purposes, no notion of
     Jacobian exists. Instead, gradcheck verifies if the numerical and analytical values of
     the Wirtinger and Conjugate Wirtinger derivatives are consistent. Because the gradient
-    computation is done under the assumption that the overall function has a real-valued,
-    output we treat functions with complex output in a special way. For these functions,
+    computation is done under the assumption that the overall function has a real-valued
+    output, we treat functions with complex output in a special way. For these functions,
     gradcheck is applied to two real-valued functions corresponding to taking the real
     components of the complex outputs for the first, and taking the imaginary components
     of the complex outputs for the second. For more details, check out
