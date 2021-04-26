@@ -481,6 +481,17 @@ const std::deque<Val*>& Fusion::deterministic_vals() const noexcept {
   return val_deque_;
 }
 
+std::vector<Val*> Fusion::usedMathVals() {
+  // Note that using fusion->inputs() as the argument for the first
+  // parameter of getAllValsBetween does not grab all used vals as
+  // there can be vals that are created inside a fusion without using
+  // anything from inputs. See, for example, tv0 in the
+  // FusionOuterSplit test.
+  const auto inputs = InputsOf::outputs(this, outputs());
+  auto used_math_vals = DependencyCheck::getAllValsBetween(inputs, outputs());
+  return used_math_vals;
+}
+
 const std::unordered_set<Expr*>& Fusion::unordered_exprs() const noexcept {
   return expr_set_;
 }

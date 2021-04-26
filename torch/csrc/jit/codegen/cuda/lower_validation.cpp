@@ -325,8 +325,7 @@ void validateVectorize(Fusion* fusion) {
   FUSER_PERF_SCOPE("validateVectorize");
   FusionGuard fg(fusion);
 
-  auto used_vals = DependencyCheck::getAllValsBetween(
-      {fusion->inputs().begin(), fusion->inputs().end()}, fusion->outputs());
+  auto used_vals = fusion->usedMathVals();
 
   std::unordered_set<TensorView*> used_tvs;
 

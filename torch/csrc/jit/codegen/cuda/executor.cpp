@@ -430,8 +430,7 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
 
 void FusionExecutor::setUsedTVs() {
   used_tvs_.clear();
-  auto used_vals = DependencyCheck::getAllValsBetween(
-      {fusion_.inputs().begin(), fusion_.inputs().end()}, fusion_.outputs());
+  auto used_vals = fusion_.usedMathVals();
   for (auto val : used_vals) {
     if (val->getValType().value() == ValType::TensorView) {
       used_tvs_.push_back(val->as<TensorView>());

@@ -461,9 +461,7 @@ void computeWithOutputs(TensorView* producer, int pos, ComputeAtMode mode) {
 }
 
 std::vector<TensorView*> allTvs(Fusion* fusion) {
-  auto used_vals = DependencyCheck::getAllValsBetween(
-      {fusion->inputs().begin(), fusion->inputs().end()}, fusion->outputs());
-
+  auto used_vals = fusion->usedMathVals();
   auto used_tvs = ir_utils::filterByType<TensorView>(used_vals);
   return uniqueEntries({used_tvs.begin(), used_tvs.end()});
 }

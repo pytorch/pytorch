@@ -74,8 +74,7 @@ bool analyzeIfDerivedFromTrivialReduction(TensorView* tv, IterDomain* id) {
 } // namespace
 
 void TrivialReductionInfo::build(Fusion* fusion, GpuLower* gpu_lower) {
-  auto used_vals = DependencyCheck::getAllValsBetween(
-      {fusion->inputs().begin(), fusion->inputs().end()}, fusion->outputs());
+  auto used_vals = fusion->usedMathVals();
 
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
     for (auto id : tv->domain()->domain()) {

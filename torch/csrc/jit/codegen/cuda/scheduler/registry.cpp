@@ -133,8 +133,7 @@ static void analyzeFusion(
     Fusion* fusion,
     std::vector<TensorView*>& reduction_tv,
     std::vector<TensorView*>& other_tv) {
-  auto all_values = DependencyCheck::getAllValsBetween(
-      {fusion->inputs().begin(), fusion->inputs().end()}, fusion->outputs());
+  auto all_values = fusion->usedMathVals();
 
   for (auto tv : ir_utils::filterByType<TensorView>(all_values)) {
     if (tv->hasReduction() && !fusion->hasInput(tv)) {
