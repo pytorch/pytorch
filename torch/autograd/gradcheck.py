@@ -938,8 +938,8 @@ def gradcheck(
     For most of the complex functions we consider for optimization purposes, no notion of
     Jacobian exists. Instead, gradcheck verifies if the numerical and analytical values of
     the Wirtinger and Conjugate Wirtinger derivatives are consistent. Because the gradient
-    computation is done under the assumption that the overall function has a real-valued,
-    output we treat functions with complex output in a special way. For these functions,
+    computation is done under the assumption that the overall function has a real-valued
+    output, we treat functions with complex output in a special way. For these functions,
     gradcheck is applied to two real-valued functions corresponding to taking the real
     components of the complex outputs for the first, and taking the imaginary components
     of the complex outputs for the second. For more details, check out
