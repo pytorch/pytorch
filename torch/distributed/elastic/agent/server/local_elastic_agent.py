@@ -6,7 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import logging
+
 import os
 import shutil
 import tempfile
@@ -22,9 +22,9 @@ from torch.distributed.elastic.agent.server.api import (
 from torch.distributed.elastic.metrics.api import prof
 from torch.distributed.elastic.multiprocessing import start_processes, PContext
 from torch.distributed.elastic.utils import macros
+from torch.distributed.elastic.utils.logging import get_logger
 
-
-log = logging.getLogger(__name__)
+log = get_logger()
 
 
 class LocalElasticAgent(SimpleElasticAgent):
