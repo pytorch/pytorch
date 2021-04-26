@@ -11,6 +11,7 @@ namespace torch { namespace autograd { namespace python {
 
 struct PythonEngine : public Engine {
   static Engine& get_python_engine();
+  ~PythonEngine() override;
   void thread_init(int device,
       const std::shared_ptr<ReadyQueue>& ready_queue,
       bool should_increment) override;
