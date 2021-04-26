@@ -256,7 +256,7 @@ Tensor internal_new_from_data(
   // here.
   Tensor tensor;
   {
-    at::AutoDispatchBelowAutograd guard;  // TODO: remove
+    at::AutoDispatchBelowInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(
@@ -605,10 +605,10 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
   auto r = parser.parse(args, kwargs, parsed_args);
   THPObjectPtr crow_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(CROW_INDICES_ARG), "dtype"));
   THPObjectPtr col_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(COL_INDICES_ARG), "dtype"));
-  at::ScalarType crow_indices_scalar_type = reinterpret_cast<THPDtype*>(
-    crow_indices_dtype_attr.get())->scalar_type;
-  at::ScalarType col_indices_scalar_type = reinterpret_cast<THPDtype*>(
-    col_indices_dtype_attr.get())->scalar_type;
+  at::ScalarType crow_indices_scalar_type = crow_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
+    crow_indices_dtype_attr.get())->scalar_type : kInt;
+  at::ScalarType col_indices_scalar_type = col_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
+    col_indices_dtype_attr.get())->scalar_type : kInt;
 
   if (r.idx == 0) {
     const int SIZE_ARRAY_ARG = 3, TYPE_INFERENCE_ARG = 4, DEVICE_TYPE_ARG = 6, REQ_GRAD_ARG = 8;
