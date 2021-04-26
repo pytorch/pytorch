@@ -356,7 +356,7 @@ Tensor & softplus_backward_out(const Tensor& grad_output,
     const Scalar& threshold,
     const Tensor& output,
     Tensor& grad_input) {
-  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
   softplus_backward_stub(iter.device_type(), iter, beta, threshold);
   return grad_input;
 }
@@ -368,7 +368,7 @@ Tensor softplus_backward(
     const Scalar& threshold,
     const Tensor& output) {
   Tensor grad_input;
-  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
   softplus_backward_stub(iter.device_type(), iter, beta, threshold);
   return iter.output();
 }
