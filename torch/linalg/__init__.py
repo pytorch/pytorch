@@ -1195,13 +1195,7 @@ which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.
 
 The singular values are returned in descending order.
 
-The parameter :attr:`full_matrices` chooses between the full and reduced SVD.
-If :attr:`A` has shape `(*, m, n)`, denoting `k = min(m, n)`
-
-- :attr:`full_matrices`\ `= True` (default): Returns the full SVD.
-  The returned tensors `(U, S, Vh)` will have shapes `(*, m, m)`, `(*, k)`, `(*, n, n)` respectively.
-- :attr:`full_matrices`\ `= False`: Returns the reduced SVD.
-  The returned tensors `(U, S, Vh)` will have shapes `(*, m, k)`, `(*, k)`, `(*, k, n)` respectively.
+The parameter :attr:`full_matrices` chooses between the full (default) and reduced SVD.
 
 Differences with `numpy.linalg.svd`:
 
