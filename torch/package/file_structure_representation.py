@@ -22,7 +22,7 @@ class Directory:
             dirs (List[str]): List of directory names that are treated like a path.
 
         Returns:
-            :class:`Directory`: The last Directory specified in the dirs list. 
+            :class:`Directory`: The last Directory specified in the dirs list.
         """
         if len(dirs) == 0:
             return self
