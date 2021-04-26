@@ -7,13 +7,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.fx.quantize import is_activation_post_process
 from .mappings import (
-    FUNS_IO_TYPE_FP32,
-    FUNS_IO_TYPE_INT8,
-    FUNS_IO_TYPE_FP32_OR_INT8,
-    MODS_IO_TYPE_FP32,
-    MODS_IO_TYPE_INT8,
-    MODS_IO_TYPE_FP32_OR_INT8,
-    METHS_IO_TYPE_FP32_OR_INT8,
+    get_node_type_to_io_type_map,
 )
 
 from typing import Any, Tuple, Callable
@@ -48,6 +42,17 @@ def get_node_first_input_and_output_type(
     gm: GraphModule,
     logger_cls: Callable,
 ) -> Tuple[NodeInputOrOutputType, NodeInputOrOutputType]:
+
+    # TODO(future PR): clean this up
+    node_type_to_io_type_map = get_node_type_to_io_type_map()
+    FUNS_IO_TYPE_FP32 = node_type_to_io_type_map['funs_io_type_fp32']
+    FUNS_IO_TYPE_INT8 = node_type_to_io_type_map['funs_io_type_int8']
+    FUNS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['funs_io_type_fp32_or_int8']
+    MODS_IO_TYPE_FP32 = node_type_to_io_type_map['mods_io_type_fp32']
+    MODS_IO_TYPE_INT8 = node_type_to_io_type_map['mods_io_type_int8']
+    MODS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['mods_io_type_fp32_or_int8']
+    METHS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['meths_io_type_fp32_or_int8']
+
     if node.op == 'call_function':
         if node.target in FUNS_IO_TYPE_FP32:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
@@ -72,13 +77,13 @@ def get_node_first_input_and_output_type(
                     first_arg, gm, logger_cls)
             return (prev_node_output_type, prev_node_output_type)
         is_known_fp32_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32  # type: ignore
         )
         is_known_int8_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_INT8
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_INT8  # type: ignore
         )
         is_known_fp32_or_int8_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore
         )
         if is_known_fp32_input_module:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
