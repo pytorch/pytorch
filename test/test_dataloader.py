@@ -1532,18 +1532,28 @@ except RuntimeError as e:
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_numpy_gen_state(self):
         from torch.utils.data._utils.worker import _generate_state
-        import numpy as np
+        # Test case as ((worker_id, base_seed), expected_state)
+        test_cases = [
+            ((4, 13434589827475259383), (2884386318, 1088094898, 3523808998, 3860348662)),
+            ((1, 15014285634777110771), (1934848465, 763213760, 2959016433, 179751970)),
+            ((10, 978296274032934101), (1759791917, 3550927336, 1225977135, 1036538043)),
+            ((12, 11868770762134256968), (3974661794, 3331131333, 3630387033, 2885815368)),
+            ((9, 15378787925219019706), (3815056996, 3162224466, 2735102421, 3190253477)),
+            ((5, 9055612723125076328), (3522565701, 3368424109, 959377806, 621878693)),
+            ((15, 14617792358407278405), (3402479508, 1588702753, 1169536393, 3675067356)),
+            ((9, 17363320784006640087), (957989458, 2518334477, 1421725660, 3086155459)),
+            ((12, 480002904169484764), (2732851467, 1762620729, 4055801988, 1277640511)),
+            ((15, 16803975943592702950), (3479415043, 4022359553, 295994005, 3358606349)),
+            ((9, 11704776406047813044), (1968928009, 710113752, 2442656196, 1587420279)),
+            ((10, 16357891985431864516), (1271733898, 4197047399, 3727213786, 2338547348)),
+            ((2, 17423369006318065007), (544294336, 1911284083, 3299147734, 3231058347)),
+            ((2, 2889492011444113593), (3721591783, 2595811276, 2212881745, 977682627)),
+            ((0, 8979703111668486195), (4276723937, 2556068849, 2962827292, 233130238)),
+            ((6, 6269787272229682235), (2548857855, 1216457374, 1012973562, 2999759647))
+        ]
 
-        for i in range(10):
-            # uint64 as the base seed
-            base_seed = np.random.randint(0, high=0xffffffff_ffffffff, dtype=np.uint64)
-            bs1 = np.bitwise_and(base_seed, np.uint64(0xffffffff)).item()
-            bs2 = np.right_shift(base_seed, np.uint64(32)).item()
-            for worker_id in range(8):
-                # Same seedsequence as `_generate_state`
-                ss = [worker_id, bs1, bs2, 0]
-                np_ss = np.random.SeedSequence(ss)
-                self.assertEqual(np_ss.generate_state(4), _generate_state(base_seed.item(), worker_id))
+        for (worker_id, base_seed), exp in test_cases:
+            self.assertEqual(exp, _generate_state(base_seed, worker_id))
 
     def test_error(self):
         self._test_error(self._get_data_loader(ErrorDataset(100), batch_size=2, shuffle=True))
