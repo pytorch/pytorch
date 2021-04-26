@@ -1,9 +1,6 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
-
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-
 
 #include <sstream>
 
@@ -786,16 +783,6 @@ c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
     deleteAllUsersCV_.notify_all();
   }
   return deletedRRef;
-}
-
-void RRefContext::blockCurrentStreams(
-    const std::vector<c10::Event>& events) const {
-  for (const c10::Event& event : events) {
-    c10::Device device{event.device_type(), event.device_index()};
-    c10::Stream stream =
-        c10::impl::getDeviceGuardImpl(device.type())->getStream(device);
-    event.block(stream);
-  }
 }
 
 } // namespace rpc
