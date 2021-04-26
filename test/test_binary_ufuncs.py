@@ -381,7 +381,8 @@ class TestBinaryUfuncs(TestCase):
         b = make_tensor((4096,), device, dtype, low=low, high=high)
 
         # Avoid division by zero which raises for integers and, for floats,
-        # NumPy behavior changed in 1.20
+        # NumPy 1.20 changed floor_divide to follow IEEE rules for inf/nan
+        # after dividing by zero.
         b[b == 0] = 1
 
         # Compare bfloat16 against NumPy float
