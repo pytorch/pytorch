@@ -3966,23 +3966,6 @@ else:
         test_func(torch.Tensor.scatter_add)
         test_func(torch.scatter_add)
 
-    def test_nondeterministic_alert_index_add(self, device):
-        def test_func(op_call):
-            input = torch.randn(10, device=device)
-            dim = 0
-            index = torch.tensor([3], device=device)
-            src = torch.randn(1, device=device)
-
-            @expectedAlertNondeterministic('index_add_cuda_', 'cuda')
-            def forward_func(slf, device):
-                op_call(input, dim, index, src)
-
-            forward_func(self, device)
-
-        test_func(torch.Tensor.index_add_)
-        test_func(torch.Tensor.index_add)
-        test_func(torch.index_add)
-
     # Ensures that index_put throws nondeterministic alerts in the correct cases
     @onlyOnCPUAndCUDA
     def test_nondeterministic_alert_index_put(self, device):
@@ -4032,38 +4015,6 @@ else:
 
         test_func(torch.Tensor.put)
         test_func(torch.Tensor.put_)
-
-    def test_nondeterministic_alert_index_select(self, device):
-        def test_func(op_call):
-            a = torch.randn(10, device=device, requires_grad=True)
-            dim = 0
-            indices = torch.tensor([0, 1], device=device)
-            res = op_call(a, dim, indices)
-            grad = torch.ones_like(res)
-
-            @expectedAlertNondeterministic('index_add_cuda_', 'cuda')
-            def backward_func(slf, device):
-                res.backward(grad)
-
-            backward_func(self, device)
-
-        test_func(torch.index_select)
-        test_func(torch.Tensor.index_select)
-
-    def test_nondeterministic_alert_repeat_interleave(self, device):
-        def test_func(op_call):
-            a = torch.randn(2, 2, device=device, requires_grad=True)
-            res = op_call(a, 2)
-            grad = torch.ones_like(res)
-
-            @expectedAlertNondeterministic('index_add_cuda_', 'cuda')
-            def backward_func(slf, device):
-                res.backward(grad)
-
-            backward_func(self, device)
-
-        test_func(torch.repeat_interleave)
-        test_func(torch.Tensor.repeat_interleave)
 
     def test_nondeterministic_alert_histc(self, device):
         def test_func(op_call):
@@ -5155,6 +5106,31 @@ else:
         test_func(self, device, 'function')
         test_func(self, device, 'method')
         test_func(self, device, 'method inplace')
+
+    @onlyOnCPUAndCUDA
+    def test_index_add_deterministic(self, device):
+        for dim in range(3):
+            a = [5, 4, 3]
+            a[dim] = 1000
+            alpha = random.random() + 1
+            x = torch.zeros(a, device=device)
+            b = a.copy()
+            elems = a[dim] * 20
+            b[dim] = elems
+            src = torch.rand(b, device=device)
+            index = torch.randint(a[dim], (elems,), device=device)
+
+            # on CPU it should be deterministic regardless of the deterministic mode
+            with DeterministicGuard(True):
+                y0 = torch.index_add(x, dim, index, src, alpha=alpha)
+                for _ in range(3):
+                    y = torch.index_add(x, dim, index, src, alpha=alpha)
+                    self.assertEqual(y, y0, atol=0, rtol=0)
+
+            with DeterministicGuard(False):
+                for _ in range(3):
+                    y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
+                    self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_index_fill(self, device, dtype):
@@ -7664,7 +7640,6 @@ tensor_op_tests = [
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [tf32_on_and_off(0.01), _wrap_warn_once("This overload of addmm_? is deprecated")]),
-    ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _types, _types_no_half),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
     ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
     ('chunk', '', _medium_2d, lambda t, d: [4], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -7770,7 +7745,6 @@ tensor_op_tests = [
     ('norm', '3_norm_neg_dim', _small_3d, lambda t, d: [3, -2], 1e-1, 1e-1, 1e-5,
         torch.testing.get_all_fp_dtypes(), _cpu_types, False),
     ('new_ones', '', _small_3d, lambda t, d: [1, 2, 3, 4, 5], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('permute', '', _new_t((1, 2, 3, 4)), lambda t, d: [2, 1, 3, 0], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('put_', '', _new_t((2, 5, 3)),
         lambda t, d: [torch.LongTensor([[0], [-2]]).to(device=d),
                       torch.LongTensor([[3], [4]]).to(dtype=_convert_t(t, d), device=d)],
@@ -7813,8 +7787,6 @@ tensor_op_tests = [
     ('take', '', _new_t((3, 4)),
         lambda t, d: [torch.LongTensor([[0], [-2]]).to(device=d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('transpose', '', _new_t((1, 2, 3, 4)), lambda t, d: [1, 2],),
-    ('transpose', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-1, -2], ),
     ('tolist', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('topk', 'dim_sort', _small_3d_unique, lambda t, d: [2, 1, False, True],
         1e-5, 1e-5, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
@@ -7841,10 +7813,6 @@ tensor_op_tests = [
     ('flip', 'd02', _small_3d, lambda t, d: [0, 2], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
     ('flip', 'd20', _small_3d, lambda t, d: [2, 0], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
     ('flip', 'neg_d', _small_3d, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
-    ('rot90', 'k1_d01', _small_2d, lambda t, d: [1, [0, 1]], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
-    ('rot90', 'k1_d12', _small_3d, lambda t, d: [1, [1, 2]], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
-    ('rot90', 'k1_neg_d', _small_3d, lambda t, d: [1, [1, -1]], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
-    ('rot90', 'default', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
     ('__lshift__', '',
         lambda t, d: torch.pow(2, torch.arange(1, 5).to(dtype=_convert_t(t, d), device=d)),
         lambda t, d: [2],
