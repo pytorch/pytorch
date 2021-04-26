@@ -77,8 +77,7 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
       auto tensor = std::move(ivalue).toTensor();
       if (mut_arg) {
         // TODO: This is a waste if the argument is write only
-        native::conj_physical_(tensor);
-        tensor.set_conj(false);
+        native::resolve_conj_(tensor);
         mutable_inputs.emplace_back(tensor);
       } else {
         tensor = native::resolve_conj(tensor);
@@ -97,7 +96,7 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
   }
   op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::Conjugate), stack);
   for (auto& mutable_input : mutable_inputs) {
-    native::conj_physical_(mutable_input);
+    at::conj_physical_(mutable_input);
     mutable_input.set_conj(true);
   }
 }
@@ -112,10 +111,12 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("_conj", torch::CppFunction::makeFallthrough());
   m.impl("conj_physical_", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
+  m.impl("resolve_conj_", torch::CppFunction::makeFallthrough());
   m.impl("empty_like", torch::CppFunction::makeFallthrough());
   m.impl("empty.memory_format", torch::CppFunction::makeFallthrough());
   m.impl("empty.out", torch::CppFunction::makeFallthrough());
   m.impl("empty_strided", torch::CppFunction::makeFallthrough());
+  m.impl("full_like", torch::CppFunction::makeFallthrough());
   m.impl("stride.int", torch::CppFunction::makeFallthrough());
   m.impl("stride.Dimname", torch::CppFunction::makeFallthrough());
   m.impl("size.int", torch::CppFunction::makeFallthrough());
@@ -128,6 +129,8 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
   m.impl("select", torch::CppFunction::makeFallthrough());
+  m.impl("index_select", torch::CppFunction::makeFallthrough());
+  m.impl("masked_select", torch::CppFunction::makeFallthrough());
   // TODO: need to hit the view functions
 }
 

@@ -708,6 +708,7 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual c10::InferredType tryToInferType() = 0;
   virtual IValue toIValue(const TypePtr& type, c10::optional<int32_t> N = c10::nullopt) = 0;
   virtual std::string toStr() = 0;
+  virtual std::vector<at::Tensor> extractTensors() = 0;
 
   virtual ~PyObjectHolder(){};
 };
