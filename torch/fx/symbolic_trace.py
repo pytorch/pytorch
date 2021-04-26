@@ -7,8 +7,8 @@ from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 from itertools import chain
 import torch
-import torch._C._fx  # type: ignore
-from torch._C import ScriptObject  # type: ignore
+import torch._C._fx  # type: ignore[import]
+from torch._C import ScriptObject  # type: ignore[attr-defined]
 
 import sys
 from .node import Argument, map_aggregate
@@ -43,7 +43,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
             co.co_names, co.co_varnames, co.co_filename,
             co.co_name, co.co_firstlineno, co.co_lnotab,
             co.co_freevars, co.co_cellvars)
-    new_code = CodeType(*co_args)  # type: ignore
+    new_code = CodeType(*co_args)  # type: ignore[arg-type]
     return FunctionType(new_code, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__)
 
     # we need to insert placeholder nodes for *args and **kwargs
@@ -244,8 +244,7 @@ class Tracer(TracerBase):
             assert isinstance(path, str)
             return path
         # O(N^2) fallback in the case that we didn't store the submodule
-        # paths. (This happens e.g. in using NormalizeArgs. See
-        #  `test/test_fx_experimental:test_normalize_args`)
+        # paths.
         else:
             for n, p in self.root.named_modules():
                 if mod is p:
@@ -313,10 +312,10 @@ class Tracer(TracerBase):
             if concrete_args is not None and name in concrete_args:
                 return concrete_args[name]
             if name[0] == '*':
-                default = ()    # type: ignore
+                default = ()
             else:
                 param = sig.parameters[name]
-                default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore
+                default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore[assignment]
             return self.create_proxy('placeholder', name, default, {},
                                      type_expr=fn_for_analysis.__annotations__.get(name, None))
 
@@ -434,7 +433,7 @@ _wrapped_methods_to_patch : List[Tuple[type, str]] = []
 
 if os.environ.get("FX_PATCH_GETITEM") == "1":
     # This change is needed to trace models like PositionalEmbedding from BERT:
-    # https://github.com/pytorch/benchmark/blob/master/torchbenchmark/models/BERT_pytorch/bert_pytorch/model/embedding/position.py  # noqa
+    # https://github.com/pytorch/benchmark/blob/master/torchbenchmark/models/BERT_pytorch/bert_pytorch/model/embedding/position.py
     # but causes issues in quantization documented here:
     # https://github.com/pytorch/pytorch/issues/50710
     # once that is fixed we can make this the default behavior.
@@ -528,7 +527,7 @@ class _Patcher(object):
         """
         Replace frame_dict[name] with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore
+        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
         if name not in frame_dict and hasattr(builtins, name):
             self.patches_made.append(_PatchedFnDel(frame_dict, name, None))
         elif getattr(frame_dict[name], "__fx_already_patched", False):
@@ -542,7 +541,7 @@ class _Patcher(object):
         """
         Replace object_or_dict.name with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore
+        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
         orig_fn = getattr(cls, name)
         if getattr(orig_fn, "__fx_already_patched", False):
             return  # already patched, no need to do it again
