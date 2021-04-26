@@ -186,8 +186,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
             }
             return floordiv;
           },
-          [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t>{
-            using vec_t = Vec256<scalar_t>;
+          [](vec_t a, vec_t b) -> vec_t {
             auto mod = a.fmod(b);
             auto div = (a - mod) / b;
             const auto zero = vec_t(0);
