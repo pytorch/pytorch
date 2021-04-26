@@ -97,7 +97,7 @@ class PackageImporter(Importer):
         self.patched_builtins = builtins.__dict__.copy()
         self.patched_builtins["__import__"] = self.__import__
         # Allow packaged modules to reference their PackageImporter
-        self.modules["torch_package_importer"] = self  # type: ignore
+        self.modules["torch_package_importer"] = self  # type: ignore[assignment]
 
         self._mangler = PackageMangler()
         self.last_map_location = None
@@ -263,7 +263,7 @@ class PackageImporter(Importer):
         self, name: str, filename: Optional[str], is_package: bool, parent: str
     ):
         mangled_filename = self._mangler.mangle(filename) if filename else None
-        spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore
+        spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore[arg-type]
         module = importlib.util.module_from_spec(spec)
         self.modules[name] = module
         module.__name__ = self._mangler.mangle(name)
@@ -287,7 +287,7 @@ class PackageImporter(Importer):
             assert mangled_filename is not None
             # pre-emptively install the source in `linecache` so that stack traces,
             # `inspect`, etc. work.
-            assert filename not in linecache.cache  # type: ignore
+            assert filename not in linecache.cache  # type: ignore[attr-defined]
             linecache.lazycache(mangled_filename, ns)
 
             code = self._compile_source(filename, mangled_filename)
@@ -301,13 +301,14 @@ class PackageImporter(Importer):
             if not isinstance(cur, _PackageNode) or atom not in cur.children:
                 raise ModuleNotFoundError(
                     f'No module named "{name}" in self-contained archive "{self.filename}"'
-                    f" and the module is also not in the list of allowed external modules: {self.extern_modules}"
+                    f" and the module is also not in the list of allowed external modules: {self.extern_modules}",
+                    name=name,
                 )
             cur = cur.children[atom]
             if isinstance(cur, _ExternNode):
                 module = self.modules[name] = importlib.import_module(name)
                 return module
-        return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore
+        return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore[attr-defined]
 
     def _compile_source(self, fullpath: str, mangled_filename: str):
         source = self.zip_reader.get_record(fullpath)
@@ -337,7 +338,7 @@ class PackageImporter(Importer):
             return
         # Set the module as an attribute on its parent.
         parent_module = self.modules[parent]
-        if parent_module.__loader__ is self:  # type: ignore
+        if parent_module.__loader__ is self:  # type: ignore[union-attr]
             setattr(parent_module, name.rpartition(".")[2], module)
 
     # note: copied from cpython's import code, with call to create module replaced with _make_module
@@ -352,7 +353,7 @@ class PackageImporter(Importer):
                 return self.modules[name]
             parent_module = self.modules[parent]
             try:
-                path = parent_module.__path__  # type: ignore
+                path = parent_module.__path__  # type: ignore[union-attr]
             except AttributeError:
                 msg = (_ERR_MSG + "; {!r} is not a package").format(name, parent)
                 raise ModuleNotFoundError(msg, name=name) from None
