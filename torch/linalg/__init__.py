@@ -1171,7 +1171,8 @@ When `m > n` (resp. `m < n`) we can drop the last `m - n` (resp. `n - m`) column
     A = U \operatorname{diag}(S) V^{\text{H}}
     \mathrlap{\qquad U \in \mathbb{K}^{m \times k}, S \in \mathbb{R}^k, V \in \mathbb{K}^{k \times n}}
 
-where :math:`\operatorname{diag}(S) \in \mathbb{K}^{k \times k}`. In this case, :math:`U` and :math:`V` also have orthonormal columns.
+where :math:`\operatorname{diag}(S) \in \mathbb{K}^{k \times k}`.
+In this case, :math:`U` and :math:`V` also have orthonormal columns.
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
