@@ -2720,33 +2720,21 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
 
   MAGMAQueue magma_queue(b.get_device());
 
+  // Compute the result in batches of 65535
+  // that is the maximum allowed number for batch_size in MAGMA
   constexpr int64_t batch_limit = 65535;
-  // Compute as many batches of 65535 possible in MAGMA
-  // The number of "mini"-batches are floor(batch_size / batch_limit)
-  // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
-  int64_t mini_batches = batch_size / batch_limit;
-  int64_t mini_idx;
-  int info;
-  for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
+
+  for (int64_t mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int64_t nbatches = std::min(batch_limit, batch_size - mini_idx);
     scalar_t** lu_array_cur = &lu_array[mini_idx];
     scalar_t** b_array_cur = &b_array[mini_idx];
     magma_int_t** pivots_array_cur = &pivots_array[mini_idx];
 
+    int info;
     magmaLuSolveBatched<scalar_t>(
-        n, nrhs, lu_array_cur, leading_dimension, pivots_array_cur, b_array_cur, leading_dimension,
-        info, batch_limit, magma_queue);
-
-    // info from magmaLuSolveBatched only reports if the i-th parameter is wrong
-    // so we don't need to check it all the time
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
-  }
-
-  // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
-  // which concisely is equal to batch_size % batch_limit
-  if (batch_size % batch_limit != 0) {
-    magmaLuSolveBatched<scalar_t>(
-        n, nrhs, &lu_array[mini_idx], leading_dimension, &pivots_array[mini_idx], &b_array[mini_idx], leading_dimension,
-        info, batch_size % batch_limit, magma_queue);
+        n, nrhs, lu_array_cur, leading_dimension,
+        pivots_array_cur, b_array_cur, leading_dimension,
+        info, nbatches, magma_queue);
 
     // info from magmaLuSolveBatched only reports if the i-th parameter is wrong
     // so we don't need to check it all the time
