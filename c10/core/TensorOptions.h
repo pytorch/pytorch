@@ -617,13 +617,10 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             return DispatchKey::XPU;
           }
           case DeviceType::MKLDNN:
-            return DispatchKey::MKLDNN;
           case DeviceType::OPENGL:
-            return DispatchKey::OpenGL;
           case DeviceType::OPENCL:
-            return DispatchKey::OpenCL;
           case DeviceType::IDEEP:
-            return DispatchKey::IDEEP;
+            TORCH_INTERNAL_ASSERT(0, "This is a grandfathered Caffe2 device type ", device_.type(), ", it shouldn't ever convert to a DispatchKey.  File a bug describing what you were doing if you think this is in error.");
           case DeviceType::HIP:
             return DispatchKey::HIP;
           case DeviceType::FPGA:
@@ -730,14 +727,6 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
       return DeviceType::MLC;
 
     // stuff that isn't real
-    case DispatchKey::MKLDNN:
-      return DeviceType::MKLDNN;
-    case DispatchKey::OpenGL:
-      return DeviceType::IDEEP;
-    case DispatchKey::OpenCL:
-      return DeviceType::OPENCL;
-    case DispatchKey::IDEEP:
-      return DeviceType::IDEEP;
     case DispatchKey::MSNPU:
       return DeviceType::MSNPU;
     default:
