@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from typing import Dict, List
 
-from ._glob_group import GlobPattern, _GlobGroup
+from .glob_group import GlobPattern, GlobGroup
 
 
 class Folder:
@@ -23,6 +23,17 @@ class Folder:
         *folders, file = file_path.split("/")
         folder = self.get_folder(folders)
         folder.children[file] = Folder(file, False)
+
+    def has_file(self, filename: str):
+        lineage = filename.split("/", maxsplit=1)
+        child = lineage[0]
+        grandchildren = lineage[1] if len(lineage) > 1 else None
+        if child in self.children.keys():
+            if grandchildren is None:
+                return True
+            else:
+                return self.children[child].has_file(grandchildren)
+        return False
 
     def __str__(self):
         str_list: List[str] = []
@@ -70,7 +81,7 @@ def _create_folder_from_file_list(
     include: "GlobPattern" = "**",
     exclude: "GlobPattern" = (),
 ) -> Folder:
-    glob_pattern = _GlobGroup(include, exclude, "/")
+    glob_pattern = GlobGroup(include, exclude=exclude, separator="/")
 
     top_folder = Folder(filename, True)
     for file in file_list:

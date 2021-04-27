@@ -2,11 +2,19 @@ from typing import List, Optional, Union
 import itertools
 from typing_extensions import Literal
 from dataclasses import dataclass
+import textwrap
 
-from tools.codegen.context import *
-from tools.codegen.utils import *
-from tools.codegen.model import *
-from tools.codegen.api.types import *
+from tools.codegen.context import method_with_native_function
+from tools.codegen.utils import Target, mapMaybe
+from tools.codegen.model import (DispatchKey, NativeFunction,
+                                 NativeFunctionsGroup, SchemaKind,
+                                 TensorOptionsArguments, assert_never,
+                                 is_cuda_dispatch_key,
+                                 is_structured_dispatch_key)
+from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
+                                     CppSignature, CppSignatureGroup,
+                                     DispatcherSignature, Expr, MutRefCType,
+                                     NativeSignature, tensorT, NamedCType)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
@@ -107,7 +115,7 @@ class RegisterDispatchKey:
         sig = NativeSignature(f.func, prefix='wrapper_')
 
         name = sig.name()
-        returns_type = sig.returns_type()
+        returns_type = sig.returns_type().cpp_type()
         args = sig.arguments()
         args_str = ', '.join(a.defn() for a in args)
 
@@ -148,18 +156,14 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             args_exprs_str = ', '.join(a.name for a in args)
 
-            init_cuda = ""
             device_guard = "// DeviceGuard omitted"  # default
 
-            if (is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key)) and f.device_guard:
+            if f.device_guard and is_cuda_dispatch_key(self.dispatch_key):
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                 if has_tensor_options:
                     # kernel is creating a tensor
-                    device_guard = "const DeviceGuard device_guard(device_or_default(device));"
-
-                    if is_cuda_dispatch_key(self.dispatch_key):
-                        # initialize CUDA on construction of CUDA tensors
-                        init_cuda = "globalContext().lazyInitCUDA();\n"
+                    device_guard = """globalContext().lazyInitCUDA();
+  const DeviceGuard device_guard(device_or_default(device));"""
                 else:
                     # kernel is operating on existing tensors
 
@@ -181,7 +185,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 namespace {{
 
 {returns_type} {name}({args_str}) {{
-  {init_cuda}{device_guard}
+  {device_guard}
   return {impl_name}({args_exprs_str});
 }}
 
@@ -217,11 +221,13 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
         return f"""
 void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
                 TensorOptions options, DimnameList names) override {{
-    {self.gen_class_set_output_body(k)}
-    if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
+{textwrap.indent(self.gen_class_set_output_body(k), "    ")}
+    if (!names.empty()) {{
+      namedinference::propagate_names(outputs_[output_idx], names);
+    }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
-    {set_output_super}
+{textwrap.indent(set_output_super, "    ")}
 }}
 """
 
@@ -236,8 +242,9 @@ if (C10_UNLIKELY(current_device.has_value())) {
   guard_.reset_device(options.device());
 }
 """
+            maybe_set_guard_line = maybe_set_guard + "\n"
         else:
-            maybe_set_guard = ''
+            maybe_set_guard_line = maybe_set_guard = ''
 
         if k is SchemaKind.functional:
             if self.dispatch_key == DispatchKey.Meta:
@@ -263,8 +270,7 @@ if (strides.empty()) {
                     empty_strided_impl = "at::empty_strided"
                 else:
                     raise AssertionError("unsupported dispatch key")
-                return f"""
-{maybe_set_guard}
+                return f"""{maybe_set_guard_line}
 if (strides.empty()) {{
     outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
 }} else {{
@@ -275,23 +281,13 @@ if (strides.empty()) {{
         elif k is SchemaKind.inplace:
             return maybe_set_guard
         elif k is SchemaKind.out:
-            if self.dispatch_key == DispatchKey.CPU:
-                resize_impl = "resize_output_cpu"
-            else:
-                # Only bothering to include a resize_output fastpath for CPU for now.
-                # We can add one in if for the perf if we need to. But it'll be easier when external backends
-                # have access to meta functions, and we can write one for resize_.
-                resize_impl = "resize_output"
-            # TODO: Provide a way of bypassing the tests here, if the meta
-            # function consulted maybe_get_output()
-            return f"""
-{maybe_set_guard}
+            return f"""{maybe_set_guard_line}
 const auto& out = outputs_[output_idx].get();
 TORCH_CHECK(options.dtype() == out.dtype(),
     "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
 TORCH_CHECK(options.device() == out.device(),
     "Expected out tensor to have device ", options.device(), ", but got ", out.device(), " instead");
-bool resized = at::native::{resize_impl}(outputs_[output_idx], sizes);
+bool resized = at::native::resize_output(outputs_[output_idx], sizes);
 // Only restride if a resize occurred; otherwise we ignore the (advisory)
 // strides from the meta function and directly use the output tensor's
 // preexisting strides
@@ -342,17 +338,20 @@ if (resized) {{
         else:
             guard_field = ''
 
-        return f"""
-struct {class_name} final : public {parent_class} {{
-    {self.gen_class_ctor(k, class_name, len(f.func.returns))}
-    {self.gen_class_set_output(k, parent_class, generate_super)}
-    const Tensor& maybe_get_output(int64_t output_idx) override {{
-        return outputs_[output_idx];
-    }}
-    std::array<{output_type}, {len(f.func.returns)}> outputs_;
-    {guard_field}
-}};
-"""
+        indent = " " * 4
+        class_ctor_str = self.gen_class_ctor(k, class_name, len(f.func.returns))
+        lines = (
+            f"struct {class_name} final : public {parent_class} {{",
+            f"{textwrap.indent(class_ctor_str, indent)}",
+            f"{textwrap.indent(self.gen_class_set_output(k, parent_class, generate_super), indent)}",
+            "    const Tensor& maybe_get_output(int64_t output_idx) override {",
+            "        return outputs_[output_idx];",
+            "    }",
+            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
+            f"{textwrap.indent(guard_field, indent)}",
+            "};"
+        )
+        return '\n'.join(line for line in lines if line)
 
     @method_with_native_function
     def gen_one(self, f: NativeFunction) -> Optional[str]:
@@ -452,13 +451,13 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # add it to the context
             out_args = structured.out_arguments(self.g)
             for i, out_arg in enumerate(out_args):
-                assert ConstRefCType(BaseCType("Tensor", out_arg.ctype.name)) == out_arg.ctype
+                assert ConstRefCType(BaseCType(tensorT)) == out_arg.nctype.type
                 context.append(Expr(
                     expr=f"op.outputs_[{i}]",
                     # TODO: Stop hardcoding that the output type is a Tensor.  Note
                     # that for the codegen here this is fine because outputs_ is
                     # hardcoded to be tensor already
-                    type=MutRefCType(BaseCType("Tensor", out_arg.ctype.name)),
+                    type=NamedCType(out_arg.nctype.name, MutRefCType(BaseCType(tensorT)))
                 ))
 
             # With the expanded context, do the impl call (if not a meta
