@@ -141,7 +141,7 @@ void writeArchive(
     const std::string& archive_name,
     const IValue& value,
     const TensorIndexMap& tensors_archive_table,
-    bool use_tensors_archive_table = false) {
+    bool use_tensors_archive_table) {
   std::vector<char> data;
   TypeNameUniquer type_name_uniquer;
   // Vector to capture the run-time class types during pickling the IValues
@@ -294,15 +294,13 @@ bool _backport_for_mobile_impl(
     check_zip_file(rai);
 
     // 1) read from archive `bytecode` and `constants`, and
-    // construcut the  TensorIndexMap from the tensors in constants.
+    // construct the TensorIndexMap from the tensors in `constants`.
     PyTorchStreamReader reader(std::move(rai));
     std::vector<IValue> bytecode_values;
     auto mobile_compilation_unit = std::make_shared<mobile::CompilationUnit>();
 
     // Read archive `bytecode`
     bytecode_values = get_bytecode_vals(mobile_compilation_unit, reader);
-    auto bytecode_tuple =
-        c10::ivalue::Tuple::create(std::move(bytecode_values));
 
     // Read archive `constants`
     std::vector<IValue> ivalues_from_constants_archive =
@@ -329,16 +327,19 @@ bool _backport_for_mobile_impl(
       }
     }
 
-    // 3) write bytecode archive
+    // 3) write `bytecode` archive
     // Update the bytecode version in bytecode.pkl
     update_bytecode_version(bytecode_values, to_bytecode_version);
-    // write bytecode archvie
+    // Construct the list of ivalues to a big tuple
+    auto bytecode_tuple =
+        c10::ivalue::Tuple::create(std::move(bytecode_values));
+    // write `bytecode` archive
     writeArchive(
         writer, "bytecode", bytecode_tuple, tensors_archive_table, false);
     return true;
   }
   TORCH_WARN(
-      "Backport doesn't support backport to version", to_bytecode_version);
+      "Backport doesn't support backport to version ", to_bytecode_version);
   return false;
 }
 
