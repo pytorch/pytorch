@@ -2507,6 +2507,16 @@ def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(sample_generator())
 
+def sample_inputs_view_as_complex(op_info, device, dtype, requires_grad, **kwargs):
+    return [SampleInput(make_tensor((S, 2), device, dtype, requires_grad=requires_grad),)]
+
+def sample_inputs_view_as_real(op_info, device, dtype, requires_grad, **kwargs):
+    tensors = (
+        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+        make_tensor((), device, dtype, requires_grad=requires_grad)
+    )
+    return [SampleInput(tensor) for tensor in tensors]
+
 def sample_inputs_copysign(op_info, device, dtype, requires_grad, **kwargs):
     def _make_tensor(*shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -2724,6 +2734,17 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad, **kwargs):
     samples = (
         SampleInput(_make_tensor_helper((S, S), low=0), args=(_make_tensor_helper((S, S)),)),
         SampleInput(_make_tensor_helper((), low=0), args=(_make_tensor_helper(()),)),
+    )
+
+    return samples
+
+def sample_inputs_complex(op_info, device, dtype, requires_grad, **kwargs):
+    def _make_tensor_helper(shape):
+        return make_tensor(shape, device, dtype, requires_grad=requires_grad)
+
+    samples = (
+        SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)),)),
+        SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper(()),)),
     )
 
     return samples
@@ -3661,6 +3682,22 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.int],
                                 active_if=IS_WINDOWS),
                    )),
+    OpInfo('view_as_real',
+           dtypes=complex_types(),
+           sample_inputs_func=sample_inputs_view_as_real,
+           ),
+    OpInfo('view_as_complex',
+           dtypes=floating_types_and(torch.half),
+           supports_out=False,
+           skips=(
+               # "sum_cpu/sum_cuda" not implemented for 'ComplexHalf'
+               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.half,)),
+           ),
+           sample_inputs_func=sample_inputs_view_as_complex),
+    OpInfo('complex',
+           dtypes=floating_types(),
+           sample_inputs_func=sample_inputs_complex,
+           ),
     OpInfo('copysign',
            dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_copysign,
@@ -5645,9 +5682,6 @@ def method_tests():
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
-        ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
-        ('view_as_complex', (S, S, 2), NO_ARGS),
-        ('complex', (S, S, S), ((S, S, S),), ''),
         ('fmod', (S, S, S), (1.5,), '', (True,)),
         ('fmod', (), (1.5,), 'scalar', (True,)),
         ('fmod', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
@@ -6019,11 +6053,6 @@ def unpack_variables(args):
 EXCLUDE_FUNCTIONAL = {
     'addmm',
     'addmm_',
-    'addbmm',
-    'addmv',
-    'addmv_',
-    'addr',
-    'addr_',
     'reshape',
     'where'  # argument order
 }
@@ -6032,30 +6061,8 @@ EXCLUDE_GRADCHECK: Dict[str, Any] = {
 EXCLUDE_GRADGRADCHECK: Dict[str, Any] = {
 }
 EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
-    # *det methods uses svd in backward when matrix is not invertible. However,
-    # svd backward is unstable unless the matrix has positive distinct singular
-    # values. Generated random matrices satisfy this with high probability, but
-    # we can't rely on it. So only test gradgrad on invertible test cases and
-    # _distinct_singular_values.
-    'test_det',
-    'test_det_1x1',
-    'test_det_symmetric',
-    'test_det_symmetric_psd',
-    'test_det_dim2_null',
-    'test_det_rank1',
-    'test_det_rank2',
-    'test_det_batched',
-    'test_det_batched_1x1',
-    'test_det_batched_symmetric',
-    'test_det_batched_symmetric_psd',
     # `other` expand_as(self, other) is not used in autograd.
     'test_expand_as',
-    'test_logdet',
-    'test_logdet_1x1',
-    'test_logdet_symmetric',
-    'test_logdet_batched',
-    'test_logdet_batched_1x1',
-    'test_logdet_batched_symmetric',
     'test_cdist',
 }
 
@@ -6079,29 +6086,17 @@ def exclude_tensor_method(name, test_name):
         'test_std_mean_dim_1d',
         'test_std_mean_dim',
         'test_std_mean',
-        'test_view_as_complex',
-        'test_view_as_real_complex',
-        'test_real_complex',
-        'test_imag_complex',
-        'test_complex'
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {
-        'index_add',
-        'index_copy',
         'index_fill',
-        'masked_fill',
-        'masked_scatter',
         'scatter',
         'scatter_add',
-        'det',
     }
     if test_name in exclude_all_tensor_method_by_test_name:
         return True
     is_magic_method = name[:2] == '__' and name[-2:] == '__'
     is_inplace = name[-1] == "_" and not is_magic_method
     if not is_inplace and name in exclude_outplace_tensor_method:
-        return True
-    if 'fft.' in name:
         return True
     return False
