@@ -1223,6 +1223,9 @@ class TestBinaryUfuncs(TestCase):
             np_dtype = torch_to_numpy_dtype_dict[dtype]
 
         def to_numpy(t):
+            if not isinstance(t, torch.Tensor):
+                return np.array(t, dtype=np_dtype)
+
             t = t.cpu()
             if intermediate_dtype:
                 t = t.to(intermediate_dtype)

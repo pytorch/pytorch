@@ -403,25 +403,43 @@ class UnaryUfuncInfo(OpInfo):
 
 def sample_inputs_binary(op_info, device, dtype, requires_grad):
     low, high = op_info.domain
-    low = low if low is None else low + op_info._domain_eps
-    high = high if high is None else high - op_info._domain_eps
+    if low is not None:
+        low += op_info._domain_eps
+    if high is not None:
+        high -= op_info._domain_eps
+    scalar = make_tensor((), device=torch.device("cpu"), dtype=dtype, low=low, high=high).item()
 
-    test_cases = (
-        # scalar x scalar, scalar x 3d, flippped
-        ((), ()), ((), (S, S, S)), ((S, S, S), ()),
-        # 3d x 2d, 2d x3d, 3d x 3d
-        ((S, S), (S, S, S)), ((S, S, S), (S, S)), ((S, S, S), (S, S, S)),
-        # 3d x 2d broadcasting
+    test_cases = [
+        ((), scalar),
+        ((S, S, S), scalar),
+        ((), ()),
+        ((), (S, S, S)),
+        ((S, S, S), ()),
+        ((S, S), (S, S, S)),
+        ((S, S, S), (S, S)),
+        ((S, S, S), (S, S, S)),
         ((S, 1, S), (M, S)),
-    )
-    return list(
-        SampleInput(make_tensor(s1, device, dtype,
-                                low=low, high=high,
-                                requires_grad=requires_grad),
-                    args=(make_tensor(s2, device, dtype,
-                                      low=low, high=high,
-                                      requires_grad=requires_grad),))
-        for s1, s2 in test_cases)
+    ]
+
+    sample_inputs = []
+    for shape_1, shape_2_or_scalar in test_cases:
+        if isinstance(shape_2_or_scalar, tuple):
+            # shape
+            arg = make_tensor(shape_2_or_scalar, device, dtype, low=low, high=high, requires_grad=requires_grad)
+            broadcasts_input = shape_1 != shape_2_or_scalar
+        else:
+            # scalar
+            arg = shape_2_or_scalar
+            broadcasts_input = True
+
+        sample_inputs.append(
+            SampleInput(
+                make_tensor(shape_1, device, dtype, low=low, high=high, requires_grad=requires_grad),
+                args=(arg,),
+                broadcasts_input=broadcasts_input,
+            )
+        )
+    return sample_inputs
 
 
 # Metadata class for binary "universal functions (ufuncs)" that accept two
