@@ -103,7 +103,7 @@ and the decomposition could not be completed.
 ``info`` filled with zeros indicates that the decomposition was successful.
 If ``check_errors=True`` and ``info`` contains positive integers, then a RuntimeError is thrown.
 
-.. note:: If ``check_errors=True`` given inputs on a CUDA device, this function synchronizes that device with the CPU.
+.. note:: Given inputs on a CUDA device, this function may synchronize that device with the CPU.
 
 .. seealso::
         :func:`torch.linalg.cholesky` is a NumPy compatible variant that always checks for errors.
