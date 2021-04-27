@@ -44,7 +44,7 @@ Functions
     householder_product
 
 Experimental Functions
----------
+----------------------
 .. autosummary::
     :toctree: generated
     :nosignatures:
