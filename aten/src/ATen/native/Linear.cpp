@@ -163,8 +163,8 @@ uint8_t einsum_label_to_index(unsigned char label) {
 // 3. Compute result by multiplying input operands and summing contraction
 //    dimensions We do the last part by reducing to bmm.
 Tensor einsum(std::string equation, TensorList operands) {
-  TORCH_CHECK(!operands.empty(), "einsum() must provide at least one operand");
-  checkDeviceType("einsum()", operands, operands[0].device().type());
+  TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
+  checkDeviceType("einsum():", operands, operands[0].device().type());
 
   // Code used to identify ELLIPSIS ("...")
   constexpr uint8_t ELLIPSIS = 52;
@@ -191,13 +191,13 @@ Tensor einsum(std::string equation, TensorList operands) {
         TORCH_CHECK(
             // Only one ellipsis per operand can be given
             !found_ell,
-            "einsum() found \'.\' for operand ",
+            "einsum(): found \'.\' for operand ",
             curr_op,
             " for which an ellipsis was already found");
         TORCH_CHECK(
             // Ensure it's a valid ellipsis
             i + 2 < lhs.length() && lhs[++i] == '.' && lhs[++i] == '.',
-            "einsum() found \'.\' for operand ",
+            "einsum(): found \'.\' for operand ",
             curr_op,
             " that is not part of any ellipsis");
         op_labels[curr_op].push_back(ELLIPSIS);
@@ -209,7 +209,7 @@ Tensor einsum(std::string equation, TensorList operands) {
         ++curr_op;
         TORCH_CHECK(
             curr_op < num_ops,
-            "einsum() fewer operands were provided than specified in the equation");
+            "einsum(): fewer operands were provided than specified in the equation");
         found_ell = false;
         break;
 
@@ -226,7 +226,7 @@ Tensor einsum(std::string equation, TensorList operands) {
 
   TORCH_CHECK(
       curr_op == num_ops - 1,
-      "einsum() more operands were provided than specified in the equation");
+      "einsum(): more operands were provided than specified in the equation");
 
   // Labels must be within [a-zA-Z].
   constexpr uint8_t TOTAL_LABELS = 52;
@@ -258,7 +258,7 @@ Tensor einsum(std::string equation, TensorList operands) {
 
     TORCH_CHECK(
         has_ellipsis ? nlabels <= ndims : nlabels == ndims,
-        "einsum() the number of subscripts in the equation (",
+        "einsum(): the number of subscripts in the equation (",
         nlabels,
         has_ellipsis ? ") is more than the number of dimensions ("
                      : ") does not match the number of dimensions (",
@@ -303,11 +303,11 @@ Tensor einsum(std::string equation, TensorList operands) {
           TORCH_CHECK(
               // There can only be one ellipsis in the output
               !found_ell,
-              "einsum() found \'.\' for output but an ellipsis (...) was already found");
+              "einsum(): found \'.\' for output but an ellipsis (...) was already found");
           TORCH_CHECK(
               // Ensure ellipsis is correct
               i + 2 < rhs.length() && rhs[++i] == '.' && rhs[++i] == '.',
-              "einsum() found \'.\' for output that is not part of any ellipsis (...)");
+              "einsum(): found \'.\' for output that is not part of any ellipsis (...)");
           ell_index = perm_index;
           perm_index += ell_num_dim;
           found_ell = true;
@@ -380,7 +380,7 @@ Tensor einsum(std::string equation, TensorList operands) {
         const auto dim = label_dim[label];
         TORCH_CHECK(
             operand.size(j) == operand.size(dim),
-            "einsum() subscript ",
+            "einsum(): subscript ",
             char(label + 'a'),
             " is repeated for operand ",
             i,
@@ -417,7 +417,7 @@ Tensor einsum(std::string equation, TensorList operands) {
       const auto dim_size = permuted_operands[i].size(dim);
       if (broadcast_size != dim_size && broadcast_size != 1 && dim_size != 1) {
         std::ostringstream msg;
-        msg << "einsum() operands do not broadcast with remapped shapes [original->remapped]:";
+        msg << "einsum(): operands do not broadcast with remapped shapes [original->remapped]:";
         for (const auto j: c10::irange(num_ops)) {
           msg << " " << operands[j].sizes() << "->"
               << permuted_operands[j].sizes();
