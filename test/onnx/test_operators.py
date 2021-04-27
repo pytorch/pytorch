@@ -61,7 +61,7 @@ class TestOperators(TestCase):
             m = FuncModule(f, params)
         m.eval()
         onnx_model_pbtxt = export_to_pbtxt(m, args, **kwargs)
-        subname = kwargs.pop('subname', None)
+        subname = kwargs.pop("subname", None)
         self.assertExpected(onnx_model_pbtxt, subname)
         if _onnx_dep:
             onnx_model_pb = export_to_pb(m, args, **kwargs)
@@ -80,7 +80,7 @@ class TestOperators(TestCase):
                 #     2) only one assertONNX in each test, otherwise will override the data.
                 assert not os.path.exists(output_dir), "{} should not exist!".format(output_dir)
                 os.makedirs(output_dir)
-                with open(os.path.join(output_dir, "model.onnx"), 'wb') as file:
+                with open(os.path.join(output_dir, "model.onnx"), "wb") as file:
                     file.write(model_def.SerializeToString())
                 data_dir = os.path.join(output_dir, "test_data_set_0")
                 os.makedirs(data_dir)
@@ -88,14 +88,14 @@ class TestOperators(TestCase):
                     args = (args,)
                 for index, var in enumerate(flatten(args)):
                     tensor = onnx.numpy_helper.from_array(var.data.numpy())
-                    with open(os.path.join(data_dir, "input_{}.pb".format(index)), 'wb') as file:
+                    with open(os.path.join(data_dir, "input_{}.pb".format(index)), "wb") as file:
                         file.write(tensor.SerializeToString())
                 outputs = m(*args)
                 if isinstance(outputs, Variable):
                     outputs = (outputs,)
                 for index, var in enumerate(flatten(outputs)):
                     tensor = onnx.numpy_helper.from_array(var.data.numpy())
-                    with open(os.path.join(data_dir, "output_{}.pb".format(index)), 'wb') as file:
+                    with open(os.path.join(data_dir, "output_{}.pb".format(index)), "wb") as file:
                         file.write(tensor.SerializeToString())
 
     def assertONNXRaises(self, err, f, args, params=None, **kwargs):
@@ -278,8 +278,8 @@ class TestOperators(TestCase):
         model = torch.nn.Conv2d(3, 2, 3)
         y = model(x)
 
-        dynamic_axes = {'input_1': [0, 2, 3], 'output_1': {0: 'output_1_variable_dim_0', 1: 'output_1_variable_dim_1'}}
-        model_proto_name = 'conv2d.onnx'
+        dynamic_axes = {"input_1": [0, 2, 3], "output_1": {0: "output_1_variable_dim_0", 1: "output_1_variable_dim_1"}}
+        model_proto_name = "conv2d.onnx"
         torch.onnx.export(model, x, model_proto_name, verbose=True, input_names=["input_1"], output_names=["output_1"],
                           example_outputs=y, dynamic_axes=dynamic_axes)
 
@@ -385,12 +385,12 @@ class TestOperators(TestCase):
 
     def test_mean_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::mean',
+        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::mean",
                                    lambda x: torch.mean(x, dtype=torch.double), x)
 
     def test_reduced_mean_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::mean',
+        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::mean",
                                    lambda x: torch.mean(x, dim=0, dtype=torch.double), x)
 
     def test_sum(self):
@@ -399,12 +399,12 @@ class TestOperators(TestCase):
 
     def test_sum_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::sum',
+        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::sum",
                                    lambda x: torch.sum(x, dtype=torch.double), x)
 
     def test_reduced_sum_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::sum',
+        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::sum",
                                    lambda x: torch.sum(x, dim=0, dtype=torch.double), x)
 
     def test_reduced_sum(self):
@@ -429,12 +429,12 @@ class TestOperators(TestCase):
 
     def test_prod_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::prod',
+        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::prod",
                                    lambda x: torch.prod(x, dtype=torch.double), x)
 
     def test_reduced_prod_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::prod',
+        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::prod",
                                    lambda x: torch.prod(x, dim=0, dtype=torch.double), x)
 
     def test_sqrt(self):
@@ -527,7 +527,7 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.flatten(x, 1), x)
 
     def test_isnan(self):
-        x = torch.tensor([1, float('nan'), 2])
+        x = torch.tensor([1, float("nan"), 2])
         self.assertONNX(lambda x: torch.isnan(x), x)
 
     def test_argmax(self):
@@ -570,16 +570,16 @@ class TestOperators(TestCase):
     def test_upsample_nearest_scale(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
-                        mode='nearest', recompute_scale_factor=False), x)
+                        mode="nearest", recompute_scale_factor=False), x)
 
     def test_upsample_nearest_scale_default_scale_factor(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
-                        mode='nearest'), x)
+                        mode="nearest"), x)
 
     def test_upsample_nearest_size(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, size=16, mode='nearest'), x)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, size=16, mode="nearest"), x)
 
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -766,7 +766,7 @@ class TestOperators(TestCase):
         im_info = torch.ones(img_count, 3, dtype=torch.float32)
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (scores, bbox_deltas, im_info, anchors)
-        self.assertONNX(model, inputs, custom_opsets={'org.pytorch._caffe2': 0})
+        self.assertONNX(model, inputs, custom_opsets={"org.pytorch._caffe2": 0})
 
     def test_dict(self):
         class MyModel(torch.nn.Module):
@@ -873,7 +873,7 @@ class TestOperators(TestCase):
 
     @skipIfNoLapack
     def test_det(self):
-        x = torch.randn(2, 3, 5, 5, device=torch.device('cpu'))
+        x = torch.randn(2, 3, 5, 5, device=torch.device("cpu"))
         self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
         self.assertONNX(lambda x: torch.linalg.det(x), x, opset_version=11)
 
@@ -900,19 +900,19 @@ class TestOperators(TestCase):
     def test_softmaxcrossentropy_3d_none(self):
         x = torch.randn(3, 5, 2)
         y = torch.empty(3, 2, dtype=torch.long).random_(5)
-        self.assertONNX(torch.nn.CrossEntropyLoss(reduction='none'), (x, y), opset_version=12)
+        self.assertONNX(torch.nn.CrossEntropyLoss(reduction="none"), (x, y), opset_version=12)
 
     def test_softmaxcrossentropy_4d(self):
         x = torch.randn(3, 5, 2, 1)
         y = torch.empty(3, 2, 1, dtype=torch.long).random_(5)
         self.assertONNX(torch.nn.CrossEntropyLoss(), (x, y), opset_version=12)
 
-if __name__ == '__main__':
-    no_onnx_dep_flag = '--no-onnx'
+if __name__ == "__main__":
+    no_onnx_dep_flag = "--no-onnx"
     _onnx_dep = no_onnx_dep_flag not in common.UNITTEST_ARGS
     if no_onnx_dep_flag in common.UNITTEST_ARGS:
         common.UNITTEST_ARGS.remove(no_onnx_dep_flag)
-    onnx_test_flag = '--produce-onnx-test-data'
+    onnx_test_flag = "--produce-onnx-test-data"
     _onnx_test = onnx_test_flag in common.UNITTEST_ARGS
     if onnx_test_flag in common.UNITTEST_ARGS:
         common.UNITTEST_ARGS.remove(onnx_test_flag)

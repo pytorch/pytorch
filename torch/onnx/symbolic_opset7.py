@@ -51,9 +51,9 @@ def div(g, self, other, *args):
         return _div_rounding_mode(g, self, other, *args)
 
 
-@parse_args('v', 'v', 's')
+@parse_args("v", "v", "s")
 def _div_rounding_mode(g, self, other, rounding_mode):
-    if rounding_mode == 'floor':
+    if rounding_mode == "floor":
         return _floor_divide(g, self, other)
     else:
         return sym_opset9._div_rounding_mode(g, self, other, rounding_mode)
@@ -62,9 +62,9 @@ def _div_rounding_mode(g, self, other, rounding_mode):
 def _floor_divide(g, self, other):
     if sym_help._is_fp(self) or sym_help._is_fp(other):
         out = sym_opset9.true_divide(g, self, other)
-        return g.op('Floor', out)
+        return g.op("Floor", out)
     else:
-        raise RuntimeError('Integer floor division requires ONNX opset 9 or greater')
+        raise RuntimeError("Integer floor division requires ONNX opset 9 or greater")
 
 
 for block_listed_op in block_listed_operators:
