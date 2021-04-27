@@ -94,4 +94,4 @@ if __name__ == "__main__":
     # Run TorchBench with the generated config
     torchbench_config = gen_abtest_config(args.pr_base_sha, args.pr_head_sha, models)
     deploy_torchbench_config(output_dir, torchbench_config)
-    run_torchbench(pytorch_path = args.pytorch_path, torchbench_path = args.torchbench_path, output_dir = output_dir)
+    run_torchbench(pytorch_path=args.pytorch_path, torchbench_path=args.torchbench_path, output_dir=output_dir)
