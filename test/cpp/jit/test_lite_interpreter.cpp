@@ -649,7 +649,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelV4) {
   AT_ASSERT(!isSuccess);
 }
 
-TEST(LiteInterpreterTest, BackPortByteCodeModel) {
+TEST(LiteInterpreterTest, BackPortByteCodeModelV5) {
   std::string filePath(__FILE__);
   auto test_model_file_v5 =
       filePath.substr(0, filePath.find_last_of("/\\") + 1);

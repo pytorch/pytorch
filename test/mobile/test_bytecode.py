@@ -163,7 +163,7 @@ class testVariousModelVersions(TestCase):
         script_module_v5 = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
 
         with tempfile.TemporaryDirectory() as tmpdirname:
-            backport_model_path = pathlib.Path(tmpdirname, "backport_script_module_v5.ptl")
+            backport_model_path = Path(tmpdirname, "backport_script_module_v5.ptl")
             _backport_to_version_for_mobile(script_module_v5, backport_model_path, 4)
             buf = io.StringIO()
             torch.utils.show_pickle.main(["", tmpdirname + "/" + backport_model_path.name + "@*/bytecode.pkl"], output_stream=buf)

@@ -420,7 +420,6 @@ bool _backport_to_version_for_mobile_impl(
     std::shared_ptr<ReadAdapterInterface> rai,
     std::shared_ptr<PyTorchStreamWriter> writer,
     const int64_t to_version) {
-  std::cout << "backporting to version" << std::endl;
   const auto bytecode_version = _get_model_bytecode_version(rai);
   bool backport_success = true;
   if (kByteCodeBackPortToVersions.find(to_version) !=
