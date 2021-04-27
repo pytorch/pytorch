@@ -270,7 +270,6 @@ class TORCH_API TensorExprKernel {
   std::unique_ptr<CodeGen> codegen_;
   at::Device device_ = at::kCPU;
   KernelArena kernelArena_;
-  std::vector<TypePtr> inputTypes_;
   std::shared_ptr<Graph> graph_;
   Code code_;
   bool allow_fallback_{false};
