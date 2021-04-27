@@ -2712,6 +2712,45 @@ std::tuple<Tensor, Tensor, Tensor> lu_unpack(
   return std::tie(permutation_matrix, L, U);
 }
 
+using TupleTensorRefs3 = std::tuple<Tensor&, Tensor&, Tensor&>;
+
+TupleTensorRefs3 lu_unpack_out(
+    const Tensor& LU_data,
+    const Tensor& LU_pivots,
+    bool unpack_data,
+    bool unpack_pivots,
+    Tensor& P,
+    Tensor& L,
+    Tensor& U
+    ) {
+  Tensor P_tmp, L_tmp, U_tmp;
+  std::tie(P_tmp, L_tmp, U_tmp) = at::lu_unpack(LU_data, LU_pivots, unpack_data, unpack_pivots);
+
+  if (unpack_pivots) {
+    checkSameDevice("lu_unpack", P, LU_data, "P");
+    // Note that lu_unpack returns P such that P.dtype == LU_data.dtype,
+    // becauser otherwise we cannot use P in matric products (no int -> float promotion)
+    checkLinalgCompatibleDtype("lu_unpack", P, LU_data, "L");
+
+    at::native::resize_output(P, P_tmp.sizes());
+    P.copy_(P_tmp);
+  }
+
+  if (unpack_data) {
+    checkSameDevice("lu_unpack", L, LU_data, "L");
+    checkSameDevice("lu_unpack", U, LU_data, "U");
+    checkLinalgCompatibleDtype("lu_unpack", L, LU_data, "L");
+    checkLinalgCompatibleDtype("lu_unpack", U, LU_data, "U");
+
+    at::native::resize_output(L, L_tmp.sizes());
+    at::native::resize_output(U, U_tmp.sizes());
+    L.copy_(L_tmp);
+    U.copy_(U_tmp);
+  }
+
+  return TupleTensorRefs3(P, L, U);
+}
+
 /*
 Calculates the Kronecker product between two Tensors.
 */

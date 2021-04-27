@@ -4259,7 +4259,7 @@ op_db: List[OpInfo] = [
            # we use in-place operations which cannot be avoided.
            # This cases vmap failures, hence we skip batched gradient checks
            check_batched_grad=False,
-           supports_out=False,
+           supports_out=True,
            sample_inputs_func=sample_inputs_lu_unpack,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
