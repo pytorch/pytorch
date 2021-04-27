@@ -27,6 +27,7 @@ jobs:
       - name: Create conda environment
         run: |
           conda create -y -n pr-ci python=3.7
+          . ${HOME}/miniconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           conda install -y numpy=1.17 requests=2.22 ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six dataclasses pillow pytest tabulate
       - name: Run TorchBench
