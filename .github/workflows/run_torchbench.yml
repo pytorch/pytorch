@@ -31,6 +31,11 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           conda install -y numpy=1.17 requests=2.22 ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six dataclasses pillow pytest tabulate
+      - name: Update self-hosted PyTorch
+        run: |
+          pushd "${HOME}"/pytorch
+          git fetch
+          popd
       - name: Run TorchBench
         run: |
           PR_BODY_FILE=/tmp/pr-body.txt
