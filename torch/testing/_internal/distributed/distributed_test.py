@@ -3928,7 +3928,7 @@ class DistributedTest:
             model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
             model_DDP._set_static_graph()
             self.assertEqual(model_DDP.get_ddp_logging_data().get("static_graph"), True)
-            with self.assertRaisesRegex(RuntimeError, '^num_iterations_ == 0INTERNAL ASSERT FAILED'):
+            with self.assertRaisesRegex(RuntimeError, 'should be called before training loop starts'):
                 local_bs = 2
                 batch_size, input, target, loss = self._prepare_dummy_data(local_bs)
                 offset = dist.get_rank() * local_bs
