@@ -224,13 +224,6 @@ class AllConvFunctional(torch.nn.Module):
 def _wrapped_hardswish(x):
     return F.hardswish(x)
 
-@torch.fx.wrap
-def _wrapped_hardswish_fp16(x):
-    x = x.dequantize()
-    x = F.hardswish(x)
-    x = x.to(torch.float16)
-    return x
-
 
 class TestFXGraphMatcher(QuantizationTestCase):
 
@@ -1306,7 +1299,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
         class M2(nn.Module):
             def forward(self, x):
-                x = _wrapped_hardswish_fp16(x)
+                x = _wrapped_hardswish(x)
                 return x
 
         qconfig_dict = {'': torch.quantization.default_qconfig}
@@ -1316,7 +1309,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
         base_name_to_sets_of_related_ops['torch.nn.functional.hardswish'].add(
-            _wrapped_hardswish_fp16)
+            _wrapped_hardswish)
 
         # test compare weights
         results = _extract_weights_impl(
@@ -1345,7 +1338,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         # test shadowed activations
 
         node_type_to_io_type_map = get_node_type_to_io_type_map()
-        node_type_to_io_type_map['funs_io_type_fp16'].add(_wrapped_hardswish_fp16)
+        node_type_to_io_type_map['funs_io_type_fp32'].add(_wrapped_hardswish)
 
         m1_shadows_m2_ns = _add_shadow_loggers_impl(
             'a', m1, 'b', m2, OutputLogger,
