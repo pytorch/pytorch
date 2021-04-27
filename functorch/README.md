@@ -1,8 +1,8 @@
 # functorch
 
 [**Why functorch?**](#why-composable-function-transforms)
-| [**Transformations**](#what-are-the-transforms)
 | [**Install guide**](#install)
+| [**Transformations**](#what-are-the-transforms)
 | [**Future Plans**](#future-plans)
 
 `functorch` is a prototype of [JAX-like](https://github.com/google/jax)
@@ -27,6 +27,27 @@ PyTorch today:
 Composing `vmap`, `grad`, and `vjp` transforms allows us to express the above
 without designing a separate subsystem for each. This idea of composable function
 transforms comes from the [JAX framework](https://github.com/google/jax).
+
+## Install
+
+### Binaries
+
+Coming soon!
+
+### From Source
+
+`functorch` is a PyTorch C++ Extension module. To install,
+
+- Install [PyTorch from source](https://github.com/pytorch/pytorch#from-source).
+Be sure to make sure the changes from  https://github.com/pytorch/pytorch/pull/56824
+are on the branch. TODO: we should recommend a commit hash that is known to be stable
+- Run `python setup.py install`. You can use `DEBUG=1` to compile in debug mode.
+
+Then, try to run some tests to make sure all is OK:
+```
+pytest test/test_vmap.py -v
+pytest test/test_eager_transforms.py -v
+```
 
 ## What are the transforms?
 
@@ -81,7 +102,7 @@ the gradients of the output of func w.r.t. to `inputs[0]`.
 ```
 
 When composed with `vmap`, `grad` can be used to compute per-sample-gradients:
-```
+```py
 >>> from functorch import vmap
 >>> batch_size, feature_size = 3, 5
 >>> weights = torch.randn(feature_size, requires_grad=True)
@@ -109,7 +130,7 @@ When composed with `vmap`, `grad` can be used to compute per-sample-gradients:
 The `vjp` transform applies `func` to `inputs` and returns a new function that
 computes vjps given some `contangents` Tensors.
 
-```
+```py
 >>> from functorch import jacrev
 >>> x = torch.randn(5)
 >>> jacobian = jacrev(torch.sin)(x)
@@ -119,40 +140,19 @@ computes vjps given some `contangents` Tensors.
 Use `jacrev` to compute the jacobian. This can be composed with vmap to produce
 batched jacobians:
 
-```
+```py
 >>> x = torch.randn(64, 5)
 >>> jacobian = vmap(jacrev(torch.sin))(x)
 >>> assert jacobian.shape == (64, 5, 5)
 ```
 
 `jacrev` can be composed with itself to produce hessians:
-```
+```py
 >>> def f(x):
 >>>   return x.sin().sum() 
 >>> 
 >>> x = torch.randn(5)
 >>> hessian = jacrev(jacrev(f))(x)
-```
-
-## Install
-
-### Binaries
-
-Coming soon!
-
-### From Source
-
-`functorch` is a PyTorch C++ Extension module. To install,
-
-- Install [PyTorch from source](https://github.com/pytorch/pytorch#from-source).
-Be sure to make sure the changes from  https://github.com/pytorch/pytorch/pull/56824
-are on the branch. TODO: we should recommend a commit hash that is known to be stable
-- Run `python setup.py install`
-
-Then, try to run some tests to make sure all is OK:
-```
-pytest test/test_vmap.py -v
-pytest test/test_eager_transforms.py -v
 ```
 
 ## Future Plans
