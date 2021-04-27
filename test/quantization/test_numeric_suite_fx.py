@@ -252,6 +252,11 @@ def _wrapped_hardswish_fp16(x):
     x = x.to(torch.float16)
     return x
 
+@torch.fx.wrap
+def _wrapped_sigmoid(x):
+    return F.sigmoid(x)
+
+
 
 class TestFXGraphMatcher(QuantizationTestCase):
 
@@ -1396,11 +1401,13 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         class M1(nn.Module):
             def forward(self, x):
                 x = F.hardswish(x)
+                x = x.sigmoid()
                 return x
 
         class M2(nn.Module):
             def forward(self, x):
-                x = _wrapped_hardswish_fp16(x)
+                x = _wrapped_hardswish(x)
+                x = _wrapped_sigmoid(x)
                 return x
 
         qconfig_dict = {'': torch.quantization.default_qconfig}
@@ -1410,13 +1417,15 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
         base_name_to_sets_of_related_ops['torch.nn.functional.hardswish'].add(
-            _wrapped_hardswish_fp16)
+            _wrapped_hardswish)
+        base_name_to_sets_of_related_ops['torch.sigmoid'].add(
+            _wrapped_sigmoid)
 
         # test compare weights
         results = _extract_weights_impl(
             'a', m1, 'b', m2,
             base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
-        self.assertTrue(len(results) == 1)
+        self.assertTrue(len(results) == 2)
         # TODO(future PR): don't store empty dictionaries for nodes
         #   without weights.
 
@@ -1433,26 +1442,27 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
         # check activation result correctness
         act_compare_dict = extract_logger_info(m1_ns, m2_ns, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == 1)
+        self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
         # test shadowed activations
 
         node_type_to_io_type_map = get_node_type_to_io_type_map()
-        node_type_to_io_type_map['funs_io_type_fp16'].add(_wrapped_hardswish_fp16)
+        node_type_to_io_type_map['funs_io_type_fp32'].add(_wrapped_hardswish)
+        node_type_to_io_type_map['funs_io_type_fp32'].add(_wrapped_sigmoid)
 
-        m1_shadows_m2_ns = _add_shadow_loggers_impl(
-            'a', m1, 'b', m2, OutputLogger,
+        m2_shadows_m1_ns = _add_shadow_loggers_impl(
+            'a', m2, 'b', m1, OutputLogger,
             should_log_inputs=False,
             base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops,
             node_type_to_io_type_map=node_type_to_io_type_map)
 
         # calibrate
-        m1_shadows_m2_ns(data)
+        m2_shadows_m1_ns(data)
 
         # check activation result correctness
-        act_compare_dict = extract_shadow_logger_info(m1_shadows_m2_ns, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == 1)
+        act_compare_dict = extract_shadow_logger_info(m2_shadows_m1_ns, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
 

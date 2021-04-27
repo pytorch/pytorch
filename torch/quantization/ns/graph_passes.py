@@ -182,7 +182,12 @@ def _insert_dtype_cast_after_node(
         (node_input_type_a == NodeInputOrOutputType.FP32 and
          node_input_type_c == NodeInputOrOutputType.INT8) or
         (node_input_type_a == NodeInputOrOutputType.FP32 and
-         node_input_type_c == NodeInputOrOutputType.FP16)
+         node_input_type_c == NodeInputOrOutputType.FP16) or
+        # TODO(future PR): determine the actual dtype of node_c,
+        # the current code only works because dequantize works with
+        # multiple input dtypes.
+        (node_input_type_a == NodeInputOrOutputType.FP32 and
+         node_input_type_c == NodeInputOrOutputType.FP32_OR_INT8)
     ):
         dtype_cast_op = torch.dequantize
     elif (

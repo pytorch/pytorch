@@ -169,7 +169,7 @@ def extract_weight_from_node(
                 'index_of_arg': 0,
             }
 
-    else:  # call_module
+    elif node.op == 'call_module':
         # for call_module, we need to look up the modules to do the type check
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
