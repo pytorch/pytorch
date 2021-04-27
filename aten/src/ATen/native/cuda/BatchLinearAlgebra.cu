@@ -2001,6 +2001,83 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, int64_t n_columns) 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
+static void apply_geqrf(const Tensor& input, const Tensor& tau, int64_t m64, int64_t n64) {
+#ifndef USE_MAGMA
+  TORCH_CHECK(
+    false,
+    "Calling torch.geqrf on a CUDA tensor requires compiling ",
+    "PyTorch with MAGMA. Please use PyTorch built with MAGMA support.");
+#else
+
+  magma_int_t m = magma_int_cast(m64, "m");
+  magma_int_t n = magma_int_cast(n64, "n");
+
+  auto input_data = input.data_ptr<scalar_t>();
+  auto input_matrix_stride = matrixStride(input);
+  auto tau_stride = tau.size(-1);
+  auto batch_size = batchCount(input);
+  auto lda = std::max<int>(1, m);
+
+  // magmaGeqrf uses a hybrid CPU-GPU algorithm to compute the elementary reflectors.
+  // The driver routine geqrf2_gpu accepts a tensor on the CPU for elementary reflectors.
+  Tensor tau_cpu = at::empty(tau.sizes(), tau.options().device(at::kCPU).pinned_memory(true));
+  scalar_t* tau_data = tau_cpu.data_ptr<scalar_t>();
+  scalar_t* work_data = nullptr; // workspace is not needed for geqrf2_gpu
+
+  magma_int_t info = 0;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+
+    // now compute the actual QR and tau
+    // MAGMA's geqrf2_gpu function is used, this version has LAPACK-complaint arguments.
+    magmaGeqrf<scalar_t>(m, n, input_working_ptr, lda, tau_working_ptr, work_data, &info, /*is_v2=*/true);
+    checkMagmaInternalError(info, "geqrf");
+  }
+  tau.copy_(tau_cpu, /*non_blocking=*/true);
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_geqrf'
+void geqrf_magma(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_magma", [&]{
+    apply_geqrf<scalar_t>(input, tau, m, n);
+  });
+}
+
+// This is a backend library dispatching helper function for calling looped batch implementation
+void geqrf_looped(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+#if defined(USE_CUSOLVER)
+  return geqrf_cusolver(input, tau, m, n);
+#else
+  return geqrf_magma(input, tau, m, n);
+#endif
+}
+
+// This is a backend library dispatching helper function for calling specialized batched implementation
+void geqrf_batched(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+#ifdef CUDART_VERSION
+  // if cuBLAS is available
+  return geqrf_batched_cublas(input, tau, m, n);
+#else
+  // TODO: implement MAGMA-based path using magma_zgeqrf_expert_batched
+  return geqrf_looped(input, tau, m, n);
+#endif
+}
+
+void geqrf_kernel(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+  // if number of rows is smaller than 32 batched is always faster for batch size > 1
+  // for larger number of rows number of batches condition
+  if (input.size(-2) <= 256 && batchCount(input) >= std::max<int64_t>(2, input.size(-2) / 16)) {
+    return geqrf_batched(input, tau, m, n);
+  } else {
+    return geqrf_looped(input, tau, m, n);
+  }
+}
+
+REGISTER_DISPATCH(geqrf_stub, &geqrf_kernel);
+
+template <typename scalar_t>
 static void apply_qr(Tensor& Q, Tensor& R, int64_t q_size_minus_2, int64_t r_size_minus_1, int64_t n_columns,
                      bool compute_q) {
 #ifndef USE_MAGMA
