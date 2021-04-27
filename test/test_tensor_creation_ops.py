@@ -1239,13 +1239,13 @@ class TestTensorCreation(TestCase):
         bad_mock_seq = MockSequence([1.0, 2.0, 3.0])
         good_mock_seq = GoodMockSequence([1.0, 2.0, 3.0])
         with self.assertRaisesRegex(ValueError, 'could not determine the shape'):
-            torch.Tensor(bad_mock_seq)
-        self.assertEqual(torch.Tensor([1.0, 2.0, 3.0]), torch.Tensor(good_mock_seq))
+            torch.tensor(bad_mock_seq)
+        self.assertEqual(torch.tensor([1.0, 2.0, 3.0]), torch.tensor(good_mock_seq))
 
     # TODO: update to work on CUDA, too?
     @onlyCPU
     def test_simple_scalar_cast(self, device):
-        ok = [torch.Tensor([1.5]), torch.zeros(1, 1, 1, 1)]
+        ok = [torch.tensor([1.5]), torch.zeros(1, 1, 1, 1)]
         ok_values = [1.5, 0]
 
         not_ok = map(torch.Tensor, [[], [1, 2], [[1, 2], [3, 4]]])
@@ -1268,7 +1268,7 @@ class TestTensorCreation(TestCase):
     # TODO: update to work on CUDA, too?
     @onlyCPU
     def test_offset_scalar_cast(self, device):
-        x = torch.Tensor([1, 2, 3])
+        x = torch.tensor([1., 2., 3.])
         y = x[2:]
         self.assertEqual(int(y), 3)
 
@@ -1806,8 +1806,8 @@ class TestTensorCreation(TestCase):
     # TODO: this test should be updated
     @onlyCPU
     def test_constructor_dtypes(self, device):
-        default_type = torch.Tensor().type()
-        self.assertIs(torch.Tensor().dtype, torch.get_default_dtype())
+        default_type = torch.tensor([]).type()
+        self.assertIs(torch.tensor([]).dtype, torch.get_default_dtype())
 
         self.assertIs(torch.uint8, torch.ByteTensor.dtype)
         self.assertIs(torch.float32, torch.FloatTensor.dtype)
@@ -2171,18 +2171,18 @@ class TestTensorCreation(TestCase):
         # Check arange for non-contiguous tensors.
         x = torch.zeros(2, 3)
         torch.arange(0, 4, out=x.narrow(1, 1, 2))
-        res2 = torch.Tensor(((0, 0, 1), (0, 2, 3)))
+        res2 = torch.tensor(((0., 0., 1.), (0., 2., 3.)))
         self.assertEqual(x, res2, atol=1e-16, rtol=0)
 
         # Check negative
-        res1 = torch.Tensor((1, 0))
-        res2 = torch.Tensor()
+        res1 = torch.tensor((1., 0.))
+        res2 = torch.tensor([])
         torch.arange(1, -1, -1, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
         # Equal bounds
         res1 = torch.ones(1)
-        res2 = torch.Tensor()
+        res2 = torch.tensor([])
         torch.arange(1, 0, -1, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
         torch.arange(1, 2, 1, out=res2)
@@ -2583,7 +2583,7 @@ class TestTensorCreation(TestCase):
 
     @onlyCUDA
     def test_tensor_factory_gpu_type_inference(self, device):
-        saved_type = torch.Tensor().type()
+        saved_type = torch.tensor([]).type()
         torch.set_default_tensor_type(torch.cuda.DoubleTensor)
         torch.set_default_dtype(torch.float32)
         self.assertIs(torch.float32, torch.tensor(0.).dtype)
@@ -2595,7 +2595,7 @@ class TestTensorCreation(TestCase):
 
     @onlyCUDA
     def test_tensor_factory_gpu_type(self, device):
-        saved_type = torch.Tensor().type()
+        saved_type = torch.tensor([]).type()
         torch.set_default_tensor_type(torch.cuda.FloatTensor)
         x = torch.zeros((5, 5))
         self.assertIs(torch.float32, x.dtype)
@@ -3257,7 +3257,7 @@ class TestLikeTensorCreation(TestCase):
     # TODO: this test should be updated
     @onlyCPU
     def test_empty_like(self, device):
-        x = torch.autograd.Variable(torch.Tensor())
+        x = torch.autograd.Variable(torch.tensor([]))
         y = torch.autograd.Variable(torch.randn(4, 4))
         z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]))
         for a in (x, y, z):
