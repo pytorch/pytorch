@@ -132,7 +132,7 @@ public:
     return values;
   }
   inline void set_value(int i, T val) {
-    return values[i] = val;
+    values[i] = val;
   }
   template <int64_t mask_>
   static Vec256<T> blend(const Vec256<T>& a, const Vec256<T>& b) {
