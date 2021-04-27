@@ -1482,6 +1482,143 @@ on inplace modification of the outputs.
     silently incorrect.
 """)
 
+add_docstr(torch.hsplit,
+           r"""
+hsplit(input, indices_or_sections) -> List of Tensors
+
+Splits :attr:`input`, a tensor with one or more dimensions, into multiple tensors
+horizontally according to :attr:`indices_or_sections`. Each split is a view of
+:attr:`input`.
+
+If :attr:`input` is one dimensional this is equivalent to calling
+torch.tensor_split(input, indices_or_sections, dim=0) (the split dimension is
+zero), and if :attr:`input` has two or more dimensions it's equivalent to calling
+torch.tensor_split(input, indices_or_sections, dim=1) (the split dimension is 1),
+except that if :attr:`indices_or_sections` is an integer it must evenly divide
+the split dimension or a runtime error will be thrown.
+
+This function is based on NumPy's :func:`numpy.hsplit`.
+
+Args:
+    input (Tensor): tensor to split.
+    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+
+Example::
+    >>> t = torch.arange(16.0).reshape(4,4)
+    >>> t
+    tensor([[ 0.,  1.,  2.,  3.],
+            [ 4.,  5.,  6.,  7.],
+            [ 8.,  9., 10., 11.],
+            [12., 13., 14., 15.]])
+    >>> torch.hsplit(t, 2)
+    (tensor([[ 0.,  1.],
+             [ 4.,  5.],
+             [ 8.,  9.],
+             [12., 13.]]),
+     tensor([[ 2.,  3.],
+             [ 6.,  7.],
+             [10., 11.],
+             [14., 15.]]))
+    >>> torch.hsplit(t, [3, 6])
+    (tensor([[ 0.,  1.,  2.],
+             [ 4.,  5.,  6.],
+             [ 8.,  9., 10.],
+             [12., 13., 14.]]),
+     tensor([[ 3.],
+             [ 7.],
+             [11.],
+             [15.]]),
+     tensor([], size=(4, 0)))
+
+""")
+
+add_docstr(torch.vsplit,
+           r"""
+vsplit(input, indices_or_sections) -> List of Tensors
+
+Splits :attr:`input`, a tensor with two or more dimensions, into multiple tensors
+vertically according to :attr:`indices_or_sections`. Each split is a view of
+:attr:`input`.
+
+This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=0)
+(the split dimension is 0), except that if :attr:`indices_or_sections` is an integer
+it must evenly divide the split dimension or a runtime error will be thrown.
+
+This function is based on NumPy's :func:`numpy.vsplit`.
+
+Args:
+    input (Tensor): tensor to split.
+    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+
+Example::
+    >>> t = torch.arange(16.0).reshape(4,4)
+    >>> t
+    tensor([[ 0.,  1.,  2.,  3.],
+            [ 4.,  5.,  6.,  7.],
+            [ 8.,  9., 10., 11.],
+            [12., 13., 14., 15.]])
+    >>> torch.vsplit(t, 2)
+    (tensor([[0., 1., 2., 3.],
+             [4., 5., 6., 7.]]),
+     tensor([[ 8.,  9., 10., 11.],
+             [12., 13., 14., 15.]]))
+    >>> torch.vsplit(t, [3, 6])
+    (tensor([[ 0.,  1.,  2.,  3.],
+             [ 4.,  5.,  6.,  7.],
+             [ 8.,  9., 10., 11.]]),
+     tensor([[12., 13., 14., 15.]]),
+     tensor([], size=(0, 4)))
+
+""")
+
+add_docstr(torch.dsplit,
+           r"""
+dsplit(input, indices_or_sections) -> List of Tensors
+
+Splits :attr:`input`, a tensor with three or more dimensions, into multiple tensors
+depthwise according to :attr:`indices_or_sections`. Each split is a view of
+:attr:`input`.
+
+This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=2)
+(the split dimension is 1), except that if :attr:`indices_or_sections` is an integer
+it must evenly divide the split dimension or a runtime error will be thrown.
+
+This function is based on NumPy's :func:`numpy.dsplit`.
+
+Args:
+    input (Tensor): tensor to split.
+    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+
+Example::
+    >>> t = torch.arange(16.0).reshape(2, 2, 4)
+    >>> t
+    tensor([[[ 0.,  1.,  2.,  3.],
+             [ 4.,  5.,  6.,  7.]],
+            [[ 8.,  9., 10., 11.],
+             [12., 13., 14., 15.]]])
+    >>> torch.dsplit(t, 2)
+    (tensor([[[ 0.,  1.],
+            [ 4.,  5.]],
+           [[ 8.,  9.],
+            [12., 13.]]]),
+     tensor([[[ 2.,  3.],
+              [ 6.,  7.]],
+             [[10., 11.],
+              [14., 15.]]]))
+
+    >>> torch.dsplit(t, [3, 6])
+    (tensor([[[ 0.,  1.,  2.],
+              [ 4.,  5.,  6.]],
+             [[ 8.,  9., 10.],
+              [12., 13., 14.]]]),
+     tensor([[[ 3.],
+              [ 7.]],
+             [[11.],
+              [15.]]]),
+     tensor([], size=(2, 2, 0)))
+
+""")
+
 add_docstr(torch.can_cast,
            r"""
 can_cast(from, to) -> bool
@@ -1900,6 +2037,10 @@ Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this r
 .. math::
     y_i = \min(\max(x_i, \text{min\_value}), \text{max\_value})
 """ + r"""
+
+.. note::
+    If :attr:`min` is greater than :attr:`max` :func:`torch.clamp(..., min, max) <torch.clamp>`
+    sets all elements in :attr:`input` to the value of :attr:`max`.
 
 Args:
     {input}
@@ -3365,27 +3506,33 @@ add_docstr(torch.geqrf,
            r"""
 geqrf(input, *, out=None) -> (Tensor, Tensor)
 
-This is a low-level function for calling LAPACK directly. This function
+This is a low-level function for calling LAPACK's geqrf directly. This function
 returns a namedtuple (a, tau) as defined in `LAPACK documentation for geqrf`_ .
 
-You'll generally want to use :func:`torch.qr` instead.
-
-Computes a QR decomposition of :attr:`input`, but without constructing
-:math:`Q` and :math:`R` as explicit separate matrices.
-
-Rather, this directly calls the underlying LAPACK function `?geqrf`
-which produces a sequence of 'elementary reflectors'.
+Computes a QR decomposition of :attr:`input`.
+Both `Q` and `R` matrices are stored in the same output tensor `a`.
+The elements of `R` are stored on and above the diagonal.
+Elementary reflectors (or Householder vectors) implicitly defining matrix `Q`
+are stored below the diagonal.
+The results of this function can be used together with :func:`torch.linalg.householder_product`
+to obtain the `Q` matrix or
+with :func:`torch.ormqr`, which uses an implicit representation of the `Q` matrix,
+for an efficient matrix-matrix multiplication.
 
 See `LAPACK documentation for geqrf`_ for further details.
+
+.. note::
+    See also :func:`torch.linalg.qr`, which computes Q and R matrices, and :func:`torch.linalg.lstsq`
+    with the ``driver="gels"`` option for a function that can solve matrix equations using a QR decomposition.
 
 Args:
     input (Tensor): the input matrix
 
 Keyword args:
-    out (tuple, optional): the output tuple of (Tensor, Tensor)
+    out (tuple, optional): the output tuple of (Tensor, Tensor). Ignored if `None`. Default: `None`.
 
 .. _LAPACK documentation for geqrf:
-    https://software.intel.com/en-us/node/521004
+    http://www.netlib.org/lapack/explore-html/df/dc5/group__variants_g_ecomputational_ga3766ea903391b5cf9008132f7440ec7b.html
 
 """)
 
@@ -6596,6 +6743,24 @@ Args:
 
 """)
 
+add_docstr(torch.permute,
+           r"""
+permute(input, dims) -> Tensor
+
+Returns a view of the original tensor :attr:`input` with its dimensions permuted.
+
+Args:
+    {input}
+    dims (tuple of ints): The desired ordering of dimensions
+
+Example:
+    >>> x = torch.randn(2, 3, 5)
+    >>> x.size()
+    torch.Size([2, 3, 5])
+    >>> torch.permute(x, (2, 0, 1)).size()
+    torch.Size([5, 2, 3])
+""")
+
 add_docstr(torch.poisson,
            r"""
 poisson(input, generator=None) -> Tensor
@@ -6654,6 +6819,25 @@ Example::
     tensor([ 6.4939, 97.4091])
     >>> torch.polygamma(4, a)
     tensor([ -24.8863, -771.4742])
+""".format(**common_args))
+
+add_docstr(torch.positive,
+           r"""
+positive(input) -> Tensor
+
+Returns :attr:`input`.
+Throws a runtime error if :attr:`input` is a bool tensor.
+""" + r"""
+Args:
+    {input}
+
+Example::
+
+    >>> t = torch.randn(5)
+    >>> t
+    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
+    >>> torch.positive(t)
+    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
 """.format(**common_args))
 
 add_docstr(torch.pow,

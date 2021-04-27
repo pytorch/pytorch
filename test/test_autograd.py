@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoL
                                                   load_tests,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
                                                   TemporaryFileName, TEST_WITH_ROCM,
-                                                  gradcheck, gradgradcheck)
+                                                  gradcheck, gradgradcheck, make_tensor)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -865,46 +865,6 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, y_grad * grad_output)
         self.assertEqual(z.grad, z_grad * grad_output)
 
-    def test_sparse_backward(self):
-        class FixedGradientFunction(Function):
-            @staticmethod
-            def forward(ctx, x, grad_x):
-                ctx.save_for_backward(grad_x)
-                return x
-
-            @staticmethod
-            def backward(ctx, grad_x):
-                saved_grad_x, = ctx.saved_tensors
-                return saved_grad_x, None
-
-        size = torch.Size([6, 3, 2])
-        i1 = torch.LongTensor([
-            [0, 3, 4],
-            [0, 2, 2],
-        ])
-        v1 = torch.DoubleTensor([[1, 2], [4, 5], [7, 8]])
-        sparse_grad1 = torch.sparse.DoubleTensor(i1, v1, size)
-        i2 = torch.LongTensor([
-            [0, 1, 3, 4],
-            [0, 1, 2, 2],
-        ])
-        v2 = torch.DoubleTensor([[1, 2], [4, 3], [4, 5], [7, 8]])
-        sparse_grad2 = torch.sparse.DoubleTensor(i2, v2, size)
-        dense_grad = torch.rand(size).double()
-        fn = FixedGradientFunction
-
-        # sparse first
-        x = torch.randn(size, requires_grad=True)
-        (fn.apply(x, sparse_grad1) + fn.apply(x, dense_grad) + fn.apply(x, sparse_grad2)).sum().backward()
-        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
-        # dense first
-        x = torch.randn(size, requires_grad=True)
-        (fn.apply(x, dense_grad) + fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
-        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
-        # sparse only
-        x = torch.randn(size, requires_grad=True)
-        (fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
-        self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
     def test_sparse_mm_backward(self):
         size = (3, 3)
@@ -2952,6 +2912,12 @@ class TestAutograd(TestCase):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
+    def test_sinc(self):
+        # The derivative of sinc(x) at x=0 has to be special cased.
+        # A naive computation will result in 0/0 -> NaN.
+        a = torch.tensor([0.0, 1.0], dtype=torch.double, requires_grad=True)
+        gradcheck(torch.sinc, a)
+
     def test_igamma(self):
         # 1e-3 offset to avoid zeros
         # NOTE: derivative for s is not implemented
@@ -4145,7 +4111,7 @@ class TestAutograd(TestCase):
             self.assertFalse(gradcheck(fn, (x,), raise_exception=False, fast_mode=fast_mode))
 
             x_c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
-            with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
+            with self.assertRaisesRegex(RuntimeError, 'While considering the imaginary part of complex outputs only'):
                 gradcheck(fn, (x_c,), fast_mode=False)
             self.assertFalse(gradcheck(fn, (x_c,), raise_exception=False, fast_mode=False))
 
@@ -4154,7 +4120,7 @@ class TestAutograd(TestCase):
                 y.register_hook(lambda x: x + 1e-2)
                 return y
             x = torch.ones(2, 2, requires_grad=True)
-            with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
+            with self.assertRaisesRegex(RuntimeError, 'While considering the imaginary part of complex outputs only'):
                 gradcheck(fn2, (x,), fast_mode=False)
             self.assertFalse(gradcheck(fn2, (x,), raise_exception=False, fast_mode=False))
 
@@ -4162,7 +4128,7 @@ class TestAutograd(TestCase):
                 y = torch.real(x)
                 y.register_hook(lambda x: x + 1e-2)
                 return y
-            with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1'):
+            with self.assertRaisesRegex(RuntimeError, 'Jacobian mismatch for output 0 with respect to input 0'):
                 gradcheck(fn3, (x_c,), fast_mode=False)
             self.assertFalse(gradcheck(fn3, (x_c,), raise_exception=False, fast_mode=False))
         check(fast_mode=True)
@@ -4246,9 +4212,12 @@ class TestAutograd(TestCase):
         self.assertEqual(jacobian[0], 2 * torch.eye(4))
 
         with self.assertWarnsRegex(UserWarning, "get_numerical_jacobian was part of PyTorch's private API"):
-            jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6)
+            jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6, grad_out=1)
         self.assertEqual(jacobian[0], 2 * torch.eye(4))
         self.assertEqual(jacobian[1], 1 * torch.eye(4))
+
+        with self.assertRaisesRegex(ValueError, "Expected grad_out to be 1.0"):
+            jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6, grad_out=2.0)
 
     def test_gradcheck_get_analytical_jacobian(self):
         from torch.autograd.gradcheck import get_analytical_jacobian
@@ -4280,6 +4249,9 @@ class TestAutograd(TestCase):
         with self.assertWarnsRegex(UserWarning, "get_analytical_jacobian was part of PyTorch's private API"):
             jacobians, reentrant, correct_grad_sizes, correct_grad_types = get_analytical_jacobian((a,), outputs)
         self.assertFalse(reentrant)
+
+        with self.assertRaisesRegex(ValueError, "Expected grad_out to be 1.0"):
+            jacobians, _, _, _ = get_analytical_jacobian((a,), outputs, grad_out=2.0)
 
     def test_gradcheck_custom_error(self):
         from torch.autograd.gradcheck import GradcheckError
@@ -5410,10 +5382,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-separate_complex_tests = ['view_as_real', 'div', '__rdiv__', 'sub']
-
-# NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
-# for non-holomorphic functions
+separate_complex_tests = ['div', '__rdiv__', 'sub']
 
 # allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
@@ -5547,12 +5516,7 @@ def add_test(
                         inplace_name = name + '_'
                         # can't broadcast inplace to left hand side
                         skip_inplace = ('broadcast_lhs' in test_name or
-                                        'broadcast_all' in test_name or
-                                        'atanh' in test_name or
-                                        'acosh' in test_name or
-                                        'asinh' in test_name or
-                                        'abs_complex' in test_name or
-                                        'abs_scalar_complex' in test_name)
+                                        'broadcast_all' in test_name)
                         if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
@@ -5599,10 +5563,7 @@ def add_test(
                 inplace_name = name + '_'
                 # can't broadcast inplace to left hand side
                 broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-                # skip C -> R inplace tests
-                skip_c_to_r_inplace = 'abs_complex' in test_name or 'abs_scalar_complex' in test_name
-                skip_inplace = broadcast_skip_inplace or skip_c_to_r_inplace
-                if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
+                if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
                     check(inplace_name)
 
             assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
@@ -7343,25 +7304,6 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
     def test_cdist(self, device):
-        def _test_cdist_for_size(sizex, sizey=None):
-            if sizey is None:
-                sizey = sizex
-            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-                x = torch.randn(sizex, device=device, dtype=torch.double)
-                y = torch.randn(sizey, device=device, dtype=torch.double)
-                eps = 1e-6
-                # to avoid extremum
-                x = x - (((x - y) < eps).double() * 2 * eps)
-                x.requires_grad = True
-                y.requires_grad = True
-                f_args_variable = (x, y)
-
-                def f(a, b):
-                    return torch.cdist(a, b, p)
-                f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                run_functional_checks(self, "test_cdist", "cdist", f,
-                                      True, f_args_variable, f_args_tensor)
-
         def _test_euclidean_large_cdist(sizex, sizey=None):
             if sizey is None:
                 sizey = sizex
@@ -7378,12 +7320,6 @@ class TestAutogradDeviceType(TestCase):
             loss = dist.sum()
             loss.backward()
 
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-        _test_cdist_for_size((1, 1), (S, 1))
         _test_euclidean_large_cdist((2000, 5))
 
     # Ensure that cdist backward with p<1 does not produce NaNs
@@ -7425,7 +7361,8 @@ class TestAutogradDeviceType(TestCase):
             m = torch.cat((asd, asd))
             m.sum().backward()
 
-    def test_sparse_ctor_getter_backward(self, device):
+    @dtypes(torch.double, torch.cdouble)
+    def test_sparse_ctor_getter_backward(self, device, dtype):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
         def _test(size, sparse_dim, nnz, device):
             v_size = [nnz] + list(size[sparse_dim:])
@@ -7433,12 +7370,12 @@ class TestAutogradDeviceType(TestCase):
             i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
             i = i.to(torch.long)
 
-            inp = torch.randn(v_size, requires_grad=True)
+            inp = torch.randn(v_size, device=device, requires_grad=True)
             other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True, device=device,
-                                         dtype=torch.double)[0]
+                                         dtype=dtype)[0]
 
             def fn(v):
-                x = torch.sparse_coo_tensor(i, v, size, device=device)
+                x = torch.sparse_coo_tensor(i, v, size, dtype=dtype, device=device)
                 y = (x + other).coalesce()
                 yv = y.values()
                 new_v = yv.tanh()
@@ -7458,6 +7395,48 @@ class TestAutogradDeviceType(TestCase):
             dense_size = [1, 0, 2] if empty_v else [1, 2]
             nnz = 0 if empty_nnz else 5
             _test(sparse_size + dense_size, len(sparse_size), nnz, device)
+
+    @dtypes(torch.double, torch.cdouble)
+    def test_sparse_backward(self, device, dtype):
+        class FixedGradientFunction(Function):
+            @staticmethod
+            def forward(ctx, x, grad_x):
+                ctx.save_for_backward(grad_x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_x):
+                saved_grad_x, = ctx.saved_tensors
+                return saved_grad_x, None
+
+        size = torch.Size([6, 3, 2])
+        i1 = torch.tensor([
+            [0, 3, 4],
+            [0, 2, 2],
+        ], dtype=torch.long)
+        v1 = make_tensor([3, 2], dtype=dtype, device=device)
+        sparse_grad1 = torch.sparse_coo_tensor(i1, v1, size, dtype=dtype, device=device)
+        i2 = torch.tensor([
+            [0, 1, 3, 4],
+            [0, 1, 2, 2],
+        ], dtype=torch.long)
+        v2 = make_tensor([4, 2], dtype=dtype, device=device)
+        sparse_grad2 = torch.sparse_coo_tensor(i2, v2, size, dtype=dtype, device=device)
+        dense_grad = torch.rand(size, device=device, dtype=dtype)
+        fn = FixedGradientFunction
+
+        # sparse first
+        x = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
+        (fn.apply(x, sparse_grad1) + fn.apply(x, dense_grad) + fn.apply(x, sparse_grad2)).sum().backward()
+        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
+        # dense first
+        x = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
+        (fn.apply(x, dense_grad) + fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
+        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
+        # sparse only
+        x = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
+        (fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
+        self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
     # autograd tests via common_method_invocations don't allow input tensors to
     # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when
