@@ -326,11 +326,11 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
   return c10::nullopt;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_any) {
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union) {
   auto unified = unifyTypesImpl(t1, t2);
 
-  if (default_to_any && !unified) {
-    return AnyType::get();
+  if (default_to_union && !unified) {
+    return UnionType::create({t1, t2});
   }
 
   return unified;
@@ -338,7 +338,8 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool def
 
 c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
-    std::ostream& why_not) {
+    std::ostream& why_not,
+    bool default_to_union) {
   if (elements.size() == 0) {
     why_not << "Cannot get unified type from empty list";
     return c10::nullopt;

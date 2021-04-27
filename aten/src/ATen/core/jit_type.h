@@ -1676,7 +1676,7 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 }
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then
-// nullopt will be returned if default_to_any is false, and Any will be returned
+// nullopt will be returned if default_to_union is false, and Any will be returned
 // if it is true. If t1 == t2, or t1 is a type refinement of t2,
 // then t2 will be returned (and vice versa).
 // Two different tensortypes will return dynamic.
@@ -1685,11 +1685,12 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 TORCH_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2,
-    bool default_to_any=false);
+    bool default_to_union=false);
 
 TORCH_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
-    std::ostream& why_not);
+    std::ostream& why_not,
+    bool default_to_union=false);
 
 namespace detail {
 template <typename T>

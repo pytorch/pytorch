@@ -1155,10 +1155,10 @@ struct to_ir {
       return {};
     }
     // statement must be var {is, is not} None
-    auto name = Var(lhs).name().name();
-    // XXX - while it should in theory be possible to specialize
-    // the `x is None` to know x has type NoneType, we have previously not
-    // done this. Unfortunately, doing this will make the type None
+    const std::string& name = Var(lhs).name().name();
+    // While it should in theory be possible to specialize
+    // the `x is None` to know x has type NoneType, we have previously
+    // not done this. Unfortunately, doing this will make the type None
     // propagate further in all loaded models. The handling of
     // unwrap_optional will fail in these cases since export did
     // not expect that the input would be none and an unannotated None.
@@ -1167,8 +1167,18 @@ struct to_ir {
     // and (2) only enable this OPTIONAL_NONE when loading newer
     // graphs because it is incompatible with older graphs.
     // Refinement none(name, RefinementKind::OPTIONAL_NONE);
-    if (auto optional_type = lhs_value->type()->cast<OptionalType>()) {
+    if (const auto optional_type = lhs_value->type()->cast<OptionalType>()) {
       Refinement present(name, optional_type->getElementType());
+      if (tok == TK_IS) {
+        return RefinementSet({}, {present});
+      } else { // TK_ISNOT
+        return RefinementSet({present}, {});
+      }
+    }
+    if (const auto union_type = lhs_value->type()->cast<UnionType>()) {
+      std::vector<TypePtr> present_types =
+          union_type->set_difference_of({NoneType::get()});
+      Refinement present(name, UnionType::create(present_types));
       if (tok == TK_IS) {
         return RefinementSet({}, {present});
       } else { // TK_ISNOT
@@ -1648,7 +1658,19 @@ struct to_ir {
         graph->createStore(x, fv)->insertBefore(false_block->return_node());
       }
 
-      auto unified = unifyTypes(tv->type(), fv->type());
+      // If the variable we're looking at is known to be Union[T1, T2],
+      // then it's okay to have one branch return T1 and the other
+      // return T2
+      SugaredValuePtr true_val = save_true->findInParentFrame(x);
+      SugaredValuePtr false_val = save_false->findInParentFrame(x);
+      bool default_to_union = false;
+      if (true_val && false_val) {
+        if (tv->type() == fv->type() && tv->type()->kind() == UnionType::Kind) {
+          default_to_union = true;
+        }
+      }
+
+      auto unified = unifyTypes(tv->type(), fv->type(), default_to_union);
 
       // attempt to unify the types. we allow variables to be set to different
       // types in each branch as long as that variable is not already in scope,
@@ -1751,16 +1773,30 @@ struct to_ir {
     };
     GatheredTypes gathered(typeParser_);
     gathered.gather(classinfo);
-    auto val = emitExpr(obj);
+    Value* val = emitExpr(obj);
     RefinementSet refinement;
     if (gathered.types.size() == 1 &&
         gathered.types.at(0)->isSubtypeOf(val->type()) &&
         obj.kind() == TK_VAR) {
       std::string ident = Var(obj).name().name();
-      Refinement isinstance(std::move(ident), gathered.types.at(0));
-      refinement = RefinementSet({isinstance}, {});
-    }
+      Refinement isinstance(ident, gathered.types.at(0));
 
+      if (val->type()->kind() == UnionType::Kind) {
+        auto union_type = val->type()->expect<UnionType>();
+        std::vector<TypePtr> not_isinstance_types =
+            union_type->set_difference_of({gathered.types.at(0)});
+        if (not_isinstance_types.size() == 1) {
+          Refinement not_isinstance(std::move(ident), not_isinstance_types.at(0));
+          refinement = RefinementSet(isinstance, not_isinstance);
+        } else {
+          auto new_union = UnionType::create(std::move(not_isinstance_types));
+          Refinement not_isinstance(std::move(ident), new_union);
+          refinement = RefinementSet(isinstance, not_isinstance);
+        }
+      } else {
+        refinement = RefinementSet({isinstance}, {});
+      }
+    }
     if (gathered.staticallyTrue(val->type())) {
       return CondValue(*graph, obj.range(), true, std::move(refinement));
     }
@@ -3270,7 +3306,9 @@ struct to_ir {
     // AnyType is the only user-exposed type which we don't unify to from
     // its subtypes, so we add a cast for use cases like
     // x : Any = 1 if cond else "str"
-    if (type_hint == AnyType::get() && out_val->type() != AnyType::get()) {
+    if (type_hint &&
+          ((type_hint == AnyType::get() && out_val->type() != AnyType::get()) ||
+          (type_hint->kind() == UnionType::Kind && out_val->type()->kind() != UnionType::Kind))) {
       out_val = graph->insertUncheckedCast(out_val, type_hint);
     }
     return out_val;
@@ -3303,6 +3341,14 @@ struct to_ir {
       const TypePtr& type_hint = nullptr) {
     switch (tree.kind()) {
       case TK_VAR: {
+        // There are certain cases in which we know a variable is of
+        // type `Union[T1, T2, ..., TN]`, but the type of the variable's
+        // value is still `T1` (one of the types in the Union). This
+        // correctly sets the value's type to match the variable's
+        // Union annotation
+        if (type_hint && type_hint->kind() == UnionType::Kind) {
+          environment_stack->setType(Var(tree).name().name(), type_hint);
+        }
         return environment_stack->getSugaredVar(Var(tree).name());
       }
       case '.': {
