@@ -182,12 +182,6 @@ __global__ void sampleMultinomialOnce(
   accscalar_t accZero = static_cast<accscalar_t>(0);
   scalar_t zero = static_cast<scalar_t>(0);
 
-  // Valid threads are those that actually process an element
-  bool is_valid_thread = threadIdx.x < categories;
-  // Block size without padding threads
-  // (so that its size is a multiple of C10_WARP_SIZE)
-  int valid_block_size = (categories < blockDim.x) ? categories : blockDim.x;
-
   for (int64_t curDist = blockIdx.x;
        curDist < distributions; curDist += gridDim.x) {
     // Each block handles one distribution
