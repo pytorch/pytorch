@@ -531,6 +531,11 @@ private:
   c10::optional<ViewInfo> backward_info_;
   c10::optional<ViewInfo> forward_info_;
 
+  // Optimization to reduce the number of ViewInfo we create.
+  // In the (very common) case where backward_info_ == forward_info_
+  // we only populate backward_info_ and set shared_view_info_ = true
+  bool shared_view_info_;
+
   /// The two following fields are extra information that we track to ensure that
   /// any operation on this backward view is valid.
 
@@ -544,6 +549,10 @@ public:
   /// for backward differentiable views
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_ || (has_bw_view() && get_backward_view().base_.requires_grad());
+  }
+
+  bool shared_view_info() const {
+    return shared_view_info_;
   }
 
   bool has_bw_view() const {
@@ -576,16 +585,17 @@ public:
   }
 
   bool has_fw_view() const {
-    return forward_info_.has_value();
+    return shared_view_info_ || forward_info_.has_value();
   }
 
   const ViewInfo& get_forward_view() const {
     TORCH_CHECK(has_fw_view(), "forward view info can only exist for forward views.");
-    return forward_info_.value();
+    TORCH_CHECK(!shared_view_info_ || has_bw_view(), "forward view info can only exist for forward views.");
+    return shared_view_info_ ? backward_info_.value() : forward_info_.value();
   }
 
   DifferentiableViewMeta(at::TensorImpl* self_impl, c10::optional<ViewInfo> backward_info,
-    c10::optional<ViewInfo> forward_info, CreationMeta creation_meta=CreationMeta::DEFAULT);
+    c10::optional<ViewInfo> forward_info, bool shared_view_info, CreationMeta creation_meta=CreationMeta::DEFAULT);
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -614,6 +624,7 @@ inline Variable make_variable_differentiable_view(
     const at::Tensor& data,
     c10::optional<ViewInfo> backward_info,
     c10::optional<ViewInfo> forward_info,
+    bool shared_view_info,
     CreationMeta creation_meta,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
@@ -626,7 +637,7 @@ inline Variable make_variable_differentiable_view(
       at::TensorImpl* data_impl = data.unsafeGetTensorImpl();
       data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
       data_impl, std::move(backward_info), std::move(forward_info),
-      creation_meta));
+      shared_view_info, creation_meta));
       return data;
     } else {
       c10::intrusive_ptr<at::TensorImpl> data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
@@ -634,7 +645,7 @@ inline Variable make_variable_differentiable_view(
         /*allow_tensor_metadata_change=*/true);
       data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
       data_impl_copy.get(), std::move(backward_info), std::move(forward_info),
-      creation_meta));
+      shared_view_info, creation_meta));
       return Variable(data_impl_copy);
     }
   }
