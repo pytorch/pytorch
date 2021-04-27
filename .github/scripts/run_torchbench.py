@@ -68,7 +68,7 @@ def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> List[str]:
 def run_torchbench(pytorch_path: str, torchbench_path: str, output_dir: str):
     # Copy system environment so that we will not override
     env = dict(os.environ)
-    command = ["python", "--work-dir", os.path.join(output_dir, f'gh{os.environ["GITHUB_RUN_ID"]}'),
+    command = ["python", "bisection.py", "--work-dir", os.path.join(output_dir, f'gh{os.environ["GITHUB_RUN_ID"]}'),
                "--pytorch-src", pytorch_path, "--torchbench-src", torchbench_path,
                "--config", os.path.join(output_dir, "config.yaml"),
                "--output", os.path.join(output_dir, "result.txt")]
