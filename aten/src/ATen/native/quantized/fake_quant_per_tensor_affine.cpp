@@ -10,7 +10,9 @@ namespace at {
 namespace native {
 
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fake_quant_tensor_cachemask_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fake_quant_grad_learnable_tensor_stub);
 
 /* Fake-quantizes the 'inputs' tensor.
@@ -107,6 +109,7 @@ int64_t _get_zero_point_from_tensor(
     int64_t quant_max,
     bool is_forward) {
   float zero_point_fp = zero_point[0].item<float>();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   zero_point_fp = is_forward ? std::nearbyint(zero_point_fp) : zero_point_fp + 0.5f;
   float zero_point_clamped = std::min(std::max(zero_point_fp, static_cast<float>(quant_min)),
                                        static_cast<float>(quant_max));
