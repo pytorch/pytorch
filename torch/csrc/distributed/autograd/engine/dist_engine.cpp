@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <c10/util/DeadlockDetection.h>
 
 namespace torch {
 namespace distributed {

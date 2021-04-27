@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <c10/util/DeadlockDetection.h>
 
 namespace torch {
 namespace distributed {
