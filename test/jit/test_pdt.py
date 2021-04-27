@@ -265,7 +265,7 @@ class TestPDT(JitTestCase):
 
         make_global(NestedPDTInner, NestedModulePDTWrapper)
         inner_pdt_model = NestedPDTInner()
-        wrapped_pdt_model  = NestedModulePDTWrapper(inner_pdt_model)
+        wrapped_pdt_model = NestedModulePDTWrapper(inner_pdt_model)
         scripted_pdt_model = torch.jit._script_pdt(wrapped_pdt_model, example_inputs=[(20, ), (False, )])
         self.assertEqual(scripted_pdt_model(30), wrapped_pdt_model(30))
         self.assertEqual(scripted_pdt_model(1.9), wrapped_pdt_model(1.9))
