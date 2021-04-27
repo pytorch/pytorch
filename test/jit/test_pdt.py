@@ -3,7 +3,7 @@ import sys
 import torch
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.jit._monkeytype_config import _IS_MONKEYTYPE_INSTALLED
-from typing import List, Dict, Tuple  # noqa: F401
+from typing import List, Dict, Tuple, Any  # noqa: F401
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -239,13 +239,34 @@ class TestPDT(JitTestCase):
         input = 120
         self.assertEqual(scripted_model(input), input)
 
+    def test_nn_module_2(self):
+        class model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x) -> Any:
+                if isinstance(x, int):
+                    return x + 1
+                elif isinstance(x, float):
+                    return x - 1
+                else:
+                    return x
+
+        make_global(model)
+        scripted = torch.jit._script_pdt(model(), example_inputs=[(10, ), (10.80, ), (False, )])
+        inp = model()
+        self.assertEqual(scripted(50), inp(50))
+        self.assertEqual(scripted(1.8), inp(1.8))
+        self.assertTrue(scripted(True))
+
     def test_nested_nn_module_class(self):
         class inner(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
             def forward(self, x):
-                assert x is not None
+                if isinstance(x, int):
+                    return x * 10
                 return x
 
         class Wrapper(torch.nn.Module):
@@ -258,7 +279,8 @@ class TestPDT(JitTestCase):
 
 
         make_global(inner, Wrapper)
-
         scripted_inner = torch.jit._script_pdt(inner(), example_inputs=[(100, ), (10.80, ), ])
         wrapped = torch.jit._script_pdt(Wrapper(scripted_inner), example_inputs=[(20, ), (False, )])
+        self.assertEqual(wrapped(30), wrapped(30))
+        self.assertEqual(wrapped(1.9), wrapped(1.9))
         self.assertTrue(wrapped(True))
