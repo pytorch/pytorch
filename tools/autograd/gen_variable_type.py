@@ -103,6 +103,13 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'index', 'masked_fill', 'cross'
 }
 
+GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
+    'to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
+    'sparse_mask_helper_cuda', '_sparse_addmm',
+}
+
+GRADIENT_IMPLEMENTED_FOR_COMPLEX.update(GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX)
+
 # Some operators invalidate the grad_accumulator. Let's reset it.
 RESET_GRAD_ACCUMULATOR = {
     'set', 'resize'
@@ -389,7 +396,7 @@ def gen_variable_type_shard(
             assert f.is_abstract, msg
 
     fm.write_with_template(output_name, template_name, lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/{template_name}',
+        'generated_comment': '@' f'generated from {fm.template_dir}/{template_name}',
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
     })

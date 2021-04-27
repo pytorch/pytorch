@@ -264,7 +264,7 @@ TARGET_DET_LIST = [
     'test_jit',
     'test_jit_profiling',
     'test_torch',
-    'test_binary_ufuncs'
+    'test_binary_ufuncs',
     'test_numpy_interop',
     'test_reductions',
     'test_shape_ops',
