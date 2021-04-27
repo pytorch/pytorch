@@ -21,7 +21,7 @@ using std::unique_ptr;
 namespace {
 
 void expectCallsIncrement(DispatchKey dispatch_key) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
@@ -32,7 +32,7 @@ void expectCallsIncrement(DispatchKey dispatch_key) {
 }
 
 void expectCallsDecrement(DispatchKey dispatch_key) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
@@ -564,7 +564,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_w
 }
 
 void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});

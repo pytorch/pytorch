@@ -2,6 +2,13 @@
 
 #include <torch/csrc/autograd/profiler_legacy.h>
 
+// Kineto is currently available on Linux server-side
+#ifdef USE_KINETO
+#if !defined(__linux__) || defined(_WIN32) || defined(C10_MOBILE) || defined(__APPLE__) || defined(DISABLE_KINETO)
+#undef USE_KINETO
+#endif
+#endif
+
 #ifdef USE_KINETO
 namespace libkineto {
 class TraceActivity;
@@ -27,6 +34,7 @@ struct KinetoObserverContext : public at::ObserverContext {
   uint64_t startThreadId;
   uint64_t endThreadId;
   c10::optional<std::vector<std::vector<int64_t>>> shapes;
+  c10::optional<std::vector<std::string>> dtypes;
   int64_t sequenceNr;
   uint64_t fwdThreadId;
   uint8_t recFunScope;
@@ -60,6 +68,14 @@ struct TORCH_API KinetoEvent {
 
   const std::vector<std::vector<int64_t>>& shapes() const {
     return *shapes_;
+  }
+
+  bool hasTypes() const {
+    return dtypes_ != c10::nullopt;
+  }
+
+  const std::vector<std::string>& dtypes() const {
+    return *dtypes_;
   }
 
   uint64_t flops() const {
@@ -99,6 +115,11 @@ struct TORCH_API KinetoEvent {
 
   KinetoEvent& shapes(const std::vector<std::vector<int64_t>>& shapes) {
     shapes_ = shapes;
+    return *this;
+  }
+
+  KinetoEvent& dtypes(const std::vector<std::string>& dtypes) {
+    dtypes_ = dtypes;
     return *this;
   }
 
@@ -170,6 +191,7 @@ struct TORCH_API KinetoEvent {
   uint8_t activity_type_;
   c10::optional<std::vector<std::vector<int64_t>>> shapes_;
   c10::optional<std::vector<std::string>> stack_;
+  c10::optional<std::vector<std::string>> dtypes_;
   uint64_t flops_ = 0;
 
   std::string name_;
@@ -218,14 +240,6 @@ TORCH_API void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
 #endif // USE_KINETO
-
-TORCH_API constexpr bool kinetoAvailable() {
-#ifdef USE_KINETO
-  return true;
-#else
-  return false;
-#endif // USE_KINETO
-}
 
 } // namespace profiler
 }} // namespace torch::autograd

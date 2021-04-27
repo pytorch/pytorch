@@ -233,5 +233,3 @@ TEST(NamedTensorTest, TensorNamesCheckUnique) {
     ASSERT_THROW(tensornames.checkUnique("op_name"), c10::Error);
   }
 }
-
-

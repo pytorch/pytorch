@@ -807,11 +807,11 @@ class FormattedTimesMixin(object):
 
     @property
     def cpu_time(self):
-        return 0.0 if self.count == 0 else 1.0 * self.cpu_time_total / self.count  # type: ignore
+        return 0.0 if self.count == 0 else 1.0 * self.cpu_time_total / self.count  # type: ignore[attr-defined]
 
     @property
     def cuda_time(self):
-        return 0.0 if self.count == 0 else 1.0 * self.cuda_time_total / self.count  # type: ignore
+        return 0.0 if self.count == 0 else 1.0 * self.cuda_time_total / self.count  # type: ignore[attr-defined]
 
 
 class Interval(object):
@@ -1185,13 +1185,14 @@ def parse_kineto_results(result):
     # output top-level memory events
     for mem_record in mem_records:
         if not mem_record[1]:
+            rel_start_us = mem_record[0].start_us() - start_record.start_us()
             fe = FunctionEvent(
                 id=mem_record[0].handle(),
                 name="[memory]",
                 trace_name=None,  # not outputting in the trace
                 thread=mem_record[0].thread_id(),
-                start_us=mem_record[0].start_us(),
-                end_us=mem_record[0].start_us(),  # no duration
+                start_us=rel_start_us,
+                end_us=rel_start_us,  # no duration
                 fwd_thread=mem_record[0].fwd_thread_id(),
                 input_shapes=[],
                 stack=[],
@@ -1563,7 +1564,7 @@ def build_table(
     row_format = row_format_lst[0]
     header_sep = header_sep_lst[0]
     line_length = line_length_lst[0]
-    add_column = None  # type: ignore
+    add_column = None  # type: ignore[assignment]
 
     # Have to use a list because nonlocal is Py3 only...
     result = []

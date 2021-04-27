@@ -36,6 +36,8 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/tensor_options.cpp
   ${TORCH_API_TEST_DIR}/tensor.cpp
   ${TORCH_API_TEST_DIR}/torch_include.cpp
+  ${TORCH_API_TEST_DIR}/inference_mode.cpp
+  ${TORCH_API_TEST_DIR}/grad_mode.cpp
 )
 
 if(USE_CUDA)

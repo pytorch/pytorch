@@ -310,6 +310,9 @@ class Timer(object):
                     break
                 if time_taken > min_run_time:
                     break
+                # Avoid overflow in C++ pybind11 interface
+                if number * 10 > 2147483647:
+                    break
                 number *= 10
         return number
 

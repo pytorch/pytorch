@@ -386,7 +386,8 @@ Tensor conv_depthwise3d_cuda(
     IntArrayRef padding,
     IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   TORCH_CHECK(input.device() == weight.device(), "expects input and weight tensors to be on the same device.");
   if (bias.defined()) {
@@ -616,17 +617,16 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
 }
 
 
-std::tuple<Tensor&, Tensor&, Tensor&> conv_depthwise3d_backward_cuda_out(
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias,
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> conv_depthwise3d_backward_cuda_out(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
-    IntArrayRef dilation) {
+    IntArrayRef dilation,
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias) {
   if (grad_weight.defined()) {
     grad_weight.resize_(weight.sizes());
     grad_weight.zero_();
