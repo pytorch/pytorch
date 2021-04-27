@@ -36,7 +36,7 @@
 // iterations.
 
 namespace at {
-namespace vec256 {
+namespace vec {
 namespace {
 
 #if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
@@ -267,7 +267,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
         Vec256<float> scale_zp_premul) const {
       __m256 float_vals = _mm256_cvtepi32_ps(vals);
 #if defined(CPU_CAPABILITY_AVX2)
-      return {vec256::fmadd(scale, Vec256<float>(float_vals), scale_zp_premul)};
+      return {vec::fmadd(scale, Vec256<float>(float_vals), scale_zp_premul)};
 #else
       return {scale * (Vec256<float>(float_vals) - zero_point)};
 #endif
@@ -577,13 +577,13 @@ struct Vec256<c10::qint8> : public Vec256qi {
 
 #if defined(CPU_CAPABILITY_AVX2)
     auto val0 =
-        vec256::fmadd(scale, Vec256<float>(float_val0), scale_neg_zp_premul);
+        vec::fmadd(scale, Vec256<float>(float_val0), scale_neg_zp_premul);
     auto val1 =
-        vec256::fmadd(scale, Vec256<float>(float_val1), scale_neg_zp_premul);
+        vec::fmadd(scale, Vec256<float>(float_val1), scale_neg_zp_premul);
     auto val2 =
-        vec256::fmadd(scale, Vec256<float>(float_val2), scale_neg_zp_premul);
+        vec::fmadd(scale, Vec256<float>(float_val2), scale_neg_zp_premul);
     auto val3 =
-        vec256::fmadd(scale, Vec256<float>(float_val3), scale_neg_zp_premul);
+        vec::fmadd(scale, Vec256<float>(float_val3), scale_neg_zp_premul);
 #else
     auto val0 = scale * (Vec256<float>(float_val0) - zero_point);
     auto val1 = scale * (Vec256<float>(float_val1) - zero_point);
@@ -848,13 +848,13 @@ struct Vec256<c10::quint8> : public Vec256qi {
 
 #if defined(CPU_CAPABILITY_AVX2)
     auto val0 =
-        vec256::fmadd(scale, Vec256<float>(float_val0), scale_zp_premul);
+        vec::fmadd(scale, Vec256<float>(float_val0), scale_zp_premul);
     auto val1 =
-        vec256::fmadd(scale, Vec256<float>(float_val1), scale_zp_premul);
+        vec::fmadd(scale, Vec256<float>(float_val1), scale_zp_premul);
     auto val2 =
-        vec256::fmadd(scale, Vec256<float>(float_val2), scale_zp_premul);
+        vec::fmadd(scale, Vec256<float>(float_val2), scale_zp_premul);
     auto val3 =
-        vec256::fmadd(scale, Vec256<float>(float_val3), scale_zp_premul);
+        vec::fmadd(scale, Vec256<float>(float_val3), scale_zp_premul);
 #else
     auto val0 = scale * (Vec256<float>(float_val0) - zero_point);
     auto val1 = scale * (Vec256<float>(float_val1) - zero_point);

@@ -26,7 +26,7 @@
 #include <iostream>
 
 namespace at {
-namespace vec256 {
+namespace vec {
 
 // Note [Acceptable use of anonymous namespace in header]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

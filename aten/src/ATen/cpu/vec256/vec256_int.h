@@ -8,7 +8,7 @@
 #include <c10/macros/Macros.h>
 
 namespace at {
-namespace vec256 {
+namespace vec {
 namespace {
 
 #ifdef CPU_CAPABILITY_AVX2

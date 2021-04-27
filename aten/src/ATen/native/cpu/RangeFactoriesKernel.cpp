@@ -13,7 +13,7 @@
 namespace at { namespace native {
 namespace {
 
-using namespace vec256;
+using namespace vec;
 
 static void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_steps, const Scalar& scalar_step) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "arange_cpu", [&]() {

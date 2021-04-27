@@ -9,7 +9,7 @@
 namespace at { namespace native {
 namespace {
 
-using namespace vec256;
+using namespace vec;
 
 template<typename scalar_t>
 void batch_norm_cpu_inference_collect_linear_and_constant_terms(

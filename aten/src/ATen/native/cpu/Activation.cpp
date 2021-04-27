@@ -34,7 +34,7 @@ inline void _vec_log_sigmoid(Tensor& output, Tensor& buffer, const Tensor& input
     int64_t d = 0;
     for (; d < size - (size % Vec::size()); d += Vec::size()) {
       Vec data_vec = Vec::loadu(input_data + begin+ d);
-      Vec max_vec = vec256::maximum(data_vec.neg(), Vec(scalar_t(0)));
+      Vec max_vec = vec::maximum(data_vec.neg(), Vec(scalar_t(0)));
       Vec buffer_vec =  max_vec.neg().exp() + (data_vec.neg() - max_vec).exp();
       Vec output_vec = (max_vec + buffer_vec.log()).neg();
       buffer_vec.store(buffer_data + begin + d);
@@ -42,7 +42,7 @@ inline void _vec_log_sigmoid(Tensor& output, Tensor& buffer, const Tensor& input
     }
     if (size - d > 0) {
       Vec data_vec = Vec::loadu(input_data + begin + d, size - d);
-      Vec max_vec = vec256::maximum(data_vec.neg(), Vec(scalar_t(0)));
+      Vec max_vec = vec::maximum(data_vec.neg(), Vec(scalar_t(0)));
       Vec buffer_vec =  max_vec.neg().exp() + (data_vec.neg() - max_vec).exp();
       Vec output_vec = (max_vec + buffer_vec.log()).neg();
       buffer_vec.store(buffer_data + begin + d, size - d);
@@ -271,7 +271,7 @@ void GeluKernelImpl(TensorIterator& it) {
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
-      using Vec = vec256::Vec256<scalar_t>;
+      using Vec = vec::Vec256<scalar_t>;
       const Vec kAlphaVec(M_SQRT1_2);
       const Vec kOneVec(1);
       const Vec kPointFiveVec(0.5);
@@ -296,7 +296,7 @@ void GeluBackwardKernelImpl(TensorIterator& it) {
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluBackwardKernelImpl", [&]() {
-      using Vec = vec256::Vec256<scalar_t>;
+      using Vec = vec::Vec256<scalar_t>;
       const Vec kAlphaVec(M_SQRT1_2);
       const Vec kBetaVec(M_2_SQRTPI * M_SQRT1_2 * 0.5);
       const Vec kOneVec(1);
@@ -328,7 +328,7 @@ void hardsigmoid_kernel(TensorIterator& iter) {
     const scalar_t zero(0.0f);
     const scalar_t three(3.0f);
     const scalar_t six(6.0f);
-    using Vec = vec256::Vec256<scalar_t>;
+    using Vec = vec::Vec256<scalar_t>;
     const Vec kZeroVec(zero);
     const Vec kThreeVec(three);
     const Vec kSixVec(six);
@@ -338,8 +338,8 @@ void hardsigmoid_kernel(TensorIterator& iter) {
           return std::min(std::max(self_val + three, zero), six) / six;
         },
         [&](Vec self_val) {
-          return vec256::minimum(
-            vec256::maximum(self_val + kThreeVec, kZeroVec),
+          return vec::minimum(
+            vec::maximum(self_val + kThreeVec, kZeroVec),
             kSixVec
           ) / kSixVec;
         });
@@ -428,7 +428,7 @@ void hardswish_kernel(TensorIterator& iter) {
     const scalar_t zero(0.0f);
     const scalar_t three(3.0f);
     const scalar_t six(6.0f);
-    using Vec = vec256::Vec256<scalar_t>;
+    using Vec = vec::Vec256<scalar_t>;
     const Vec kZeroVec(zero);
     const Vec kThreeVec(three);
     const Vec kSixVec(six);
@@ -438,8 +438,8 @@ void hardswish_kernel(TensorIterator& iter) {
         return x * std::min(std::max(x + three, zero), six) / six;
       },
       [&](Vec x_vec) {
-        return x_vec * vec256::minimum(
-          vec256::maximum(x_vec + kThreeVec, kZeroVec),
+        return x_vec * vec::minimum(
+          vec::maximum(x_vec + kThreeVec, kZeroVec),
           kSixVec
         ) / kSixVec;
       }
@@ -453,7 +453,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
     const scalar_t three(3.0f);
     const scalar_t neg_three(-3.0f);
     const scalar_t one_half(0.5f);
-    using Vec = vec256::Vec256<scalar_t>;
+    using Vec = vec::Vec256<scalar_t>;
     const Vec kZeroVec(zero);
     const Vec kThreeVec(three);
     const Vec kNegThreeVec(neg_three);

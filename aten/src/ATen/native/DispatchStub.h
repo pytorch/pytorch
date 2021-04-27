@@ -52,6 +52,7 @@ enum class CPUCapability {
 #else
   AVX = 1,
   AVX2 = 2,
+  AVX512 = 3,
 #endif
   NUM_OPTIONS
 };
@@ -71,6 +72,9 @@ struct TORCH_API DispatchStubImpl {
   void* get_call_ptr(
     DeviceType device_type
     , void *DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      , void *AVX512
+#endif
 #ifdef HAVE_AVX_CPU_DEFINITION
       , void *AVX
 #endif
@@ -89,6 +93,9 @@ struct TORCH_API DispatchStubImpl {
    */
   void* choose_cpu_impl(
     void *DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+    , void *AVX512
+#endif
 #ifdef HAVE_AVX_CPU_DEFINITION
     , void *AVX
 #endif
@@ -126,6 +133,9 @@ private:
     return reinterpret_cast<FnPtr>(
       impl.get_call_ptr(device_type
       , reinterpret_cast<void*>(DEFAULT)
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      , reinterpret_cast<void*>(AVX)
+#endif
 #ifdef HAVE_AVX_CPU_DEFINITION
       , reinterpret_cast<void*>(AVX)
 #endif
@@ -155,6 +165,9 @@ public:
   }
 
   static FnPtr DEFAULT;
+#ifdef HAVE_AVX512_CPU_DEFINITION
+  static FnPtr AVX512;
+#endif
 #ifdef HAVE_AVX_CPU_DEFINITION
   static FnPtr AVX;
 #endif
@@ -209,6 +222,12 @@ struct RegisterHIPDispatch {
 #define REGISTER_AVX_DISPATCH(name, fn)
 #endif
 
+#ifdef HAVE_AVX512_CPU_DEFINITION
+#define REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX512, fn)
+#else
+#define REGISTER_AVX512_DISPATCH(name, fn)
+#endif
+
 #ifdef HAVE_AVX2_CPU_DEFINITION
 #define REGISTER_AVX2_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX2, fn)
 #else
@@ -223,8 +242,9 @@ struct RegisterHIPDispatch {
 
 #define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
   REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
+  REGISTER_AVX512_DISPATCH(name, static_cast<fn_type>(nullptr))                \
   REGISTER_AVX_DISPATCH(name, static_cast<fn_type>(nullptr))                   \
-  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))          \
+  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))                  \
   REGISTER_VSX_DISPATCH(name, static_cast<fn_type>(nullptr))
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \

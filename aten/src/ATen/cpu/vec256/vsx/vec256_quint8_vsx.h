@@ -28,7 +28,7 @@
 // iterations.
 
 namespace at {
-namespace vec256 {
+namespace vec {
 namespace {
 
 const vint16 mask_unsigned = vec_splats((short int)0xFF);

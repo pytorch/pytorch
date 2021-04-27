@@ -55,7 +55,7 @@ namespace at {
 namespace vml {
 namespace {
 
-using namespace vec256;
+using namespace vec;
 
 template <typename scalar_t>
 inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {

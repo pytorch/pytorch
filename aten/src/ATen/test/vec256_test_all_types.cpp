@@ -751,7 +751,7 @@ namespace {
     TYPED_TEST(BitwiseFloatsAdditional, Convert) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
-        using IntVT = at::vec256::int_same_size_t<VT>;
+        using IntVT = at::vec::int_same_size_t<VT>;
 
         // verify float to int
         CACHE_ALIGN VT input1[vec::size()];
@@ -761,7 +761,7 @@ namespace {
             input1[i] = (VT)i * (VT)2.1 + (VT)0.5;
             expected_vals1[i] = static_cast<IntVT>(input1[i]);
         }
-        at::vec256::convert(input1, actual_vals1, vec::size());
+        at::vec::convert(input1, actual_vals1, vec::size());
         auto expected1 = VecType<IntVT>::loadu(expected_vals1);
         auto actual1 = VecType<IntVT>::loadu(actual_vals1);
         if (AssertVec256<VecType<IntVT>>(NAME_INFO(test_convert_to_int), expected1, actual1).check()) {
@@ -776,7 +776,7 @@ namespace {
             input2[i] = (IntVT)i * (IntVT)2 + (IntVT)1;
             expected_vals2[i] = (VT)input2[i];
         }
-        at::vec256::convert(input2, actual_vals2, vec::size());
+        at::vec::convert(input2, actual_vals2, vec::size());
         auto expected2 = vec::loadu(expected_vals2);
         auto actual2 = vec::loadu(actual_vals2);
         AssertVec256<vec>(NAME_INFO(test_convert_to_float), expected2, actual2).check();
@@ -794,7 +794,7 @@ namespace {
         test_ternary<vec>(
             NAME_INFO(clamp), RESOLVE_OVERLOAD(local_fmadd),
             [](const vec& v0, const vec& v1, const vec& v2) {
-                return at::vec256::fmadd(v0, v1, v2);
+                return at::vec::fmadd(v0, v1, v2);
             },
             test_case,
             RESOLVE_OVERLOAD(filter_fmadd));

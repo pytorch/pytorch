@@ -11,7 +11,7 @@
 namespace at { namespace native {
 namespace {
 
-using namespace vec256;
+using namespace vec;
 
 struct Indexer {
   Indexer(int64_t num_indexers, char** indexers, const int64_t* indexer_strides,

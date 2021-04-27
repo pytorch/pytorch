@@ -55,7 +55,7 @@ template<typename T>
 using Complex = typename c10::complex<T>;
 
 template <typename T>
-using VecType = typename at::vec256::Vec256<T>;
+using VecType = typename at::vec::Vec256<T>;
 
 using vfloat = VecType<float>;
 using vdouble = VecType<double>;

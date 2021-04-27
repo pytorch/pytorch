@@ -15,7 +15,7 @@ static inline void cadd(
     const scalar_t* x,
     const scalar_t* y,
     int64_t n) {
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vec256<scalar_t>;
   char* ptrs[] = {reinterpret_cast<char*>(z),
                   reinterpret_cast<char*>(const_cast<scalar_t*>(x)),
                   reinterpret_cast<char*>(const_cast<scalar_t*>(y))};

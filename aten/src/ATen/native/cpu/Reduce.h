@@ -8,7 +8,7 @@
 
 namespace at { namespace native { namespace {
 
-using namespace vec256;
+using namespace vec;
 
 #define VEC_LOOP_HEADER(func_t, data) \
   using scalar_t = typename function_traits<func_t>::result_type; \

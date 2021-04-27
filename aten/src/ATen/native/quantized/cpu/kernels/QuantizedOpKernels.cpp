@@ -134,7 +134,7 @@ Tensor qcat_nhwc_kernel(
                 for (int i = 0; i < Vec::float_num_vecs(); ++i) {
                   if (ReLUFused) {
                     retvals[i] =
-                        vec256::maximum(float_values[i], Vec256<float>(0.0f));
+                        vec::maximum(float_values[i], Vec256<float>(0.0f));
                   } else {
                     retvals[i] = float_values[i];
                   }
@@ -593,8 +593,8 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
               scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
           for (int idx = 0; idx < value_dx.size(); ++idx) {
             value_dx[idx] =
-                vec256::minimum(
-                    vec256::maximum(value_dx[idx] + kThreeVec, kZeroVec),
+                vec::minimum(
+                    vec::maximum(value_dx[idx] + kThreeVec, kZeroVec),
                     kSixVec) /
                 kSixVec;
           }
@@ -790,8 +790,8 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
           auto value_dx = value.dequantize(i_scale_vec, i_zero_point_vec,
                                            i_scale_neg_zp_premul_vec);
           for (int idx = 0; idx < value_dx.size(); idx++) {
-            value_dx[idx] = value_dx[idx] * vec256::minimum(
-              vec256::maximum(value_dx[idx] + three_vec, zero_vec),
+            value_dx[idx] = value_dx[idx] * vec::minimum(
+              vec::maximum(value_dx[idx] + three_vec, zero_vec),
               six_vec
             ) / six_vec;
           }
@@ -1036,7 +1036,7 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
           for (int i = 0; i < Vec::float_num_vecs(); ++i) {
             auto c = da[i] + db[i];
             if (ReLUFused) {
-              c = vec256::maximum(c, Vec256<float>(0.0f));
+              c = vec::maximum(c, Vec256<float>(0.0f));
             }
             retvals[i] = c;
           }
@@ -1162,7 +1162,7 @@ void qmaxpool_2d_nhwc_kernel(
                   tcntr = y * iW + x;
                   auto vals = Vec256<scalar_t>::loadu(
                       i_p + tcntr * iC + c + Vec256<scalar_t>::size() * i);
-                  accs[i] = vec256::maximum(accs[i], vals);
+                  accs[i] = vec::maximum(accs[i], vals);
                 }
               } // for x
             } // for y
@@ -1181,7 +1181,7 @@ void qmaxpool_2d_nhwc_kernel(
               for (x = w_start; x < w_end; x += dW) {
                 tcntr = y * iW + x;
                 auto vals = Vec256<scalar_t>::loadu(i_p + tcntr * iC + c);
-                acc = vec256::maximum(acc, vals);
+                acc = vec::maximum(acc, vals);
               } // for x
             } // for y
             acc.store(o_p + c);
@@ -1251,7 +1251,7 @@ void do_avg_pool_nhwc_on_AVX2(
                     csize +
                 c;
             for (int ic = 0; ic < cend; ic++) {
-              auto vals = vec256::convert_to_int32<typename T::underlying>(
+              auto vals = vec::convert_to_int32<typename T::underlying>(
                   i_p + i_idx + ic * vec_width);
               acc_buffer[ic] = acc_buffer[ic] + vals;
             }
@@ -1259,7 +1259,7 @@ void do_avg_pool_nhwc_on_AVX2(
         }
       }
       // convert int32 accumulative to fp32
-      vec256::convert((int*)acc_buffer, (float*)acc_buffer_fp, cend * vec_width);
+      vec::convert((int*)acc_buffer, (float*)acc_buffer_fp, cend * vec_width);
 
       // first quantize using AVX using 32 lanes, then 8, finally falls
       // back to single
@@ -1306,7 +1306,7 @@ void do_avg_pool_on_AVX2(
         for (int64_t ih = hstart; ih < hend; ih++) {
           for (int64_t iw = wstart; iw < wend; iw++) {
             tcntr = id * stride_D + ih * stride_H + iw * stride_W;
-            auto vals = vec256::convert_to_int32<typename T::underlying>(
+            auto vals = vec::convert_to_int32<typename T::underlying>(
                 i_p + tcntr * channel_multiplier + c * stride_C);
             acc = acc + vals;
           }
@@ -1315,7 +1315,7 @@ void do_avg_pool_on_AVX2(
       int32_t acc_int[vec_width];
       float acc_fp[vec_width];
       acc.store(acc_int);
-      vec256::convert(acc_int, acc_fp, vec_width);
+      vec::convert(acc_int, acc_fp, vec_width);
       at::native::quantize_vec<T>(
           1.0f / multiplier,
           output_zero_point,
@@ -1737,18 +1737,18 @@ int64_t do_quantized_bilinear_on_AVX2(
     for (; c + vec_width <= channels; c += vec_width) {
       Vec256<float> pos1_fp_v[4];
       Vec256<int32_t> pos1_int_v[4];
-      pos1_int_v[0] = vec256::convert_to_int32<typename T::underlying>(pos1);
-      pos1_int_v[1] = vec256::convert_to_int32<typename T::underlying>(
+      pos1_int_v[0] = vec::convert_to_int32<typename T::underlying>(pos1);
+      pos1_int_v[1] = vec::convert_to_int32<typename T::underlying>(
           pos1 + w1p * channels);
-      pos1_int_v[2] = vec256::convert_to_int32<typename T::underlying>(
+      pos1_int_v[2] = vec::convert_to_int32<typename T::underlying>(
           pos1 + h1p * input_width * channels);
-      pos1_int_v[3] = vec256::convert_to_int32<typename T::underlying>(
+      pos1_int_v[3] = vec::convert_to_int32<typename T::underlying>(
           pos1 + (h1p * input_width + w1p) * channels);
       for (int i = 0; i < 4; i++) {
         int32_t pos1_int[vec_width];
         float pos1_fp[vec_width];
         pos1_int_v[i].store(pos1_int);
-        vec256::convert(pos1_int, pos1_fp, vec_width);
+        vec::convert(pos1_int, pos1_fp, vec_width);
         pos1_fp_v[i] = Vec256<float>::loadu(pos1_fp, 8);
       }
       Vec256<float> h0lambda_v(h0lambda);
@@ -1964,7 +1964,7 @@ inline void do_bn_compute(
   for (size_t idx = 0; idx < vec_num; ++idx) {
     auto alpha_v = Vec256<float>::loadu(alpha + idx * kVLen);
     auto beta_v = Vec256<float>::loadu(beta + idx * kVLen);
-    vals_dq[idx] = vec256::fmadd(alpha_v, vals_dq[idx], beta_v);
+    vals_dq[idx] = vec::fmadd(alpha_v, vals_dq[idx], beta_v);
   }
   auto outputs_q = Vec::quantize(vals_dq, /*output_scale=*/1.0f, out_zero_point, /*inv_output_scale=*/1.0f);
   // Fake scale again
@@ -2229,8 +2229,8 @@ void quantized_normalize_kernel(
     double eps,
     Tensor* Y) {
   AT_DISPATCH_QINT_TYPES(X.scalar_type(), "quantized_layer_norm_kernel_impl_cpu", [&]() {
-    using qVec = vec256::Vec256<scalar_t>;
-    using fVec = vec256::Vec256<float>;
+    using qVec = vec::Vec256<scalar_t>;
+    using fVec = vec::Vec256<float>;
 
     TORCH_INTERNAL_ASSERT(X.numel() == M * N, "Unexpected num elements in X");
     TORCH_INTERNAL_ASSERT(

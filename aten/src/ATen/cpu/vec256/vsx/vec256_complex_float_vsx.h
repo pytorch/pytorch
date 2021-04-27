@@ -6,7 +6,7 @@
 #include <c10/util/complex.h>
 
 namespace at {
-namespace vec256 {
+namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 using ComplexFlt = c10::complex<float>;

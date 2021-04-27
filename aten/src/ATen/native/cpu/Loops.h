@@ -41,7 +41,7 @@
 
 namespace at { namespace native { namespace {
 
-using namespace vec256;
+using namespace vec;
 
 template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple

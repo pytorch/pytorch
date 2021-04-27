@@ -17,7 +17,7 @@
 
 namespace at { namespace native { namespace {
 
-using namespace vec256;
+using namespace vec;
 
 template <typename scalar_t, typename func_t>
 static inline void cpu_cum_base_kernel(Tensor& result,

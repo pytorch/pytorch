@@ -32,7 +32,7 @@ namespace native {
 
 namespace {
 
-using namespace vec256;
+using namespace vec;
 
 static void sigmoid_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "sigmoid_cpu", [&]() {
@@ -55,7 +55,7 @@ template <typename T>
 void VmlLog(int64_t N, const T* X, T* Y) {
   constexpr int64_t K = Vec256<T>::size();
   at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
-    vec256::map(
+    vec::map(
         [](Vec256<T> x_vec) { return x_vec.log(); },
         Y + begin,
         X + begin,
@@ -150,7 +150,7 @@ void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
                     : std::log(x / (scalar_t(1) - x));
               },
               [kOneVec, lo_vec, hi_vec](Vec256<scalar_t> x_vec) {
-                x_vec = vec256::clamp(x_vec, lo_vec, hi_vec);
+                x_vec = vec::clamp(x_vec, lo_vec, hi_vec);
                 return (x_vec / (kOneVec - x_vec)).log();
               });
         }
@@ -434,7 +434,7 @@ static void clamp_kernel(TensorIteratorBase& iter, const Scalar& min_scalar, con
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
      [=](scalar_t a) -> scalar_t { return std::min(std::max(a, min), max); },
-     [=](Vec256<scalar_t> a) { return vec256::clamp(a, min_vec, max_vec); });
+     [=](Vec256<scalar_t> a) { return vec::clamp(a, min_vec, max_vec); });
   });
 }
 
@@ -444,7 +444,7 @@ static void clamp_max_kernel(TensorIteratorBase& iter, const Scalar& max_scalar)
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
      [=](scalar_t a) -> scalar_t { return std::min(a, max); },
-     [=](Vec256<scalar_t> a) { return vec256::clamp_max(a, max_vec); });
+     [=](Vec256<scalar_t> a) { return vec::clamp_max(a, max_vec); });
   });
 }
 
@@ -454,7 +454,7 @@ static void clamp_min_kernel(TensorIteratorBase& iter, const Scalar& min_scalar)
     auto min_vec = Vec256<scalar_t>(min);
     cpu_kernel_vec(iter,
      [=](scalar_t a) -> scalar_t { return std::max(a, min); },
-     [=](Vec256<scalar_t> a) { return vec256::clamp_min(a, min_vec); });
+     [=](Vec256<scalar_t> a) { return vec::clamp_min(a, min_vec); });
   });
 }
 
@@ -525,7 +525,7 @@ void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> ge
           if (!std::is_same<scalar_t, int>::value && contig) {
             scalar_t *self_seg = self_ptr + begin;
             int* tmp_seg = sample_int_ptr + begin;
-            at::vec256::convert<int, scalar_t>(tmp_seg, self_seg, len);
+            at::vec::convert<int, scalar_t>(tmp_seg, self_seg, len);
           }
         }
       };

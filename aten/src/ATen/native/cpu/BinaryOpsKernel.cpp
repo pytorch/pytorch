@@ -18,7 +18,7 @@ namespace native {
 
 namespace {
 
-using namespace vec256;
+using namespace vec;
 
 // Note: Undefined behavior when performing addition is intentionally
 // ignored.
@@ -35,7 +35,7 @@ void add_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a + alpha * b; },
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
-          return vec256::fmadd(b, alpha_vec, a);
+          return vec::fmadd(b, alpha_vec, a);
         });
       });
   }
@@ -54,9 +54,9 @@ void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Sc
         return std::min(max_scalar, std::max(min_scalar, static_cast<scalar_t>(a + alpha * b)));
       },
       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
-        auto add_clamp_res = vec256::fmadd(b, alpha_vec, a);
-        add_clamp_res = vec256::clamp_min(add_clamp_res, min_vec);
-        add_clamp_res = vec256::clamp_max(add_clamp_res, max_vec);
+        auto add_clamp_res = vec::fmadd(b, alpha_vec, a);
+        add_clamp_res = vec::clamp_min(add_clamp_res, min_vec);
+        add_clamp_res = vec::clamp_max(add_clamp_res, max_vec);
         return add_clamp_res;
       });
     });
@@ -535,7 +535,7 @@ void maximum_kernel(TensorIterator& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "maximum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::maximum(a, b); });
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec::maximum(a, b); });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "maximum_cpu", [&]() {
@@ -547,7 +547,7 @@ void maximum_kernel(TensorIterator& iter) {
             return std::max(a, b);
           }
         },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::maximum(a, b); });
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec::maximum(a, b); });
     });
   }
 }
@@ -562,7 +562,7 @@ void minimum_kernel(TensorIterator& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::minimum(a, b); });
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec::minimum(a, b); });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "minimum_cpu", [&]() {
@@ -574,7 +574,7 @@ void minimum_kernel(TensorIterator& iter) {
             return std::min(a, b);
           }
         },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::minimum(a, b); });
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec::minimum(a, b); });
     });
   }
 }

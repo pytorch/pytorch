@@ -4,7 +4,7 @@
 #include <ATen/cpu/vec256/vec256_base.h>
 #include <ATen/cpu/vec256/vsx/vsx_helpers.h>
 namespace at {
-namespace vec256 {
+namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 

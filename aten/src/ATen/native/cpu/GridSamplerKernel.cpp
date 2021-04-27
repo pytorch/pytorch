@@ -166,7 +166,7 @@ namespace at { namespace native { namespace {
 
 using at::native::detail::GridSamplerInterpolation;
 using at::native::detail::GridSamplerPadding;
-using namespace at::vec256;
+using namespace at::vec;
 
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ComputeLocation ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1003,7 +1003,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
     // Grid is contiguous.
     // Strategy: Sequentially load two vectors at the same time, and get,
     //           e.g.,  {x0, y0, x1, y1}, {x2, y2, x3, y3}. Then we use
-    //           at::vec256::deinterleave2 to get x and y vectors.
+    //           at::vec::deinterleave2 to get x and y vectors.
     auto total_size = out_H * out_W;
     for (int64_t spatial_offset = 0; spatial_offset < total_size; spatial_offset += step) {
       auto grid_offset = spatial_offset * 2;
@@ -1064,7 +1064,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
     // Case 3:
     // General case.
     // Strategy: Do a for-loop over H, for each W slice, use
-    //           at::vec256::gather to load the x and y vectors.
+    //           at::vec::gather to load the x and y vectors.
     int64_t spatial_offset = 0;
     const int64_t i_offset_delta = grid_sW * step;
 
@@ -1084,8 +1084,8 @@ static inline void grid_sample_2d_grid_slice_iterator(
           // prevents illegal memory access, sets the exceeding offsets to zero
           i_offsets = iVec::set(iVec(0), i_offsets, len);
         }
-        apply_fn(vec256::gather<sizeof(scalar_t)>(grid_ptr_x, i_offsets),
-                 vec256::gather<sizeof(scalar_t)>(grid_ptr_y, i_offsets),
+        apply_fn(vec::gather<sizeof(scalar_t)>(grid_ptr_x, i_offsets),
+                 vec::gather<sizeof(scalar_t)>(grid_ptr_y, i_offsets),
                  spatial_offset, len);
 
         grid_ptr_x += i_offset_delta;
