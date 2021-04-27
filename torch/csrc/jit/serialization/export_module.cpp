@@ -435,8 +435,7 @@ void ScriptModuleSerializer::writeArchive(
                   tensor.storage().unsafeGetStorageImpl())) +
               ".storage");
         } else {
-          tensor_names.push_back(
-              std::to_string(tensor_names.size()) + ".storage");
+          tensor_names.push_back(std::to_string(tensor_names.size()));
         }
         return tensor_names.back();
       });
