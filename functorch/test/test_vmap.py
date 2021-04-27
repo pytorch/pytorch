@@ -1667,6 +1667,40 @@ class TestVmapOperators(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(baz, memory_format=torch.channels_last_3d))(tensor)
 
+    def test_unsqueeze(self):
+        op = torch.unsqueeze
+        test = self._vmap_view_test
+        B0, B1, B2 = 7, 11, 13
+
+        # unsqueeze dim 0
+        test(op, (torch.rand(B0, 2, 5), 0), in_dims=(0, None))
+        test(op, (torch.rand(2, B0, 5), 0), in_dims=(1, None))
+        
+        # unsqueeze last dim (positive)
+        test(op, (torch.rand(B0, 2, 5), 2), in_dims=(0, None))
+        test(op, (torch.rand(2, B0, 5), 2), in_dims=(1, None))
+
+        # unsqueeze last dim (negative)
+        test(op, (torch.rand(B0, 2, 5), -1), in_dims=(0, None))
+        test(op, (torch.rand(2, B0, 5), -1), in_dims=(1, None))
+
+        # nested vmaps
+        def unsqueeze_0(x):
+            return torch.unsqueeze(x, 0)
+
+        def unsqueeze_last(x):
+            return torch.unsqueeze(x, -1)
+
+        # bdims in canonical order
+        test(vmap(unsqueeze_0), (torch.rand(B0, B1, 2), ))
+        test(vmap(unsqueeze_last), (torch.rand(B0, B1, 2),))
+
+        # wild bdims
+        test(vmap(unsqueeze_0), (torch.rand(B1, 2, B0),), in_dims=2)
+        test(vmap(unsqueeze_0, in_dims=1), (torch.rand(2, B1, B0),), in_dims=2)
+        test(vmap(unsqueeze_last), (torch.rand(B1, 2, B0),), in_dims=2)
+        test(vmap(unsqueeze_last, in_dims=1), (torch.rand(2, B1, B0),), in_dims=2)
+
     def test_movedim(self):
         op = torch.movedim
         test = self._vmap_view_test
