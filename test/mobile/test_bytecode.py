@@ -1,13 +1,5 @@
-import torch
-import io
-
-from torch.jit.mobile import _load_for_lite_interpreter, _get_bytecode_version
+from torch.jit.mobile import _get_model_bytecode_version
 from torch.testing._internal.common_utils import TestCase, run_tests
-import pathlib
-import tempfile
-import torch.utils.show_pickle
-import shutil
-import fnmatch
 from pathlib import Path
 
 pytorch_test_dri = Path(__file__).resolve().parents[1]
@@ -29,12 +21,12 @@ pytorch_test_dri = Path(__file__).resolve().parents[1]
 #   str(output_model_path))
 
 class testVariousModelVersions(TestCase):
-    def test_get_bytecode_version(self):
+    def test_get_model_bytecode_version(self):
         script_module_v4 = pytorch_test_dri / "cpp" / "jit" / "script_module_v4.ptl"
         script_module_v5 = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
 
-        version_v4 = _get_bytecode_version(script_module_v4)
-        version_v5 = _get_bytecode_version(script_module_v5)
+        version_v4 = _get_model_bytecode_version(script_module_v4)
+        version_v5 = _get_model_bytecode_version(script_module_v5)
 
         assert(version_v4 == 4)
         assert(version_v5 == 5)

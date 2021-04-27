@@ -17,6 +17,7 @@ TypePtr parseType(const std::string& pythonStr);
 namespace torch {
 namespace jit {
 
+using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
@@ -24,7 +25,7 @@ using caffe2::serialize::ReadAdapterInterface;
 namespace {
 
 TypePtr resolveTypeName(
-    std::shared_ptr<CompilationUnit>& compilation_unit,
+    std::shared_ptr<CompilationUnit> compilation_unit,
     const c10::QualifiedName& qn) {
   // HACK: first we check whether the name starts with special prefix to
   // tell if it's a supported pytorch class type. There are two special
@@ -136,17 +137,17 @@ std::vector<IValue> get_bytecode_vals(
 
 } // namespace
 
-int64_t _get_bytecode_version(std::istream& in) {
+int64_t _get_model_bytecode_version(std::istream& in) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  return _get_bytecode_version(std::move(rai));
+  return _get_model_bytecode_version(std::move(rai));
 }
 
-int64_t _get_bytecode_version(const std::string& filename) {
+int64_t _get_model_bytecode_version(const std::string& filename) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _get_bytecode_version(std::move(rai));
+  return _get_model_bytecode_version(std::move(rai));
 }
 
-int64_t _get_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
+int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
   if (check_zip_file(rai)) {
     return -1;
   }
