@@ -850,7 +850,8 @@ Tensor& slow_conv_transpose2d_out_cpu(const Tensor& input,
     IntArrayRef dilation,
     Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   Tensor columns = at::empty({0}, input.options());
 
@@ -878,7 +879,8 @@ Tensor slow_conv_transpose2d_cpu(
     IntArrayRef output_padding,
     IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   Tensor output = at::empty({0}, input.options());
   Tensor columns = at::empty({0}, input.options());
