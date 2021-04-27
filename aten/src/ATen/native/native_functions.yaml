@@ -5783,12 +5783,12 @@
     CPU: _lu_solve_helper_cpu
     CUDA: _lu_solve_helper_cuda
 
-- func: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor, Tensor, Tensor)
+- func: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   variants: function
   dispatch:
     CPU, CUDA: lu_unpack
 
-- func: lu_unpack.out(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True, *, Tensor(a!) P, Tensor(a!) L, Tensor(a!) U) -> (Tensor(a!), Tensor(a!), Tensor(a!))
+- func: lu_unpack.out(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True, *, Tensor(a!) P, Tensor(b!) L, Tensor(c!) U) -> (Tensor(a!) P, Tensor(b!) L, Tensor(c!) U)
   variants: function
   dispatch:
     CPU, CUDA: lu_unpack_out

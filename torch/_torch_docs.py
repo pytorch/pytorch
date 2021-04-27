@@ -5028,11 +5028,15 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.lu_unpack, r"""
-lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True) -> (Tensor, Tensor, Tensor)
+lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-Unpacks the data and pivots from a LU factorization of a tensor.
+Unpacks the data and pivots from a LU factorization of a tensor into tensors ``L`` and ``U`` and a permutation tensor ``P``
+such that ``LU_data, LU_pivots = (P @ L @ U).lu()``.
 
 Returns a tuple of tensors as ``(the P tensor (permutation matrix), the L tensor, the U tensor)``.
+
+.. note:: ``P.dtype == LU_data.dtype`` and ``P.dtype`` is not an integer type so that matrix products with ``P``
+          are possible without casting it to a floating type.
 
 Args:
     LU_data (Tensor): the packed LU factorization data
@@ -5043,6 +5047,7 @@ Args:
     unpack_pivots (bool): flag indicating if the pivots should be unpacked into a permutation matrix ``P``.
                           If ``False``, then the returned ``P`` is  ``None``.
                           Default: ``True``
+    out (tuple, optional): a tuple of three tensors to use for the outputs ``(P, L, U)``.
 
 Examples::
 
