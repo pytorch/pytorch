@@ -519,7 +519,8 @@ TensorPipeAgent::TensorPipeAgent(
   // register Future factories
   FutureFactoryRegistry::getInstance().registerFutureFactory(
       c10::DeviceType::CPU,
-      [](const std::vector<c10::DeviceIndex>& devices) -> std::shared_ptr<JitFuture> {
+      [](const std::vector<c10::DeviceIndex>& devices)
+          -> std::shared_ptr<JitFuture> {
         TORCH_INTERNAL_ASSERT(devices.empty());
         return std::make_shared<JitFuture>(at::AnyClassType::get());
       });
@@ -527,7 +528,8 @@ TensorPipeAgent::TensorPipeAgent(
 #ifdef USE_CUDA_NOT_ROCM
   FutureFactoryRegistry::getInstance().registerFutureFactory(
       c10::DeviceType::CUDA,
-      [](const std::vector<c10::DeviceIndex>& devices) -> std::shared_ptr<JitFuture> {
+      [](const std::vector<c10::DeviceIndex>& devices)
+          -> std::shared_ptr<JitFuture> {
         if (!devices.empty()) {
           return std::make_shared<at::cuda::CUDAFuture>(
               at::AnyClassType::get(), devices);

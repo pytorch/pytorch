@@ -188,9 +188,8 @@ inline std::shared_ptr<LazyStreamContext> createLazyStreamContext(
       std::move(current_stream_provider));
 }
 
-using future_factory_t =
-    std::function<std::shared_ptr<JitFuture>(
-        const std::vector<c10::DeviceIndex>&)>;
+using future_factory_t = std::function<std::shared_ptr<JitFuture>(
+    const std::vector<c10::DeviceIndex>&)>;
 
 // A registry for Future factories that create either ivalue::Future or
 // CUDAFuture. The RPC agent is responsible for registering Future
@@ -214,8 +213,8 @@ class FutureFactoryRegistry final {
   }
 
  private:
-  future_factory_t factories_[
-      static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+  future_factory_t factories_[static_cast<size_t>(
+      c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 };
 
 } // namespace rpc

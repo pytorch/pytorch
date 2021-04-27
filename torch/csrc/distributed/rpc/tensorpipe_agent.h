@@ -286,9 +286,10 @@ class TensorPipeAgent : public RpcAgent {
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
     explicit AtomicJitFuture(const std::vector<c10::DeviceIndex>& devices) {
-      c10::DeviceType type = devices.empty() ?
-          c10::DeviceType::CPU : c10::DeviceType::CUDA;
-      jitFuture = FutureFactoryRegistry::getInstance().createFuture(type, devices);
+      c10::DeviceType type =
+          devices.empty() ? c10::DeviceType::CPU : c10::DeviceType::CUDA;
+      jitFuture =
+          FutureFactoryRegistry::getInstance().createFuture(type, devices);
     }
 
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
