@@ -2706,19 +2706,25 @@ tensor_binary_ops = [
     '__eq__', '__ne__',
 
     '__add__', '__radd__', '__iadd__',
-    '__sub__', '__rsub__', '__isub__',
+    '__sub__', '__isub__',
     '__mul__', '__rmul__', '__imul__',
-    '__matmul__', '__rmatmul__', '__imatmul__',
-    '__truediv__', '__rtruediv__', '__itruediv__',
+    '__matmul__',
+    '__truediv__', '__itruediv__',
     '__floordiv__', '__rfloordiv__', '__ifloordiv__',
-    '__mod__', '__rmod__', '__imod__',
-    '__divmod__', '__rdivmod__', '__idivmod__',
-    '__pow__', '__rpow__', '__ipow__',
-    '__lshift__', '__rlshift__', '__ilshift__',
-    '__rshift__', '__rrshift__', '__irshift__',
-    '__and__', '__rand__', '__iand__',
-    '__xor__', '__rxor__', '__ixor__',
-    '__or__', '__ror__', '__ior__',
+    '__mod__', '__imod__',
+    '__rpow__', '__ipow__',
+    '__lshift__', '__ilshift__',
+    '__rshift__', '__irshift__',
+    '__and__', '__iand__',
+    '__xor__', '__ixor__',
+    '__or__', '__ior__',
+
+    # Attribute does not exist
+    # '__rmatmul__', '__rmod__', '__divmod__', '__rdivmod__', '__idivmod__',
+    # '__pow__', '__rand__', '__ror__', '__rxor__', '__rlshift__', '__rrshift__',
+
+    # Attribute exists, but `NotImplemented` is not returned.
+    # '__rsub__', '__imatmul__', '__rtruediv__',
 ]
 
 # Test that binary math operations return NotImplemented for unknown types.
