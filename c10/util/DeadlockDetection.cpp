@@ -13,7 +13,7 @@ bool check_python_gil() {
 }
 
 void SetPythonGILHooks(PythonGILHooks* hooks) {
-  // TODO: assert !python_gil_hooks?  Properly unset this on destruction?
+  TORCH_INTERNAL_ASSERT(!hooks || !python_gil_hooks);
   python_gil_hooks = hooks;
 }
 

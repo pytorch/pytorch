@@ -39,6 +39,9 @@ struct C10_API PythonGILHooksRegisterer {
   explicit PythonGILHooksRegisterer(PythonGILHooks* factory) {
     SetPythonGILHooks(factory);
   }
+  ~PythonGILHooksRegisterer() {
+    SetPythonGILHooks(nullptr);
+  }
 };
 
 } // namespace impl
