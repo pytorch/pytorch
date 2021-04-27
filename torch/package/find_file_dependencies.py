@@ -49,10 +49,15 @@ class _ExtractModuleReferences(ast.NodeVisitor):
             return node.value
 
     def _grab_node_str(self, node):
-        if sys.version_info[:2] < (3, 8):
-            return node.s
+        if isinstance(node, ast.Name):
+            return node.id
+        elif isinstance(node, ast.Constant):
+            if sys.version_info[:2] < (3, 8):
+                return node.s
+            else:
+                return node.value
         else:
-            return node.value
+            raise Exception(f"Unsupported node type: {type(node)}")
 
     def visit_Call(self, node):
         # __import__ calls aren't routed to the visit_Import/From nodes

@@ -231,7 +231,7 @@ class TestMisc(PackageTestCase):
                 dedent(
                     """\
                     import os
-                    import mkl
+                    import yaml
 
                     def fn():
                         pass
@@ -241,7 +241,7 @@ class TestMisc(PackageTestCase):
 
         broken_modules = [module.name for module in pe.broken_modules]
         self.assertEqual(len(broken_modules), 3)
-        self.assertIn("mkl._mklinit", broken_modules)
+        self.assertIn("_yaml", broken_modules)
 
         for module in pe.broken_modules:
             self.assertRegex(module.reason, r"could not be found")
