@@ -2094,7 +2094,7 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
   ASSERT_NE(mul_ss.str().find("line 6"), std::string::npos);
   ASSERT_NE(
       mul_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
-  ASSERT_NE(add_ss.str().find("return x * y"), std::string::npos);
+  ASSERT_NE(mul_ss.str().find("return x * y"), std::string::npos);
 }
 
 TEST(AutogradSymbolsTest, Basic) {
