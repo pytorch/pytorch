@@ -98,12 +98,12 @@ def _get_bytecode_version(f_input):
     """
     if isinstance(f_input, str):
         if not os.path.exists(f_input):
-            raise ValueError("The provided filename {} does not exist".format(f_input))
+            raise ValueError(f"The provided filename {f_input} does not exist")
         if os.path.isdir(f_input):
-            raise ValueError("The provided filename {} is a directory".format(f_input))
+            raise ValueError(f"The provided filename {f_input} is a directory")
 
     if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)):
-        return torch._C._get_bytecode_version(f_input)
+        return torch._C._get_bytecode_version(str(f_input))
     else:
         return torch._C._get_bytecode_version_from_buffer(f_input.read())
 
