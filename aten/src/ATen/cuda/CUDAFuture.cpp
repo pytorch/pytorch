@@ -9,13 +9,10 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/ivalue_inl.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAFunctions.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/core/StreamGuard.h>
 #include <c10/macros/Export.h>
 #include <c10/util/intrusive_ptr.h>
 
@@ -52,35 +49,44 @@ std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
 }
 
 std::vector<c10::DeviceIndex> getDevicesOfDataPtrs(
+    const c10::impl::DeviceGuardImplInterface* impl,
     const std::vector<std::reference_wrapper<const at::DataPtr>>& data_ptrs) {
-  std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
+  std::vector<bool> isDeviceUsed(impl->deviceCount(), false);
   for (const at::DataPtr& data_ptr : data_ptrs) {
-    if (data_ptr.device().is_cuda()) {
-      isCudaDeviceUsed[data_ptr.device().index()] = true;
+    if (!data_ptr.device().is_cpu()) {
+      TORCH_CHECK_VALUE(
+          data_ptr.device().type() == impl->type(),
+          "Expected all data ptrs to be on a device of type ",
+          impl->type(),
+          ", got one on device ",
+          data_ptr.device());
+      isDeviceUsed[data_ptr.device().index()] = true;
     }
   }
   std::vector<c10::DeviceIndex> deviceIndices;
-  for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
-    if (isCudaDeviceUsed[idx]) {
+  for (c10::DeviceIndex idx = 0; idx < isDeviceUsed.size(); idx++) {
+    if (isDeviceUsed[idx]) {
       deviceIndices.push_back(idx);
     }
   }
   return deviceIndices;
 }
 
-std::string formatSetOfDevices(const std::vector<c10::DeviceIndex>& devices) {
+std::string formatSetOfDevices(
+    const c10::impl::DeviceGuardImplInterface* impl,
+    const std::vector<c10::DeviceIndex>& devices) {
   if (devices.empty()) {
     return "(none)";
   }
   std::ostringstream oss;
-  oss << "cuda:" << static_cast<int64_t>(devices[0]);
+  oss << c10::Device(impl->type(), devices[0]);
   for (size_t idx = 1; idx < devices.size(); idx++) {
     if (idx == devices.size() - 1) {
       oss << " and ";
     } else {
       oss << ", ";
     }
-    oss << "cuda:" << static_cast<int64_t>(devices[idx]);
+    oss << c10::Device(impl->type(), devices[idx]);
   }
   return oss.str();
 }
@@ -96,12 +102,13 @@ std::vector<c10::DeviceIndex> sortDevices(
 
 CUDAFuture::CUDAFuture(at::TypePtr type, std::vector<c10::DeviceIndex> devices)
     : at::ivalue::Future(std::move(type)),
+      impl_(c10::impl::getDeviceGuardImpl(c10::kCUDA)),
       devices_(sortDevices(std::move(devices))) {
   // Use current device to initialize currentDevice_. This is necessary
   // because preMarkCompletedHook won't be called when the Future contains
   // an error. Uninitialized currentDevice_ could lead to crash when used
   // in CUDAGuard.
-  currentDevice_ = c10::cuda::current_device();
+  currentDevice_ = impl_->getDevice().index();
 }
 
 c10::intrusive_ptr<ivalue::Future> CUDAFuture::createInstance(
@@ -125,7 +132,7 @@ void CUDAFuture::preMarkCompletedHook(
   std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs =
       dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
   std::vector<c10::DeviceIndex> usedDevices =
-      getDevicesOfDataPtrs(actualDataPtrs);
+      getDevicesOfDataPtrs(impl_, actualDataPtrs);
   std::vector<c10::DeviceIndex> excessDevices;
   std::set_difference(
       usedDevices.begin(),
@@ -136,65 +143,66 @@ void CUDAFuture::preMarkCompletedHook(
   TORCH_CHECK_VALUE(
       excessDevices.empty(),
       "The result contained tensors residing on device(s) ",
-      formatSetOfDevices(excessDevices),
+      formatSetOfDevices(impl_, excessDevices),
       " which are not among the expected device(s) ",
-      formatSetOfDevices(devices_));
+      formatSetOfDevices(impl_, devices_));
 
-  currentDevice_ = c10::cuda::current_device();
+  currentDevice_ = impl_->getDevice().index();
 
   // Extract them once and cache them for later uses.
   dataPtrs_ = std::move(actualDataPtrs);
 
   for (const c10::DeviceIndex& idx : usedDevices) {
-    at::cuda::CUDAEvent cudaEvent;
-    cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
-    cudaEvents_.push_back(std::move(cudaEvent));
+    c10::Event event(impl_->type());
+    event.record(impl_->getStream(c10::Device(impl_->type(), idx)));
+    events_.push_back(std::move(event));
   }
 }
 
 std::function<void(void)> CUDAFuture::wrapCallback(
     std::function<void(void)> callback) {
   return [this, callback{std::move(callback)}]() {
-    std::vector<at::cuda::CUDAStream> streams;
+    std::vector<c10::Stream> streams;
     for (const c10::DeviceIndex& idx : devices_) {
       // FIXME Should we find a way to allow to change the priority of
       // streams?
-      streams.push_back(
-          at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
+      streams.push_back(impl_->getStreamFromPool(
+          c10::Device(impl_->type(), idx), /*isHighPriority=*/false));
     }
 
     // Use the dedicated callback stream to run callback.
-    c10::cuda::CUDAMultiStreamGuard streamGuard(streams);
+    c10::MultiStreamGuard streamGuard(streams);
 
-    for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
-      cudaEvent.block(at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+    for (c10::Event& event : events_) {
+      event.block(impl_->getStream(
+          c10::Device(event.device_type(), event.device_index())));
     }
 
     // Do not free the underlying data storage of value_ before its
     // usage on the stream finishes.
     for (const at::DataPtr& data_ptr : dataPtrs_) {
-      if (data_ptr.device().is_cuda()) {
-        c10::cuda::CUDACachingAllocator::recordStream(
-            data_ptr,
-            at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+      if (!data_ptr.device().is_cpu()) {
+        impl_->recordDataPtrOnStream(
+            data_ptr, impl_->getStream(data_ptr.device()));
       }
     }
 
-    c10::cuda::CUDAGuard deviceGuard(currentDevice_);
+    c10::DeviceGuard deviceGuard(c10::Device(impl_->type(), currentDevice_));
 
     callback();
   };
 }
 
 void CUDAFuture::postWaitHook(const at::IValue& value) {
-  for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
-    cudaEvent.block(at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+  for (c10::Event& event : events_) {
+    event.block(impl_->getStream(
+        c10::Device(event.device_type(), event.device_index())));
   }
 
   for (const at::DataPtr& data_ptr : dataPtrs_) {
-    if (data_ptr.device().is_cuda()) {
-      c10::cuda::CUDACachingAllocator::recordStream(
-          data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+    if (!data_ptr.device().is_cpu()) {
+      impl_->recordDataPtrOnStream(
+          data_ptr, impl_->getStream(data_ptr.device()));
     }
   }
 }

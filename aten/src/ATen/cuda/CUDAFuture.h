@@ -5,8 +5,9 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/ivalue_inl.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/Device.h>
+#include <c10/core/Event.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Export.h>
 #include <c10/util/intrusive_ptr.h>
 
@@ -31,6 +32,10 @@ struct TORCH_CUDA_CPP_API CUDAFuture final : at::ivalue::Future {
   void postWaitHook(const at::IValue& value) override;
 
  private:
+  // An upcast pointer to a virtual class which allows us to manipulate events,
+  // streams, ... in a generic way, without an explicit dependency on CUDA.
+  const c10::impl::DeviceGuardImplInterface* const impl_;
+
   // The device that was current when markCompleted was called, which we'll
   // restore when invoking callbacks.
   c10::DeviceIndex currentDevice_;
@@ -39,7 +44,7 @@ struct TORCH_CUDA_CPP_API CUDAFuture final : at::ivalue::Future {
   // are recorded on the appropriate streams when the future is marked completed
   // and can then be queried/waited/blocked on. There is one event for each
   // distinct device on which the value's tensors reside.
-  std::vector<at::cuda::CUDAEvent> cudaEvents_;
+  std::vector<c10::Event> events_;
 
   // A cached version of the data ptrs extracted from the value when the future
   // is first marked completed.
