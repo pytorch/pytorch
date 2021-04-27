@@ -18,7 +18,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 #elif defined(TH_REAL_IS_BFLOAT16)
 #define IS_NONZERO(val) (c10::BFloat16(0)!=val)
 #else
-#define IS_NONZERO(val) ((val)!=0)
+#define IS_NONZERO(val) ((val)!=scalar_t(0))
 #endif
 
   /* First Pass to determine size of subscripts */
