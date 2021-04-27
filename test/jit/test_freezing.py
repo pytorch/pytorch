@@ -1828,18 +1828,55 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(mod_eager(inp), frozen_mod(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_incompatible_perf_formats(self):
+        with set_default_dtype(torch.float):
+            class Mod(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 64, 3, 2)
+                    self.max_pool = torch.nn.MaxPool2d(111, 111)
+
+                def forward(self, x):
+                    a = self.conv(x)
+                    b = self.max_pool(a)
+                    return a + b
+
+            model = Mod()
+            model.eval()
+            mod = torch.jit.freeze(torch.jit.script(model))
+            N, C, H, W, = 10, 3, 224, 224
+            inp = torch.randn(N, C, H, W)
+            self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+            self.assertTrue(torch.allclose(model(inp), mod(inp)))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_adaptive_avgpool2d(self):
+        with set_default_dtype(torch.float):
+
+            sub_model = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 2, 2), torch.nn.AdaptiveAvgPool2d(4), torch.nn.Hardswish())
+            sub_model.eval()
+            mod = torch.jit.freeze(torch.jit.script(sub_model))
+            N, C, H, W, = 10, 3, 224, 224
+            inp = torch.randn(N, C, H, W)
+            self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+            self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     @skipIfNoTorchVision
     def test_conv_hardswish(self):
         with set_default_dtype(torch.float):
             activations = [
-                torch.nn.Hardswish,
-                torch.nn.Hardsigmoid,
-                torch.nn.ReLU6,
+                torch.nn.Hardswish(),
+                torch.nn.Hardsigmoid(),
+                torch.nn.ReLU6(),
+                torch.nn.Hardtanh(0., 6.),
+                torch.nn.Hardtanh(1., 100.),
+                torch.nn.Hardtanh(-100., -1.),
             ]
 
             model = torchvision.models.resnet18()
             for activation in activations:
-                sub_model = torch.nn.Sequential(model.conv1, activation())
+                sub_model = torch.nn.Sequential(model.conv1, activation)
                 sub_model.eval()
                 mod = torch.jit.freeze(torch.jit.script(sub_model))
                 N, C, H, W, = 10, 3, 224, 224
@@ -1853,7 +1890,6 @@ class TestFrozenOptimizations(JitTestCase):
             op_map = {
                 'prim::MKLDNNHardSwish' : F.hardswish,
                 'prim::MKLDNNHardSigmoid' : F.hardsigmoid,
-                'prim::MKLDNNRelu6' : F.relu6
             }
 
             input_sizes = ([0], [1], [3], [1, 3, 8, 8])
