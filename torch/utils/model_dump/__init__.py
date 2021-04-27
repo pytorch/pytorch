@@ -54,6 +54,7 @@ Possible improvements:
     - Add the ability for JS to choose the URL to load the JSON based
       on the page URL (query or hash).  That way we could publish the
       inlined skeleton once and have it load various JSON blobs.
+    - Add a button to expand all expandable sections so ctrl-F works well.
     - Add hyperlinking from data to code, and code to code.
     - Add hyperlinking from debug info to Diffusion.
     - Make small tensor contents available.
@@ -73,6 +74,10 @@ import pickle
 import pprint
 import importlib.resources
 import urllib.parse
+
+from typing import (
+    Dict,
+)
 
 import torch.utils.show_pickle
 
@@ -147,7 +152,7 @@ def get_model_info(
 
     if isinstance(path_or_file, os.PathLike):
         default_title = os.fspath(path_or_file)
-        file_size = path_or_file.stat().st_size
+        file_size = path_or_file.stat().st_size  # type: ignore
     elif isinstance(path_or_file, str):
         default_title = path_or_file
         file_size = pathlib.Path(path_or_file).stat().st_size
@@ -187,7 +192,7 @@ def get_model_info(
         # so re-used strings are stored efficiently.
         # However, JSON has no way of representing this,
         # so we have to do it manually.
-        interned_strings = {}
+        interned_strings : Dict[str, int] = {}
 
         def ist(s):
             if s not in interned_strings:
@@ -285,10 +290,10 @@ def get_inline_skeleton():
     It can load model_info.json over HTTP, or be passed to burn_in_info.
     """
 
-    skeleton = importlib.resources.read_text(__package__, "skeleton.html")
-    js_code = importlib.resources.read_text(__package__, "code.js")
+    skeleton = importlib.resources.read_text(__package__, "skeleton.html")  # type: ignore
+    js_code = importlib.resources.read_text(__package__, "code.js")  # type: ignore
     for js_module in ["preact", "htm"]:
-        js_lib = importlib.resources.read_binary(__package__, f"{js_module}.mjs")
+        js_lib = importlib.resources.read_binary(__package__, f"{js_module}.mjs")  # type: ignore
         js_url = "data:application/javascript," + urllib.parse.quote(js_lib)
         js_code = js_code.replace(f"https://unpkg.com/{js_module}?module", js_url)
     skeleton = skeleton.replace(' src="./code.js">', ">\n" + js_code)

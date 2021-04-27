@@ -29,8 +29,9 @@ class Vec256<float> {
   using value_type = float;
   using vec_internal_type = vfloat32;
   using vec_internal_mask_type = vbool32;
+  using size_type = int;
 
-  static constexpr int size() {
+  static constexpr size_type size() {
     return 8;
   }
   Vec256() {}
@@ -265,7 +266,9 @@ class Vec256<float> {
   Vec256<float> atan2(const Vec256<float>& b) const {
      return {Sleef_atan2f4_u10vsx(_vec0, b._vec0), Sleef_atan2f4_u10vsx(_vec1, b._vec1)};
   }
-
+  Vec256<float> copysign(const Vec256<float> &sign) const {
+    return {Sleef_copysignf4_vsx(_vec0, sign._vec0), Sleef_copysignf4_vsx(_vec1, sign._vec1)};
+  }
   Vec256<float> lgamma() const {
      return {Sleef_lgammaf4_u10vsx(_vec0), Sleef_lgammaf4_u10vsx(_vec1)};
   }
