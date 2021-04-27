@@ -826,6 +826,7 @@ class Tensor(torch._C._TensorBase):
             sizes (Union[Tuple[int] or torch.Size, Tuple[Tuple[str, int]]]): New shape of the unflattened dimension
 
         Examples:
+        
             >>> torch.randn(3, 4, 1).unflatten(1, (2, 2)).shape
             torch.Size([3, 2, 2, 1])
             >>> torch.randn(3, 4, 1).unflatten(1, (-1, 2)).shape # the size -1 is inferred from the size of dimension 1
@@ -838,6 +839,8 @@ class Tensor(torch._C._TensorBase):
             >>> torch.randn(2, names=('A',)).unflatten('A', (('B1', -1), ('B2', 1)))
             tensor([[-0.8591],
                     [ 0.3100]], names=('B1', 'B2'))
+            >>> torch.randn(2, names=('A',)).unflatten('A', (('B1', -1), ('B2', 1))).shape
+            torch.Size([2, 1])
 
         .. warning::
             The named tensor API is experimental and subject to change.
