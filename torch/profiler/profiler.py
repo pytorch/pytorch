@@ -76,9 +76,7 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
         if not worker_name:
             worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
         file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
-        if use_gzip:
-            file_name = file_name + '.gz'
-        prof.export_chrome_trace(os.path.join(dir_name, file_name))
+        prof.export_chrome_trace(os.path.join(dir_name, file_name), use_gzip)
     return handler_fn
 
 
@@ -298,11 +296,15 @@ class profile(object):
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
 
-    def export_chrome_trace(self, path: str):
+    def export_chrome_trace(self, path: str, use_gzip: bool=False):
         """
         Exports the collected trace in Chrome JSON format.
         """
         assert self.profiler
+
+        if use_gzip and not path.endswith('.gz'):
+            path = path + '.gz'
+
         if path.endswith('.gz'):
             fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
             fp.close()
