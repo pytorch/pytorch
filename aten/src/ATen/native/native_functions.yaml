@@ -2823,23 +2823,25 @@
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
 
-- func: _pixel_shuffle_cpu(Tensor self, int[] output_sizes, int upscale_factor) -> Tensor
+- func: native_pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
   dispatch:
-    CPU: _pixel_shuffle_cpu
+    CPU: pixel_shuffle_cpu
+    CompositeImplicitAutograd: math_pixel_shuffle
 
-- func: _pixel_shuffle_backward_cpu(Tensor grad_output, int[] input_sizes, int upscale_factor) -> Tensor
+- func: native_pixel_shuffle_backward(Tensor grad_output, int[] input_sizes, int upscale_factor) -> Tensor
   dispatch:
-    CPU: _pixel_shuffle_backward_cpu
+    CPU: pixel_shuffle_backward_cpu
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
 
-- func: _pixel_unshuffle_cpu(Tensor self, int[] output_sizes, int downscale_factor) -> Tensor
+- func: native_pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
   dispatch:
-    CPU: _pixel_unshuffle_cpu
+    CPU: pixel_unshuffle_cpu
+    CompositeImplicitAutograd: math_pixel_unshuffle
 
-- func: _pixel_unshuffle_backward_cpu(Tensor grad_output, int[] input_sizes, int downscale_factor) -> Tensor
+- func: native_pixel_unshuffle_backward(Tensor grad_output, int[] input_sizes, int downscale_factor) -> Tensor
   dispatch:
-    CPU: _pixel_unshuffle_backward_cpu
+    CPU: pixel_unshuffle_backward_cpu
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
   dispatch:

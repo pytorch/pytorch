@@ -1519,17 +1519,17 @@
 - name: upsample_nearest3d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
   input: upsample_nearest3d_backward(grad, output_size, input.sizes(), scale_factors)
 
-- name: _pixel_shuffle_cpu(Tensor self, int[] output_sizes, int upscale_factor) -> Tensor
-  self: _pixel_shuffle_backward_cpu(grad, self.sizes(), upscale_factor)
+- name: native_pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
+  self: native_pixel_shuffle_backward(grad, self.sizes(), upscale_factor)
 
-- name: _pixel_shuffle_backward_cpu(Tensor grad_output, int[] input_sizes, int upscale_factor) -> Tensor
-  grad_output: _pixel_shuffle_cpu(grad, grad_output.sizes(), upscale_factor)
+- name: native_pixel_shuffle_backward(Tensor grad_output, int[] input_sizes, int upscale_factor) -> Tensor
+  grad_output: native_pixel_shuffle(grad, upscale_factor)
 
-- name: _pixel_unshuffle_cpu(Tensor self, int[] output_sizes, int downscale_factor) -> Tensor
-  self: _pixel_unshuffle_backward_cpu(grad, self.sizes(), downscale_factor)
+- name: native_pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
+  self: native_pixel_unshuffle_backward(grad, self.sizes(), downscale_factor)
 
-- name: _pixel_unshuffle_backward_cpu(Tensor grad_output, int[] input_sizes, int downscale_factor) -> Tensor
-  grad_output: _pixel_unshuffle_cpu(grad, grad_output.sizes(), downscale_factor)
+- name: native_pixel_unshuffle_backward(Tensor grad_output, int[] input_sizes, int downscale_factor) -> Tensor
+  grad_output: native_pixel_unshuffle(grad, downscale_factor)
 
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
