@@ -1,18 +1,18 @@
 #pragma once
 
-#include <ATen/cpu/vec256/intrinsics.h>
-#include <ATen/cpu/vec256/vec256_base.h>
-#include <ATen/cpu/vec256/vsx/vsx_helpers.h>
-#include <ATen/cpu/vec256/vsx/vec256_double_vsx.h>
-#include <ATen/cpu/vec256/vsx/vec256_float_vsx.h>
-#include <ATen/cpu/vec256/vsx/vec256_int16_vsx.h>
-#include <ATen/cpu/vec256/vsx/vec256_int32_vsx.h>
-#include <ATen/cpu/vec256/vsx/vec256_int64_vsx.h>
-#include <ATen/cpu/vec256/vsx/vec256_qint32_vsx.h>
-#include <ATen/cpu/vec256/vsx/vec256_qint8_vsx.h>
-#include <ATen/cpu/vec256/vsx/vec256_quint8_vsx.h>
-#include <ATen/cpu/vec256/vsx/vec256_complex_float_vsx.h>
-#include <ATen/cpu/vec256/vsx/vec256_complex_double_vsx.h>
+#include <ATen/cpu/vec/vec256/intrinsics.h>
+#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_double_vsx.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_float_vsx.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_int16_vsx.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_int32_vsx.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_int64_vsx.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_qint32_vsx.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_qint8_vsx.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_quint8_vsx.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_complex_float_vsx.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_complex_double_vsx.h>
 namespace at {
 namespace vec {
 
@@ -28,37 +28,37 @@ DEFINE_CLAMP_FUNCS(float)
 DEFINE_CLAMP_FUNCS(double)
 
 template <>
-Vec256<double> C10_ALWAYS_INLINE fmadd(
-    const Vec256<double>& a,
-    const Vec256<double>& b,
-    const Vec256<double>& c) {
-  return Vec256<double>{
+Vectorize<double> C10_ALWAYS_INLINE fmadd(
+    const Vectorize<double>& a,
+    const Vectorize<double>& b,
+    const Vectorize<double>& c) {
+  return Vectorize<double>{
       vec_madd(a.vec0(), b.vec0(), c.vec0()),
       vec_madd(a.vec1(), b.vec1(), c.vec1())};
 }
 
 template <>
-Vec256<int64_t> C10_ALWAYS_INLINE fmadd(
-    const Vec256<int64_t>& a,
-    const Vec256<int64_t>& b,
-    const Vec256<int64_t>& c) {
-  return Vec256<int64_t>{
+Vectorize<int64_t> C10_ALWAYS_INLINE fmadd(
+    const Vectorize<int64_t>& a,
+    const Vectorize<int64_t>& b,
+    const Vectorize<int64_t>& c) {
+  return Vectorize<int64_t>{
       a.vec0() * b.vec0() + c.vec0(), a.vec1() * b.vec1() + c.vec1()};
 }
 template <>
-Vec256<int32_t> C10_ALWAYS_INLINE fmadd(
-    const Vec256<int32_t>& a,
-    const Vec256<int32_t>& b,
-    const Vec256<int32_t>& c) {
-  return Vec256<int32_t>{
+Vectorize<int32_t> C10_ALWAYS_INLINE fmadd(
+    const Vectorize<int32_t>& a,
+    const Vectorize<int32_t>& b,
+    const Vectorize<int32_t>& c) {
+  return Vectorize<int32_t>{
       a.vec0() * b.vec0() + c.vec0(), a.vec1() * b.vec1() + c.vec1()};
 }
 template <>
-Vec256<int16_t> C10_ALWAYS_INLINE fmadd(
-    const Vec256<int16_t>& a,
-    const Vec256<int16_t>& b,
-    const Vec256<int16_t>& c) {
-  return Vec256<int16_t>{
+Vectorize<int16_t> C10_ALWAYS_INLINE fmadd(
+    const Vectorize<int16_t>& a,
+    const Vectorize<int16_t>& b,
+    const Vectorize<int16_t>& c) {
+  return Vectorize<int16_t>{
       a.vec0() * b.vec0() + c.vec0(), a.vec1() * b.vec1() + c.vec1()};
 }
 
@@ -69,23 +69,23 @@ DEFINE_REINTERPRET_CAST_TO_ALL_FUNCS(int32_t)
 DEFINE_REINTERPRET_CAST_TO_ALL_FUNCS(int16_t)
 
 template <>
-Vec256<int64_t> C10_ALWAYS_INLINE
-convert_to_int_of_same_size<double>(const Vec256<double>& src) {
-  return Vec256<int64_t>{vec_signed(src.vec0()), vec_signed(src.vec1())};
+Vectorize<int64_t> C10_ALWAYS_INLINE
+convert_to_int_of_same_size<double>(const Vectorize<double>& src) {
+  return Vectorize<int64_t>{vec_signed(src.vec0()), vec_signed(src.vec1())};
 }
 
 template <>
-Vec256<int32_t> C10_ALWAYS_INLINE
+Vectorize<int32_t> C10_ALWAYS_INLINE
 convert_to_int_of_same_size<float>(
-    const Vec256<float>& src) {
-  return Vec256<int32_t>{vec_signed(src.vec0()), vec_signed(src.vec1())};
+    const Vectorize<float>& src) {
+  return Vectorize<int32_t>{vec_signed(src.vec0()), vec_signed(src.vec1())};
 }
 
 template <>
 inline void convert(const int32_t* src, float* dst, int64_t n) {
   // int32_t and float have same size
   int64_t i;
-  for (i = 0; i <= (n - Vec256<float>::size()); i += Vec256<float>::size()) {
+  for (i = 0; i <= (n - Vectorize<float>::size()); i += Vectorize<float>::size()) {
     const int32_t* src_a = src + i;
     float* dst_a = dst + i;
     vint32 input_vec0 = vec_vsx_ld(offset0, reinterpret_cast<const vint32*>(src_a));
@@ -105,7 +105,7 @@ inline void convert(const int32_t* src, float* dst, int64_t n) {
 template <>
 inline void convert(const int64_t* src, double* dst, int64_t n) {
   int64_t i;
-  for (i = 0; i <= (n - Vec256<double>::size()); i += Vec256<double>::size()) {
+  for (i = 0; i <= (n - Vectorize<double>::size()); i += Vectorize<double>::size()) {
     const int64_t* src_a = src + i;
     double* dst_a = dst + i;
     vint64 input_vec0 =
@@ -123,9 +123,9 @@ inline void convert(const int64_t* src, double* dst, int64_t n) {
 }
 
 template <>
-std::pair<Vec256<double>, Vec256<double>> inline interleave2<double>(
-    const Vec256<double>& a,
-    const Vec256<double>& b) {
+std::pair<Vectorize<double>, Vectorize<double>> inline interleave2<double>(
+    const Vectorize<double>& a,
+    const Vectorize<double>& b) {
   // inputs:
   //   a      = {a0, a1, a2, a3}
   //   b      = {b0, b1, b2, b3}
@@ -137,13 +137,13 @@ std::pair<Vec256<double>, Vec256<double>> inline interleave2<double>(
   //   return {a0, b0, a1, b1}
   //          {a2, b2, a3, b3}
   return std::make_pair(
-      Vec256<double>{ab00, ab11}, Vec256<double>{ab2_00, ab2_11});
+      Vectorize<double>{ab00, ab11}, Vectorize<double>{ab2_00, ab2_11});
 }
 
 template <>
-std::pair<Vec256<double>, Vec256<double>> inline deinterleave2<double>(
-    const Vec256<double>& a,
-    const Vec256<double>& b) {
+std::pair<Vectorize<double>, Vectorize<double>> inline deinterleave2<double>(
+    const Vectorize<double>& a,
+    const Vectorize<double>& b) {
   // inputs:
   //   a = {a0, b0, a1, b1}
   //   b = {a2, b2, a3, b3}
@@ -157,13 +157,13 @@ std::pair<Vec256<double>, Vec256<double>> inline deinterleave2<double>(
   //   return {a0, a1, a2, a3}
   //          {b0, b1, b2, b3}
   return std::make_pair(
-      Vec256<double>{aa01, aa23}, Vec256<double>{bb_01, bb_23});
+      Vectorize<double>{aa01, aa23}, Vectorize<double>{bb_01, bb_23});
 }
 
 template <>
-std::pair<Vec256<float>, Vec256<float>> inline interleave2<float>(
-    const Vec256<float>& a,
-    const Vec256<float>& b) {
+std::pair<Vectorize<float>, Vectorize<float>> inline interleave2<float>(
+    const Vectorize<float>& a,
+    const Vectorize<float>& b) {
   // inputs:
   //   a = {a0, a1, a2, a3,, a4, a5, a6, a7}
   //   b = {b0, b1, b2, b3,, b4, b5, b6, b7}
@@ -178,13 +178,13 @@ std::pair<Vec256<float>, Vec256<float>> inline interleave2<float>(
   //          {a4, b4, a5, b5,, a6, b6, a7, b7}
 
   return std::make_pair(
-      Vec256<float>{ab0011, ab2233}, Vec256<float>{ab2_0011, ab2_2233});
+      Vectorize<float>{ab0011, ab2233}, Vectorize<float>{ab2_0011, ab2_2233});
 }
 
 template <>
-std::pair<Vec256<float>, Vec256<float>> inline deinterleave2<float>(
-    const Vec256<float>& a,
-    const Vec256<float>& b) {
+std::pair<Vectorize<float>, Vectorize<float>> inline deinterleave2<float>(
+    const Vectorize<float>& a,
+    const Vectorize<float>& b) {
   // inputs:
   //   a = {a0, b0, a1, b1,, a2, b2, a3, b3}
   //   b = {a4, b4, a5, b5,, a6, b6, a7, b7}
@@ -208,7 +208,7 @@ std::pair<Vec256<float>, Vec256<float>> inline deinterleave2<float>(
   //          {b0, b1, b2, b3,, b4, b5, b6, b7}
 
   return std::make_pair(
-      Vec256<float>{aa0123, aa0123_2}, Vec256<float>{bb0123, bb0123_2});
+      Vectorize<float>{aa0123, aa0123_2}, Vectorize<float>{bb0123, bb0123_2});
 }
 
 } // namespace

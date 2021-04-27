@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/cpu/vec256/intrinsics.h>
-#include <ATen/cpu/vec256/vec256_base.h>
-#include <ATen/cpu/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec256/intrinsics.h>
+#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 #include <sleef.h>
 namespace at {
 namespace vec {
@@ -11,7 +11,7 @@ namespace vec {
 namespace {
 
 template <>
-class Vec256<float> {
+class Vectorize<float> {
  private:
   union {
     struct {
@@ -34,15 +34,15 @@ class Vec256<float> {
   static constexpr size_type size() {
     return 8;
   }
-  Vec256() {}
+  Vectorize() {}
 
-  C10_ALWAYS_INLINE Vec256(vfloat32 v) : _vec0{v}, _vec1{v} {}
-  C10_ALWAYS_INLINE Vec256(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vec256(vfloat32 v1, vfloat32 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vec256(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
-  C10_ALWAYS_INLINE Vec256(float scalar)
+  C10_ALWAYS_INLINE Vectorize(vfloat32 v) : _vec0{v}, _vec1{v} {}
+  C10_ALWAYS_INLINE Vectorize(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
+  C10_ALWAYS_INLINE Vectorize(vfloat32 v1, vfloat32 v2) : _vec0{v1}, _vec1{v2} {}
+  C10_ALWAYS_INLINE Vectorize(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
+  C10_ALWAYS_INLINE Vectorize(float scalar)
       : _vec0{vec_splats(scalar)}, _vec1{vec_splats(scalar)} {}
-  C10_ALWAYS_INLINE Vec256(
+  C10_ALWAYS_INLINE Vectorize(
       float scalar1,
       float scalar2,
       float scalar3,
@@ -61,62 +61,62 @@ class Vec256<float> {
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 0, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 0, Vectorize<float>> C10_ALWAYS_INLINE
+  blend(const Vectorize<float>& a, const Vectorize<float>& b) {
     return a;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 1, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 1, Vectorize<float>> C10_ALWAYS_INLINE
+  blend(const Vectorize<float>& a, const Vectorize<float>& b) {
     return b;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 2, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 2, Vectorize<float>> C10_ALWAYS_INLINE
+  blend(const Vectorize<float>& a, const Vectorize<float>& b) {
     return {b._vec0, a._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 3, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 3, Vectorize<float>> C10_ALWAYS_INLINE
+  blend(const Vectorize<float>& a, const Vectorize<float>& b) {
     return {a._vec0, b._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 4, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 4, Vectorize<float>> C10_ALWAYS_INLINE
+  blend(const Vectorize<float>& a, const Vectorize<float>& b) {
     const vbool32 mask_1st = VsxMask1(mask);
     return {(vfloat32)vec_sel(a._vec0, b._vec0, mask_1st), a._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 5, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 5, Vectorize<float>> C10_ALWAYS_INLINE
+  blend(const Vectorize<float>& a, const Vectorize<float>& b) {
     const vbool32 mask_1st = VsxMask1(mask);
     return {(vfloat32)vec_sel(a._vec0, b._vec0, mask_1st), b._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 6, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 6, Vectorize<float>> C10_ALWAYS_INLINE
+  blend(const Vectorize<float>& a, const Vectorize<float>& b) {
     const vbool32 mask_2nd = VsxMask2(mask);
     // generated masks
     return {a._vec0, (vfloat32)vec_sel(a._vec1, b._vec1, mask_2nd)};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 7, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 7, Vectorize<float>> C10_ALWAYS_INLINE
+  blend(const Vectorize<float>& a, const Vectorize<float>& b) {
     const vbool32 mask_2nd = VsxMask2(mask);
     // generated masks
     return {b._vec0, (vfloat32)vec_sel(a._vec1, b._vec1, mask_2nd)};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 8, Vec256<float>> C10_ALWAYS_INLINE
-  blend(const Vec256<float>& a, const Vec256<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 8, Vectorize<float>> C10_ALWAYS_INLINE
+  blend(const Vectorize<float>& a, const Vectorize<float>& b) {
     const vbool32 mask_1st = VsxMask1(mask);
     const vbool32 mask_2nd = VsxMask2(mask);
     return {
@@ -124,10 +124,10 @@ class Vec256<float> {
         (vfloat32)vec_sel(a._vec1, b._vec1, mask_2nd)};
   }
 
-  static Vec256<float> C10_ALWAYS_INLINE blendv(
-      const Vec256<float>& a,
-      const Vec256<float>& b,
-      const Vec256<float>& mask) {
+  static Vectorize<float> C10_ALWAYS_INLINE blendv(
+      const Vectorize<float>& a,
+      const Vectorize<float>& b,
+      const Vectorize<float>& mask) {
     // the mask used here returned by comparision of vec256
     // assuming this we can use the same mask directly with vec_sel
     return {
@@ -135,8 +135,8 @@ class Vec256<float> {
         vec_sel(a._vec1, b._vec1, mask._vecb1)};
   }
 
-  static Vec256<float> arange(float base = 0.f, float step = 1.f) {
-    return Vec256<float>(
+  static Vectorize<float> arange(float base = 0.f, float step = 1.f) {
+    return Vectorize<float>(
         base,
         base + step,
         base + 2 * step,
@@ -146,9 +146,9 @@ class Vec256<float> {
         base + 6 * step,
         base + 7 * step);
   }
-  static Vec256<float> set(
-      const Vec256<float>& a,
-      const Vec256<float>& b,
+  static Vectorize<float> set(
+      const Vectorize<float>& a,
+      const Vectorize<float>& b,
       size_t count = size()) {
     switch (count) {
       case 0:
@@ -171,7 +171,7 @@ class Vec256<float> {
 
     return b;
   }
-  static Vec256<value_type> C10_ALWAYS_INLINE
+  static Vectorize<value_type> C10_ALWAYS_INLINE
   loadu(const void* ptr, int count = size()) {
     if (count == size()) {
       return {
@@ -200,8 +200,8 @@ class Vec256<float> {
   const float& operator[](int idx) const = delete;
   float& operator[](int idx) = delete;
 
-  Vec256<float> map(float (*f)(float)) const {
-    Vec256<float> ret;
+  Vectorize<float> map(float (*f)(float)) const {
+    Vectorize<float> ret;
     for (int i = 0; i < size() / 2; i++) {
       ret._vec0[i] = f(_vec0[i]);
     }
@@ -211,9 +211,9 @@ class Vec256<float> {
     return ret;
   }
 
-  Vec256<float> mapbi(float (*f)(float, float), const Vec256<float>& other)
+  Vectorize<float> mapbi(float (*f)(float, float), const Vectorize<float>& other)
       const {
-    Vec256<float> ret;
+    Vectorize<float> ret;
     for (int i = 0; i < size() / 2; i++) {
       ret._vec0[i] = f(_vec0[i], other._vec0[i]);
     }
@@ -223,17 +223,17 @@ class Vec256<float> {
     return ret;
   }
 
-  Vec256<float> _nor() const {
+  Vectorize<float> _nor() const {
     return {vec_nor(_vec0, _vec0), vec_nor(_vec1, _vec1)};
   }
 
-  Vec256<float> _isnan() const {
+  Vectorize<float> _isnan() const {
     auto x = *this;
     auto ret = (x == x);
     return ret._nor();
   }
 
-  Vec256<float> _isinf() const {
+  Vectorize<float> _isinf() const {
     auto x = *this;
     return (x == v_inf) | (x == v_minus_inf);
   }
@@ -250,54 +250,54 @@ class Vec256<float> {
     return (result0[1] >> 12 | (result1[1] >> 8));
   }
 
-  Vec256<float> C10_ALWAYS_INLINE abs() const {
+  Vectorize<float> C10_ALWAYS_INLINE abs() const {
     return {vec_abs(_vec0), vec_abs(_vec1)};
   }
 
-  Vec256<float> C10_ALWAYS_INLINE acos() const {
+  Vectorize<float> C10_ALWAYS_INLINE acos() const {
      return {Sleef_acosf4_u10vsx(_vec0), Sleef_acosf4_u10vsx(_vec1)};
   }
-  Vec256<float> C10_ALWAYS_INLINE asin() const {
+  Vectorize<float> C10_ALWAYS_INLINE asin() const {
      return {Sleef_asinf4_u10vsx(_vec0), Sleef_asinf4_u10vsx(_vec1)};
   }
-  Vec256<float> atan() const {
+  Vectorize<float> atan() const {
      return {Sleef_atanf4_u10vsx(_vec0), Sleef_atanf4_u10vsx(_vec1)};
   }
-  Vec256<float> atan2(const Vec256<float>& b) const {
+  Vectorize<float> atan2(const Vectorize<float>& b) const {
      return {Sleef_atan2f4_u10vsx(_vec0, b._vec0), Sleef_atan2f4_u10vsx(_vec1, b._vec1)};
   }
-  Vec256<float> copysign(const Vec256<float> &sign) const {
+  Vectorize<float> copysign(const Vectorize<float> &sign) const {
     return {Sleef_copysignf4_vsx(_vec0, sign._vec0), Sleef_copysignf4_vsx(_vec1, sign._vec1)};
   }
-  Vec256<float> lgamma() const {
+  Vectorize<float> lgamma() const {
      return {Sleef_lgammaf4_u10vsx(_vec0), Sleef_lgammaf4_u10vsx(_vec1)};
   }
-  Vec256<float> erf() const {
+  Vectorize<float> erf() const {
      return {Sleef_erff4_u10vsx(_vec0), Sleef_erff4_u10vsx(_vec1)};
   }
 
-  Vec256<float> erfc() const {
+  Vectorize<float> erfc() const {
      return {Sleef_erfcf4_u15vsx(_vec0), Sleef_erfcf4_u15vsx(_vec1)};
   }
 
-  Vec256<float> erfinv() const {
+  Vectorize<float> erfinv() const {
     return map(calc_erfinv);
   }
 
-  Vec256<float> angle() const {
-    return Vec256<float>{0};
+  Vectorize<float> angle() const {
+    return Vectorize<float>{0};
   }
-  Vec256<float> real() const {
+  Vectorize<float> real() const {
     return *this;
   }
-  Vec256<float> imag() const {
-    return Vec256<float>{0};
+  Vectorize<float> imag() const {
+    return Vectorize<float>{0};
   }
-  Vec256<float> conj() const {
+  Vectorize<float> conj() const {
     return *this;
   }
 
-  Vec256<float> C10_ALWAYS_INLINE exp() const {
+  Vectorize<float> C10_ALWAYS_INLINE exp() const {
     // implementation logic from avx_mathfun with some modifications from sleef
     // Express e**x = e**g 2**n
     ///   = e**g e**( n loge(2) )
@@ -333,16 +333,16 @@ class Vec256<float> {
     y._vec0 = (y._vec0 * (vfloat32)imm00) * (vfloat32)imm10;
     y._vec1 = (y._vec1 * (vfloat32)imm01) * (vfloat32)imm11;
     // boundary check
-    auto tmp = blendv(y, v_inf, (Vec256<float>(exp_hi) <= tmp_x));
-    y = blendv(tmp, zero, (tmp_x < Vec256<float>(exp_lo)));
+    auto tmp = blendv(y, v_inf, (Vectorize<float>(exp_hi) <= tmp_x));
+    y = blendv(tmp, zero, (tmp_x < Vectorize<float>(exp_lo)));
 
     return y;
   }
-  Vec256<float> expm1() const {
+  Vectorize<float> expm1() const {
     return exp() - one;
   }
 
-  Vec256<float> C10_ALWAYS_INLINE log() const {
+  Vectorize<float> C10_ALWAYS_INLINE log() const {
     auto temp = *this;
     auto invalid_mask = temp < zero;
     // cut off denormalized stuff
@@ -354,7 +354,7 @@ class Vec256<float> {
     x = x | half;
     imm0 = imm0 - v0x7f;
     imm1 = imm1 - v0x7f;
-    Vec256<float> ex;
+    Vectorize<float> ex;
     ex._vec0 = vec_float(imm0);
     ex._vec1 = vec_float(imm1);
     ex = ex + one;
@@ -383,19 +383,19 @@ class Vec256<float> {
     x = blendv(x, min_inf, (temp == zero));
     return x;
   }
-  Vec256<float> C10_ALWAYS_INLINE log10() const {
+  Vectorize<float> C10_ALWAYS_INLINE log10() const {
     return log() * log10e_inv;
   }
-  Vec256<float> C10_ALWAYS_INLINE log1p() const {
+  Vectorize<float> C10_ALWAYS_INLINE log1p() const {
     return ((*this) + one).log();
   }
-  Vec256<float> C10_ALWAYS_INLINE log2() const {
+  Vectorize<float> C10_ALWAYS_INLINE log2() const {
     return log() * log2e_inv;
   }
-  Vec256<float> C10_ALWAYS_INLINE ceil() const {
+  Vectorize<float> C10_ALWAYS_INLINE ceil() const {
     return {vec_ceil(_vec0), vec_ceil(_vec1)};
   }
-  Vec256<float> C10_ALWAYS_INLINE cos() const {
+  Vectorize<float> C10_ALWAYS_INLINE cos() const {
     // take the absolute value
     auto x = abs();
     // extract the sign bit (upper one)
@@ -411,7 +411,7 @@ class Vec256<float> {
 
     imm0 = imm0 - vi_2;
     imm1 = imm1 - vi_2;
-    Vec256<float> poly_mask;
+    Vectorize<float> poly_mask;
     // get the swap sign flag
     vint32 tmp0 = vec_and(vec_nand(imm0, imm0), vi_4);
     vint32 tmp1 = vec_and(vec_nand(imm1, imm1), vi_4);
@@ -451,11 +451,11 @@ class Vec256<float> {
 
     return y;
   }
-  Vec256<float> C10_ALWAYS_INLINE cosh() const {
+  Vectorize<float> C10_ALWAYS_INLINE cosh() const {
     // cosh = 1/2 * (e^x + e^-x)
     auto x = abs();
     auto e_x = x.exp();
-    auto ret = (e_x + Vec256<float>(one) / e_x) * half;
+    auto ret = (e_x + Vectorize<float>(one) / e_x) * half;
     // inf and nan checks
 #if 0
                     ret = blendv(ret, v_inf, x >= vf_89);
@@ -464,10 +464,10 @@ class Vec256<float> {
 #endif
     return ret;
   }
-  Vec256<float> C10_ALWAYS_INLINE floor() const {
+  Vectorize<float> C10_ALWAYS_INLINE floor() const {
     return {vec_floor(_vec0), vec_floor(_vec1)};
   }
-  Vec256<float> C10_ALWAYS_INLINE neg() const {
+  Vectorize<float> C10_ALWAYS_INLINE neg() const {
     return {vec_neg(_vec0), vec_neg(_vec1)};
   }
 
@@ -478,10 +478,10 @@ class Vec256<float> {
               << _vec1[3] << std::endl;
   }
 
-  Vec256<float> C10_ALWAYS_INLINE round() const {
+  Vectorize<float> C10_ALWAYS_INLINE round() const {
     return {vec_round(_vec0), vec_round(_vec1)};
   }
-  Vec256<float> C10_ALWAYS_INLINE sin() const {
+  Vectorize<float> C10_ALWAYS_INLINE sin() const {
     // take the absolute value and xtract sign
     auto x = abs();
     auto sign_bit = (*this) & sign_mask;
@@ -496,7 +496,7 @@ class Vec256<float> {
     y._vec0 = vec_float(imm0);
     y._vec1 = vec_float(imm1);
     // get the swap sign flag
-    Vec256<float> swap_sign_bit, poly_mask;
+    Vectorize<float> swap_sign_bit, poly_mask;
     swap_sign_bit._vecb0 = (vbool32)vec_sl(imm0 & vi_4, vu_29);
     swap_sign_bit._vecb1 = (vbool32)vec_sl(imm1 & vi_4, vu_29);
     // get the polynom selection mask
@@ -532,11 +532,11 @@ class Vec256<float> {
 
     return y;
   }
-  Vec256<float> C10_ALWAYS_INLINE sinh() const {
+  Vectorize<float> C10_ALWAYS_INLINE sinh() const {
     auto temp_abs = abs();
     // get exponent
     auto ret = temp_abs.exp();
-    auto recp = Vec256<float>(half) / ret;
+    auto recp = Vectorize<float>(half) / ret;
     auto v = ret * half - recp;
     // extract the sign bit (upper one)
     auto sign_bit = (*this) & sign_mask;
@@ -548,15 +548,15 @@ class Vec256<float> {
     auto result = blendv(y, v, temp_abs > one);
     return result | sign_bit;
   }
-  Vec256<float> C10_ALWAYS_INLINE tan() const {
+  Vectorize<float> C10_ALWAYS_INLINE tan() const {
      return {Sleef_tanf4_u10vsx(_vec0), Sleef_tanf4_u10vsx(_vec1)};
   }
-  Vec256<float> C10_ALWAYS_INLINE tanh() const {
+  Vectorize<float> C10_ALWAYS_INLINE tanh() const {
     auto x = *this;
     auto vabs = abs();
     // get exponent
     auto exp2x = (vabs + vabs).exp();
-    auto vv = Vec256<float>(one) - Vec256<float>(two) / (exp2x + one);
+    auto vv = Vectorize<float>(one) - Vectorize<float>(two) / (exp2x + one);
     // extract the sign bit (upper one)
     auto sign_bit = (*this) & sign_mask;
     auto z = vabs * vabs;
@@ -574,31 +574,31 @@ class Vec256<float> {
     auto max_ret = sign_bit ^ one;
     return blendv(blendv(tmp, vv, sel_mask), max_ret, max_mask);
   }
-  Vec256<float> C10_ALWAYS_INLINE trunc() const {
+  Vectorize<float> C10_ALWAYS_INLINE trunc() const {
     return {vec_trunc(_vec0), vec_trunc(_vec1)};
   }
 
-  Vec256<float> C10_ALWAYS_INLINE frac() const {
+  Vectorize<float> C10_ALWAYS_INLINE frac() const {
     return *this - trunc();
   }
 
-  Vec256<float> C10_ALWAYS_INLINE sqrt() const {
+  Vectorize<float> C10_ALWAYS_INLINE sqrt() const {
     return {vec_sqrt(_vec0), vec_sqrt(_vec1)};
   }
-  Vec256<float> C10_ALWAYS_INLINE reciprocal() const {
-    return Vec256<float>(one) / (*this);
+  Vectorize<float> C10_ALWAYS_INLINE reciprocal() const {
+    return Vectorize<float>(one) / (*this);
   }
-  Vec256<float> C10_ALWAYS_INLINE rsqrt() const {
+  Vectorize<float> C10_ALWAYS_INLINE rsqrt() const {
     return sqrt().reciprocal();
   }
 
-  Vec256<float> C10_ALWAYS_INLINE pow(const Vec256<float>& exp) const {
+  Vectorize<float> C10_ALWAYS_INLINE pow(const Vectorize<float>& exp) const {
     auto x = *this;
     auto sign_bit = (*this) & sign_mask;
     // |b|
     auto exp_abs = exp.abs();
     auto exp_trunc = exp.trunc();
-    Vec256<float> odd_mask;
+    Vectorize<float> odd_mask;
     odd_mask._vecb0 = (vec_signed(exp._vec0) & vi_1) != vi_0;
     odd_mask._vecb1 = (vec_signed(exp._vec1) & vi_1) != vi_0;
     // using ln fuction
@@ -616,31 +616,31 @@ class Vec256<float> {
     return blendv(out1, one, (exp_abs == zero));
   }
 
-  Vec256<float> fmod(const Vec256<float>& b) const {
+  Vectorize<float> fmod(const Vectorize<float>& b) const {
      return {Sleef_fmodf4_vsx(_vec0, b._vec0),Sleef_fmodf4_vsx(_vec1, b._vec1)};
   }
 
-  Vec256<float> hypot(const Vec256<float>& b) const {
+  Vectorize<float> hypot(const Vectorize<float>& b) const {
      return {Sleef_hypotf4_u05vsx(_vec0, b._vec0), Sleef_hypotf4_u05vsx(_vec1, b._vec1)};
   }
 
-  Vec256<float> nextafter(const Vec256<float>& b) const {
+  Vectorize<float> nextafter(const Vectorize<float>& b) const {
      return {Sleef_nextafterf4_vsx(_vec0, b._vec0), Sleef_nextafterf4_vsx(_vec1, b._vec1)};
   }
 
-  Vec256<float> igamma(const Vec256<float>& x) const {
+  Vectorize<float> igamma(const Vectorize<float>& x) const {
     return mapbi(calc_igamma, x);
   }
 
-  Vec256<float> igammac(const Vec256<float>& x) const {
+  Vectorize<float> igammac(const Vectorize<float>& x) const {
     return mapbi(calc_igammac, x);
   }
 
-  Vec256<float> i0() const {
+  Vectorize<float> i0() const {
     return map(calc_i0);
   }
 
-  Vec256<float> i0e() const {
+  Vectorize<float> i0e() const {
     return map(calc_i0e);
   }
 
@@ -669,12 +669,12 @@ class Vec256<float> {
 };
 
 template <>
-Vec256<float> inline maximum(const Vec256<float>& a, const Vec256<float>& b) {
+Vectorize<float> inline maximum(const Vectorize<float>& a, const Vectorize<float>& b) {
   return a.maximum(b);
 }
 
 template <>
-Vec256<float> inline minimum(const Vec256<float>& a, const Vec256<float>& b) {
+Vectorize<float> inline minimum(const Vectorize<float>& a, const Vectorize<float>& b) {
   return a.minimum(b);
 }
 

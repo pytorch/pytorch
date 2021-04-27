@@ -5,8 +5,8 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/Parallel.h>
 
 namespace at {
@@ -25,7 +25,7 @@ void LayerNormKernelImplInternal(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  using Vec = vec::Vec256<T>;
+  using Vec = vec::Vectorize<T>;
   DCHECK_EQ(X.numel(), M * N);
   DCHECK(!gamma.defined() || gamma.numel() == N);
   DCHECK(!beta.defined() || beta.numel() == N);
@@ -107,7 +107,7 @@ void LayerNormBackwardKernelImplInternal(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  using Vec = vec::Vec256<T>;
+  using Vec = vec::Vectorize<T>;
   DCHECK_EQ(dY.numel(), M * N);
   DCHECK_EQ(X.numel(), M * N);
   DCHECK_EQ(mean.numel(), M);

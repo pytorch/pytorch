@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <c10/util/llvmMathExtras.h>
 
 namespace at { namespace native { namespace {

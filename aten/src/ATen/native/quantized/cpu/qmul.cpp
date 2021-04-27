@@ -71,8 +71,8 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
       cpu_kernel_vec(
           iter,
           [&](scalar_t a) -> scalar_t { return scalar_t(0); },
-          [&](Vec256<scalar_t> vec) -> Vec256<scalar_t> {
-            return Vec256<scalar_t>(scalar_t(0));
+          [&](Vectorize<scalar_t> vec) -> Vectorize<scalar_t> {
+            return Vectorize<scalar_t>(scalar_t(0));
           });
       set_quantizer_(out, make_per_tensor_affine_quantizer(
           scale_prime, zero_point_prime, self.scalar_type()));

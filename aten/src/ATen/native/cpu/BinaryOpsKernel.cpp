@@ -5,8 +5,8 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/Math.h>
@@ -31,10 +31,10 @@ void add_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "add_cpu/sub_cpu", [&]() {
       auto alpha = alpha_scalar.to<scalar_t>();
-      auto alpha_vec = Vec256<scalar_t>(alpha);
+      auto alpha_vec = Vectorize<scalar_t>(alpha);
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a + alpha * b; },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) __ubsan_ignore_undefined__ {
           return vec::fmadd(b, alpha_vec, a);
         });
       });
@@ -44,16 +44,16 @@ void add_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
 void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Scalar& min_val, const Scalar& max_val) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_clamp_cpu", [&]() {
     auto alpha = alpha_scalar.to<scalar_t>();
-    auto alpha_vec = Vec256<scalar_t>(alpha);
+    auto alpha_vec = Vectorize<scalar_t>(alpha);
     auto min_scalar = min_val.to<scalar_t>();
-    auto min_vec = Vec256<scalar_t>(min_scalar);
+    auto min_vec = Vectorize<scalar_t>(min_scalar);
     auto max_scalar = max_val.to<scalar_t>();
-    auto max_vec = Vec256<scalar_t>(max_scalar);
+    auto max_vec = Vectorize<scalar_t>(max_scalar);
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t {
         return std::min(max_scalar, std::max(min_scalar, static_cast<scalar_t>(a + alpha * b)));
       },
-      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
+      [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) __ubsan_ignore_undefined__ {
         auto add_clamp_res = vec::fmadd(b, alpha_vec, a);
         add_clamp_res = vec::clamp_min(add_clamp_res, min_vec);
         add_clamp_res = vec::clamp_max(add_clamp_res, max_vec);
@@ -67,7 +67,7 @@ void atan2_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
     return std::atan2(a, b);
   },
-    [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+    [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
       return a.atan2(b);
     });
   });
@@ -86,7 +86,7 @@ void mul_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "mul_cpu", [&]() {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
           return a * b;
         });
     });
@@ -99,7 +99,7 @@ void div_true_kernel(TensorIteratorBase& iter) {
       [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
         return a / b;
       },
-      [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+      [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
         return a / b;
       });
   });
@@ -122,7 +122,7 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
         [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
           return std::trunc(a / b);
         },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
           return (a / b).trunc();
         });
     });
@@ -209,11 +209,11 @@ void remainder_kernel(TensorIterator& iter) {
           if ((mod != 0) && ((b < 0) != (mod < 0))) mod += b;
           return mod;
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
           auto mod = a.fmod(b);
-          const auto zero = Vec256<scalar_t>(0);
+          const auto zero = Vectorize<scalar_t>(0);
           auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
-          return Vec256<scalar_t>::blendv(mod, mod + b, mask);
+          return Vectorize<scalar_t>::blendv(mod, mod + b, mask);
         });
     });
   }
@@ -233,7 +233,7 @@ void bitwise_and_kernel(TensorIterator& iter) {
           [](scalar_t a, scalar_t b) -> scalar_t {
             return a & b;
           },
-          [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
             return a & b;
           });
     });
@@ -254,7 +254,7 @@ void bitwise_or_kernel(TensorIterator& iter) {
           [](scalar_t a, scalar_t b) -> scalar_t {
             return a | b;
           },
-          [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
             return a | b;
           });
     });
@@ -277,7 +277,7 @@ void bitwise_xor_kernel(TensorIterator& iter) {
           [](scalar_t a, scalar_t b) -> scalar_t {
             return a ^ b;
           },
-          [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
             return a ^ b;
           });
     });
@@ -287,13 +287,13 @@ void bitwise_xor_kernel(TensorIterator& iter) {
 void lshift_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "lshift_cpu", [&]() {
-      auto base_vec = Vec256<scalar_t>((scalar_t)(2));
+      auto base_vec = Vectorize<scalar_t>((scalar_t)(2));
       cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
           return a * std::pow((scalar_t)(2), b);
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
           return a * base_vec.pow(b);
       });
     });
@@ -367,13 +367,13 @@ void logical_xor_kernel(TensorIterator& iter) {
 void rshift_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rshift_cpu", [&]() {
-      auto base_vec = Vec256<scalar_t>((scalar_t)(2));
+      auto base_vec = Vectorize<scalar_t>((scalar_t)(2));
       cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
           return a / std::pow((scalar_t)(2), b);
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
           return a / base_vec.pow(b);
       });
     });
@@ -403,7 +403,7 @@ void lt_kernel(TensorIterator& iter) {
         [](scalar_t a, scalar_t b) -> scalar_t {
           return a < b;
         },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) -> Vectorize<scalar_t> {
           return a.lt(b);
         });
     });
@@ -426,7 +426,7 @@ void le_kernel(TensorIterator& iter) {
         [](scalar_t a, scalar_t b) -> scalar_t {
           return a <= b;
         },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) -> Vectorize<scalar_t> {
           return a.le(b);
         });
     });
@@ -449,7 +449,7 @@ void gt_kernel(TensorIterator& iter) {
         [](scalar_t a, scalar_t b) -> scalar_t {
           return a > b;
         },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) -> Vectorize<scalar_t> {
           return a.gt(b);
         });
     });
@@ -472,7 +472,7 @@ void ge_kernel(TensorIterator& iter) {
         [](scalar_t a, scalar_t b) -> scalar_t {
           return a >= b;
         },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) -> Vectorize<scalar_t> {
           return a.ge(b);
         });
     });
@@ -495,7 +495,7 @@ void eq_kernel(TensorIterator& iter) {
         [](scalar_t a, scalar_t b) -> scalar_t {
           return a == b;
         },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) -> Vectorize<scalar_t> {
           return a.eq(b);
         });
     });
@@ -518,7 +518,7 @@ void ne_kernel(TensorIterator& iter) {
         [](scalar_t a, scalar_t b) -> scalar_t {
           return a != b;
         },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) -> Vectorize<scalar_t> {
           return a.ne(b);
         });
     });
@@ -535,7 +535,7 @@ void maximum_kernel(TensorIterator& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "maximum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec::maximum(a, b); });
+        [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) { return at::vec::maximum(a, b); });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "maximum_cpu", [&]() {
@@ -547,7 +547,7 @@ void maximum_kernel(TensorIterator& iter) {
             return std::max(a, b);
           }
         },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec::maximum(a, b); });
+        [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) { return at::vec::maximum(a, b); });
     });
   }
 }
@@ -562,7 +562,7 @@ void minimum_kernel(TensorIterator& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec::minimum(a, b); });
+        [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) { return at::vec::minimum(a, b); });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "minimum_cpu", [&]() {
@@ -574,7 +574,7 @@ void minimum_kernel(TensorIterator& iter) {
             return std::min(a, b);
           }
         },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec::minimum(a, b); });
+        [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) { return at::vec::minimum(a, b); });
     });
   }
 }
@@ -608,7 +608,7 @@ void fmin_kernel(TensorIterator& iter) {
 void smooth_l1_kernel(TensorIterator& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
         kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
-        using Vec = Vec256<scalar_t>;
+        using Vec = Vectorize<scalar_t>;
         const scalar_t beta_val(beta);
         const Vec beta_val_vec(beta_val);
         const Vec point_five_vec(static_cast<scalar_t>(0.5));
@@ -630,7 +630,7 @@ void smooth_l1_kernel(TensorIterator& iter, double beta) {
 
 void huber_kernel(TensorIterator& iter, double delta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "huber_cpu", [&]() {
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorize<scalar_t>;
     const scalar_t delta_val(delta);
     const Vec delta_val_vec(delta_val);
     const Vec point_five_vec(static_cast<scalar_t>(0.5));
@@ -652,12 +652,12 @@ void huber_kernel(TensorIterator& iter, double delta) {
 
 void sigmoid_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
-    auto one_vec = Vec256<scalar_t>((scalar_t)(1));
+    auto one_vec = Vectorize<scalar_t>((scalar_t)(1));
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
         return a * (scalar_t(1) - b) * b;
       },
-      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+      [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
         return a * (one_vec - b) * b;
       });
   });
@@ -667,10 +667,10 @@ void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.dtype(), "logit_backward_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
-        const Vec256<scalar_t> kZeroVec(scalar_t(0));
-        const Vec256<scalar_t> kOneVec(scalar_t(1));
+        const Vectorize<scalar_t> kZeroVec(scalar_t(0));
+        const Vectorize<scalar_t> kOneVec(scalar_t(1));
         if (eps < scalar_t(0)) {
-          const Vec256<scalar_t> kNanVec(
+          const Vectorize<scalar_t> kNanVec(
               std::numeric_limits<scalar_t>::quiet_NaN());
           cpu_kernel_vec(
               iter,
@@ -682,8 +682,8 @@ void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
                            : (dy / (x * (scalar_t(1) - x))));
               },
               [kZeroVec, kOneVec, kNanVec](
-                  Vec256<scalar_t> dy_vec, Vec256<scalar_t> x_vec) {
-                return Vec256<scalar_t>::blendv(
+                  Vectorize<scalar_t> dy_vec, Vectorize<scalar_t> x_vec) {
+                return Vectorize<scalar_t>::blendv(
                     kNanVec,
                     dy_vec / (x_vec * (kOneVec - x_vec)),
                     (x_vec >= kZeroVec) & (x_vec <= kOneVec));
@@ -691,8 +691,8 @@ void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
         } else {
           const scalar_t lo = eps;
           const scalar_t hi = scalar_t(1) - eps;
-          const Vec256<scalar_t> lo_vec(lo);
-          const Vec256<scalar_t> hi_vec(hi);
+          const Vectorize<scalar_t> lo_vec(lo);
+          const Vectorize<scalar_t> hi_vec(hi);
           cpu_kernel_vec(
               iter,
               [lo, hi](scalar_t dy, scalar_t x) {
@@ -703,8 +703,8 @@ void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
                            : dy / (x * (scalar_t(1) - x)));
               },
               [kZeroVec, kOneVec, lo_vec, hi_vec](
-                  Vec256<scalar_t> dy_vec, Vec256<scalar_t> x_vec) {
-                return Vec256<scalar_t>::blendv(
+                  Vectorize<scalar_t> dy_vec, Vectorize<scalar_t> x_vec) {
+                return Vectorize<scalar_t>::blendv(
                     kZeroVec,
                     dy_vec / (x_vec * (kOneVec - x_vec)),
                     (x_vec >= lo_vec) & (x_vec <= hi_vec));
@@ -716,25 +716,25 @@ void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
 void tanh_backward_kernel(TensorIterator& iter) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
-      auto one_vec = Vec256<scalar_t>(scalar_t{1});
+      auto one_vec = Vectorize<scalar_t>(scalar_t{1});
     cpu_kernel_vec(
       iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
         return a * std::conj(scalar_t{1} - b * b);
       },
-      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+      [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
         return a * (one_vec - b * b).conj();
       });
   });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
-      auto one_vec = Vec256<scalar_t>(scalar_t{1});
+      auto one_vec = Vectorize<scalar_t>(scalar_t{1});
       cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
           return a * (scalar_t{1} - b * b);
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
           return a * (one_vec - b * b);
         });
     });
@@ -753,7 +753,7 @@ void mse_kernel(TensorIterator& iter) {
         auto diff = a - b;
         return diff * diff;
       },
-      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+      [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
       auto diff =  a - b;
       return diff * diff;
       });
@@ -775,7 +775,7 @@ void fmod_kernel(TensorIterator& iter) {
         [](scalar_t x, scalar_t d) -> scalar_t {
           return std::fmod(x, d);
         },
-        [](Vec256<scalar_t> x, Vec256<scalar_t> d) {
+        [](Vectorize<scalar_t> x, Vectorize<scalar_t> d) {
           return x.fmod(d);
         });
     });
@@ -794,11 +794,11 @@ void logaddexp_kernel(TensorIterator& iter) {
             return m + std::log((scalar_t)(1.0) + std::exp(-std::abs(a - b)));
           }
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-          Vec256<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
-          Vec256<scalar_t> one(1.0);
-          Vec256<scalar_t> m = maximum(a, b);
-          return Vec256<scalar_t>::blendv(
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
+          Vectorize<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
+          Vectorize<scalar_t> one(1.0);
+          Vectorize<scalar_t> m = maximum(a, b);
+          return Vectorize<scalar_t>::blendv(
               m + (one + (a - b).abs().neg().exp()).log(),
               a,
               (a == b) & (a.abs() == inf));
@@ -818,12 +818,12 @@ void logaddexp2_kernel(TensorIterator& iter) {
             return m + std::log2((scalar_t)(1.0) + std::pow((scalar_t)(2), -std::abs(a - b)));
           }
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-          Vec256<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
-          Vec256<scalar_t> one(1.0);
-          Vec256<scalar_t> two(2.0);
-          Vec256<scalar_t> m = maximum(a, b);
-          return Vec256<scalar_t>::blendv(
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
+          Vectorize<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
+          Vectorize<scalar_t> one(1.0);
+          Vectorize<scalar_t> two(2.0);
+          Vectorize<scalar_t> m = maximum(a, b);
+          return Vectorize<scalar_t>::blendv(
               m + (one + two.pow((a - b).abs().neg())).log2(),
               a,
               (a == b) & (a.abs() == inf));
@@ -859,7 +859,7 @@ void hypot_kernel(TensorIterator& iter) {
         [=](scalar_t a, scalar_t b) -> scalar_t {
             return std::hypot(a, b);
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
             return a.hypot(b);
         });
   });
@@ -872,7 +872,7 @@ void igamma_kernel(TensorIterator& iter) {
         [=](scalar_t a, scalar_t b) -> scalar_t {
             return calc_igamma(a, b);
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
             return a.igamma(b);
         });
   });
@@ -885,7 +885,7 @@ void igammac_kernel(TensorIterator& iter) {
         [=](scalar_t a, scalar_t b) -> scalar_t {
             return calc_igammac(a, b);
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
             return a.igammac(b);
         });
   });
@@ -898,7 +898,7 @@ void nextafter_kernel(TensorIterator& iter) {
         [=](scalar_t a, scalar_t b) -> scalar_t {
             return std::nextafter(a, b);
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](Vectorize<scalar_t> a, Vectorize<scalar_t> b) {
             return a.nextafter(b);
         });
   });
@@ -918,7 +918,7 @@ void copysign_kernel(TensorIteratorBase& iter) {
       [](scalar_t a, scalar_t b) -> scalar_t {
         return c10::copysign(a, b);
       },
-      [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+      [](Vectorize<scalar_t> a, Vectorize<scalar_t> b) -> Vectorize<scalar_t> {
         return a.copysign(b);
       });
   });

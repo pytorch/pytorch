@@ -4,7 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 
 #include <ATen/AccumulateType.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/Loops.h>
@@ -29,10 +29,10 @@ static void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, cons
           [start, step, &idx]() -> scalar_t {
             return start + step * (idx++);
           },
-          [start, step, &idx]() -> Vec256<scalar_t> {
-            Vec256<scalar_t> res;
-            res = Vec256<scalar_t>::arange(start + step * idx, step);
-            idx += Vec256<scalar_t>::size();
+          [start, step, &idx]() -> Vectorize<scalar_t> {
+            Vectorize<scalar_t> res;
+            res = Vectorize<scalar_t>::arange(start + step * idx, step);
+            idx += Vectorize<scalar_t>::size();
             return res;
           }, {p_begin, p_end});
     });
@@ -60,15 +60,15 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
               return end - step * (steps - (idx++) - 1);
             }
           },
-          [start, end, step, halfway, steps, &idx]() -> Vec256<scalar_t> {
-            Vec256<scalar_t> res;
+          [start, end, step, halfway, steps, &idx]() -> Vectorize<scalar_t> {
+            Vectorize<scalar_t> res;
             if (idx < halfway) {
-              res = Vec256<scalar_t>::arange(start + step * idx, step);
+              res = Vectorize<scalar_t>::arange(start + step * idx, step);
             } else {
-              res = Vec256<scalar_t>::arange(
+              res = Vectorize<scalar_t>::arange(
                   end - step * (steps - idx - 1), step);
             }
-            idx += Vec256<scalar_t>::size();
+            idx += Vectorize<scalar_t>::size();
             return res;
           }, {p_begin, p_end});
     });

@@ -3,20 +3,20 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec256/intrinsics.h>
+#include <ATen/cpu/vec/vec256/intrinsics.h>
 
-#include <ATen/cpu/vec256/vec256_base.h>
+#include <ATen/cpu/vec/vec256/vec256_base.h>
 #if !defined(__VSX__)  || !defined(CPU_CAPABILITY_VSX)
-#include <ATen/cpu/vec256/vec256_float.h>
-#include <ATen/cpu/vec256/vec256_float_neon.h>
-#include <ATen/cpu/vec256/vec256_bfloat16.h>
-#include <ATen/cpu/vec256/vec256_double.h>
-#include <ATen/cpu/vec256/vec256_int.h>
-#include <ATen/cpu/vec256/vec256_qint.h>
-#include <ATen/cpu/vec256/vec256_complex_float.h>
-#include <ATen/cpu/vec256/vec256_complex_double.h>
+#include <ATen/cpu/vec/vec256/vec256_float.h>
+#include <ATen/cpu/vec/vec256/vec256_float_neon.h>
+#include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
+#include <ATen/cpu/vec/vec256/vec256_double.h>
+#include <ATen/cpu/vec/vec256/vec256_int.h>
+#include <ATen/cpu/vec/vec256/vec256_qint.h>
+#include <ATen/cpu/vec/vec256/vec256_complex_float.h>
+#include <ATen/cpu/vec/vec256/vec256_complex_double.h>
 #else
-#include <ATen/cpu/vec256/vsx/vec256_common_vsx.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_common_vsx.h>
 #endif
 
 #include <algorithm>
@@ -53,11 +53,11 @@ namespace {
  }
 
 template <typename T>
-std::ostream& operator<<(std::ostream& stream, const Vec256<T>& vec) {
-  T buf[Vec256<T>::size()];
+std::ostream& operator<<(std::ostream& stream, const Vectorize<T>& vec) {
+  T buf[Vectorize<T>::size()];
   vec.store(buf);
   stream << "vec[";
-  for (int i = 0; i != Vec256<T>::size(); i++) {
+  for (int i = 0; i != Vectorize<T>::size(); i++) {
     if (i != 0) {
       stream << ", ";
     }
@@ -68,17 +68,17 @@ std::ostream& operator<<(std::ostream& stream, const Vec256<T>& vec) {
 }
 
 
-#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<>
-inline Vec256<float> cast<float, double>(const Vec256<double>& src) {
+inline Vectorize<float> cast<float, double>(const Vectorize<double>& src) {
   return _mm256_castpd_ps(src);
 }
 
 template<>
-inline Vec256<double> cast<double, float>(const Vec256<float>& src) {
+inline Vectorize<double> cast<double, float>(const Vectorize<float>& src) {
   return _mm256_castps_pd(src);
 }
 
@@ -88,11 +88,11 @@ inline Vec256<double> cast<double, float>(const Vec256<float>& src) {
 
 #define DEFINE_FLOAT_INT_CAST(int_t, float_t, float_ch)            \
 template<>                                                         \
-inline  Vec256<int_t> cast<int_t, float_t>(const Vec256<float_t>& src) {   \
+inline  Vectorize<int_t> cast<int_t, float_t>(const Vectorize<float_t>& src) {   \
   return _mm256_castp ## float_ch ## _si256(src);                  \
 }                                                                  \
 template<>                                                         \
-inline Vec256<float_t> cast<float_t, int_t>(const Vec256<int_t>& src) {   \
+inline Vectorize<float_t> cast<float_t, int_t>(const Vectorize<int_t>& src) {   \
   return _mm256_castsi256_p ## float_ch (src);                     \
 }
 
@@ -108,30 +108,30 @@ DEFINE_FLOAT_INT_CAST(int16_t, float, s)
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<int64_t scale = 1>
-std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<double>>
-inline gather(const double* base_addr, const Vec256<int64_t>& vindex) {
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize<double>>
+inline gather(const double* base_addr, const Vectorize<int64_t>& vindex) {
   return _mm256_i64gather_pd(base_addr, vindex, scale);
 }
 
 template<int64_t scale = 1>
-std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<float>>
-inline gather(const float* base_addr, const Vec256<int32_t>& vindex) {
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize<float>>
+inline gather(const float* base_addr, const Vectorize<int32_t>& vindex) {
   return _mm256_i32gather_ps(base_addr, vindex, scale);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<int64_t scale = 1>
-std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<double>>
-inline mask_gather(const Vec256<double>& src, const double* base_addr,
-                   const Vec256<int64_t>& vindex, const Vec256<double>& mask) {
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize<double>>
+inline mask_gather(const Vectorize<double>& src, const double* base_addr,
+                   const Vectorize<int64_t>& vindex, const Vectorize<double>& mask) {
   return _mm256_mask_i64gather_pd(src, base_addr, vindex, mask, scale);
 }
 
 template<int64_t scale = 1>
-std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<float>>
-inline mask_gather(const Vec256<float>& src, const float* base_addr,
-                   const Vec256<int32_t>& vindex, const Vec256<float>& mask) {
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize<float>>
+inline mask_gather(const Vectorize<float>& src, const float* base_addr,
+                   const Vectorize<int32_t>& vindex, const Vectorize<float>& mask) {
   return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
 }
 
@@ -140,8 +140,8 @@ inline mask_gather(const Vec256<float>& src, const float* base_addr,
 // Only works for inputs in the range: [-2^51, 2^51]
 // From: https://stackoverflow.com/a/41148578
 template<>
-Vec256<int64_t>
-inline convert_to_int_of_same_size<double>(const Vec256<double> &src) {
+Vectorize<int64_t>
+inline convert_to_int_of_same_size<double>(const Vectorize<double> &src) {
   auto x = _mm256_add_pd(src, _mm256_set1_pd(0x0018000000000000));
   return _mm256_sub_epi64(
       _mm256_castpd_si256(x),
@@ -150,16 +150,16 @@ inline convert_to_int_of_same_size<double>(const Vec256<double> &src) {
 }
 
 template<>
-Vec256<int32_t>
-inline convert_to_int_of_same_size<float>(const Vec256<float> &src) {
+Vectorize<int32_t>
+inline convert_to_int_of_same_size<float>(const Vectorize<float> &src) {
   return _mm256_cvttps_epi32(src);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ INTERLEAVE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <>
-std::pair<Vec256<double>, Vec256<double>>
-inline interleave2<double>(const Vec256<double>& a, const Vec256<double>& b) {
+std::pair<Vectorize<double>, Vectorize<double>>
+inline interleave2<double>(const Vectorize<double>& a, const Vectorize<double>& b) {
   // inputs:
   //   a = {a0, a1, a3, a3}
   //   b = {b0, b1, b2, b3}
@@ -178,8 +178,8 @@ inline interleave2<double>(const Vec256<double>& a, const Vec256<double>& b) {
 }
 
 template <>
-std::pair<Vec256<float>, Vec256<float>>
-inline interleave2<float>(const Vec256<float>& a, const Vec256<float>& b) {
+std::pair<Vectorize<float>, Vectorize<float>>
+inline interleave2<float>(const Vectorize<float>& a, const Vectorize<float>& b) {
   // inputs:
   //   a = {a0, a1, a2, a3, a4, a5, a6, a7}
   //   b = {b0, b1, b2, b3, b4, b5, b6, b7}
@@ -202,8 +202,8 @@ inline interleave2<float>(const Vec256<float>& a, const Vec256<float>& b) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DEINTERLEAVE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <>
-std::pair<Vec256<double>, Vec256<double>>
-inline deinterleave2<double>(const Vec256<double>& a, const Vec256<double>& b) {
+std::pair<Vectorize<double>, Vectorize<double>>
+inline deinterleave2<double>(const Vectorize<double>& a, const Vectorize<double>& b) {
   // inputs:
   //   a = {a0, b0, a1, b1}
   //   b = {a2, b2, a3, b3}
@@ -222,8 +222,8 @@ inline deinterleave2<double>(const Vec256<double>& a, const Vec256<double>& b) {
 }
 
 template <>
-std::pair<Vec256<float>, Vec256<float>>
-inline deinterleave2<float>(const Vec256<float>& a, const Vec256<float>& b) {
+std::pair<Vectorize<float>, Vectorize<float>>
+inline deinterleave2<float>(const Vectorize<float>& a, const Vectorize<float>& b) {
   // inputs:
   //   a = {a0, b0, a1, b1, a2, b2, a3, b3}
   //   b = {a4, b4, a5, b5, a6, b6, a7, b7}

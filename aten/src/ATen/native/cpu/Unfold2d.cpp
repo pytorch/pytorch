@@ -1,5 +1,5 @@
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/Unfold2d.h>
 #include <ATen/native/cpu/Loops.h>
 #include <cmath>
@@ -15,7 +15,7 @@ static inline void cadd(
     const scalar_t* x,
     const scalar_t* y,
     int64_t n) {
-  using Vec = vec::Vec256<scalar_t>;
+  using Vec = vec::Vectorize<scalar_t>;
   char* ptrs[] = {reinterpret_cast<char*>(z),
                   reinterpret_cast<char*>(const_cast<scalar_t*>(x)),
                   reinterpret_cast<char*>(const_cast<scalar_t*>(y))};

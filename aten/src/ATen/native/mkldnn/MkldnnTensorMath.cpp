@@ -2,8 +2,8 @@
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -25,7 +25,7 @@ namespace at {
 namespace native {
 
 Tensor& mkldnn_zero_(Tensor& self) {
-  using Vec = vec::Vec256<float>;
+  using Vec = vec::Vectorize<float>;
 
   ideep::tensor& x = itensor_from_mkldnn(self);
 
