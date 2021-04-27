@@ -7,6 +7,9 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# Get fully qualified path using realpath
+CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -268,7 +271,7 @@ test_rpc() {
 test_custom_backend() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom backends"
-    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
     pushd test/custom_backend
     cp -a "$CUSTOM_BACKEND_BUILD" build
     # Run tests Python-side and export a lowered module.
@@ -285,7 +288,7 @@ test_custom_backend() {
 test_custom_script_ops() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom script operators"
-    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
     pushd test/custom_operator
     cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
@@ -301,7 +304,7 @@ test_custom_script_ops() {
 test_jit_hooks() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing jit hooks in cpp"
-    HOOK_BUILD="$PWD/../jit-hook-build"
+    HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
     pushd test/jit_hooks
     cp -a "$HOOK_BUILD" build
     # Run tests Python-side and export the script modules with hooks
