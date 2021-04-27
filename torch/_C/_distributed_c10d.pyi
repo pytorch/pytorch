@@ -1,6 +1,6 @@
 from datetime import timedelta
 from enum import Enum
-from typing import Optional, List, Any, overload
+from typing import Optional, List, Any, Tuple, overload
 
 from torch import Tensor
 
@@ -8,6 +8,7 @@ from torch import Tensor
 
 _DEFAULT_FIRST_BUCKET_BYTES: int
 _DEFAULT_NO_TIMEOUT: timedelta
+_DEFAULT_PG_TIMEOUT: timedelta
 
 class BuiltinCommHookType(Enum):
     ALLREDUCE = ...
@@ -19,12 +20,19 @@ def _register_builtin_comm_hook(
 ): ...
 
 class GradBucket:
-    def __init__(self, tensors: List[Tensor]): ...
+    def __init__(
+        self,
+        index: int,
+        tensor: Tensor,
+        offsets: List[int],
+        lengths: List[int],
+        sizes_list: List[Tuple[int]],
+    ): ...
     def get_index(self) -> int: ...
-    def get_tensors(self) -> List[Tensor]: ...
+    def get_tensor(self) -> Tensor: ...
     def get_per_parameter_tensors(self) -> List[Tensor]: ...
     def is_the_last_bucket_to_allreduce(self) -> bool: ...
-    def set_tensor(self, tensor: Tensor, i: int) -> None: ...
+    def set_tensor(self, tensor: Tensor) -> None: ...
 
 class Reducer:
     def __init__(
@@ -130,9 +138,10 @@ class TCPStore(Store):
         self,
         host_name: str,
         port: int,
-        world_size: int,
-        is_master: bool,
-        timeout: timedelta,
+        world_size: int = ...,
+        is_master: bool = ...,
+        timeout: timedelta = ...,
+        wait_for_workers: bool = ...
     ): ...
 
 class PrefixStore(Store):
@@ -368,9 +377,6 @@ def _broadcast_coalesced(
     src: int,
 ): ...
 def _test_python_store(store: Store): ...
-def _verify_replicas_within_process(
-    replicas: List[List[Tensor]], expect_sparse_gradient: List[List[bool]]
-): ...
 def _verify_model_across_ranks(
     process_group: ProcessGroup, replicas: List[List[Tensor]]
 ): ...

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/constant_map.h>
@@ -452,22 +453,20 @@ std::vector<int64_t> ComputeShapeFromReshape(
   }
   std::vector<int64_t> final_shape;
   // shape_ratio is used to calculate the real value of -1.
-  // it is updated on each dimension to avoid overflow.
+  // One example with reshape 0 and -1:
+  // input_shape = 2 16 5 4
+  // reshape = -1 0 4
+  // final_shape = 10 16 4
   double shape_ratio = 1.0;
   for (auto i = 0; i < input_shape_size; i++) {
-    if (i < minus_one_pos) {
+    shape_ratio *= static_cast<double>(input_shape[i]);
+  }
+  for (auto i = 0; i < reshape_size; i++) {
+    if (i != minus_one_pos) {
       if (reshape[i] != 0) {
-        shape_ratio *= static_cast<double>(input_shape[i]) / reshape[i];
-      }
-    } else if (minus_one_pos > -1) {
-      if (i < input_shape_size - reshape_size + minus_one_pos + 1) {
-        shape_ratio *= static_cast<double>(input_shape[i]);
+        shape_ratio /= static_cast<double>(reshape[i]);
       } else {
-        auto reshape_idx = i - input_shape_size + reshape_size;
-        if (reshape[reshape_idx] != 0) {
-          shape_ratio *=
-              static_cast<double>(input_shape[i]) / reshape[reshape_idx];
-        }
+        shape_ratio /= static_cast<double>(input_shape[i]);
       }
     }
   }
@@ -478,9 +477,7 @@ std::vector<int64_t> ComputeShapeFromReshape(
   }
   final_shape.push_back(static_cast<int64_t>(std::round(shape_ratio)));
   for (auto i = minus_one_pos + 1; i < reshape_size; i++) {
-    int64_t cur_shape = reshape[i] == 0
-        ? input_shape[i + input_shape_size - reshape_size]
-        : reshape[i];
+    int64_t cur_shape = reshape[i] == 0 ? input_shape[i] : reshape[i];
     final_shape.push_back(cur_shape);
   }
   return final_shape;
@@ -738,7 +735,7 @@ void ProcessSliceNode(Node* n, int opset_version) {
       std::vector<int64_t> start_vector;
       std::vector<int64_t> end_vector;
       std::vector<int64_t> axes_vector(input0_shape_value.size(), 0);
-      for (int64_t i = 0; i < input0_shape_value.size(); i++) {
+      for (const auto i : c10::irange(input0_shape_value.size())) {
         axes_vector[i] = i;
       }
       std::vector<int64_t> step_vector;
@@ -1255,7 +1252,8 @@ void ONNXShapeTypeInference(
     n_graph->registerOutput(output);
   }
 
-  ScalarTypeAnalysisForONNX(n_graph);
+  // Use scalar_type_analysis without low precision cast
+  ScalarTypeAnalysisForONNX(n_graph, false, opset_version);
 
   GRAPH_DEBUG("Original torch graph: ", n->owningGraph()->toString());
   GRAPH_DEBUG(
@@ -1392,7 +1390,7 @@ size_t ONNXAssignOutputShape(
   index_check();
 
   if (THPVariable_Check(output_obj)) {
-    at::Tensor var = reinterpret_cast<THPVariable*>(output_obj)->cdata;
+    at::Tensor var = THPVariable_Unpack(output_obj);
     ONNXUpdateTypeFromTensor(
         graph->outputs().at(outputs_index), var, onnx_shape_inference);
     outputs_index++;
@@ -1411,11 +1409,11 @@ size_t ONNXAssignOutputShape(
       if (list_len > 0) {
         auto list_elem = PyList_GET_ITEM(output_obj, 0);
         TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
-        auto& var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+        auto& var = THPVariable_Unpack(list_elem);
         for (size_t i = 1; i < list_len; ++i) {
           list_elem = PyList_GET_ITEM(output_obj, i);
           TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
-          auto& new_var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+          auto& new_var = THPVariable_Unpack(list_elem);
           TORCH_CHECK(
               var.scalar_type() == new_var.scalar_type(),
               "Unsupported sequence type in model outputs. ONNX supports sequences of elements of the same data type.");

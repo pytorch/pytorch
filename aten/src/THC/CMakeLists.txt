@@ -50,7 +50,6 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathMagma.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorIndex.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCSortUtils.cu
@@ -70,7 +69,6 @@ install(FILES
           THCTensorMath.h
           THCApply.cuh
           THCReduce.cuh
-          THCReduceAll.cuh
           THCReduceApplyUtils.cuh
           THCTensorMathReduce.cuh
           THCAsmUtils.cuh
@@ -138,8 +136,6 @@ install(FILES
           generic/THCTensorMathReduce.cu
           generic/THCTensorScatterGather.h
           generic/THCTensorScatterGather.cu
-          generic/THCTensorIndex.h
-          generic/THCTensorIndex.cu
           generic/THCTensorSort.h
           generic/THCTensorSort.cu
           generic/THCTensorTopK.h
