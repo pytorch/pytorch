@@ -1265,11 +1265,10 @@ class TestNormalizeOperators(JitTestCase):
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Unsupported input types
         if op.name in {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma',
-                       'hsplit', 'vsplit', 'dsplit'}:
+                       'hsplit', 'vsplit', 'dsplit', 'einsum'}:
             return
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {'stack', 'hstack', 'vstack', 'dstack',
-                   'linalg.multi_dot'}
+        fx_fail = {'stack', 'hstack', 'vstack', 'dstack', 'linalg.multi_dot'}
         print(op.name)
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
