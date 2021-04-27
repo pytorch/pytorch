@@ -203,7 +203,6 @@ static void _fft_fill_with_conjugate_symmetry_cpu_(
 
 // Register this one implementation for all cpu types instead of compiling multiple times
 REGISTER_ARCH_DISPATCH(fft_fill_with_conjugate_symmetry_stub, DEFAULT, &_fft_fill_with_conjugate_symmetry_cpu_)
-REGISTER_AVX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 
 // Constructs an mkl-fft plan descriptor representing the desired transform
