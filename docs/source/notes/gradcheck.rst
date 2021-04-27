@@ -16,13 +16,13 @@ Notations and background information
 
 Throughout this note, we will use the following convention:
 
-1. :math:`x`, :math:`y`, :math:`a`, :math:`b`, :math:`v`, :math:`u`, :math:`ur` and :math:`ui` as real-valued vectors and :math:`z` is a complex-valued vector that can be rewritten in terms of two real-valued vectors as :math:`z = a + i b`.
+1. :math:`x`, :math:`y`, :math:`a`, :math:`b`, :math:`v`, :math:`u`, :math:`ur` and :math:`ui` are real-valued vectors and :math:`z` is a complex-valued vector that can be rewritten in terms of two real-valued vectors as :math:`z = a + i b`.
 
 2. :math:`N` and :math:`M` are two integers that we will use for the dimension of the input and output space respectively.
 
-3. :math:`f: \mathcal{R}^N \to \mathcal{R}^M` as our basic real-to-real function such that :math:`y = f(x)`.
+3. :math:`f: \mathcal{R}^N \to \mathcal{R}^M` is our basic real-to-real function such that :math:`y = f(x)`.
 
-4. :math:`g: \mathcal{C}^N \to \mathcal{R}^M` as our basic complex-to-real function such that :math:`y = g(z)`.
+4. :math:`g: \mathcal{C}^N \to \mathcal{R}^M` is our basic complex-to-real function such that :math:`y = g(z)`.
 
 
 For the simple real-to-real case, we write as :math:`J_f` the Jacobian matrix associated with :math:`f` of size :math:`M \times N`.
@@ -87,7 +87,7 @@ To test a function :math:`g: \mathcal{C}^N \to \mathcal{R}^M, z \to y` with :mat
 Default complex input numerical evaluation
 """"""""""""""""""""""""""""""""""""""""""
 
-Consider the elementary case where :math:`N = M = 1` first. We know from (chapter 3 of) `this research paper <https://arxiv.org/pdf/1701.00392.pdf>`_) that:
+Consider the elementary case where :math:`N = M = 1` first. We know from (chapter 3 of) `this research paper <https://arxiv.org/pdf/1701.00392.pdf>`_ that:
 
 .. math::
     CW := \frac{\partial y}{\partial z^*} = \frac{1}{2} * (\frac{\partial y}{\partial a} + i \frac{\partial y}{\partial b})
@@ -126,7 +126,15 @@ Functions with complex outputs
 
 In this case, the user-provided function does not follow the assumption from the autograd that the function we compute backward AD for is real-valued.
 This means that using autograd directly on this function is not well defined.
-To solve this, we will replace the test of the function :math:`h: \mathcal{P}^N \to \mathcal{C}^M` (where :math:`\mathcal{P}` can be either :math:`\mathcal{R}` or :math:`\mathcal{C}`), with two functions :math:`hr` and :math:`hi` such that: :math:`hr(q) = real(f(q))` and :math:`hi(q) = imag(f(q))` where :math:`q \in \mathcal{P}`.
+To solve this, we will replace the test of the function :math:`h: \mathcal{P}^N \to \mathcal{C}^M` (where :math:`\mathcal{P}` can be either :math:`\mathcal{R}` or :math:`\mathcal{C}`), with two functions: :math:`hr` and :math:`hi` such that:
+
+.. math::
+    \begin{aligned}
+        hr(q) &:= real(f(q)) \\
+        hi(q) &:= imag(f(q))
+    \end{aligned}
+
+where :math:`q \in \mathcal{P}`.
 We then do a basic gradcheck for both :math:`hr` and :math:`hi` using either the real-to-real or complex-to-real case described above, depending on :math:`\mathcal{P}`.
 
 Note that, the code, as of time of writing, does not create these functions explicitly but perform the chain rule with the :math:`real` or :math:`imag` functions manually by passing the :math:`\text{grad\_out}` arguments to the different functions.
@@ -148,7 +156,12 @@ Fast gradcheck for real-to-real functions
 
 The scalar quantity that we want to compute here is :math:`v^T J_f u` for a given random vector :math:`v \in \mathcal{R}^M` and a random unit norm vector :math:`u \in \mathcal{R}^N`.
 
-For the numerical evaluation, we can efficiently compute :math:`J_f u \approx \frac{f(x + u * eps) - f(x - u * eps)}{2 * eps}`. We then perform the dot product between this vector and :math:`v` to get the scalar value of interest.
+For the numerical evaluation, we can efficiently compute
+
+.. math::
+    J_f u \approx \frac{f(x + u * eps) - f(x - u * eps)}{2 * eps}.
+
+We then perform the dot product between this vector and :math:`v` to get the scalar value of interest.
 
 For the analytical version, we can use backward mode AD to compute :math:`v^T J_f` directly. We then perform the dot product with :math:`u` to get the expected value.
 
