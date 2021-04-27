@@ -1632,12 +1632,6 @@ static void apply_cholesky(const Tensor& self, bool upper, const Tensor& info) {
     // magmaCholeskyBatched supports only upper=false
     uplo = MagmaLower;
 
-    // if upper=true we need to tranpose the self tensor
-    if (upper) {
-      // self.transpose_(-2, -1);
-      self_data = self.transpose(-2, -1).data_ptr<scalar_t>();
-    }
-
     auto self_mat_stride = matrixStride(self);
     magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
 
@@ -1682,7 +1676,10 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
     result = at::empty(input.numel() + 1, input.options());
     result.resize_as_(input).transpose_(-2, -1);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
-    result.copy_(input);
+
+    // batched MAGMA doesn't support upper=true
+    // we transpose the input as a workaround
+    result.copy_(upper ? input.transpose(-2, -1) : input);
   }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
