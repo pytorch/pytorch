@@ -35,6 +35,7 @@ void RpcAgent::start() {
 }
 
 void RpcAgent::shutdown() {
+  TORCH_ASSERT_NO_GIL_WITHOUT_PYTHON_DEP();
   std::unique_lock<std::mutex> lock(rpcRetryMutex_);
   rpcAgentRunning_.store(false);
   lock.unlock();

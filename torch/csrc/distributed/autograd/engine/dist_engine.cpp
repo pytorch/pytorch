@@ -133,6 +133,7 @@ DistEngine::DistEngine()
 
 DistEngine::~DistEngine() {
   // Ensure we shutdown the CPU thread.
+  TORCH_ASSERT_NO_GIL_WITHOUT_PYTHON_DEP();
   global_cpu_ready_queue_->pushShutdownTask();
   global_cpu_thread_.join();
 }
