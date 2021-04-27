@@ -5,7 +5,11 @@
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/cuda/SortUtils.cuh>
+#include <ATen/native/cuda/SortingCommon.cuh>
 
 namespace {
 
@@ -31,9 +35,8 @@ __global__ void sort_postprocess_kernel(const scalar_t *in, scalar_t *out, int64
 
 namespace at { namespace native {
 
-bool should_use_th_sort(const Tensor &self, int64_t dim) {
+bool should_use_small_sort(const Tensor &self, int64_t dim) {
   int64_t ndim = self.dim();
-  dim = maybe_wrap_dim(dim, ndim);
   int64_t nsort = self.sizes()[dim];
   int64_t threshold;
   if (self.scalar_type() == kLong || self.scalar_type() == kDouble) {
@@ -46,7 +49,170 @@ bool should_use_th_sort(const Tensor &self, int64_t dim) {
 
 std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim);
 
-// We perform a vectorized segmented sort in cub.
+void fillSliceWithIndex(Tensor& t,int dim) {
+  if (t.numel()) {
+    auto sizes = DimVector(t.dim(), 1);
+    sizes[dim] = t.sizes()[dim];
+    auto range = at::arange(t.sizes()[dim], t.options());
+    auto rangeview = range.view(sizes);
+    t.copy_(rangeview);
+  }
+}
+
+// In alignment with default sort on a c++ map, this function
+// will permute key and value tensors identically, and
+// in such a way that the 'key' tensor is ordered numerically
+void sortKeyValueInplace(Tensor& key,
+                         Tensor& value,
+                         int dim, bool dir) {
+  TORCH_CHECK(key.sizes() == value.sizes(),
+              "Key tensor must have same size as value tensor");
+  int dims = value.dim();
+  TORCH_CHECK(dims <= MAX_DIMS, "value tensor has too many dimensions");
+  // if key and value tensors have the same size, we do not need to check both
+
+  ptrdiff_t inElements = key.numel();
+
+  if (inElements == 0) {
+    return;
+  }
+
+  int64_t keySliceSize = key.size(dim);
+  ptrdiff_t keySlices = inElements / keySliceSize;
+
+  // The amount of shared memory and block size is based on
+  // 2^ceil(lg(n)); we choose that sorting implementation for a given
+  // size.
+  int64_t ceilPowerOf2 = nextHighestPowerOf2(keySliceSize);
+
+  // FIXME: We'd have to find some other trick with Thrust to perform a
+  // vectorized (key, value) sort by slice segment
+  TORCH_INTERNAL_ASSERT(ceilPowerOf2 <= 2048, "sortKeyValueInplace only works for sizes <= 2048 at present");
+
+  // The grid is based on the number of independent slices that we
+  // have to sort; one block per slice
+  dim3 grid;
+  TORCH_INTERNAL_ASSERT(getGridFromTiles(keySlices, grid), "Too many slices to sort");
+
+#define HANDLE_CASE(TYPE, A, SIZE)                                      \
+  do {                                                                  \
+    int blockSize = SIZE / 2;                                           \
+    if (blockSize < 1) {                                                \
+      blockSize = 1;                                                    \
+    }                                                                   \
+                                                                        \
+    dim3 block(blockSize);                                              \
+                                                                        \
+    if (dir) {                                                          \
+      bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
+          GTComp<scalar_t, true>, TYPE, SIZE>                           \
+        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
+          keyInfo,                                                      \
+          keySlices,                                                    \
+          (TYPE) keySliceSize,                                          \
+          (TYPE) keyInfo.strides[collapseKeyDim],                       \
+          valueInfo,                                                    \
+          (TYPE) valueInfo.strides[collapseValueDim],                   \
+          GTComp<scalar_t, true>());                                    \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
+    } else {                                                            \
+      bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
+      LTComp<scalar_t, true>, TYPE, SIZE>                               \
+        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
+          keyInfo,                                                      \
+          keySlices,                                                    \
+          (TYPE) keySliceSize,                                          \
+          (TYPE) keyInfo.strides[collapseKeyDim],                       \
+          valueInfo,                                                    \
+          (TYPE) valueInfo.strides[collapseValueDim],                   \
+          LTComp<scalar_t, true>());                                    \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
+    }                                                                   \
+  } while (0)
+
+#define HANDLE_SORT_CASE(TYPE, A)                       \
+  {                                                     \
+    switch (ceilPowerOf2) {                             \
+      case 2048:                                        \
+      HANDLE_CASE(TYPE, A, 2048);                       \
+      break;                                            \
+      case 1024:                                        \
+      case 512:                                         \
+      case 256:                                         \
+      HANDLE_CASE(TYPE, A, 1024);                       \
+      break;                                            \
+      case 128:                                         \
+      case 64:                                          \
+      HANDLE_CASE(TYPE, A, 128);                        \
+      break;                                            \
+      case 32:                                          \
+      case 16:                                          \
+      case 8:                                           \
+      case 4:                                           \
+      case 2:                                           \
+      HANDLE_CASE(TYPE, A, 32);                         \
+      break;                                            \
+      case 1:                                           \
+      /* Nothing to do, data already sorted */          \
+      break;                                            \
+      default:                                          \
+      TORCH_INTERNAL_ASSERT(false);                     \
+    }                                                   \
+  }
+
+  // The constructed key/value tensor info is used to select the slice
+  // we are sorting on a per-block basis
+  // The constructed key/value tensor info is used to select the slice
+  // we are sorting on a per-block basis
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, key.scalar_type(), "sortKeyValueInplace", [&]  {
+    if (at::cuda::detail::canUse32BitIndexMath(key)) {
+      at::cuda::detail::TensorInfo<scalar_t, unsigned int> keyInfo =
+        at::cuda::detail::getTensorInfo<scalar_t, unsigned int>(key);
+      at::cuda::detail::TensorInfo<int64_t, unsigned int> valueInfo =
+        at::cuda::detail::getTensorInfo<int64_t, unsigned int>(value);
+
+      keyInfo.reduceDim(dim);
+      int collapseKeyDim = keyInfo.collapseDims(dim);
+      valueInfo.reduceDim(dim);
+      int collapseValueDim = valueInfo.collapseDims(dim);
+
+      if (keyInfo.isContiguous()) {
+        HANDLE_SORT_CASE(unsigned int, -2);
+      } else {
+        switch (keyInfo.dims) {
+          case 2:
+            HANDLE_SORT_CASE(unsigned int, 2);
+            break;
+          default:
+            HANDLE_SORT_CASE(unsigned int, -1);
+            break;
+        }
+      }
+
+    } else {
+      at::cuda::detail::TensorInfo<scalar_t, uint64_t> keyInfo =
+        at::cuda::detail::getTensorInfo<scalar_t, uint64_t>(key);
+      at::cuda::detail::TensorInfo<int64_t, uint64_t> valueInfo =
+        at::cuda::detail::getTensorInfo<int64_t, uint64_t>(value);
+
+      keyInfo.reduceDim(dim);
+      int collapseKeyDim = keyInfo.collapseDims(dim);
+      valueInfo.reduceDim(dim);
+      int collapseValueDim = valueInfo.collapseDims(dim);
+
+      // int64_t case is rare, just instantiate the generic version
+      HANDLE_SORT_CASE(uint64_t, -1);
+    }
+  });
+#undef HANDLE_CASE
+#undef HANDLE_SORT_CASE
+#undef HANDLE_A_CASE
+}
+
+// We perform a vectorized segmented sort in cub with inputs that have
+// more than 1024/2048 elements along the selected dimension.
+// Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
+// Large sort algorithm:.
 // Say we are sorting a (2, 3) tensor. We have in flattened form:
 // values       0.4 1.2 5.3 6.2 1.3 2.3
 // indices        0   1   2   0   1   2
@@ -72,11 +238,11 @@ std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t d
 // implementation here is a catch-all, so we're not looking for
 // efficiency, but instead correctness.
 std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
-  if (should_use_th_sort(self, dim)) {
-    return legacy::cuda::_th_sort_out_stable(self, stable, dim, descending, values, indices);
-  }
   // this algorithm is always stable
   TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
+  TensorArg self_arg{self, "self", 1}, values_arg{values, "values", 2}, indices_arg{indices, "indices", 3};
+  checkAllSameGPU("small_sort", {self_arg, values_arg, indices_arg});
+
   bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
   int64_t numel = self.numel();
   int64_t ndim = self.dim();
@@ -84,7 +250,14 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   int64_t nsort = self.sizes()[dim];
 
   TORCH_CHECK(nsort <= std::numeric_limits<int>::max(),
-    "The dimension being sorted can not have more than INT_MAX elsments.");
+    "The dimension being sorted can not have more than INT_MAX elements.");
+
+  const auto self_dtype = self.dtype();
+  // FIXME: remove this check once cub sort supports bool
+  TORCH_CHECK(self_dtype != ScalarType::Bool,
+    "Sort currently does not support bool dtype on CUDA.");
+  TORCH_CHECK(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,
+    "Sort currently does not support complex dtypes on CUDA.");
 
   if (ndim == 0) {
     if (!values.defined()) {
@@ -99,6 +272,32 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
       indices.resize_as_(self);
       indices.zero_();
     }
+    return std::forward_as_tuple(values, indices);
+  }
+
+  // use inplace algorithm for smaller input sizes without stable=True
+  if (should_use_small_sort(self, dim) && !stable.value()) {
+    // from thc: sorted->values, indices->indices, input->self
+
+    if (!values.defined()) {
+      values = at::empty_like(self);
+    }
+    if (!indices.defined()) {
+      indices = at::empty_like(self, self.options().dtype(kLong));
+    }
+
+    // Make sure sufficient output space is allocated
+    auto self_size = self.sizes();
+    at::native::resize_output(values, self_size);
+    at::native::resize_output(indices, self_size);
+    fillSliceWithIndex(indices, dim);
+
+    // We sort k/v pairs in-place; copy unsorted input to output
+    values.copy_(self);
+
+    // Sort using our in-place k/v kernel that supports arbitrary
+    // layout
+    sortKeyValueInplace(values, indices, dim, descending);
     return std::forward_as_tuple(values, indices);
   }
 
@@ -210,24 +409,15 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
 }
 
 std::tuple<Tensor &,Tensor &> sort_out_cuda(const Tensor & self, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
-  if (should_use_th_sort(self, dim)) {
-    return legacy::cuda::_th_sort_out(self, dim, descending, values, indices);
-  }
   return sort_out_stable_cuda(self, /*stable=*/false, dim, descending, values, indices);
 }
 
 std::tuple<Tensor,Tensor> sort_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
-  if (should_use_th_sort(self, dim)) {
-    return legacy::cuda::_th_sort_stable(self, stable, dim, descending);
-  }
   Tensor values, indices;
   return sort_out_stable_cuda(self, stable, dim, descending, values, indices);
 }
 
 std::tuple<Tensor,Tensor> sort_cuda(const Tensor & self, int64_t dim, bool descending) {  int64_t threshold;
-  if (should_use_th_sort(self, dim)) {
-    return legacy::cuda::_th_sort(self, dim, descending);
-  }
   return sort_stable_cuda(self, /*stable=*/false, dim, descending);
 }
 
