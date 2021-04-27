@@ -347,15 +347,6 @@ def einsum(*args):
         run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
         can optimize the formula for you.
 
-    .. note::
-
-        There's an alternative way of calling :func:`torch.einsum` by providing each input operand followed by its
-        subscripts as a list of integers in the range [0, 52), and optionally `Ellipsis`, as separate arguments. The
-        output subscripts may be optionally specified as the last argument.
-        e.g.`torch.einsum(op1, sublist1, op2, sublist2, ..., [subslist_out])`, where `opn` is the `nth` operand,
-        `sublistn` the subscript list for the `nth` and `sublist_out` the optional output subscripts. An example of
-        a subscript list is `[0, 30, Ellipsis, 30, 5]`. See below for more examples.
-
     Args:
         equation (string): The subscripts for the Einstein summation.
         operands (List[Tensor]): The tensors to compute the Einstein summation of.

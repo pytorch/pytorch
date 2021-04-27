@@ -217,7 +217,7 @@ Tensor einsum(std::string equation, TensorList operands) {
         // Parse label
         TORCH_CHECK(
             einsum_check_label(label),
-            "einsum() invalid subscript given at index ",
+            "einsum(): invalid subscript given at index ",
             i,
             " in the equation string, subscripts must be in [a-zA-Z]");
         op_labels[curr_op].push_back(einsum_label_to_index(label));
@@ -316,7 +316,7 @@ Tensor einsum(std::string equation, TensorList operands) {
         default:
           TORCH_CHECK(
               einsum_check_label(label),
-              "einsum() invalid subscript given at index ",
+              "einsum(): invalid subscript given at index ",
             lhs.size() + 2 + i,
               " in the equation string, subscripts must be in [a-zA-Z]");
           const auto index = einsum_label_to_index(label);
@@ -324,7 +324,7 @@ Tensor einsum(std::string equation, TensorList operands) {
               // Ensure label appeared at least once for some input operand and at
               // most once for the output
               label_count[index] > 0 && label_perm_index[index] == -1,
-              "einsum() output subscript ",
+              "einsum(): output subscript ",
               label,
               label_perm_index[index] > -1
                   ? " appears more than once in the output"

@@ -4291,17 +4291,17 @@ class TestLinalg(TestCase):
             self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
 
         # Test cases from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
-        x = torch.rand(5, device=device, dtype=dtype)
-        y = torch.rand(7, device=device, dtype=dtype)
-        A = torch.randn(3, 5, device=device, dtype=dtype)
-        B = torch.randn(2, 5, device=device, dtype=dtype)
-        C = torch.randn(2, 3, 5, device=device, dtype=dtype)
-        D = torch.randn(2, 5, 7, device=device, dtype=dtype)
-        E = torch.randn(7, 9, device=device, dtype=dtype)
-        F = torch.randn(2, 3, 3, 5, device=device, dtype=dtype)
-        G = torch.randn(5, 4, 6, device=device, dtype=dtype)
-        H = torch.randn(4, 4, device=device, dtype=dtype)
-        I = torch.rand(2, 3, 2, device=device, dtype=dtype)
+        x = make_tensor((5,), device, dtype)
+        y = make_tensor((7,), device, dtype)
+        A = make_tensor((3, 5), device, dtype)
+        B = make_tensor((2, 5), device, dtype)
+        C = make_tensor((2, 3, 5), device, dtype)
+        D = make_tensor((2, 5, 7), device, dtype)
+        E = make_tensor((7, 9), device, dtype)
+        F = make_tensor((2, 3, 3, 5), device, dtype)
+        G = make_tensor((5, 4, 6), device, dtype)
+        H = make_tensor((4, 4), device, dtype)
+        I = make_tensor((2, 3, 2), device, dtype)
 
         # Vector operations
         check('i->', x)                     # sum
@@ -4332,20 +4332,20 @@ class TestLinalg(TestCase):
         check("ii", H)                      # trace
         check("ii->i", H)                   # diagonal
         check('iji->j', I)                  # non-contiguous trace
-        check('ngrg...->nrg...', torch.rand((2, 1, 3, 1, 4), device=device, dtype=dtype))
+        check('ngrg...->nrg...', make_tensor((2, 1, 3, 1, 4), device, dtype))
 
         # Test ellipsis
         check("i...->...", H)
         check("ki,...k->i...", A.t(), B)
         check("k...,jk->...", A.t(), B)
         check('...ik, ...j -> ...ij', C, x)
-        check('Bik,k...j->i...j', C, torch.rand(5, 3, device=device, dtype=dtype))
-        check('i...j, ij... -> ...ij', C, torch.rand(2, 5, 2, 3, device=device, dtype=dtype))
+        check('Bik,k...j->i...j', C, make_tensor((5, 3), device, dtype))
+        check('i...j, ij... -> ...ij', C, make_tensor((2, 5, 2, 3), device, dtype))
 
         # torch.bilinear with noncontiguous tensors
-        l = torch.randn(10, 5, device=device, dtype=dtype).transpose(0, 1)
-        r = torch.randn(20, 5, device=device, dtype=dtype).transpose(0, 1)
-        w = torch.randn(15, 10, 20, device=device, dtype=dtype)
+        l = make_tensor((5, 10), device, dtype, noncontiguous=True)
+        r = make_tensor((5, 20), device, dtype, noncontiguous=True)
+        w = make_tensor((15, 10, 20), device, dtype)
         check("bn,anm,bm->ba", l, w, r)
 
         # with strided tensors
@@ -4385,7 +4385,7 @@ class TestLinalg(TestCase):
                     labels.insert(ell_index, "...")
 
                 equation += ''.join(labels) + ','
-                ops.append(torch.rand(sizes, device=device, dtype=dtype))
+                ops.append(make_tensor(sizes, device, dtype))
             equation = equation[:-1]
 
             # Test with implicit output
@@ -4403,8 +4403,8 @@ class TestLinalg(TestCase):
 
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
-            tensors = [torch.tensor(operand, dtype=torch.float32, device=device) if not isinstance(operand, tuple)
-                       else torch.rand(operand, dtype=torch.float32, device=device) for operand in operands]
+            tensors = [torch.tensor(operand, device=device, dtype=torch.float32) if not isinstance(operand, tuple)
+                       else make_tensor(operand, device, torch.float32) for operand in operands]
             output = torch.einsum(equation, tensors)
             self.assertEqual(output, torch.tensor(expected_output, dtype=torch.float32, device=device))
 
@@ -4446,8 +4446,8 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(exception, r'einsum\(\):.*' + regex):
                 torch.einsum(*args)
 
-        x = torch.rand(2)
-        y = torch.rand(2, 3)
+        x = make_tensor((2,), device, torch.float32)
+        y = make_tensor((2, 3), device, torch.float32)
 
         check('', [], regex=r'at least one operand', exception=ValueError)
         check('. ..', [x], regex=r'found \'.\' for operand 0 that is not part of any ellipsis')
@@ -4481,11 +4481,11 @@ class TestLinalg(TestCase):
             res = torch.einsum(*args)
             self.assertEqual(torch.from_numpy(np.array(ref)), res)
 
-        x = torch.rand(5, device=device, dtype=dtype)
-        y = torch.rand(7, device=device, dtype=dtype)
-        A = torch.randn(3, 5, device=device, dtype=dtype)
-        B = torch.randn(2, 5, device=device, dtype=dtype)
-        C = torch.rand((2, 1, 3, 1, 4), device=device, dtype=dtype)
+        x = make_tensor((5,), device, dtype)
+        y = make_tensor((7,), device, dtype)
+        A = make_tensor((3, 5), device, dtype)
+        B = make_tensor((2, 5), device, dtype)
+        C = make_tensor((2, 1, 3, 1, 4), device, dtype)
 
         check(x, [0])
         check(x, [0], [])
