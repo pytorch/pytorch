@@ -60,7 +60,7 @@ class TORCH_API ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(
       caffe2::serialize::PyTorchStreamWriter& export_writer)
-      : writer_(export_writer), next_ts_id(0) {}
+      : writer_(export_writer) {}
 
   void writeFiles(const std::string& code_dir);
   void serialize(
@@ -68,9 +68,7 @@ class TORCH_API ScriptModuleSerializer {
       const ExtraFilesMap& extra_files,
       bool bytecode_format,
       bool save_mobile_debug_info);
-  std::tuple<uint64_t, uint64_t> serialize_unified_format(
-      Module& module,
-      uint64_t starting_tensor_id);
+  void serialize_unified_format(Module& module, uint64_t script_module_id);
 
   ~ScriptModuleSerializer() = default;
 
@@ -82,12 +80,12 @@ class TORCH_API ScriptModuleSerializer {
       const Module& module,
       const ExtraFilesMap& extra_files);
   void writeByteCode(const Module& module, bool save_mobile_debug_info);
-  uint64_t writeArchive(
+  void writeArchive(
       const IValue& value,
       const std::string& archive_name,
       const std::string& archive_dir,
       const std::string& tensor_dir,
-      uint64_t next_tensor_id = 0);
+      bool tensor_cptr_naming_scheme = false);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
   std::vector<at::IValue> constant_table_;
@@ -97,8 +95,6 @@ class TORCH_API ScriptModuleSerializer {
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
   // created
   OrderedDict<std::string, PythonPrint> file_streams_;
-  // next torchscript identifier to be used in package archive
-  uint64_t next_ts_id;
 };
 
 // For testing purposes

@@ -103,9 +103,8 @@ class PackageExporter:
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
-        self.serialized_reduces: Dict[str, Any] = {}
-        self.serialized_storages: Dict[str, Any] = {}
-        self.storage_ids: Dict[str, str] = {}  # mapping of storage pointers to their serialized_storages id
+        self.serialized_reduces: Dict[int, Any] = {}
+        self.serialized_storages: Set[str] = set()
         self.extern_modules: List[str] = []
         self.provided: Dict[str, bool] = {}
         self.verbose = verbose
@@ -127,7 +126,6 @@ class PackageExporter:
         self.matched_patterns: Set[int] = set()
         self.debug_deps: List[Tuple[str, str]] = []
         self._unique_id = 0
-        self._next_storage_id = 0
 
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
@@ -565,13 +563,21 @@ node [shape=box];
     def _persistent_id(self, obj):
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            if self.storage_ids.get(str(obj._cdata)) is None:
-                self.storage_ids[str(obj._cdata)] = self.get_unique_id() 
-            obj_key = self.storage_ids[str(obj._cdata)]
+            obj_key = str(obj._cdata)
             location = location_tag(obj)
-            self.serialized_storages[obj_key] = obj
+            name = f".data/{obj_key}.storage"
 
+            if name not in self.serialized_storages:
+                # check to see if storage was previously serialized
+                serialzed_files = self.zip_file.get_all_written_records()
+                if name not in serialzed_files:
+                    if obj.device.type != "cpu":
+                        obj = obj.cpu()
+                    num_bytes = obj.size() * obj.element_size()
+                    self.zip_file.write_record(name, obj.data_ptr(), num_bytes)
+                self.serialized_storages.add(name)
             return ("storage", storage_type, obj_key, location, obj.size())
+
         if hasattr(obj, "__reduce_package__"):
             if self.serialized_reduces.get(id(obj)) is None:
                 self.serialized_reduces[id(obj)] = obj.__reduce_package__(self)
@@ -621,16 +627,6 @@ node [shape=box];
                     f"Exporter did not match any modules to {pattern}, which was marked as allow_empty=False"
                 )
 
-        # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-        for key in sorted(self.serialized_storages.keys()):
-            name = f".data/{key}.storage"
-            storage = self.serialized_storages[key]
-            # location information is saved in python, but to actually
-            # get the data from non cpu tensors we need to move them over first
-            if storage.device.type != "cpu":
-                storage = storage.cpu()
-            num_bytes = storage.size() * storage.element_size()
-            self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
         contents = "\n".join(self.extern_modules) + "\n"
         self._write(".data/extern_modules", contents)
         self.script_module_serializer.write_files()
