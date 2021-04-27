@@ -1188,5 +1188,18 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    const auto dim = p_node->Input(1).toOptional<int64_t>();
+    const auto keepdim = p_node->Input(2).toBool();
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t, at::kLong);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::argmin_out(in0_t, dim, keepdim, out_t);
+  };
+});
 } // namespace jit
 } // namespace torch
