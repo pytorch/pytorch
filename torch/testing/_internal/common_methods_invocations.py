@@ -3764,8 +3764,8 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad):
             elif dtype.is_complex:
                 reduce_args = ['add']
 
-            for reduce in reduce_args:
-                samples.append(SampleInput(tensor, args=args, kwargs={'reduce': reduce}))
+            for r in reduce_args:
+                samples.append(SampleInput(tensor, args=args, kwargs={'reduce': r}))
 
     return samples
 
