@@ -775,31 +775,31 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result_grads, expected_grads)
 
-
+only_for = ("cpu", "cuda")
 instantiate_device_type_tests(
     TestGradTransform,
     globals(),
-    None,
+    only_for=only_for,
 )
 instantiate_device_type_tests(
     TestVmapOfGrad,
     globals(),
-    None,
+    only_for=only_for,
 )
 instantiate_device_type_tests(
     TestJacrev,
     globals(),
-    None,
+    only_for=only_for,
 )
 instantiate_device_type_tests(
     TestComposability,
     globals(),
-    None,
+    only_for=only_for,
 )
 instantiate_device_type_tests(
     TestExamplesCorrectness,
     globals(),
-    None,
+    only_for=only_for,
 )
 
 
