@@ -50,7 +50,7 @@ function get_exit_code() {
 }
 
 function file_diff_from_base() {
-  # The fetch may fail on Docker hosts, but it's not always necessary.
+  # The fetch may fail on Docker hosts, this fetch is necessary for GHA
   set +e
   git fetch origin master --quiet
   set -e

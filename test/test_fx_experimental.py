@@ -911,8 +911,8 @@ class {test_classname}(torch.nn.Module):
                         normalized_args2 = normalize_module(traced, node.target, node.args, node.kwargs)
                         assert(normalized_args == normalized_args2)
                         assert normalized_args
-                        node.args = ()
-                        node.kwargs = normalized_args
+                        node.args = normalized_args.args
+                        node.kwargs = normalized_args.kwargs
 
             traced.recompile()
 
@@ -1264,11 +1264,11 @@ class TestNormalizeOperators(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Unsupported input types
-        if op.name in {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma'}:
+        if op.name in {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma',
+                       'hsplit', 'vsplit', 'dsplit', 'einsum'}:
             return
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {'stack', 'hstack', 'vstack', 'dstack',
-                   'linalg.multi_dot'}
+        fx_fail = {'stack', 'hstack', 'vstack', 'dstack', 'linalg.multi_dot'}
         print(op.name)
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
@@ -1306,8 +1306,8 @@ class TestNormalizeOperators(JitTestCase):
                 continue
             # Test normalize_function by itself
             ref_out = op.op(*arg_values, **kwarg_values)
-            norm_kwargs = normalize_function(op.op, arg_values, kwarg_values, arg_types, kwarg_types)
-            test_out = op.op(**norm_kwargs)
+            norm_args_and_kwargs = normalize_function(op.op, arg_values, kwarg_values, arg_types, kwarg_types)
+            test_out = op.op(*norm_args_and_kwargs.args, **norm_args_and_kwargs.kwargs)
             self.assertEqual(test_out, ref_out)
 
             # Test normalized_arguments as part of FX
@@ -1351,8 +1351,8 @@ class TestModule(torch.nn.Module):
                 if node.op == 'call_function':
                     normalized_args = node.normalized_arguments(traced, arg_types, kwarg_types)
                     assert normalized_args
-                    node.args = ()
-                    node.kwargs = normalized_args
+                    node.args = normalized_args.args
+                    node.kwargs = normalized_args.kwargs
             traced.recompile()
 
             test_out = traced(*param_values)

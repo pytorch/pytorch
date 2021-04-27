@@ -2635,17 +2635,7 @@ add_docstr_all('permute',
                r"""
 permute(*dims) -> Tensor
 
-Returns a view of the original tensor with its dimensions permuted.
-
-Args:
-    *dims (int...): The desired ordering of dimensions
-
-Example:
-    >>> x = torch.randn(2, 3, 5)
-    >>> x.size()
-    torch.Size([2, 3, 5])
-    >>> x.permute(2, 0, 1).size()
-    torch.Size([5, 2, 3])
+See :func:`torch.permute`
 """)
 
 add_docstr_all('polygamma',
@@ -2660,6 +2650,13 @@ add_docstr_all('polygamma_',
 polygamma_(n) -> Tensor
 
 In-place version of :meth:`~Tensor.polygamma`
+""")
+
+add_docstr_all('positive',
+               r"""
+positive() -> Tensor
+
+See :func:`torch.positive`
 """)
 
 add_docstr_all('pow',
