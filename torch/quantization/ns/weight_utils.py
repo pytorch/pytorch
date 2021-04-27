@@ -155,7 +155,6 @@ def extract_weight_from_node(
                 'prev_node_target_type': str(node.target),
                 'ref_node_name': node.name,
                 'index_within_arg': 0,
-                'index_of_arg': 0,
             }
         elif (related_to_conv1d or related_to_conv2d or related_to_conv3d):
             weight = get_conv_fun_weight(node, gm)
@@ -166,10 +165,9 @@ def extract_weight_from_node(
                 'prev_node_target_type': str(node.target),
                 'ref_node_name': node.name,
                 'index_within_arg': 0,
-                'index_of_arg': 0,
             }
 
-    elif node.op == 'call_module':
+    else:  # call_module
         # for call_module, we need to look up the modules to do the type check
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
@@ -196,7 +194,6 @@ def extract_weight_from_node(
                 'prev_node_target_type': str(type(mod)),
                 'ref_node_name': node.name,
                 'index_within_arg': 0,
-                'index_of_arg': 0,
             }
         elif related_to_lstm_mod:
             weights = get_lstm_mod_weights(mod)
@@ -207,7 +204,6 @@ def extract_weight_from_node(
                 'prev_node_target_type': str(type(mod)),
                 'ref_node_name': node.name,
                 'index_within_arg': 0,
-                'index_of_arg': 0,
             }
         elif related_to_linear_mod:
             weights = [get_linear_mod_weight(mod)]
@@ -218,7 +214,6 @@ def extract_weight_from_node(
                 'prev_node_target_type': str(type(mod)),
                 'ref_node_name': node.name,
                 'index_within_arg': 0,
-                'index_of_arg': 0,
             }
 
     return None
