@@ -100,7 +100,9 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("copy_", torch::CppFunction::makeFallthrough());
   m.impl("conj", torch::CppFunction::makeFallthrough());
   m.impl("_conj", torch::CppFunction::makeFallthrough());
+  m.impl("neg", torch::CppFunction::makeFallthrough());
   m.impl("neg_", torch::CppFunction::makeFallthrough());
+  m.impl("_resolve_neg", torch::CppFunction::makeFallthrough());
   m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
   m.impl("resolve_neg_", torch::CppFunction::makeFallthrough());
   m.impl("empty_like", torch::CppFunction::makeFallthrough());

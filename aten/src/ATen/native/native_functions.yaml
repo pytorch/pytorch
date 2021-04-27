@@ -311,10 +311,10 @@
   variants: function, method
   structured_delegate: conj_physical.out
 
-- func: _resolve_conj(Tensor(a) self) -> Tensor(a)
+- func: _resolve_conj_neg(Tensor(a) self) -> Tensor(a)
   variants: function, method
   dispatch:
-    CompositeExplicitAutograd: _resolve_conj
+    CompositeExplicitAutograd: _resolve_conj_neg
 
 - func: resolve_conj(Tensor(a) self) -> Tensor(a)
   variants: function, method

@@ -1181,7 +1181,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   TRIVIAL_OP(conj);
   TRIVIAL_OP(_conj);
   TRIVIAL_OP(resolve_conj);
-  TRIVIAL_OP(_resolve_conj);
+  TRIVIAL_OP(_resolve_conj_neg);
+  TRIVIAL_OP(resolve_neg);
   m.impl("view_as_complex", view_as_complex_batching_rule);
 #undef TRIVIAL
 

@@ -335,22 +335,17 @@ Tensor imag(const Tensor& self) {
   }
 }
 
+Tensor _resolve_conj_neg(const Tensor& self) {
+  auto result = at::empty_like(self, self.options());
+  // conjugation and negation are handled in `copy_()`
+  return result.copy_(self);
+}
+
 // No op if the neg bit is not set
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_neg(const Tensor& self) {
   if (!self.is_neg()) { return self; }
-  auto result = at::empty_like(self, self.options());
-  // should empty and other tensor constructors propagate the neg bit?
-  // possibly empty_like
-  result.set_neg(false);
-  // negation is handled in `copy_()`
-  return result.copy_(self);
-}
-
-Tensor _resolve_conj(const Tensor& self) {
-  auto result = at::empty_like(self, self.options());
-  // conjugation is handled in `copy_()`
-  return result.copy_(self);
+  return _resolve_conj_neg(self);
 }
 
 Tensor resolve_conj(const Tensor& self) {
@@ -377,6 +372,8 @@ Tensor _conj(const Tensor& self) {
 }
 
 Tensor conj(const Tensor& self) {
+  // This might look like an infinite recursion but it's not.
+  // This actually calls into `conj()` defined in the Tensor class.
   return self.conj();
 }
 

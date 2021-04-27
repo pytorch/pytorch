@@ -26,6 +26,7 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   // tensors are contiguous after dimension coalescing and reordering.
   bool same_type = iter.dtype(0) == iter.dtype(1);
   bool same_conj = iter.tensor(0).is_conj() == iter.tensor(1).is_conj();
+  bool same_neg = iter.tensor(0).is_neg() == iter.tensor(1).is_neg();
   bool memcpy_eligible = same_type && same_conj && iter.is_contiguous();
 
   Device dst_device = iter.device(0);
@@ -72,16 +73,30 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
       });
     } else {
-      if (!same_conj && same_type) {
-        AT_DISPATCH_COMPLEX_TYPES(
-            dtype, "copy_conj_", [&] {
-              gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(x); });
-            });
+      if (same_neg) {
+        if (!same_conj && same_type) {
+          AT_DISPATCH_COMPLEX_TYPES(
+              dtype, "copy_conj_", [&] {
+                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(x); });
+              });
+        } else {
+          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+              kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+              });
+        }
       } else {
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-            kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
-              gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-            });
+        if (!same_conj && same_type) {
+          AT_DISPATCH_COMPLEX_TYPES(
+              dtype, "copy_conj_", [&] {
+                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(-x); });
+              });
+        } else {
+          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+              kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return -x; });
+              });
+        }
       }
     }
   }

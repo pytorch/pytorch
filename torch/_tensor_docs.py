@@ -921,6 +921,20 @@ conj() -> Tensor
 In-place version of :meth:`~Tensor.resolve_conj`
 """)
 
+add_docstr_all('resolve_neg',
+               r"""
+conj() -> Tensor
+
+See :func:`torch.resolve_neg`
+""")
+
+add_docstr_all('resolve_neg_',
+               r"""
+conj() -> Tensor
+
+In-place version of :meth:`~Tensor.resolve_neg`
+""")
+
 add_docstr_all('copysign',
                r"""
 copysign(other) -> Tensor
