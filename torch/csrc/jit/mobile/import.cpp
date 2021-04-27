@@ -171,7 +171,7 @@ std::unordered_set<std::string> BytecodeDeserializer::
   for (const auto& op : ops_list) {
     auto op_item = op.toTuple()->elements();
     TORCH_CHECK(
-        op_item.size() == 2 || op_item.size() == 3,
+        op_item.size() >= 2,
         "There should be either two parts (name and overload name), ",
         "or three parts (name, overload name and number of specified args) ",
         "for an operator");
