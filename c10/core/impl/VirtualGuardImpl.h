@@ -71,6 +71,12 @@ public:
     impl_->destroyEvent(event, device_index);
   }
 
+  void recordDataPtrOnStream(
+    const c10::DataPtr& data_ptr,
+    const Stream& stream) const override {
+    impl_->recordDataPtrOnStream(data_ptr, stream);
+  }
+
 private:
   const DeviceGuardImplInterface* impl_ = nullptr;
 };

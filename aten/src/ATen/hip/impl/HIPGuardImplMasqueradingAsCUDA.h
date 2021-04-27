@@ -188,6 +188,13 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     if (err != hipErrorNotReady) C10_HIP_CHECK(err);
     return (err == hipSuccess);
   }
+
+  void recordDataPtrOnStream(
+    const c10::DataPtr& data_ptr,
+    const Stream& stream) const override {
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA(data_ptr, hip_stream);
+  }
 };
 
 // All of the guards which have HIPGuardImpl burned in need to also have
