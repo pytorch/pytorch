@@ -3,8 +3,15 @@ import inspect
 import numbers
 import typing
 import enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast
 from torch._jit_internal import boolean_dispatched
+
+class ArgsKwargsPair(NamedTuple):
+    """
+    Simple named tuple for wrapping args/kwargs pairs.
+    """
+    args: Tuple[Any, ...]
+    kwargs: Dict[str, Any]
 
 _manual_overrides : Dict[Callable, List[inspect.Signature]] = {}
 
@@ -140,11 +147,13 @@ def type_matches(signature_type : Any, argument_type : Any):
 
 def normalize_function(
         target: Callable, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None, arg_types : Optional[Tuple[Any]] = None,
-        kwarg_types : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        kwarg_types : Optional[Dict[str, Any]] = None,
+        normalize_to_only_use_kwargs : bool = False) -> Optional[ArgsKwargsPair]:
     """
     Returns normalized arguments to PyTorch functions. This means that
     `args/kwargs` will be matched up to the functional's
-    signature and return exclusively kwargs in positional order.
+    signature and return exclusively kwargs in positional order if
+    `normalize_to_only_use_kwargs` is True.
     Also populates default values. Does not support positional-only
     parameters or varargs parameters (*args, **kwargs). Does not support modules.
 
@@ -156,14 +165,15 @@ def normalize_function(
         kwargs (Optional[Dict[str, Any]]): Dict of kwargs to the function
         arg_types (Optional[Tuple[Any]]): Tuple of arg types for the args
         kwarg_types (Optional[Dict[str, Any]]): Dict of arg types for the kwargs
+        normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.
 
     Returns:
 
-        Returns normalized_kwargs, or `None` if not successful.
+        Returns normalized_args_and_kwargs, or `None` if not successful.
     """
     if kwargs is None:
         kwargs = {}
-    new_kwargs = None
+    new_args_and_kwargs = None
     if target in boolean_dispatched or target.__module__ in ['torch.nn.functional', 'torch.functional']:
         target_for_analysis = target
         if target in boolean_dispatched:
@@ -180,15 +190,15 @@ def normalize_function(
 
         assert callable(target_for_analysis)
         sig = inspect.signature(inspect.unwrap(target_for_analysis))
-        new_kwargs = _args_kwargs_to_normalized_kwargs(sig, args, kwargs)
+        new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(sig, args, kwargs, normalize_to_only_use_kwargs)
     else:
         assert callable(target)
         torch_op_schemas = get_signature_for_torch_op(target)
         matched_schemas = []
         if torch_op_schemas:
             # Iterate through all of the schema until we find one that matches
-            # If one matches, populate `new_kwargs` with the combined args/kwargs
-            # values. If none matches, `new_kwargs` will be None
+            # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
+            # values. If none matches, `new_args_and_kwargs` will be None
             for candidate_signature in torch_op_schemas:
                 try:
                     candidate_signature.bind(*args, **kwargs)
@@ -201,7 +211,8 @@ def normalize_function(
                 pass
             elif len(matched_schemas) == 1:
                 # Matched exactly one schema, unambiguous
-                new_kwargs = _args_kwargs_to_normalized_kwargs(matched_schemas[0], args, kwargs)
+                new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(matched_schemas[0], args, kwargs,
+                                                                             normalize_to_only_use_kwargs)
             else:
                 if arg_types is not None or kwarg_types is not None:
                     arg_types = arg_types if arg_types else cast(Tuple[Any], ())
@@ -216,7 +227,8 @@ def normalize_function(
                         except TypeError as e:
                             sig_matches = False
                         if sig_matches:
-                            new_kwargs = _args_kwargs_to_normalized_kwargs(candidate_signature, args, kwargs)
+                            new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(candidate_signature, args, kwargs,
+                                                                                         normalize_to_only_use_kwargs)
                             break
                 else:
                     # Matched more than one schema. In this situation, the caller must provide the types of
@@ -226,14 +238,16 @@ def normalize_function(
                                        f'the schema match was ambiguous! Please provide argument types to '
                                        f'the normalize_arguments() call. Available schemas:\n{schema_printouts}')
 
-    return new_kwargs
+    return new_args_and_kwargs
 
 def normalize_module(
-        root: torch.nn.Module, target: str, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        root: torch.nn.Module, target: str, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None,
+        normalize_to_only_use_kwargs : bool = False) -> Optional[ArgsKwargsPair]:
     """
     Returns normalized arguments to PyTorch modules. This means that
     `args/kwargs` will be matched up to the functional's
-    signature and return exclusively kwargs in positional order.
+    signature and return exclusively kwargs in positional order if
+    `normalize_to_only_use_kwargs` is True.
     Also populates default values. Does not support positional-only
     parameters or varargs parameters (*args, **kwargs).
 
@@ -242,10 +256,11 @@ def normalize_module(
         target (Callable): Function that we are normalizing
         args (Tuple[Any]): Tuple of args to the function
         kwargs (Optional[Dict[str, Any]]): Dict of kwargs to the function
+        normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.
 
     Returns:
 
-        Returns normalized_kwargs, or `None` if not successful.
+        Returns normalized_args_and_kwargs, or `None` if not successful.
     """
     try:
         submod = root.get_submodule(target)
@@ -258,15 +273,17 @@ def normalize_module(
             sig = inspect.signature(inspect.unwrap(submod.forward))
             if kwargs is None:
                 kwargs = {}
-            new_kwargs = _args_kwargs_to_normalized_kwargs(sig, args, kwargs)
-            return new_kwargs
+            new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(sig, args, kwargs,
+                                                                         normalize_to_only_use_kwargs)
+            return new_args_and_kwargs
     return None
 
-def _args_kwargs_to_normalized_kwargs(sig : inspect.Signature, args : Tuple[Any, ...],
-                                      kwargs : Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _args_kwargs_to_normalized_args_kwargs(sig : inspect.Signature, args : Tuple[Any, ...],
+                                           kwargs : Dict[str, Any],
+                                           normalize_to_only_use_kwargs : bool) -> Optional[ArgsKwargsPair]:
     """
     Given a call target, args, and kwargs, return the arguments normalized into
-    a single kwargs dict, or None if the type signature is not supported by
+    an ArgsKwargsPair, or None if the type signature is not supported by
     this normalization.
 
     Args:
@@ -274,11 +291,12 @@ def _args_kwargs_to_normalized_kwargs(sig : inspect.Signature, args : Tuple[Any,
         target (inspect.Signature): Signature object for the target
         args (Tuple): Arguments that appear at the callsite for `target`
         kwargs (Dict): Keyword arugments that appear at the callsite for `target`
+        normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.
 
     Returns:
 
-        Optional[Dict]: Normalized kwargs for `target`, or `None` if this target is not
-            supported
+        Optional[ArgsKwargsPair]: Normalized args and kwargs for `target`, or `None` if
+            this target is not supported.
     """
 
     # Don't currently support positional-only
@@ -292,7 +310,11 @@ def _args_kwargs_to_normalized_kwargs(sig : inspect.Signature, args : Tuple[Any,
     bound_args.apply_defaults()
 
     new_kwargs : Dict[str, Any] = {}
-    for param in sig.parameters:
-        new_kwargs[param] = bound_args.arguments[param]
+    new_args : List[Any] = []
+    for i, param in enumerate(sig.parameters):
+        if not normalize_to_only_use_kwargs and i < len(args):
+            new_args.append(bound_args.arguments[param])
+        else:
+            new_kwargs[param] = bound_args.arguments[param]
 
-    return new_kwargs
+    return ArgsKwargsPair(tuple(new_args), new_kwargs)

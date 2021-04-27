@@ -380,6 +380,50 @@ class ProcessGroupNCCLTest(TestCase):
                 self.assertEqual(torch.tensor([s_idx]), t)
 
     @requires_nccl()
+    def test_allgather_base_ops(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allgather_base(output_t, input_t):
+            work = pg._allgather_base(output_t, input_t)
+            work.wait()
+
+        device_id = self.rank % self.num_gpus
+        # allgather_base is GPU number agnostic.
+        # Each rank contribute one tensor regardless of GPU counts
+        tensor = torch.tensor([self.rank]).cuda(device_id)
+        output_t = torch.empty((self.world_size), dtype=tensor.dtype).cuda(device_id)
+
+        allgather_base(output_t, tensor)
+
+        # Verification
+        self.assertEqual(torch.arange(self.world_size), output_t)
+
+    @requires_nccl()
+    def test_allgather_base_basics(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allgather_base(output_t, input_t):
+            work = pg._allgather_base(output_t, input_t)
+            work.wait()
+
+        device_id = self.rank % self.num_gpus
+        # anticpate an error
+        with self.assertRaisesRegex(RuntimeError, "output tensor size must be equal to world_size times input tensor size"):
+            tensor = torch.tensor([self.rank]).cuda(device_id)
+            output_t = torch.empty((self.world_size + 1), dtype=tensor.dtype).cuda(device_id)
+            # fails the check because output_t is not correctly sized
+            allgather_base(output_t, tensor)
+
+        # anticpate an error
+        with self.assertRaisesRegex(RuntimeError, "output tensor must have the same type as input tensor"):
+            tensor = torch.tensor([self.rank], dtype=torch.float).cuda(device_id)
+            output_t = torch.empty((self.world_size + 1), dtype=torch.long).cuda(device_id)
+            # fails the check because the dtype is different
+            allgather_base(output_t, tensor)
+
+    @requires_nccl()
     def test_reduce_scatter_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
