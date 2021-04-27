@@ -1377,8 +1377,15 @@ std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool ch
   checkSameDevice("torch.linalg.cholesky_ex", L, input, "L");
   checkLinalgCompatibleDtype("torch.linalg.cholesky_ex", L, input, "L");
   checkSameDevice("torch.linalg.cholesky_ex", info, input, "info");
+
+  // Do not allow type promotion for the `info` tensor, it must be of Int dtype
+  // Int is used because current interface to LAPACK and its CUDA implementation use "int" type.
+  // https://github.com/pytorch/pytorch/pull/56724#discussion_r618916774
   ScalarType info_output_type = ScalarType::Int;
-  checkLinalgCompatibleDtype("torch.linalg.cholesky_ex", info.scalar_type(), info_output_type);
+  TORCH_CHECK(
+      info.scalar_type() == info_output_type,
+      "torch.linalg.cholesky_ex: ",
+      "Expected info to have ", info_output_type, " dtype, but got info with dtype ", info.scalar_type());
 
   bool L_input_same_type = (L.scalar_type() == input.scalar_type());
   bool L_equal_expected_shape = L.sizes().equals(input.sizes());
@@ -1397,7 +1404,6 @@ std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool ch
   auto expected_info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
   copy_needed |= (info.numel() != 0 && !info.is_contiguous());
   copy_needed |= (info.numel() != 0 && !(info.sizes().equals(expected_info_shape))); // or L does not have the expected shape
-  copy_needed |= (info.scalar_type() != info_output_type);  // or L does not have the same dtype as input
 
   if (copy_needed) {
     Tensor L_tmp = at::empty({0}, input.options());
