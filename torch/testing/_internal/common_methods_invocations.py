@@ -1374,6 +1374,22 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
             samples.append(SampleInput(tensor, args=(d, idx, fill_val)))
             samples.append(SampleInput(tensor, args=(d, -idx - 1, fill_val)))
             samples.append(SampleInput(tensor, args=(d, idx_nonctg, fill_val)))
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    index_tensor = partial(torch.tensor, device=device, dtype=torch.long)
+
+    def unique_idx(numel, max_idx):
+        # Generate unique random indices vector of `numel`
+        # elements in range [0, max_idx).
+        indices = random.sample(range(max_idx), numel)
+        return index_tensor(indices)
+
+    samples.append(SampleInput(make_arg((S, S)), args=(0, unique_idx(2, S), 2)))
+    samples.append(SampleInput(make_arg((S, S)), args=(0, unique_idx(2, S), make_arg(()))))
+    samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor(0), 2)))
+    samples.append(SampleInput(make_arg(()), args=(0, index_tensor([0]), 2)))
+    samples.append(SampleInput(make_arg(()), args=(0, index_tensor(0), 2)))
+
     return samples
 
 def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs):
@@ -5831,11 +5847,6 @@ def method_tests():
         ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
-        ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', (), [0]),
-        ('index_fill', (S, S), (0, index_variable(2, S), ()), 'variable_dim', (), [0]),
-        ('index_fill', (S, S), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_index_dim', (), [0]),
-        ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', (), [0]),
-        ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', (), [0]),
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
         ('fill_', (S, S, S), ((),), 'variable'),
