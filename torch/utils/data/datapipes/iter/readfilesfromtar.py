@@ -1,16 +1,14 @@
+from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple
+from typing import Iterable, Iterator, Tuple, Optional, IO, cast
+from io import BufferedIOBase
+
 import os
 import tarfile
 import warnings
 
-from io import BufferedIOBase
-from typing import Iterable, Iterator, Tuple, Optional, IO, cast
-
-from torch.utils.data import IterDataPipe
-from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple
-
-
 class ReadFilesFromTarIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
-    r""" :class:`ReadFilesFromTarIterDataPipe`.
+    r""" :class:`ReadFilesFromTarIDP`.
 
     Iterable datapipe to extract tar binary streams from input iterable which contains tuples of
     pathname and tar binary stream, yields pathname and extracted binary stream in a tuple.
@@ -20,11 +18,12 @@ class ReadFilesFromTarIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     """
     def __init__(
             self,
-            datapipe: Iterable[Tuple[str, BufferedIOBase]],
-            length: int = -1):
+            datapipe : Iterable[Tuple[str, BufferedIOBase]],
+            length : int = -1):
         super().__init__()
-        self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
-        self.length: int = length
+        self.datapipe : Iterable[Tuple[str, BufferedIOBase]] = datapipe
+        self.length : int = length
+
 
     def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]]:
         if not isinstance(self.datapipe, Iterable):
@@ -52,6 +51,7 @@ class ReadFilesFromTarIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
                 warnings.warn(
                     "Unable to extract files from corrupted tarfile stream {} due to: {}, abort!".format(pathname, e))
                 raise e
+
 
     def __len__(self):
         if self.length == -1:
