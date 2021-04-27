@@ -429,11 +429,9 @@ if _enabled:
             Returns method to load the ScriptModule from a ``torch.package.PackageImporter``'s
             Pickler's ``persistent_load`` function.
             """
-            script_module_id, next_storage_id = exporter.script_module_serializer.serialize(
-                self._c, int(exporter.get_unique_id())
-            )
-            exporter._next_storage_id = next_storage_id
-            return (unpackage_script_module, (str(script_module_id),))
+            script_module_id = exporter.get_unique_id()
+            exporter.script_module_serializer.serialize(self._c, int(script_module_id))
+            return (unpackage_script_module, (script_module_id,))
 
     class RecursiveScriptModule(ScriptModule):
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole

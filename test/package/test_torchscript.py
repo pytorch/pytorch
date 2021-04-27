@@ -30,7 +30,7 @@ class PackageScriptModuleTest(PackageTestCase):
 
     def test_save_scriptmodule(self):
         """
-        Test basic saving of ScriptModule
+        Test basic saving of ScriptModule.
         """
 
         class ModB(torch.nn.Module):
@@ -72,7 +72,7 @@ class PackageScriptModuleTest(PackageTestCase):
     )
     def test_save_scriptmodule_file(self):
         """
-        Test basic saving of ScriptModule in file
+        Test basic saving of ScriptModule in file.
         """
 
         class ModB(torch.nn.Module):
@@ -110,7 +110,7 @@ class PackageScriptModuleTest(PackageTestCase):
     def test_save_scriptmodules_shared_code(self):
         """
         Test to verify saving multiple ScriptModules with same top module
-        but different submodules works
+        but different submodules works.
         """
 
         class ModD(torch.nn.Module):
@@ -166,7 +166,7 @@ class PackageScriptModuleTest(PackageTestCase):
 
     def test_save_independent_scriptmodules(self):
         """
-        Test to verify saving multiple ScriptModules works
+        Test to verify saving multiple ScriptModules works.
         """
 
         class ModD(torch.nn.Module):
@@ -276,6 +276,7 @@ class PackageScriptModuleTest(PackageTestCase):
     def test_scriptmodules_repeat_save(self):
         """
         Test to verify saving and loading same ScriptModule object works
+        across multiple packages.
         """
 
         class ModFoo(torch.nn.Module):
@@ -325,7 +326,7 @@ class PackageScriptModuleTest(PackageTestCase):
     def test_save_scriptmodule_multiple_packages(self):
         """
         Test to verify when saving multiple packages with same CU
-        that packages don't include unnecessary ts code files
+        that packages don't include unnecessary torchscript code files.
         """
 
         class ModFoo(torch.nn.Module):
@@ -370,7 +371,7 @@ class PackageScriptModuleTest(PackageTestCase):
 
     def test_save_scriptmodules_in_container(self):
         """
-        Test saving of ScriptModules inside of container
+        Test saving of ScriptModules inside of container.
         """
 
         class ModB(torch.nn.Module):
@@ -408,7 +409,7 @@ class PackageScriptModuleTest(PackageTestCase):
     def test_save_shared_scriptmodules(self):
         """
         Test saving of single ScriptModule shared by multiple
-        eager modules (ScriptModule should be saved just once)
+        eager modules (ScriptModule should be saved just once).
         """
 
         from package_a.test_module import SimpleTest, Mod
@@ -431,11 +432,47 @@ class PackageScriptModuleTest(PackageTestCase):
         self.assertTrue(file_structure.has_file(".data/ts_code/0"))
         self.assertFalse(file_structure.has_file(".data/ts_code/1"))
 
+    def test_save_shared_tensors(self):
+        """
+        Test that tensors are shared across eager and ScriptModules.
+        """
+        from package_a.test_module import SharedTensorsMod
+
+        class ModA(torch.nn.Module):
+            def __init__(self, x):
+                super().__init__()
+                self.tensor = x
+
+            def forward(self, input):
+                input = input + self.tensor
+                return input
+
+        shared_tensor = torch.rand(2, 3, 4)
+        scripted_mod = torch.jit.script(ModA(shared_tensor))
+
+        mod1 = SharedTensorsMod(shared_tensor, scripted_mod)
+        mod2 = SharedTensorsMod(shared_tensor, scripted_mod)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as e:
+            e.save_pickle("res", "mod1.pkl", mod1)
+            e.save_pickle("res", "mod2.pkl", mod2)
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+        loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
+
+        # assert that there is only one storage stored in package
+        file_structure = importer.file_structure(include=".data/*.storage")
+        self.assertTrue(len(file_structure.children[".data"].children) == 1)
+
+        input = torch.rand(2, 3, 4)
+        self.assertTrue(torch.allclose(loaded_mod_1(input), mod1(input)))
 
     def test_saving_scripting_packaged_mod(self):
         """
         Test scripting a module loaded from a package
-        and saving it in a new package as a script object
+        and saving it in a new package as a script object.
         """
         from package_a.test_module import SimpleTest
 
@@ -466,7 +503,7 @@ class PackageScriptModuleTest(PackageTestCase):
 
     def test_mixing_packaged_and_inline_modules(self):
         """
-        Test saving inline and imported modules in same package
+        Test saving inline and imported modules in same package.
         """
 
         class ModBar(torch.nn.Module):
@@ -505,7 +542,7 @@ class PackageScriptModuleTest(PackageTestCase):
     def test_mixing_packaged_and_inline_modules_shared_code(self):
         """
         Test saving inline and imported modules in same package that
-        share code 
+        share code.
         """
 
         class TorchVisionTestInline(torch.nn.Module):
