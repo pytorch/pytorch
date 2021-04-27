@@ -162,7 +162,10 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
          !is_strided() &&
          !is_dilated() &&
          // 3x3 depthwith convolutions implementation is inference only
-         !(input.requires_grad() && GradMode::is_enabled()) &&
+         !(GradMode::is_enabled() &&
+                 (input.requires_grad() ||
+                  weight.requires_grad() ||
+                 (bias.defined() && bias.requires_grad()))) &&
          !transposed;
 #else
   return false;
