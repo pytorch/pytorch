@@ -1306,8 +1306,9 @@ class TestNormalizeOperators(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
+        op_skip = {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma', 'einsum'}
         # Unsupported input types
-        if op.name in {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma'}:
+        if op.name in op_skip:
             return
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {'stack', 'hstack', 'vstack', 'dstack',
@@ -1349,6 +1350,13 @@ class TestNormalizeOperators(JitTestCase):
             # Test normalize_function by itself
             ref_out = op.op(*arg_values, **kwarg_values)
             norm_args_and_kwargs = normalize_function(op.op, arg_values, kwarg_values, arg_types, kwarg_types)
+            if norm_args_and_kwargs is None:
+                raise RuntimeError(
+                    """
+                    FX failed to normalize op - add the op to the op_skip list.
+                    A common reason is if your OpInfo was implemented with a lambda
+                    - otherwise, file an issue
+                    """)
             test_out = op.op(*norm_args_and_kwargs.args, **norm_args_and_kwargs.kwargs)
             self.assertEqual(test_out, ref_out)
 
