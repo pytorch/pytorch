@@ -15,7 +15,6 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <cstddef>
-#include <optional>
 #include <vector>
 
 namespace torch {
@@ -38,7 +37,7 @@ struct unique_type_checker {
     unique = type_id_.value() == type_id;
   }
 
-  optional<size_t> type_id_;
+  c10::optional<size_t> type_id_;
   bool unique = true;
 };
 
