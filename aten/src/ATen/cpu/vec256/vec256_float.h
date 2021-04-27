@@ -347,7 +347,7 @@ Vec256<float> inline minimum(const Vec256<float>& a, const Vec256<float>& b) {
 
 // std::fmax, which returns the non-NaN input if either input is a NaN.
 template <>
-Vec256<float> inline fmax(const Vec256<float>& a, const Vec256<float>& b) {
+inline Vec256<float> fmax(const Vec256<float>& a, const Vec256<float>& b) {
   // Make sure all NaN's are filled with bit 1, including the sign bit
   Vec256<float> a_normalized = _mm256_or_ps(_mm256_cmp_ps(a, a, _CMP_UNORD_Q), a);
   Vec256<float> b_normalized = _mm256_or_ps(_mm256_cmp_ps(b, b, _CMP_UNORD_Q), b);
@@ -359,7 +359,7 @@ Vec256<float> inline fmax(const Vec256<float>& a, const Vec256<float>& b) {
 
 // std::fmin, which returns the non-NaN input if either input is a NaN.
 template <>
-Vec256<float> inline fmin(const Vec256<float>& a, const Vec256<float>& b) {
+inline Vec256<float> fmin(const Vec256<float>& a, const Vec256<float>& b) {
   // Make sure all NaN's are filled with bit 1, including the sign bit
   Vec256<float> a_normalized = _mm256_or_ps(_mm256_cmp_ps(a, a, _CMP_UNORD_Q), a);
   Vec256<float> b_normalized = _mm256_or_ps(_mm256_cmp_ps(b, b, _CMP_UNORD_Q), b);

@@ -638,7 +638,7 @@ Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
 
 // Vectorized version of std::fmax
 template <class T,
-          typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
+          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 inline Vec256<T> fmax(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -660,7 +660,7 @@ inline Vec256<T> fmax(const Vec256<T> &a, const Vec256<T> &b) {
 
 // Vectorized version of std::fmin
 template <class T,
-          typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
+          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 inline Vec256<T> fmin(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
