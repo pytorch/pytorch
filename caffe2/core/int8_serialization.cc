@@ -25,6 +25,7 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
     for (int i = 0; i < tensor.t.dim(); ++i) {
       proto.add_dims(tensor.t.dim32(i));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     proto.set_precision(8);
     proto.set_scale(tensor.scale);
     proto.set_bias(tensor.zero_point);
@@ -64,9 +65,11 @@ class Int8TensorCPUDeserializer : public TensorDeserializer {
   void Deserialize(const BlobProto& blob_proto, Blob* blob) override {
     const QTensorProto& proto = blob_proto.qtensor();
     Int8TensorCPU* tensor = blob->template GetMutable<Int8TensorCPU>();
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     tensor->scale = proto.scale();
     tensor->zero_point = proto.bias();
     vector<int> dims;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     for (const int d : proto.dims()) {
       dims.push_back(d);
     }
@@ -98,9 +101,11 @@ class Int8TensorCPUDeserializer : public TensorDeserializer {
 } // namespace int8
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<int8::Int8TensorCPU>()),
     int8::Int8TensorCPUSerializer);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(Int8TensorCPU, int8::Int8TensorCPUDeserializer);
 } // namespace
 
