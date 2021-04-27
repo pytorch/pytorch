@@ -130,6 +130,7 @@ void cpu_max_pool_channels_last(
     int64_t size = channels;
     int64_t len = size - (size % Vec::size());
     // temp buffer holding index with integer_t
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     std::unique_ptr<integer_t []> index_buffer(new integer_t[len]);
 
     for (int64_t i = begin; i < end; i++) {
@@ -353,7 +354,9 @@ void max_pool2d_backward_kernel_impl(
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_pool2d_kernel, &max_pool2d_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_pool2d_backward_kernel, &max_pool2d_backward_kernel_impl);
 
 }} // at::native
