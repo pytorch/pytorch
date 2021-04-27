@@ -515,6 +515,20 @@ const std::vector<FusionKernelRuntime::SchedulerEntryPtr>& FusionKernelRuntime::
   return heuristics_->heuristicsList();
 }
 
+void FusionKernelRuntime::updateHeuristicsLaunchParams(
+    FusionHeuristics* update_heuristics) {
+  auto scheduler_list_length = heuristics_->heuristicsList().size();
+  TORCH_INTERNAL_ASSERT(
+      update_heuristics->heuristicsList().size() == scheduler_list_length);
+  for (size_t i = 0; i < scheduler_list_length; i++) {
+    auto& schedulerPtr = heuristics_->heuristicsList()[i];
+    if (schedulerPtr->hasParam()) {
+      schedulerPtr->updateLaunchConstraint(
+          update_heuristics->heuristicsList()[i]->params().lparams);
+    }
+  }
+}
+
 namespace {
 using HashType = FusionKernelRuntime::HashType;
 // Use a slightly more nontrivial combine to avoid collision
@@ -620,6 +634,14 @@ FusionKernelRuntime* FusionKernelRuntimeCache::getRtByHeuristics(
 
     // Cache the new instance
     insertEntry(dev_id, tag, std::move(new_rt));
+  } else {
+    // In the case of heuristics hit, the launch constraints still need to be
+    // updated
+    //  to match with the new input. The previously stored params if input_id
+    //  hit will directly use the launch params cached inside executor. And it
+    //  will be re-computed/updated again if evicted, so it is safe to overwrite
+    //  the launchparams here.
+    rt->updateHeuristicsLaunchParams(heuristics.get());
   }
 
   // Cache this new id

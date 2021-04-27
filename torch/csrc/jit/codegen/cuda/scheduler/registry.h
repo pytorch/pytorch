@@ -49,6 +49,11 @@ class TORCH_CUDA_CU_API SchedulerEntry {
     return rparams_;
   }
 
+  void updateLaunchConstraint(const LaunchParams& launch_params) {
+    TORCH_INTERNAL_ASSERT(hasParam());
+    rparams_.lparams = launch_params;
+  }
+
  protected:
   explicit SchedulerEntry(ScheduleHeuristic heuristic, bool has_param)
       : heuristc_(heuristic), has_param_(has_param) {}

@@ -67,6 +67,10 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
     }
   }
 
+  //! Copy the launch params given in the parameter heuristics to prepare
+  //!  for kernel launch for a new input dimension but same heuristics
+  void updateHeuristicsLaunchParams(FusionHeuristics* update_heuristics);
+
   //! Cache Interface: Common utility for computing hash of scheduler entires
   static HashType getHash(FusionHeuristics* sh);
 
