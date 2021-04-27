@@ -4312,9 +4312,6 @@ class TestLinalg(TestCase):
         H = torch.randn(4, 4, device=device, dtype=dtype)
         I = torch.rand(2, 3, 2, device=device, dtype=dtype)
 
-        # Note: gradcheck fails if the same input is given multiple times which is why the
-        # calls to clone below. (see https://github.com/pytorch/pytorch/issues/9282)
-
         # Vector operations
         self._check_einsum('i->', x)                     # sum
         self._check_einsum('i,i->', x, x.clone())        # dot
@@ -4450,7 +4447,7 @@ class TestLinalg(TestCase):
 
     def test_einsum_error_cases(self, device):
         def check(equation, operands, regex, exception=RuntimeError):
-            with self.assertRaisesRegex(exception, r'einsum\(\) ' + regex):
+            with self.assertRaisesRegex(exception, r'einsum\(\): ' + regex):
                 torch.einsum(equation, operands)
 
         x = torch.rand(2)
