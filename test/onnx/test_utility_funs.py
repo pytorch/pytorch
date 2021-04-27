@@ -106,8 +106,7 @@ class TestUtilityFuns(TestCase):
                               (input_t, ),
                               "test.onnx",
                               opset_version=self.opset_version,
-                              example_outputs=[example_output]
-                             )
+                              example_outputs=[example_output])
 
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
