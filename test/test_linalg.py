@@ -575,7 +575,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_cholesky_with_info(self, device, dtype):
+    def test_cholesky_ex(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
         def run_test(n, batch):
@@ -606,7 +606,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_cholesky_with_info_non_pd(self, device, dtype):
+    def test_cholesky_ex_non_pd(self, device, dtype):
         # if the input matrix is not positive definite, info with positive integer is returned
         A = torch.eye(3, 3, dtype=dtype, device=device)
         A[-1, -1] = 0  # Now A is singular
