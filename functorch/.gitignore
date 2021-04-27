@@ -3,3 +3,5 @@ dist/
 functorch.egg-info/
 *__pycache__*
 functorch/version.py
+functorch/_C.so
+.gdbinit
