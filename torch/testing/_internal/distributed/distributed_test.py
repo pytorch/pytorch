@@ -5005,7 +5005,6 @@ class DistributedTest:
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
-        @skip_if_rocm
         def test_ddp_control_flow_same_across_ranks(self):
             # Control flow that is the same across ranks.
             batch = 20
@@ -5104,7 +5103,6 @@ class DistributedTest:
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
-        @skip_if_rocm
         def test_ddp_control_flow_different_across_ranks(self):
             # Control flow that is different across ranks.
             batch = 20
