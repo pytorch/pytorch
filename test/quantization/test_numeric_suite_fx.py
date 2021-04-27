@@ -44,9 +44,7 @@ from torch.quantization.ns.graph_matcher import (
 )
 from torch.quantization.ns.mappings import (
     get_node_type_to_io_type_map,
-    FUNS_UNMATCHABLE,
-    MODS_UNMATCHABLE,
-    METHS_UNMATCHABLE,
+    get_unmatchable_types_map,
 )
 from torch.quantization._numeric_suite_fx import (
     extract_weights,
@@ -1140,6 +1138,43 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @skipIfNoFBGEMM
+    def test_user_module_scriptable(self):
+        # Logging of the output of this class is not supported, because it is
+        # neither a tensor or an RNN return type.
+        class M1(nn.Module):
+            def forward(self, x):
+                x1 = x * 2
+                x2 = x * 4
+                return (x1, x2)
+
+        class M2(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x):
+                x1, x2 = self.m1(x)
+                return x1, x2
+
+        m = M2().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        prepare_custom_config_dict = {
+            'non_traceable_module_class': [M1],
+        }
+        mp1 = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
+        mp2 = copy.deepcopy(mp1)
+        unmatchable_types_map = get_unmatchable_types_map()
+        unmatchable_types_map['mods_unmatchable'].add(M1)
+        mp1_ns, mp2_ns = _add_loggers_impl(
+            'a', mp1, 'b', mp2, OutputLogger, should_log_inputs=False,
+            unmatchable_types_map=unmatchable_types_map)
+
+        # Scripting a model with loggers should succeed. If it fails because of
+        # incorrect dtypes, we can blocklist the associated types from being instrumented.
+        mp1_ns_scripted = torch.jit.script(mp1_ns)
+        mp2_ns_scripted = torch.jit.script(mp2_ns)
+
+    @skipIfNoFBGEMM
     def test_user_module(self):
         """
         For user defined modules,
@@ -1226,6 +1261,11 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         MODS_IO_TYPE_INT8 = node_type_to_io_type_map['mods_io_type_int8']
         MODS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['mods_io_type_fp32_or_int8']
         METHS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['meths_io_type_fp32_or_int8']
+
+        unmatchable_types_map = get_unmatchable_types_map()
+        FUNS_UNMATCHABLE = unmatchable_types_map['funs_unmatchable']
+        MODS_UNMATCHABLE = unmatchable_types_map['mods_unmatchable']
+        METHS_UNMATCHABLE = unmatchable_types_map['meths_unmatchable']
 
         # 1. check static quant module mappings
         static_quant_mod_mappings = get_default_static_quant_module_mappings()

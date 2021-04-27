@@ -9,9 +9,7 @@ from torch.fx.graph import Graph, Node
 from .utils import getattr_from_fqn
 from .ns_types import NSSubgraph, NSNodeTargetType
 from .mappings import (
-    FUNS_UNMATCHABLE,
-    MODS_UNMATCHABLE,
-    METHS_UNMATCHABLE,
+    get_unmatchable_types_map,
 )
 from .pattern_utils import (
     get_base_name_to_sets_of_related_ops,
@@ -20,32 +18,10 @@ from .pattern_utils import (
     end_node_matches_reversed_fusion,
 )
 
-from typing import Dict, Tuple, List, Optional, Set, Callable, Any
+from typing import Dict, Tuple, List, Optional, Set, Any
 
 def _get_output_nodes(g: Graph) -> List[Node]:
     return [n for n in g.nodes if n.op == 'output']
-
-def get_non_matchable_functions() -> Set[Callable]:
-    """
-    `call_function` nodes pointing to these functions are non-matchable.
-    """
-    # TODO(future PR): allow customizations
-    return FUNS_UNMATCHABLE
-
-def get_non_matchable_modules() -> Set[Callable]:
-    """
-    `call_module` nodes pointing to instances of these types are non-matchable.
-    """
-    # TODO(future PR): allow customizations
-    return MODS_UNMATCHABLE
-
-def get_non_matchable_methods() -> Set[str]:
-    """
-    `call_method` nodes pointing to these targets are non-matchable.
-
-    """
-    # TODO(future PR): allow customizations
-    return METHS_UNMATCHABLE
 
 class _NSGraphMatchableSubgraphsIterator:
     """
@@ -58,14 +34,14 @@ class _NSGraphMatchableSubgraphsIterator:
     def __init__(
         self,
         gm: GraphModule,
-        non_matchable_functions: Set[Callable],
-        non_matchable_modules: Set[Callable],
-        non_matchable_methods: Set[str],
+        non_matchable_functions: Set[NSNodeTargetType],
+        non_matchable_modules: Set[NSNodeTargetType],
+        non_matchable_methods: Set[NSNodeTargetType],
     ):
         self.gm: GraphModule = gm
-        self.non_matchable_functions: Set[Callable] = non_matchable_functions
-        self.non_matchable_modules: Set[Callable] = non_matchable_modules
-        self.non_matchable_methods: Set[str] = non_matchable_methods
+        self.non_matchable_functions: Set[NSNodeTargetType] = non_matchable_functions
+        self.non_matchable_modules: Set[NSNodeTargetType] = non_matchable_modules
+        self.non_matchable_methods: Set[NSNodeTargetType] = non_matchable_methods
         self.seen_nodes: Set[Node] = set()
         self.stack: List[Node] = []
         for start_node in _get_output_nodes(self.gm.graph):
@@ -307,6 +283,7 @@ def get_matching_subgraph_pairs(
     gm_a: GraphModule,
     gm_b: GraphModule,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> Dict[str, Tuple[NSSubgraph, NSSubgraph]]:
     """
     Matches matchable subgraphs of graph_a to graph_b.
@@ -371,9 +348,12 @@ def get_matching_subgraph_pairs(
         ),
     }
     """
-    non_matchable_functions = get_non_matchable_functions()
-    non_matchable_modules = get_non_matchable_modules()
-    non_matchable_methods = get_non_matchable_methods()
+    if unmatchable_types_map is None:
+        unmatchable_types_map = get_unmatchable_types_map()
+    non_matchable_functions = unmatchable_types_map['funs_unmatchable']
+    non_matchable_modules = unmatchable_types_map['mods_unmatchable']
+    non_matchable_methods = unmatchable_types_map['meths_unmatchable']
+
     graph_a_iterator = _NSGraphMatchableSubgraphsIterator(
         gm_a, non_matchable_functions, non_matchable_modules,
         non_matchable_methods)

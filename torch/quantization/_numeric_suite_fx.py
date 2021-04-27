@@ -139,9 +139,11 @@ def _extract_weights_impl(
     model_name_b: str,
     gm_b: GraphModule,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> NSResultsType:
     matched_subgraph_pairs = get_matching_subgraph_pairs(
-        gm_a, gm_b, base_name_to_sets_of_related_ops)
+        gm_a, gm_b, base_name_to_sets_of_related_ops,
+        unmatchable_types_map)
 
     # split the subgraph pairs into one data structure for each model
     nodes_and_names_to_instrument_a: List[Tuple[Node, str]] = []
@@ -167,6 +169,7 @@ def extract_weights(
     model_name_b: str,
     model_b: nn.Module,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> NSResultsType:
     base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
@@ -180,7 +183,8 @@ def extract_weights(
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
     return _extract_weights_impl(
-        model_name_a, gm_a, model_name_b, gm_b, base_name_to_sets_of_related_ops)
+        model_name_a, gm_a, model_name_b, gm_b, base_name_to_sets_of_related_ops,
+        unmatchable_types_map)
 
 
 def _add_loggers_one_model(
@@ -214,10 +218,11 @@ def _add_loggers_impl(
     logger_cls: Callable,
     should_log_inputs: bool,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> Tuple[nn.Module, nn.Module]:
     matched_subgraph_pairs = get_matching_subgraph_pairs(
         gm_a, gm_b,
-        base_name_to_sets_of_related_ops)
+        base_name_to_sets_of_related_ops, unmatchable_types_map)
     nodes_and_names_to_instrument_inputs_a = []
     nodes_and_names_to_instrument_inputs_b = []
     nodes_and_names_to_instrument_outputs_a = []
@@ -250,6 +255,7 @@ def add_loggers(
     logger_cls: Callable,
     should_log_inputs : bool = False,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> Tuple[nn.Module, nn.Module]:
     # TODO(future PR): expose these
     skipped_module_names: List[str] = []
@@ -261,7 +267,8 @@ def add_loggers(
     return _add_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs,
-        base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
+        base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops,
+        unmatchable_types_map=unmatchable_types_map)
 
 
 def _extract_logger_info_one_model(
@@ -337,9 +344,11 @@ def _add_shadow_loggers_impl(
     should_log_inputs: bool,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     node_type_to_io_type_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> nn.Module:
     matched_subgraph_pairs = get_matching_subgraph_pairs(
-        gm_a, gm_b, base_name_to_sets_of_related_ops)
+        gm_a, gm_b, base_name_to_sets_of_related_ops,
+        unmatchable_types_map)
     gm_a_shadows_b = create_a_shadows_b(
         name_a, gm_a, name_b, gm_b, matched_subgraph_pairs, logger_cls,
         should_log_inputs=should_log_inputs,
@@ -356,6 +365,7 @@ def add_shadow_loggers(
     should_log_inputs: bool = False,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     node_type_to_io_type_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> nn.Module:
     """
     Same thing as add_loggers, but for an `a_shadows_b` model.
@@ -372,7 +382,8 @@ def add_shadow_loggers(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs,
         base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops,
-        node_type_to_io_type_map=node_type_to_io_type_map)
+        node_type_to_io_type_map=node_type_to_io_type_map,
+        unmatchable_types_map=unmatchable_types_map)
 
 
 def extract_shadow_logger_info(
