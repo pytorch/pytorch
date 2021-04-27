@@ -134,6 +134,8 @@ enum class DispatchKey : uint8_t {
   // correct backend.
   BackendSelect,
 
+  FuncTorchPython, // See Note [Out-of-tree vmap+grad prototype]
+
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
   // this dispatch key doesn't do any of the substantive functionality for named
@@ -147,6 +149,11 @@ enum class DispatchKey : uint8_t {
   // has named dimension propagation that doesn't match that of its
   // constituent parts.
   Named,
+
+  // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
+  // is to insert code after the "autograd subsystem" runs, so this key should
+  // be directly after InplaceOrView and all of the autograd keys.
+  FuncTorchDynamicLayerBackMode,
 
   // Note [InplaceOrView key]
   // InplaceOrView key is used by inplace or view ops to register a kernel
@@ -233,6 +240,9 @@ enum class DispatchKey : uint8_t {
   // autograd; for example, error checking, tracing, profiling or vmap.  They
   // go here.
 
+  FuncTorchBatched, // See Note [Out-of-tree vmap+grad prototype]
+  FuncTorchVmapMode, // See Note [Out-of-tree vmap+grad prototype]
+
   // This is the dispatch key for BatchedTensorImpl, which is used to implement
   // batching rules for vmap.
   Batched,
@@ -240,6 +250,9 @@ enum class DispatchKey : uint8_t {
   // When we are inside a vmap, all tensors dispatch on this key.
   // See Note: [DispatchKey::VmapMode usage] for more details.
   VmapMode,
+
+  FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
+  FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
