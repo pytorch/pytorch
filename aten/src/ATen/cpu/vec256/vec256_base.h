@@ -642,18 +642,7 @@ template <class T,
 inline Vec256<T> fmax(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    // Not use c[i] to circumvent a compilation error on MacOS:
-    //     ../aten/src/ATen/cpu/vec256/vec256_base.h:644:12: error:
-    //     expression is not assignable
-    //     c[i] = a[i];
-    //     ~~~~ ^
-    ((T*)c)[i] = a[i] > b[i] ? a[i] : b[i];
-    if (_isnan(b[i])) {
-      // If either input is NaN, the result is the other input.
-      // NOTE: The case where b[i] was NaN is handled correctly by the naive
-      // ternary operator above.
-      ((T*)c)[i] = a[i];
-    }
+    c[i] = std::fmax(a[i], b[i]);
   }
   return c;
 }
@@ -664,18 +653,7 @@ template <class T,
 inline Vec256<T> fmin(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    // Not use c[i] to circumvent a compilation error on MacOS:
-    //     ../aten/src/ATen/cpu/vec256/vec256_base.h:644:12: error:
-    //     expression is not assignable
-    //     c[i] = a[i];
-    //     ~~~~ ^
-    ((T*)c)[i] = a[i] < b[i] ? a[i] : b[i];
-    if (_isnan(b[i])) {
-      // If either input is NaN, the result is the other input.
-      // NOTE: The case where b[i] was NaN is handled correctly by the naive
-      // ternary operator above.
-      ((T*)c)[i] = a[i];
-    }
+    c[i] = std::fmin(a[i], b[i]);
   }
   return c;
 }
