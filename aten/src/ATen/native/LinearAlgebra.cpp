@@ -2629,8 +2629,8 @@ std::tuple<Tensor, Tensor, Tensor> lu_unpack(
     bool unpack_pivots
     ) {
   TORCH_CHECK(LU_pivots.is_contiguous() && (LU_pivots.scalar_type() == at::kInt),
-      "LU_pivots is expected to be a contiguous tensor of torch.int32 dtype."
-      "Intended to be used with the output produced by torch.lu");
+      "lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype."
+      "Note: this function is intended to be used with the output produced by torch{.linalg}.lu");
 
   Tensor L, U;
   // In the generalized LU factorization, the following shape relations hold:

@@ -5279,7 +5279,7 @@ class TestLinalg(TestCase):
             for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3),
                           (3, 5), (5, 3), (3, 3, 5), (3, 5, 3),
                           (7, 5, 3, 5, 3), (7, 5, 3, 3, 5)):
-                a = torch.randn(*shape, dtype=dtype, device=device)
+                a = make_tensor(shape, dtype=dtype, device=device, low=None, high=None)
                 a_lu, p = torch.lu(a, pivot=pivot)
                 p_ref, l_ref, u_ref = torch.lu_unpack(a_lu, p)
                 self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
