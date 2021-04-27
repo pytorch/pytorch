@@ -880,6 +880,9 @@ Tensor randperm(int64_t n, c10::optional<Generator> generator,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  if (!dtype.has_value()) {
+    dtype = ScalarType::Long;
+  }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto tensor = at::empty(n, options);
@@ -937,6 +940,10 @@ Tensor range(
 Tensor tril_indices_cpu(
     int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  if (!dtype_opt.has_value()) {
+    dtype_opt = ScalarType::Long;
+  }
+
   check_args(row, col, layout_opt);
 
   auto tril_size = get_tril_size(row, col, offset);
@@ -983,6 +990,10 @@ Tensor tril_indices_cpu(
 Tensor triu_indices_cpu(
     int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  if (!dtype_opt.has_value()) {
+    dtype_opt = ScalarType::Long;
+  }
+
   check_args(row, col, layout_opt);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);

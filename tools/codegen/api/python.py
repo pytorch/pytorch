@@ -696,7 +696,7 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
         tensor_options_args.append(PythonArgument(
             name='dtype',
             type=BaseType(BaseTy.ScalarType),
-            default='None' if pyi else _dtype_default_type_hack(name),
+            default='None',
             default_init='self.scalar_type()' if is_like_or_new_function else None,
         ))
         tensor_options_args.append(PythonArgument(
@@ -737,13 +737,6 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
     )
 
 # TODO blowtorch
-# note: removing this will be BC-breaking. A quick test shows that
-# randperm will otherwise default its dtype to torch.float64
-def _dtype_default_type_hack(name: str) -> str:
-    if name.startswith('randperm') or name == 'tril_indices' or name == 'triu_indices':
-        return 'torch.int64'
-    else:
-        return 'None'
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                          Python Interface
