@@ -2844,21 +2844,25 @@ class TestSparse(TestCase):
         t_nan = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, True]), device=device)
         self.assertEqual(torch.isnan(t).int(), t_nan.int())
 
-    def test_div_rounding_mode(self, device):
-		sparse, _, _ = self._gen_sparse(2, 10, (10, 10), torch.float32,
-										device, self.coalesced):
+    @coalescedonoff
+    @dtypes(torch.float32, torch.float64)
+    def test_div_rounding_mode(self, device, dtype, coalesced):
+        sparse, _, _ = self._gen_sparse(2, 10, (10, 10), dtype,
+                                        device, coalesced)
         dense = self.safeToDense(sparse)
 
         for mode in (None, 'floor', 'trunc'):
-            actual = sparse.div(-2.0, rounding_mode=mode)
-            expect = dense.div(-2.0, rounding_mode=mode)
+            actual = sparse.div(-2, rounding_mode=mode)
+            expect = dense.div(-2, rounding_mode=mode)
             self.assertEqual(self.safeToDense(actual), expect)
 
-            actual = sparse.clone().div_(-2.0, rounding_mode=mode)
+            # Test inplace
+            actual = sparse.clone().div_(-2, rounding_mode=mode)
             self.assertEqual(self.safeToDense(actual), expect)
 
+            # Test out argument
             actual.zero_()
-            torch.div(sparse, -2.0, rounding_mode=mode, out=actual)
+            torch.div(sparse, -2, rounding_mode=mode, out=actual)
             self.assertEqual(self.safeToDense(actual), expect)
 
     def test_div_by_sparse_error(self, device):
