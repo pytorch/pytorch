@@ -210,9 +210,9 @@ def _tensorpipe_check_device_maps(agent, device_maps):
                 if not all([
                     len(device_map) == len(key_set),
                     len(device_map) == len(val_set),  # check 1-to-1 mapping
-                    min(key_set) >= 0,
+                    min(key_set) >= -1,
                     max(key_set) < device_count,  # check local range
-                    min(val_set) >= 0,
+                    min(val_set) >= -1,
                     max(val_set) < remote_device_count  # check remote range
                 ]):
                     raise ValueError(
