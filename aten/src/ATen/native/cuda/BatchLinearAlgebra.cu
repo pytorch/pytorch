@@ -1689,7 +1689,7 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
     // reads off bounds it will still be valid user memory.
     result = at::empty(input.numel() + 1, input.options());
     result.resize_as_(input).transpose_(-2, -1);
-    TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
     result.copy_(input);
   }
 

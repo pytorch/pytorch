@@ -1334,14 +1334,14 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
 DEFINE_DISPATCH(cholesky_stub);
 
 void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const Tensor& info) {
-  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
-  TORCH_INTERNAL_ASSERT(input.size(-1) == input.size(-2));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.size(-1) == input.size(-2));
 
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
-  TORCH_INTERNAL_ASSERT(result.device() == input.device());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.device() == input.device());
 
-  TORCH_INTERNAL_ASSERT(info.scalar_type() == at::kInt);
-  TORCH_INTERNAL_ASSERT(info.device() == input.device());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.device() == input.device());
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
@@ -1350,8 +1350,8 @@ void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const T
   }
 
   // result tensor must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
-  TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.sizes().equals(input.sizes()));
 
   // cholesky_stub (apply_cholesky) performs calculations in-place and result must be a copy of input
   result.copy_(input);
@@ -1363,8 +1363,8 @@ void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const T
   }
 
   // info must be contiguous
-  TORCH_INTERNAL_ASSERT(info.is_contiguous());
-  TORCH_INTERNAL_ASSERT(info.sizes().equals(expected_info_shape));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.sizes().equals(expected_info_shape));
   info.fill_(0);
 
   cholesky_stub(result.device().type(), result, info);
