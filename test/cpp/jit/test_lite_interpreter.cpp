@@ -619,7 +619,6 @@ TEST(LiteInterpreterTest, LoadAndRunByteCodeModel) {
 }
 
 TEST(LiteInterpreterTest, GetByteCodeVersion) {
-  // Load check in model: sequence.ptl
   std::string filePath(__FILE__);
   auto test_model_file_v4 =
       filePath.substr(0, filePath.find_last_of("/\\") + 1);

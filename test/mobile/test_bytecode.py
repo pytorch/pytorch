@@ -99,8 +99,8 @@ class testVariousModelVersions(TestCase):
         script_module_v4 = pytorch_test_dri / "cpp" / "jit" / "script_module_v4.ptl"
         script_module_v5 = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
 
-        version_v4 = _get_bytecode_version(str(script_module_v4))
-        version_v5 = _get_bytecode_version(str(script_module_v5))
+        version_v4 = _get_bytecode_version(script_module_v4)
+        version_v5 = _get_bytecode_version(script_module_v5)
 
         assert(version_v4 == 4)
         assert(version_v5 == 5)
