@@ -1012,13 +1012,12 @@ struct to_ir {
         def_stack_.back().declared_return_type_; // nullptr if not annotated
     TypePtr type_hint = nullptr;
     if (declared_return_type &&
-        (declared_return_type == AnyType::get() ||
-         declared_return_type->kind() == UnionType::Kind ||
-         declared_return_type->kind() == OptionalType::Kind)) {
+        declared_return_type == AnyType::get()) {
       type_hint = declared_return_type;
     }
     Value* actual_return = emitExpr(stmt.expr(), type_hint);
     TypePtr actual_return_type = actual_return->type();
+
     // result type is annotated, every return must convert to that type
     if (declared_return_type) {
       // this guard skips implicit conversion from None -> Tensor for the return

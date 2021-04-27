@@ -292,13 +292,13 @@ class TestUnion(JitTestCase):
 
         self.assertEqual(fn2(), 10)
 
-    def test_optional_of_union_is_flattened(self):
+    def test_union_optional_of_union_is_flattened(self):
         def fn(flag: bool) -> Tuple[Union[str, int, None], Union[str, int, None]]:
             y: Union[int, str, None] = "foo"
             if flag:
                 x: Optional[Union[int, str]] = y
             else:
-                x: Optional[Union[int, str]] = "bar"
+                x: Optional[Union[int, str]] = 1
             return x, y
 
         self.checkScript(fn, (True,))
@@ -509,3 +509,22 @@ class TestUnion(JitTestCase):
             return x
 
         self.assertEqual(eager(), script())
+
+    def test_union_serialization_preserves_type_annotations(self):
+        # This function will fail after being torch.jit.save'd and
+        # torch.jit.load'd if the type annotations aren't preserved
+        # for Union during serialization. We need the `Union[str, int]`
+        # annotation to make sure that `y` is typed as a Union instead
+        # of as a str in one branch and an int in the other
+        def fn(x: int) -> str:
+            if x % 2:
+                y: Union[str, int] = "bar"
+            else:
+                y: Union[str, int] = x
+            if isinstance(y, str):
+                return y
+            else:
+                return "baz"
+
+        self.checkScript(fn, (1,))
+        self.checkScript(fn, (8,))
