@@ -8,7 +8,7 @@
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
 # Get fully qualified path using realpath
-CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath ${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../})
+CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
