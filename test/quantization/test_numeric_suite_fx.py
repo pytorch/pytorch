@@ -226,6 +226,10 @@ class AllConvFunctional(torch.nn.Module):
         x = F.relu(x)
         return x
 
+@torch.fx.wrap
+def _wrapped_hardswish(x):
+    return F.hardswish(x)
+
 
 class TestFXGraphMatcher(QuantizationTestCase):
 
@@ -365,7 +369,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         results = get_matching_subgraph_pairs(mp, mq)
 
         expected_types = {
-            'base_op_torch.cat_0': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
+            'base_op_torch.cat_0': ((torch.cat, torch.cat), (torch.cat, torch.cat)),
             'base_op_torch.add_0': ((torch.add, torch.add), (toq.add, toq.add)),
             'base_op_torch.add_1': ((torch.add, torch.add), (toq.add, toq.add)),
         }
@@ -594,6 +598,39 @@ class TestFXGraphMatcher(QuantizationTestCase):
             else:
                 raise AssertionError(
                     f"handing for {qhandler_cls} not implemented")
+
+    @skipIfNoFBGEMM
+    def test_user_defined_function(self):
+        """
+        Verify that graph matching works on user defined functions
+        """
+        class M1(nn.Module):
+            def forward(self, x):
+                x = F.hardswish(x)
+                return x
+
+        class M2(nn.Module):
+            def forward(self, x):
+                x = _wrapped_hardswish(x)
+                return x
+
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m1 = prepare_fx(M1().eval(), qconfig_dict)
+        m2 = prepare_fx(M2().eval(), qconfig_dict)
+
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        base_name_to_sets_of_related_ops['torch.nn.functional.hardswish'].add(
+            _wrapped_hardswish)
+
+        results = get_matching_subgraph_pairs(
+            m1, m2,
+            base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
+        expected_types = {
+            'base_op_torch.nn.functional.hardswish_0':
+                ((F.hardswish, F.hardswish), (_wrapped_hardswish, _wrapped_hardswish)),
+        }
+        self.assert_types_for_matched_subgraph_pairs(
+            results, expected_types, m1, m2)
 
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
@@ -927,7 +964,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         m = M().eval()
         expected_occurrence = {
             # 3 dequantize function calls from the 3 dtype casts for [x, x, x]
-            ns.call_function(torch.dequantize): 3,
+            ns.call_module(torch.nn.Identity): 3,
             # 1 dequantize method call for module output
             ns.call_method("dequantize"): 1,
         }
@@ -1207,7 +1244,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 continue
             elif qhandler_cls == qp.CatQuantizeHandler:
                 self.assertTrue(
-                    base_op in FUNS_IO_TYPE_FP32,
+                    base_op in FUNS_IO_TYPE_FP32_OR_INT8,
                     f"missing IO type handling for {base_op}")
             elif (
                 qhandler_cls in (
@@ -1245,6 +1282,56 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             else:
                 raise AssertionError(
                     f"handing for {qhandler_cls} not implemented")
+
+    @skipIfNoFBGEMM
+    def test_user_defined_function(self):
+        """
+        Verify that NS APIs work on user defined functions
+        """
+        class M1(nn.Module):
+            def forward(self, x):
+                x = F.hardswish(x)
+                return x
+
+        class M2(nn.Module):
+            def forward(self, x):
+                x = _wrapped_hardswish(x)
+                return x
+
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m1 = prepare_fx(M1().eval(), qconfig_dict)
+        m2 = prepare_fx(M2().eval(), qconfig_dict)
+        data = torch.randn(4, 4)
+
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        base_name_to_sets_of_related_ops['torch.nn.functional.hardswish'].add(
+            _wrapped_hardswish)
+
+        # test compare weights
+        results = _extract_weights_impl(
+            'a', m1, 'b', m2,
+            base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
+        self.assertTrue(len(results) == 1)
+        # TODO(future PR): don't store empty dictionaries for nodes
+        #   without weights.
+
+        # test unshadowed activations
+
+        m1_ns, m2_ns = _add_loggers_impl(
+            'a', copy.deepcopy(m1), 'b', copy.deepcopy(m2), OutputLogger,
+            should_log_inputs=False,
+            base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
+
+        # calibrate
+        m1_ns(data)
+        m2_ns(data)
+
+        # check activation result correctness
+        act_compare_dict = extract_logger_info(m1_ns, m2_ns, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 1)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
+
+        # TODO(future PR): test shadowed activations
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
