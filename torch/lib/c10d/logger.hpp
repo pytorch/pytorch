@@ -1,5 +1,4 @@
 #include <c10d/reducer.hpp>
-#include "c10/util/Logging.h"
 
 namespace c10d {
 

@@ -3797,8 +3797,9 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.get("master_port"), parse_env("MASTER_PORT"))
             self.assertEqual(ddp_logging_data.get("master_addr"), parse_env("MASTER_ADDR"))
             self.assertEqual(ddp_logging_data.get("cuda_visible_devices"), parse_env("CUDA_VISIBLE_DEVICES"))
-            self.assertEqual(ddp_logging_data.get("gloo_socket_ifname"), parse_env("GLOO_SOCKET_IFNAME"))
-            self.assertEqual(ddp_logging_data.get("gloo_device_transport"), parse_env("GLOO_DEVICE_TRANSPORT"))
+            if ddp_logging_data.get("backend_name") == "gloo":
+                self.assertEqual(ddp_logging_data.get("gloo_socket_ifname"), parse_env("GLOO_SOCKET_IFNAME"))
+                self.assertEqual(ddp_logging_data.get("gloo_device_transport"), parse_env("GLOO_DEVICE_TRANSPORT"))
             self.assertEqual(ddp_logging_data.get("nccl_socket_ifname"), None)
             self.assertEqual(ddp_logging_data.get("nccl_blocking_wait"), None)
             self.assertEqual(ddp_logging_data.get("nccl_async_error_handling"), None)
@@ -3847,7 +3848,7 @@ class DistributedTest:
             # It is hard to test accurate latency, but it can test whether the latency is
             # a valid value and in the expected range.
             self.assertGreaterEqual(ddp_logging_data.get("avg_forward_compute_time"), 1)
-            self.assertGreaterEqual(ddp_logging_data.get("avg_backward_compute_comm_overlap_tim"), 1)
+            self.assertGreaterEqual(ddp_logging_data.get("avg_backward_compute_comm_overlap_time"), 1)
             self.assertGreaterEqual(
                 ddp_logging_data.get("avg_backward_compute_time"),
                 ddp_logging_data.get("avg_backward_compute_comm_overlap_time"))

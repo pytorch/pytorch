@@ -2,7 +2,6 @@
 #include <c10d/logger.hpp>
 #include <fmt/format.h>
 #include <string>
-#include "c10/util/Logging.h"
 
 namespace c10d {
 
