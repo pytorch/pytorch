@@ -111,4 +111,91 @@ static inline void sort_pairs(
   }
 }
 
+namespace block_sort_internal {
+
+template <typename T, bool descending>
+constexpr T get_padding_value() {
+  using limit = std::numeric_limits<T>;
+  if /*constexpr*/ (limit::has_infinity) {
+    if /*constexpr*/ (descending) {
+      return -limit::infinity();
+    } else {
+      return limit::quiet_NaN();
+    }
+  } else {
+    if /*constexpr*/ (descending) {
+      return limit::min();
+    } else {
+      return limit::max();
+    }
+  }
+}
+
+template<int block_size, int ilp, bool descending, typename key_t, typename value_t>
+C10_LAUNCH_BOUNDS_1(block_size)
+__global__ void block_sort_pairs_kernel(
+  const key_t *keys_in, key_t *keys_out,
+  const value_t *values_in, value_t *values_out,
+  int64_t nsort, int64_t stride,
+  int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8)
+{
+  keys_in += stride * blockIdx.x;
+  keys_out += stride * blockIdx.x;
+  values_in += stride * blockIdx.x;
+  values_out += stride * blockIdx.x;
+
+  using BlockRadixSort = cub::BlockRadixSort<key_t, block_size, ilp, value_t>;
+  __shared__ typename BlockRadixSort::TempStorage temp_storage;
+
+  key_t thread_keys[ilp];
+  value_t thread_values[ilp];
+
+  #pragma unroll
+  for (int i = 0; i < ilp; i++) {
+    int index = threadIdx.x + i * block_size;
+    if (index < nsort) {
+      thread_keys[i] = keys_in[index];
+      thread_values[i] = values_in[index];
+    } else {
+      thread_keys[i] = get_padding_value<key_t, descending>();
+    }
+  }
+
+  if /*constexpr*/ (descending) {
+    BlockRadixSort(temp_storage).SortDescending(thread_keys, thread_values, begin_bit, end_bit);
+  } else {
+    BlockRadixSort(temp_storage).Sort(thread_keys, thread_values, begin_bit, end_bit);
+  }
+
+  #pragma unroll
+  for (int i = 0; i < ilp; i++) {
+    int index = threadIdx.x + i * block_size;
+    if (index < nsort) {
+      keys_out[index] = thread_keys[i]
+      values_out[index] = thread_values[i];
+    }
+  }
+}
+
+}
+
+template<typename key_t, typename value_t>
+static inline void block_sort_pairs(
+  const key_t *keys_in, key_t *keys_out,
+  const value_t *values_in, value_t *values_out,
+  int64_t nsort, int64_t stride, int64_t nsegments,
+  bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8)
+) {
+  constexpr int block_size = 64;
+  if (descending) {
+    block_sort_internal::block_sort_pairs_kernel<block_size, 4, true>
+      <<<nsegments, block_size, 0, c10::cuda::getCurrentCUDAStream()>>>(
+        keys_in, keys_out, values_in, values_out, nsort, stride, begin_bit, end_bit);
+  } else {
+    block_sort_internal::block_sort_pairs_kernel<block_size, 4, false>
+      <<<nsegments, block_size, 0, c10::cuda::getCurrentCUDAStream()>>>(
+        keys_in, keys_out, values_in, values_out, nsort, stride, begin_bit, end_bit);
+  }
+}
+
 }}}
