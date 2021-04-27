@@ -703,7 +703,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   static std::vector<c10::DeviceIndex> getDevicesOfDataPtrs(
       const c10::impl::DeviceGuardImplInterface* impl,
       const std::vector<std::reference_wrapper<const at::DataPtr>>& data_ptrs) {
-    std::vector<bool> isDeviceUsed(impl->deviceCount(), false);
+    c10::DeviceIndex deviceCount = impl->deviceCount();
+    std::vector<bool> isDeviceUsed(deviceCount, false);
     for (const at::DataPtr& data_ptr : data_ptrs) {
       if (!data_ptr.device().is_cpu()) {
         TORCH_CHECK_VALUE(
@@ -716,7 +717,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       }
     }
     std::vector<c10::DeviceIndex> deviceIndices;
-    for (c10::DeviceIndex idx = 0; idx < isDeviceUsed.size(); idx++) {
+    for (c10::DeviceIndex idx = 0; idx < deviceCount; idx++) {
       if (isDeviceUsed[idx]) {
         deviceIndices.push_back(idx);
       }
@@ -764,14 +765,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   static std::vector<c10::DeviceIndex> getSortedIndicesOfDevices(
       const c10::impl::DeviceGuardImplInterface* impl,
       const std::vector<c10::Device>& devices) {
-    std::vector<bool> isDeviceUsed(impl->deviceCount(), false);
+    c10::DeviceIndex deviceCount = impl->deviceCount();
+    std::vector<bool> isDeviceUsed(deviceCount, false);
     for (const c10::Device& device : devices) {
       TORCH_CHECK_VALUE(
           device.has_index(), "Expected devices to have indices, got ", device);
       isDeviceUsed[device.index()] = true;
     }
     std::vector<c10::DeviceIndex> deviceIndices;
-    for (c10::DeviceIndex idx = 0; idx < isDeviceUsed.size(); idx++) {
+    for (c10::DeviceIndex idx = 0; idx < deviceCount; idx++) {
       if (isDeviceUsed[idx]) {
         deviceIndices.push_back(idx);
       }
