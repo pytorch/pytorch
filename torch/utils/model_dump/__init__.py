@@ -85,6 +85,24 @@ import torch.utils.show_pickle
 DEFAULT_EXTRA_FILE_SIZE_LIMIT = 16 * 1024
 
 
+def get_storage_info(storage):
+    assert isinstance(storage, torch.utils.show_pickle.FakeObject)
+    assert storage.module == "pers"
+    assert storage.name == "obj"
+    assert storage.state is None
+    assert isinstance(storage.args, tuple)
+    assert len(storage.args) == 1
+    sa = storage.args[0]
+    assert isinstance(sa, tuple)
+    assert len(sa) == 5
+    assert sa[0] == "storage"
+    assert isinstance(sa[1], torch.utils.show_pickle.FakeClass)
+    assert sa[1].module == "torch"
+    assert sa[1].name.endswith("Storage")
+    storage_info = [sa[1].name.replace("Storage", "")] + list(sa[2:])
+    return storage_info
+
+
 def hierarchical_pickle(data):
     if isinstance(data, (bool, int, float, str, type(None))):
         return data
@@ -102,7 +120,7 @@ def hierarchical_pickle(data):
         }
     if isinstance(data, torch.utils.show_pickle.FakeObject):
         typename = f"{data.module}.{data.name}"
-        if data.module.startswith("__torch__."):
+        if typename.startswith("__torch__."):
             assert data.args == ()
             return {
                 "__module_type__": typename,
@@ -111,21 +129,24 @@ def hierarchical_pickle(data):
         if typename == "torch._utils._rebuild_tensor_v2":
             assert data.state is None
             storage, offset, size, stride, requires_grad, hooks = data.args
-            assert isinstance(storage, torch.utils.show_pickle.FakeObject)
-            assert storage.module == "pers"
-            assert storage.name == "obj"
-            assert storage.state is None
-            assert isinstance(storage.args, tuple)
-            assert len(storage.args) == 1
-            sa = storage.args[0]
-            assert isinstance(sa, tuple)
-            assert len(sa) == 5
-            assert sa[0] == "storage"
-            assert isinstance(sa[1], torch.utils.show_pickle.FakeClass)
-            assert sa[1].module == "torch"
-            assert sa[1].name.endswith("Storage")
-            storage_info = [sa[1].name.replace("Storage", "")] + list(sa[2:])
+            storage_info = get_storage_info(storage)
             return {"__tensor_v2__": [storage_info, offset, size, stride, requires_grad]}
+        if typename == "torch._utils._rebuild_qtensor":
+            assert data.state is None
+            storage, offset, size, stride, quantizer, requires_grad, hooks = data.args
+            storage_info = get_storage_info(storage)
+            assert isinstance(quantizer, tuple)
+            assert isinstance(quantizer[0], torch.utils.show_pickle.FakeClass)
+            assert quantizer[0].module == "torch"
+            if quantizer[0].name == "per_tensor_affine":
+                assert len(quantizer) == 3
+                assert isinstance(quantizer[1], float)
+                assert isinstance(quantizer[2], int)
+                quantizer_extra = quantizer[1:3]
+            else:
+                quantizer_extra = []
+            quantizer_json = [quantizer[0].name] + list(quantizer_extra)
+            return {"__qtensor__": [storage_info, offset, size, stride, quantizer_json, requires_grad]}
         if typename == "torch.jit._pickle.restore_type_tag":
             assert data.state is None
             obj, typ = data.args
@@ -152,7 +173,7 @@ def get_model_info(
 
     if isinstance(path_or_file, os.PathLike):
         default_title = os.fspath(path_or_file)
-        file_size = path_or_file.stat().st_size  # type: ignore
+        file_size = path_or_file.stat().st_size  # type: ignore[attr-defined]
     elif isinstance(path_or_file, str):
         default_title = path_or_file
         file_size = pathlib.Path(path_or_file).stat().st_size
@@ -244,9 +265,11 @@ def get_model_info(
             if zi.file_size > extra_file_size_limit:
                 continue
             with zf.open(zi) as handle:
-                # TODO: handle errors here and just ignore the file?
-                json_content = json.load(handle)
-            extra_files_jsons[zi.filename] = json_content
+                try:
+                    json_content = json.load(handle)
+                    extra_files_jsons[zi.filename] = json_content
+                except json.JSONDecodeError:
+                    extra_files_jsons[zi.filename] = "INVALID JSON"
 
         always_render_pickles = {
             "bytecode.pkl",
@@ -290,10 +313,10 @@ def get_inline_skeleton():
     It can load model_info.json over HTTP, or be passed to burn_in_info.
     """
 
-    skeleton = importlib.resources.read_text(__package__, "skeleton.html")  # type: ignore
-    js_code = importlib.resources.read_text(__package__, "code.js")  # type: ignore
+    skeleton = importlib.resources.read_text(__package__, "skeleton.html")  # type: ignore[attr-defined]
+    js_code = importlib.resources.read_text(__package__, "code.js")  # type: ignore[attr-defined]
     for js_module in ["preact", "htm"]:
-        js_lib = importlib.resources.read_binary(__package__, f"{js_module}.mjs")  # type: ignore
+        js_lib = importlib.resources.read_binary(__package__, f"{js_module}.mjs")  # type: ignore[attr-defined]
         js_url = "data:application/javascript," + urllib.parse.quote(js_lib)
         js_code = js_code.replace(f"https://unpkg.com/{js_module}?module", js_url)
     skeleton = skeleton.replace(' src="./code.js">', ">\n" + js_code)

@@ -136,6 +136,9 @@ class ModelData extends Component {
     if (data.__tensor_v2__) {
       return false;
     }
+    if (data.__qtensor__) {
+      return false;
+    }
     throw new Error("TODO: handle dict, etc.");
   }
 
@@ -188,6 +191,36 @@ class ModelData extends Component {
       void(numel);
       return "tensor(" + parts.join(", ") + ")";
     }
+    if (data.__qtensor__) {
+      // TODO: Make this have less copy/paste with tensor
+      const [storage, offset, size, stride, quantizer, grad] = data.__qtensor__;
+      const [dtype, key, device, numel] = storage;
+      let parts = [
+        "(" + size.join(",") + ")",
+        dtype,
+      ];
+      if (quantizer[0] == "per_tensor_affine") {
+        parts.push(`scale=${quantizer[1]}`);
+        parts.push(`zero_point=${quantizer[2]}`);
+      } else {
+        parts.push(`quantizer=${quantizer[0]}`);
+      }
+      if (device != "cpu") {
+        parts.push(device);
+      }
+      if (grad) {
+        parts.push("grad");
+      }
+      // TODO: Check stride and indicate if the tensor is channels-last or non-contiguous
+      // TODO: Check size, stride, offset, and numel and indicate if
+      // the tensor doesn't use all data in storage.
+      // TODO: Maybe show key?
+      void(offset);
+      void(stride);
+      void(key);
+      void(numel);
+      return "qtensor(" + parts.join(", ") + ")";
+    }
     throw new Error("TODO: handle dict, etc.");
   }
 
@@ -213,23 +246,32 @@ class ModelData extends Component {
     }
     if (data.__module_type__) {
       const mstate = data.state;
-      if (mstate === null || typeof(mstate) != "object" || !mstate.__is_dict__) {
+      if (mstate === null || typeof(mstate) != "object") {
         throw new Error("Bad module state");
       }
       let new_indent = indent + "\u00A0\u00A0";
       let parts = [];
-      for (let idx = 0; idx < mstate.keys.length; idx++) {
-        if (typeof(mstate.keys[idx]) != "string") {
-          parts.push(html`<br/>${new_indent}Non-string key`);
-        } else if (this.IGNORED_STATE_KEYS.has(mstate.keys[idx])) {
-          // Do nothing.
-        } else {
-          parts.push(html`<br/><${ModelData} prefix=${mstate.keys[idx] + ": "} indent=${new_indent} data=${mstate.values[idx]} />`);
+      if (mstate.__is_dict__) {
+        for (let idx = 0; idx < mstate.keys.length; idx++) {
+          if (typeof(mstate.keys[idx]) != "string") {
+            parts.push(html`<br/>${new_indent}Non-string key`);
+          } else if (this.IGNORED_STATE_KEYS.has(mstate.keys[idx])) {
+            // Do nothing.
+          } else {
+            parts.push(html`<br/><${ModelData} prefix=${mstate.keys[idx] + ": "} indent=${new_indent} data=${mstate.values[idx]} />`);
+          }
         }
+      } else if (mstate.__tuple_values__) {
+        parts.push(html`<br/><${ModelData} prefix="" indent=${new_indent} data=${mstate} />`);
+      } else {
+        throw new Error("Bad module state");
       }
       return parts;
     }
     if (data.__tensor_v2__) {
+      throw "Should not reach here."
+    }
+    if (data.__qtensor__) {
       throw "Should not reach here."
     }
     throw new Error("TODO: handle dict, etc.");
