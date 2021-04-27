@@ -1932,25 +1932,25 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
 
 void inlineCallStackOfNode(
     Node* n,
-    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entires,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
     c10::optional<ModuleInstanceInfo> m_info);
 
 void inlineCallStackOfBlock(
     Block* b,
-    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entires,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
     c10::optional<ModuleInstanceInfo> m_info) {
   for (auto n : b->nodes()) {
-    inlineCallStackOfNode(n, new_cs_entires, callee, to_replace, m_info);
+    inlineCallStackOfNode(n, new_cs_entries, callee, to_replace, m_info);
   }
 }
 
 void inlineCallStackOfNode(
     Node* new_node,
-    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entires,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
     c10::optional<ModuleInstanceInfo> m_info) {
@@ -1959,21 +1959,21 @@ void inlineCallStackOfNode(
   InlinedCallStack* raw_callstack_ptr =
       new_node_cs ? new_node_cs->get() : nullptr;
 
-  if (!new_cs_entires.count(raw_callstack_ptr)) {
+  if (!new_cs_entries.count(raw_callstack_ptr)) {
     if (new_node_cs) {
-      new_cs_entires[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
+      new_cs_entries[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
           *new_node_cs, callee, to_replace->sourceRange(), m_info);
     } else {
-      new_cs_entires[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
+      new_cs_entries[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
           callee, to_replace->sourceRange(), m_info);
     }
   }
-  new_node->setCallStack(new_cs_entires.at(raw_callstack_ptr));
+  new_node->setCallStack(new_cs_entries.at(raw_callstack_ptr));
   // We updated the inlined callstack of new_node.
   // Same must be done for the nodes of the blocks of new_node.
   // For example If node's block otherwise is not annotated appropriately.
   for (auto block : new_node->blocks()) {
-    inlineCallStackOfBlock(block, new_cs_entires, callee, to_replace, m_info);
+    inlineCallStackOfBlock(block, new_cs_entries, callee, to_replace, m_info);
   }
 }
 
