@@ -165,6 +165,15 @@ inline torch::jit::tensorexpr::ScalarType PrimitiveToScalarType(
     case lazy_tensors::PrimitiveType::U8: {
       return torch::jit::tensorexpr::ScalarType::Byte;
     }
+    case lazy_tensors::PrimitiveType::U16: {
+      return torch::jit::tensorexpr::ScalarType::Short;
+    }
+    case lazy_tensors::PrimitiveType::U32: {
+      return torch::jit::tensorexpr::ScalarType::Int;
+    }
+    case lazy_tensors::PrimitiveType::U64: {
+      return torch::jit::tensorexpr::ScalarType::Long;
+    }
     case lazy_tensors::PrimitiveType::F32: {
       return torch::jit::tensorexpr::ScalarType::Float;
     }
