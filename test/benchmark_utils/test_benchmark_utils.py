@@ -586,11 +586,11 @@ class TestBenchmarkUtils(TestCase):
         for l in repr(wide_linewidth).splitlines(keepends=False):
             self.assertLessEqual(len(l), 160)
 
-        self.assertEqual(
-            # `delta` is just a convenience method.
-            stats_with_data.delta(stats_no_data)._data,
-            (stats_with_data.stats() - stats_no_data.stats())._data
-        )
+        # `delta` is just a convenience method.
+        for actual, expected in zip(
+                stats_with_data.delta(stats_no_data)._data, (stats_with_data.stats() - stats_no_data.stats())._data
+        ):
+            self.assertEqual(actual, expected)
 
         deltas = stats_with_data.as_standardized().delta(stats_no_data.as_standardized())
 
