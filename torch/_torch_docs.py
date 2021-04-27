@@ -6821,6 +6821,25 @@ Example::
     tensor([ -24.8863, -771.4742])
 """.format(**common_args))
 
+add_docstr(torch.positive,
+           r"""
+positive(input) -> Tensor
+
+Returns :attr:`input`.
+Throws a runtime error if :attr:`input` is a bool tensor.
+""" + r"""
+Args:
+    {input}
+
+Example::
+
+    >>> t = torch.randn(5)
+    >>> t
+    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
+    >>> torch.positive(t)
+    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
+""".format(**common_args))
+
 add_docstr(torch.pow,
            r"""
 pow(input, exponent, *, out=None) -> Tensor
