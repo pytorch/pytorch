@@ -268,10 +268,10 @@ __global__ void sampleMultinomialOnce(
           (dist_val > zero));
 
       if (inBucket) {
-          // We're done; we have the sample
-          // Torch indices are 1-based
-          atomicMax(&foundPos, cat);
-          found = true;
+        // We're done; we have the sample
+        // Torch indices are 1-based
+        atomicMax(&foundPos, cat);
+        found = true;
       }
 
       // Store the previous scan's high value for future use
