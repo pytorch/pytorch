@@ -685,6 +685,31 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const Tensor& min
   }
 }
 
+std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
+    const Tensor& grad, const Tensor& self, const Tensor& min, const Tensor& max,
+    const std::array<bool, 2>& grad_input_mask) {
+  // If min > max, min has no gradient
+  std::tuple<at::Tensor, at::Tensor> ret;
+  if (!grad.defined()) {
+    return ret;
+  }
+
+  auto zero = at::scalar_tensor(0., grad.options());
+  if (max.defined() && min.defined()) {
+    if (grad_input_mask[0]) {
+      std::get<0>(ret) = where((self < min).logical_and_(min < max) , grad, zero);
+    }
+    if (grad_input_mask[1]) {
+      std::get<1>(ret) = where((self > max).logical_or_(max < min), grad, zero);
+    }
+  } else if (min.defined() && grad_input_mask[0]) {
+    std::get<0>(ret) = where(self < min, grad, zero);
+  } else if (max.defined() && grad_input_mask[1]) {
+    std::get<1>(ret) = where(self > max, grad, zero);
+  }
+  return ret;
+}
+
 // This function is used by load_derivatives.py to replace tensor.strides()
 // calls that appear in derivative formulas. If the tensor has requires_grad
 // set, this function returns its strides or throws an error if the tensor

@@ -332,8 +332,7 @@
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
 - name: clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
-  min: where(self < min, grad, at::scalar_tensor(0., grad.options()))
-  max: where(self > max, grad, at::scalar_tensor(0., grad.options()))
+  min, max: clamp_backward_min_max(grad, self, min, max, grad_input_mask)
 
 - name: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
