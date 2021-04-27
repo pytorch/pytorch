@@ -48,7 +48,7 @@ TORCH_LIBRARY(functorch, m) {
   m.def("new_empty_hack", new_empty_hack_impl);
 }
 
-TORCH_LIBRARY_IMPL(aten, DynamicLayerFront, m) {
+TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   m.impl("new_zeros", new_zeros_hack);
   m.impl("new_empty", new_empty_hack);
 }
