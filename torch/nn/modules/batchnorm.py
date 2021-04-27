@@ -617,8 +617,8 @@ class SyncBatchNorm(_BatchNorm):
 
     .. note::
         Synchronization of batchnorm statistics occurs only while training, i.e.
-        synchronization is disabled when model.eval() is set or if self.training
-        is otherwise ``False``.
+        synchronization is disabled when ``model.eval()`` is set or if
+        ``self.training`` is otherwise ``False``.
 
     Examples::
 
