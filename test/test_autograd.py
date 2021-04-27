@@ -5396,10 +5396,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-separate_complex_tests = ['view_as_real', 'div', '__rdiv__', 'sub']
-
-# NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
-# for non-holomorphic functions
+separate_complex_tests = ['div', '__rdiv__', 'sub']
 
 # allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
@@ -5533,12 +5530,7 @@ def add_test(
                         inplace_name = name + '_'
                         # can't broadcast inplace to left hand side
                         skip_inplace = ('broadcast_lhs' in test_name or
-                                        'broadcast_all' in test_name or
-                                        'atanh' in test_name or
-                                        'acosh' in test_name or
-                                        'asinh' in test_name or
-                                        'abs_complex' in test_name or
-                                        'abs_scalar_complex' in test_name)
+                                        'broadcast_all' in test_name)
                         if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
@@ -5585,10 +5577,7 @@ def add_test(
                 inplace_name = name + '_'
                 # can't broadcast inplace to left hand side
                 broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-                # skip C -> R inplace tests
-                skip_c_to_r_inplace = 'abs_complex' in test_name or 'abs_scalar_complex' in test_name
-                skip_inplace = broadcast_skip_inplace or skip_c_to_r_inplace
-                if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
+                if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
                     check(inplace_name)
 
             assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
