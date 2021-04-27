@@ -242,50 +242,46 @@ __global__ void sampleMultinomialOnce(
                              static_cast<accscalar_t>(dist[curDist * stride_dist + cat * stride_categories]) / sum :
                              accZero;
 
-      if (is_valid_thread) {
-        smem[threadIdx.x] = dist_val;
-      }
+      smem[threadIdx.x] = dist_val;
       __syncthreads();
 
       // Perform an inclusive prefix sum of the shared memory contents
-      for (int offset = 1; offset < valid_block_size; offset *= 2) {
+      for (int offset = 1; offset < blockDim.x; offset *= 2) {
         accscalar_t val = accZero;
 
-        if (is_valid_thread && threadIdx.x >= offset) {
+        if (threadIdx.x >= offset) {
           val = smem[threadIdx.x - offset] + smem[threadIdx.x];
         }
 
         __syncthreads();
-        if (is_valid_thread && threadIdx.x >= offset) {
+        if (threadIdx.x >= offset) {
           smem[threadIdx.x] = val;
         }
         __syncthreads();
       }
 
-      if (is_valid_thread) {
-        // Each thread will check to see if the sample falls in its
-        // bucket
-        scalar_t curBucket =
-            static_cast<scalar_t>(smem[threadIdx.x] + prevHighProb);
-        scalar_t prevBucket = static_cast<scalar_t>(
-            threadIdx.x == 0 ? prevHighProb
-                            : smem[threadIdx.x - 1] + prevHighProb);
-        bool inBucket =
-            (cat < categories) &&
-            (!(sample >= curBucket) &&
-            (sample >= prevBucket) &&
-            (dist_val > zero));
+      // Each thread will check to see if the sample falls in its
+      // bucket
+      scalar_t curBucket =
+          static_cast<scalar_t>(smem[threadIdx.x] + prevHighProb);
+      scalar_t prevBucket = static_cast<scalar_t>(
+          threadIdx.x == 0 ? prevHighProb
+                          : smem[threadIdx.x - 1] + prevHighProb);
+      bool inBucket =
+          (cat < categories) &&
+          (!(sample >= curBucket) &&
+          (sample >= prevBucket) &&
+          (dist_val > zero));
 
-        if (inBucket) {
-            // We're done; we have the sample
-            // Torch indices are 1-based
-            atomicMax(&foundPos, cat);
-            found = true;
-        }
-
-        // Store the previous scan's high value for future use
-        prevHighProb = prevHighProb + smem[valid_block_size - 1];
+      if (inBucket) {
+          // We're done; we have the sample
+          // Torch indices are 1-based
+          atomicMax(&foundPos, cat);
+          found = true;
       }
+
+      // Store the previous scan's high value for future use
+      prevHighProb = prevHighProb + smem[blockDim.x - 1];
 
       __syncthreads();
     }
@@ -336,8 +332,10 @@ void multinomial_with_replacement_kernel_impl(
     int numSM = props->multiProcessorCount;
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
-    int requiredShared =
-        std::min(maxThreads, std::max(2, numCategories)) * sizeof(accscalar_t);
+
+    int requiredWarps = at::cuda::ATenCeilDiv(numCategories, C10_WARP_SIZE);
+    int requiredThreads = std::min(maxThreads, requiredWarps * C10_WARP_SIZE);
+    int requiredShared = requiredThreads * sizeof(accscalar_t);
 
     if (n_sample == 1 && maxShared >= requiredShared) {
       // Optimized allocation-free implementation
@@ -349,8 +347,7 @@ void multinomial_with_replacement_kernel_impl(
                                           self_v.options().pinned_memory_opt());
       at::native::uniform_(sampled, 0.0, 1.0, generator);
 
-      int warps = at::cuda::ATenCeilDiv(numCategories, C10_WARP_SIZE);
-      dim3 block(std::min(warps * C10_WARP_SIZE, maxThreads));
+      dim3 block(requiredThreads);
       dim3 grid(std::min(static_cast<int>(numDist), numSM * 4));
 
       sampleMultinomialOnce<scalar_t, accscalar_t>
