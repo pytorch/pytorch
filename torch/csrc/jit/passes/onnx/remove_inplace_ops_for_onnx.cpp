@@ -320,6 +320,11 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
   }
 }
 
+static void PrepareForRemoveMutations(std::shared_ptr<Graph> graph) {
+  MutationRemover mr(graph);
+  PrepareForRemoveMutations(mr, graph->block());
+}
+
 // findSubModuleAttr function chases getAttr chains backwards to locate the
 // submodules. For example: module M {
 //   attributes {
@@ -840,11 +845,11 @@ void InplaceConverter::convertMutationForONNX() {
 void RemoveInplaceOpsForONNX(
     const std::shared_ptr<Graph>& graph,
     Module* model = nullptr) {
-  MutationRemover mr(graph);
   ImplicitCastForBinaryInplaceOps(graph->block());
-  PrepareForRemoveMutations(mr, graph->block());
-  RemoveTensorMutation(graph);
-  RemoveListMutation(graph);
+  PrepareForRemoveMutations(graph);
+  MutationRemover mr(graph);
+  mr.removeTensorMutation();
+  mr.removeListMutation();
   InplaceConverter ic(graph, &mr, model);
   ic.convertMutationForONNX();
 }
