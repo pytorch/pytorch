@@ -18,13 +18,17 @@ static Dimname dimnameFromString(const std::string& str) {
   return Dimname::fromSymbol(Symbol::dimname(str));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, isNamed) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = at::zeros({3, 2, 5, 7});
   ASSERT_FALSE(tensor.has_names());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::zeros({3, 2, 5, 7});
   ASSERT_FALSE(tensor.has_names());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   tensor = at::zeros({3, 2, 5, 7});
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
@@ -49,7 +53,9 @@ static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, attachMetadata) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = at::zeros({3, 2, 5, 7});
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
@@ -67,7 +73,9 @@ TEST(NamedTensorTest, attachMetadata) {
   ASSERT_FALSE(tensor.has_names());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, internalSetNamesInplace) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto tensor = at::zeros({3, 2, 5, 7});
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
@@ -87,6 +95,7 @@ TEST(NamedTensorTest, internalSetNamesInplace) {
   ASSERT_TRUE(tensor.opt_names() == at::nullopt);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, empty) {
   auto N = Dimname::fromSymbol(Symbol::dimname("N"));
   auto C = Dimname::fromSymbol(Symbol::dimname("C"));
@@ -103,9 +112,11 @@ TEST(NamedTensorTest, empty) {
   tensor = at::empty({1, 2, 3, 4}, names);
   ASSERT_TRUE(dimnames_equal(tensor.opt_names().value(), names));
 
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(at::empty({1, 2, 3}, names), c10::Error);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, dimnameToPosition) {
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
@@ -114,6 +125,7 @@ TEST(NamedTensorTest, dimnameToPosition) {
   std::vector<Dimname> names = { N, C, H, W };
 
   auto tensor = at::empty({1, 1, 1});
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(dimname_to_position(tensor, N), c10::Error);
 
   tensor = at::empty({1, 1, 1, 1}, names);
@@ -146,10 +158,13 @@ static void check_unify(
 static void check_unify_error(DimnameList names, DimnameList other_names) {
   // In the future we'll merge at::unify_from_right and
   // TensorNames::unifyFromRight. For now, test them both.
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(at::unify_from_right(names, other_names), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(tensornames_unify_from_right(names, other_names), c10::Error);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, unifyFromRight) {
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
@@ -170,6 +185,7 @@ TEST(NamedTensorTest, unifyFromRight) {
   check_unify_error({ H, None, C }, { H });
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, alias) {
   // tensor.alias is not exposed in Python so we test its name propagation here
   auto N = dimnameFromString("N");
@@ -181,6 +197,7 @@ TEST(NamedTensorTest, alias) {
   ASSERT_TRUE(dimnames_equal(tensor.opt_names().value(), aliased.opt_names().value()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, NoNamesGuard) {
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
@@ -205,6 +222,7 @@ static std::vector<Dimname> nchw() {
   return { N, C, H, W };
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, TensorNamePrint) {
   auto names = nchw();
   {
@@ -221,6 +239,7 @@ TEST(NamedTensorTest, TensorNamePrint) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, TensorNamesCheckUnique) {
   auto names = nchw();
   {
@@ -230,6 +249,7 @@ TEST(NamedTensorTest, TensorNamesCheckUnique) {
   {
     std::vector<Dimname> nchh = { names[0], names[1], names[2], names[2] };
     auto tensornames = TensorNames(nchh);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(tensornames.checkUnique("op_name"), c10::Error);
   }
 }
