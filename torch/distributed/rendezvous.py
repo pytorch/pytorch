@@ -97,7 +97,9 @@ def _file_rendezvous_handler(url: str, **kwargs):
         import urllib.request
         full_path = result.netloc + result.path
         path = urllib.request.url2pathname(full_path)
-        path = os.path.normpath(path)
+        if path:
+            # Normalizing an empty string produces ".", which is not expected.
+            path = os.path.normpath(path)
 
     if not path:
         raise _error("path missing")
