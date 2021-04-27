@@ -719,7 +719,8 @@ class SyncBatchNorm(_BatchNorm):
             self.running_var if not self.training or self.track_running_stats else None
         )
 
-        need_sync = bn_training
+        # Don't sync batchnorm stats in inference mode (model.eval()).
+        need_sync = (bn_training and self.training)
         if need_sync:
             process_group = torch.distributed.group.WORLD
             if self.process_group:
