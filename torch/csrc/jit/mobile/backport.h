@@ -9,15 +9,14 @@
 
 namespace torch {
 namespace jit {
-using caffe2::serialize::ReadAdapterInterface;
 
 // The family of methods below to get version given bytecode model
-TORCH_API int64_t _get_bytecode_version(std::istream& in);
+TORCH_API int64_t _get_model_bytecode_version(std::istream& in);
 
-TORCH_API int64_t _get_bytecode_version(const std::string& filename);
+TORCH_API int64_t _get_model_bytecode_version(const std::string& filename);
 
-TORCH_API int64_t
-_get_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai);
+TORCH_API int64_t _get_model_bytecode_version(
+    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
 
 } // namespace jit
 } // namespace torch
