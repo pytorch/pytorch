@@ -33,7 +33,7 @@ static CPUCapability compute_cpu_capability() {
   if (cpuinfo_initialize()) {
     if (cpuinfo_has_x86_avx512f() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX512;
-    }    
+    }
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX2;
     }
