@@ -2544,10 +2544,11 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         result = vmap(vjp)(gy)
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
+only_for = ("cpu", "cuda")
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
     globals(),
-    None,
+    only_for=only_for,
 )
 
 if __name__ == '__main__':
