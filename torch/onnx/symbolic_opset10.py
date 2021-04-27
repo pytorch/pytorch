@@ -206,23 +206,20 @@ def slice(g, self, *args):
     else:
         raise NotImplementedError("Unknown aten::slice signature")
 
+    if start.type().kind() == "NoneType":
+        start = 0
+    if end.type().kind() == "NoneType":
+        end = 9223372036854775807
+
     step = sym_help._parse_arg(step, 'i')
     if (start.node().kind() != 'onnx::Constant' or
        (not isinstance(end, int) and end.node().kind() != 'onnx::Constant') or
        (not isinstance(dim, int) and dim.node().kind() != 'onnx::Constant')):
         dynamic_slice = True
-        if start.type().kind() == "NoneType":
-            start = g.op("Constant", value_t=torch.tensor(0))
-        if end.type().kind() == "NoneType":
-            end = g.op("Constant", value_t=torch.tensor(9223372036854775807))
     else:
-        start = [sym_help._parse_arg(start, 'i')]
-        end = [sym_help._parse_arg(end, 'i')]
+        start = [0 if start.type().kind() == "NoneType" else sym_help._parse_arg(start, 'i')]
+        end = [9223372036854775807 if end.type().kind() == "NoneType" else sym_help._parse_arg(end, 'i')]
         dim = [sym_help._parse_arg(dim, 'i')]
-        if start[0] is None:
-            start[0] = 0
-        if end[0] is None:
-            end = 9223372036854775807
         dynamic_slice = False
     return sym_help._slice_helper(g, self, axes=dim, starts=start, ends=end, steps=[step], dynamic_slice=dynamic_slice)
 
