@@ -757,13 +757,13 @@ def _set_input_and_output_names(graph, input_names, output_names):
 attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
 
-def _run_symbolic_method(op_name, symbolic_fn, args):
+def _run_symbolic_method(g, op_name, symbolic_fn, args):
     r"""
     This trampoline function gets invoked for every symbolic method
     call from C++.
     """
     try:
-        return symbolic_fn(*args)
+        return symbolic_fn(g, *args)
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
@@ -1041,6 +1041,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                 if symbolic_fn is None:
                     return None
                 attrs = {k: n[k] for k in n.attributeNames()}
+                if op_name == 'PythonOp':
+                    inputs = (n, *inputs)
                 return symbolic_fn(g, *inputs, **attrs)
 
         elif ns == "quantized":
