@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import sys
 import io
+import unittest
 
 import torch
 import torch.utils.model_dump
@@ -53,6 +55,7 @@ class ModelWithLists(torch.nn.Module):
 
 
 class TestModelDump(TestCase):
+    @unittest.skipIf(sys.version_info < (3, 7), "importlib.resources was new in 3.7")
     def test_inline_skeleton(self):
         skel = torch.utils.model_dump.get_inline_skeleton()
         assert "unpkg.org" not in skel

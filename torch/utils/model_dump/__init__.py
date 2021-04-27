@@ -142,10 +142,10 @@ def hierarchical_pickle(data):
                 assert len(quantizer) == 3
                 assert isinstance(quantizer[1], float)
                 assert isinstance(quantizer[2], int)
-                quantizer_extra = quantizer[1:3]
+                quantizer_extra = list(quantizer[1:3])
             else:
                 quantizer_extra = []
-            quantizer_json = [quantizer[0].name] + list(quantizer_extra)
+            quantizer_json = [quantizer[0].name] + quantizer_extra
             return {"__qtensor__": [storage_info, offset, size, stride, quantizer_json, requires_grad]}
         if typename == "torch.jit._pickle.restore_type_tag":
             assert data.state is None
