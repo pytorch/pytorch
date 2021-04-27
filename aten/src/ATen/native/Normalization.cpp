@@ -312,7 +312,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
     reduce_dims[i - 1] = i;
   }
 
-  auto sum = at::sum(input, /*dims=*/reduce_dims);
+  auto sum = at::sum(grad_out_, /*dims=*/reduce_dims);
   auto sum_a = sum.accessor<scalar_t, 1>();
 
   parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
