@@ -756,7 +756,7 @@ class DistributedDataParallel(Module):
                     dist.all_reduce(zeros, group=self.process_group)
                     should_throw_stop_iteration = zeros.item()
                     if should_throw_stop_iteration:
-                        raise StopIteration(
+                        raise RuntimeError(
                             "Detected at least one rank that exhausted inputs. Throwing StopIteration across all ranks."
                         )
 
@@ -1063,7 +1063,10 @@ class DistributedDataParallel(Module):
                             # Schedule allreduce telling active ranks to terminate
                             ones = torch.ones(1, device=self.device)
                             dist.all_reduce(ones, group=self.process_group)
-                            raise StopIteration(
+                            # Raising StopIteration doesn't throw error in python 3.6
+                            # and throws RuntimeError in 3.7+ (PEP 479), so just
+                            # raise RuntimeError here.
+                            raise RuntimeError(
                                 f"Rank {dist.get_rank(self.process_group)} exhausted all inputs."
                             )
                         if is_last_joiner:

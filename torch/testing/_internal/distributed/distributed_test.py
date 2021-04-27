@@ -4517,13 +4517,13 @@ class DistributedTest:
                     # Early termination rank(s)
                     num_iters = min_num_iters
                     exception_ctx = self.assertRaisesRegex(
-                        RuntimeError, "generator raised StopIteration"
+                        RuntimeError, f"Rank {self.rank} exhausted all inputs"
                     )
                 else:
                     # Non early termination rank
                     num_iters = min_num_iters * 2
                     exception_ctx = self.assertRaisesRegex(
-                        StopIteration,
+                        RuntimeError,
                         "Detected at least one rank that exhausted inputs."
                     )
                 n = 0
