@@ -2252,7 +2252,7 @@ Example::
     >>> y.is_conj()
     True
 
-""".format(**common_args))
+""")
 
 add_docstr(torch.resolve_conj,
            r"""
@@ -2276,7 +2276,7 @@ Example::
     >>> z.is_conj()
     False
 
-""".format(**common_args))
+""")
 
 add_docstr(torch.copysign,
            r"""
@@ -4240,6 +4240,15 @@ is_complex(input) -> (bool)
 
 Returns True if the data type of :attr:`input` is a complex data type i.e.,
 one of ``torch.complex64``, and ``torch.complex128``.
+
+Args:
+    {input}
+""".format(**common_args))
+
+add_docstr(torch.is_conj, r"""
+is_conj(input) -> (bool)
+
+Returns True if the :attr:`input` is a conjugated tensor, i.e. its conjugate bit is set to `True`.
 
 Args:
     {input}
@@ -6873,6 +6882,25 @@ Example::
     tensor([ 6.4939, 97.4091])
     >>> torch.polygamma(4, a)
     tensor([ -24.8863, -771.4742])
+""".format(**common_args))
+
+add_docstr(torch.positive,
+           r"""
+positive(input) -> Tensor
+
+Returns :attr:`input`.
+Throws a runtime error if :attr:`input` is a bool tensor.
+""" + r"""
+Args:
+    {input}
+
+Example::
+
+    >>> t = torch.randn(5)
+    >>> t
+    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
+    >>> torch.positive(t)
+    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
 """.format(**common_args))
 
 add_docstr(torch.pow,

@@ -1998,6 +1998,13 @@ is_complex() -> bool
 Returns True if the data type of :attr:`self` is a complex data type.
 """)
 
+add_docstr_all('is_conj',
+               r"""
+is_conj() -> bool
+
+Returns True if the conjugate bit of :attr:`self` is set to true.
+""")
+
 add_docstr_all('is_signed',
                r"""
 is_signed() -> bool
@@ -2678,6 +2685,13 @@ add_docstr_all('polygamma_',
 polygamma_(n) -> Tensor
 
 In-place version of :meth:`~Tensor.polygamma`
+""")
+
+add_docstr_all('positive',
+               r"""
+positive() -> Tensor
+
+See :func:`torch.positive`
 """)
 
 add_docstr_all('pow',

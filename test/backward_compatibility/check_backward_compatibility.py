@@ -80,6 +80,7 @@ allow_list = [
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::conj", datetime.date(9999, 1, 1)),
+    ("aten::_conj", datetime.date(9999, 1, 1)),
     ("aten::conj.out", datetime.date(9999, 1, 1)),
 ]
 

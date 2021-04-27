@@ -3245,11 +3245,12 @@ class TestRandomTensorCreation(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @onlyCUDA
     def test_randperm(self, device):
-        if device == 'cpu':
+        if device == 'cpu' or device == 'meta':
             rng_device = None
         else:
+            # TODO: This won't actually work for non-CUDA device
+            # see https://github.com/pytorch/pytorch/issues/54282
             rng_device = [device]
 
         # Test core functionality. On CUDA, for small n, randperm is offloaded to CPU instead. For large n, randperm is
@@ -3279,7 +3280,8 @@ class TestRandomTensorCreation(TestCase):
         self.assertEqual(res2.numel(), 0)
 
         # Test exceptions when n is too large for a floating point type
-        for dtype, small_n, large_n in ((torch.half, 2**11 + 1, 2**11 + 2),
+        for dtype, small_n, large_n in ((torch.uint8, 2**8, 2**8 + 1),
+                                        (torch.half, 2**11 + 1, 2**11 + 2),
                                         (torch.float, 2**24 + 1, 2**24 + 2),
                                         (torch.double, 2**25,  # 2**53 + 1 is too large to run
                                          2**53 + 2)):
