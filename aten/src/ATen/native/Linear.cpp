@@ -1,9 +1,11 @@
 #include <ATen/ATen.h>
+#include <ATen/native/Resize.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
+#include <c10/util/MaybeOwned.h>
 
 #include <array>
 #include <cctype>
@@ -16,23 +18,25 @@ namespace at { namespace native {
 
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  auto bias = bias_opt.has_value()
+    ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
+    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
 
   if (input.is_mkldnn()) {
-    return at::mkldnn_linear(input, weight, bias);
+    return at::mkldnn_linear(input, weight, *bias);
   }
 #if defined(C10_MOBILE)
-  if (xnnpack::use_linear(input, weight, bias)) {
-    return xnnpack::linear(input, weight, bias);
+  if (xnnpack::use_linear(input, weight, *bias)) {
+    return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input.dim() == 2 && bias.defined()) {
+  if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
-    return at::addmm(bias, input, weight.t());
+    return at::addmm(*bias, input, weight.t());
   }
   auto output = at::matmul(input, weight.t());
-  if (bias.defined()) {
-    output.add_(bias);
+  if (bias->defined()) {
+    output.add_(*bias);
   }
   return output;
 }
@@ -140,6 +144,19 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   return result;
 }
 
+namespace {
+
+bool einsum_check_label(char label) {
+  return std::isalpha(label);
+}
+
+int einsum_label_to_index(char label) {
+  constexpr int NUM_OF_LETTERS = 'z' - 'a' + 1;
+  return std::islower(label) ? label - 'a' : NUM_OF_LETTERS + (label - 'A');
+}
+
+} // namespace
+
 // There are roughly three parts to compute einsum:
 // 1. Parse equation to extract the labels for each input operand and output
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
@@ -198,13 +215,12 @@ Tensor einsum(std::string equation, TensorList operands) {
       default:
         // Parse label
         TORCH_CHECK(
-            lhs[i] >= 'a' && lhs[i] <= 'z',
-            "einsum() operand subscript must be in range [a, z] but found ",
+            einsum_check_label(lhs[i]),
+            "einsum() operand subscript must be in [a-zA-Z] but found ",
             lhs[i],
             " for operand ",
             curr_op);
-        // Convert label to index in [0, 25] and store
-        op_labels[curr_op].push_back(lhs[i] - 'a');
+        op_labels[curr_op].push_back(einsum_label_to_index(lhs[i]));
     }
   }
 
@@ -212,8 +228,8 @@ Tensor einsum(std::string equation, TensorList operands) {
       curr_op == num_ops - 1,
       "einsum() more operands were provided than specified in the equation");
 
-  // Labels must be within [a, z].
-  constexpr int TOTAL_LABELS = 'z' - 'a' + 1;
+  // Labels must be within [a-zA-Z].
+  constexpr int TOTAL_LABELS = 52;
   std::vector<int> label_count(TOTAL_LABELS, 0);
 
   // The maximum number of dimensions covered by any ellipsis, needed when
@@ -298,12 +314,11 @@ Tensor einsum(std::string equation, TensorList operands) {
 
         default:
           TORCH_CHECK(
-              // Labels must be in [a, z]
-              rhs[i] >= 'a' && rhs[i] <= 'z',
-              "einsum() subscripts must be in range [a, z] but found ",
+              einsum_check_label(rhs[i]),
+              "einsum() subscripts must be in [a-zA-Z] but found ",
               rhs[i],
               " for the output");
-          const auto label = rhs[i] - 'a';
+          const auto label = einsum_label_to_index(rhs[i]);
           TORCH_CHECK(
               // Ensure label appeared at least once for some input operand and at
               // most once for the output
@@ -549,7 +564,8 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 
 Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   TORCH_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
   for (const auto i : c10::irange(input1.dim() - 1)) {
@@ -638,9 +654,26 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
 }
 
 Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
-  result.copy_(at::native::tensordot(input1, input2, dims1, dims2));
+  Tensor result_tmp = at::native::tensordot(input1, input2, dims1, dims2);
+  auto result_dtype = result_tmp.scalar_type();
+  auto output_tensor_dtype = result.scalar_type();
+  auto output_device = result.device();
+  auto input_device = input1.device();
+  // check if the input & output tensors are on the same device.
+  TORCH_CHECK(
+    output_device == input_device,
+    "tensordot: Expected the output and input tensors to be on the "
+    "same device, but got output on ", output_device, " and inputs on ",
+    input_device);
+  // check if the computed result has the same dtype as the out tensor
+  //   (because tensordot does not support type promotion)
+  TORCH_CHECK(
+    result_dtype == output_tensor_dtype, "tensordot",
+    ": Expected the output tensor to have dtype ", result_dtype,
+    ", but got an output tensor with dtype ", output_tensor_dtype);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
-
 
 }}  // namespace at::native

@@ -16,6 +16,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Registry.h>
 #include <c10/util/typeid.h>
+#include <c10/core/Stream.h>
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
@@ -807,22 +808,23 @@ inline vector<int16_t> OperatorBase::GetRepeatedArgument<int16_t>(
 template <class Context>
 class Operator : public OperatorBase {
  public:
-  explicit Operator(const OperatorDef& operator_def, Workspace* ws)
+  explicit Operator(const OperatorDef& operator_def, Workspace* ws, StreamId stream = 0)
       : OperatorBase(operator_def, ws), context_(operator_def.device_option()) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
-    context_.SwitchToDevice();
+    context_.SwitchToDevice(stream);
   }
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
       std::vector<c10::IValue> inputs,
-      c10::List<at::Tensor> outputs)
+      c10::List<at::Tensor> outputs,
+      StreamId stream = 0)
       : OperatorBase(fn_schema, std::move(inputs), std::move(outputs)) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
-    context_.SwitchToDevice();
+    context_.SwitchToDevice(stream);
   }
 #endif
   ~Operator() noexcept override {}

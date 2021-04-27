@@ -139,6 +139,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
           return std::vector<std::vector<int64_t>>();
         }
       })
+      .def("dtypes", [](const KinetoEvent& e) {
+        if (e.hasTypes()) {
+          return e.dtypes();
+        } else {
+          return std::vector<std::string>();
+        }
+      })
       // stack traces of the PyTorch CPU events
       .def("stack", [](const KinetoEvent& e) {
         if (e.hasStack()) {
@@ -177,7 +184,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_prepare_profiler", prepareProfiler);
 #endif
 
-  m.def("kineto_available", kinetoAvailable);
+  m.def("kineto_available", []() {
+#ifdef USE_KINETO
+    return true;
+#else
+    return false;
+#endif
+  });
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
   py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")

@@ -18,7 +18,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # deep clone, to allow us to use git log
       - name: Install dependencies
         # mypy and boto3 versions copied from
@@ -26,6 +25,6 @@ jobs:
         run: |
           set -eux
           pip install -r requirements.txt
-          pip install boto3==1.16.34 mypy==0.770
+          pip install boto3==1.16.34 mypy==0.812
       - name: Run tests
         run: python -m unittest discover -vs tools/test -p 'test_*.py'

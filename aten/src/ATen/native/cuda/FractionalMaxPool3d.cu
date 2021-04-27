@@ -373,13 +373,12 @@ std::tuple<Tensor, Tensor> fractional_max_pool3d_cuda(
     return std::tuple<Tensor, Tensor>(output, indices);
   }
 
-Tensor& fractional_max_pool3d_backward_out_cuda(
-  at::Tensor& gradInput,
-  const at::Tensor& gradOutput_,
+Tensor& fractional_max_pool3d_backward_out_cuda(const at::Tensor& gradOutput_,
   const at::Tensor& input,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const at::Tensor& indices) {
+  const at::Tensor& indices,
+  at::Tensor& gradInput) {
     // See Note [Writing Nondeterministic Operations]
     // Nondeterministic because of atomicAdd usage
     globalContext().alertNotDeterministic("fractional_max_pool3d_backward_out_cuda");
