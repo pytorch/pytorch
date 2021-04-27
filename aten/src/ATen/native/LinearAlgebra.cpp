@@ -2709,7 +2709,7 @@ std::tuple<Tensor, Tensor, Tensor> lu_unpack(
     at::ones({1}, permutation_matrix.options()).expand(permutation_matrix.sizes())
   );
 
-  return std::tie(permutation_matrix, L, U);
+  return std::make_tuple(permutation_matrix, L, U);
 }
 
 using TupleTensorRefs3 = std::tuple<Tensor&, Tensor&, Tensor&>;
