@@ -45,7 +45,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast, largeTensorTest, expectedFailureMeta
+    deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -13828,16 +13828,31 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfCudnnVersionLessThan(7600)
     def test_CTCLoss_cudnn(self, device):
-        target_lengths = [30, 25, 20]
-        input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device=device).log_softmax(2)
-        res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
-        expected = ctcloss_reference(log_probs, targets.cuda(), input_lengths, target_lengths).float()
-        with torch.backends.cudnn.flags(enabled=False):
-            res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths)
-        self.assertEqual(res, expected)
-        self.assertEqual(res2, res)
+        def _helper(zero_infinity):
+            target_lengths = [30, 25, 20]
+            input_lengths = [50, 50, 50]
+            targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
+            log_probs = torch.randn(50, 3, 15, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+
+            log_probs_ref = log_probs.detach().clone().requires_grad_()
+
+            with torch.backends.cudnn.flags(enabled=True):
+                res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, zero_infinity=zero_infinity)
+                res.backward()
+
+            expected = ctcloss_reference(log_probs, targets.cuda(), input_lengths, target_lengths).float()
+
+            with torch.backends.cudnn.flags(enabled=False):
+                res2 = torch.nn.functional.ctc_loss(log_probs_ref, targets.cuda().long(), input_lengths, target_lengths,
+                                                    zero_infinity=zero_infinity)
+                res2.backward()
+
+            self.assertEqual(res, expected)
+            self.assertEqual(res2, res)
+            self.assertEqual(log_probs.grad, log_probs_ref.grad)
+
+        _helper(zero_infinity=True)
+        _helper(zero_infinity=False)
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
@@ -15789,6 +15804,35 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("Complex modules are a new feature" in str(w[-1].message))
 
+    @skipMeta
+    @dtypes(torch.float32, torch.float64)
+    def test_module_to_empty(self, device, dtype):
+        class MyModule(nn.Module):
+            def __init__(self, in_features, out_features, device=None, dtype=None):
+                super().__init__()
+                factory_kwargs = {"device": device, "dtype": dtype}
+                self.weight = nn.Parameter(torch.randn(in_features, out_features, **factory_kwargs))
+
+            def forward(self, x):
+                return x @ self.weight
+
+        # Test meta module instantiation.
+        input = torch.randn(5, 10, device=device, dtype=dtype)
+        m = MyModule(10, 1, device='meta', dtype=dtype)
+        with self.assertRaises(NotImplementedError):
+            m(input)
+
+        # Test materializing meta module on a real device.
+        m.to_empty(device=device)
+        m(input)
+        with torch.no_grad():
+            torch.nn.init.kaiming_uniform_(m.weight)
+        m(input)
+
+        # Test creating meta module from materialized module.
+        m.to_empty(device='meta')
+        with self.assertRaises(NotImplementedError):
+            m(input)
 
 class TestModuleGlobalHooks(TestCase):
 
