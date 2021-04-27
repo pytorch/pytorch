@@ -276,6 +276,10 @@ Tensor class reference
     Tensor.contiguous
     Tensor.copy_
     Tensor.conj
+    Tensor.conj_physical
+    Tensor.conj_physical_
+    Tensor.resolve_conj
+    Tensor.resolve_conj_
     Tensor.copysign
     Tensor.copysign_
     Tensor.cos
@@ -408,6 +412,7 @@ Tensor class reference
     Tensor.isnan
     Tensor.is_contiguous
     Tensor.is_complex
+    Tensor.is_conj
     Tensor.is_floating_point
     Tensor.is_leaf
     Tensor.is_pinned
@@ -523,6 +528,7 @@ Tensor class reference
     Tensor.pinverse
     Tensor.polygamma
     Tensor.polygamma_
+    Tensor.positive
     Tensor.pow
     Tensor.pow_
     Tensor.prod

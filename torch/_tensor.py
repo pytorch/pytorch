@@ -86,9 +86,14 @@ class Tensor(torch._C._TensorBase):
                         self.requires_grad,
                         self._backward_hooks)
                 else:
-                    new_tensor = self.new()
+                    if self.is_conj():
+                        new_tensor = self.conj().new()
+                    else:
+                        new_tensor = self.new()
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
                     new_tensor.requires_grad = self.requires_grad
+                    if self.is_conj():
+                        new_tensor = new_tensor.conj()
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
             memo[id(self)] = new_tensor
@@ -572,6 +577,7 @@ class Tensor(torch._C._TensorBase):
     def __rfloordiv__(self, other):
         return torch.floor_divide(other, self)
 
+    __pos__ = _C._TensorBase.positive
     __neg__ = _C._TensorBase.neg
     __abs__ = _C._TensorBase.abs
 

@@ -112,7 +112,8 @@ class TestGradients(TestCase):
                 return variant.__wrapped__ is op.get_inplace()
             return variant is op.get_inplace()
 
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        samples = op.sample_inputs(device, dtype, requires_grad=True, include_conjugated_inputs=dtype.is_complex)
+
         for sample in samples:
             if sample.broadcasts_input and is_inplace(variant):
                 continue
@@ -267,7 +268,7 @@ class TestCommon(JitCommonTestCase):
         _requires_grad = (op.supports_autograd and
                           (dtype.is_floating_point or op.supports_complex_autograd))
 
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad, include_conjugated_inputs=dtype.is_complex)
 
         def _test_consistency_helper(samples, variants):
             for sample in samples:
@@ -367,7 +368,7 @@ class TestCommon(JitCommonTestCase):
         if _requires_grad and not op.supports_gradgrad:
             self.skipTest("skipped! This test does not handle ops that don't support gragrad properly")
 
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad, include_conjugated_inputs=dtype.is_complex)
 
         for sample in samples:
             # Acquires variants to test

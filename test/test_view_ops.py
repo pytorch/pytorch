@@ -350,8 +350,9 @@ class TestViewOps(TestCase):
     @dtypes(*torch.testing.get_all_complex_dtypes())
     def test_conj_imag_view(self, device, dtype) -> None:
         t = _make_tensor((4, 5,), dtype, device)
-        t_numpy_conj = t.numpy().conj()
+        t_numpy_conj = t.numpy().conj().to(device=device)
         v = t.conj()
+        self.assertTrue(self.is_view_of(t, v))
         self.assertEqual(v, t_numpy_conj)
 
         if (t.is_complex()):

@@ -19,6 +19,7 @@ Tensors
     is_tensor
     is_storage
     is_complex
+    is_conj
     is_floating_point
     is_nonzero
     set_default_dtype
@@ -341,6 +342,7 @@ Pointwise Ops
     negative
     nextafter
     polygamma
+    positive
     pow
     rad2deg
     real
