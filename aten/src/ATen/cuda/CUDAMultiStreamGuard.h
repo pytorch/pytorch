@@ -16,32 +16,22 @@ public:
   /// Calls `set_stream` on each of the streams in the list.
   /// This may be useful if you need to set different streams
   /// for different devices.
-  explicit CUDAMultiStreamGuard(ArrayRef<CUDAStream> streams) : CUDAMultiStreamGuard() {
+  explicit CUDAMultiStreamGuard(ArrayRef<CUDAStream> streams) {
+    original_streams_.reserve(streams.size());
     for (const auto& s : streams) {
+      original_streams_.push_back(getCurrentCUDAStream(s.device_index()));
       setCurrentCUDAStream(s);
     }
   }
 
-  CUDAMultiStreamGuard() {
-    const size_t device_count = getNumGPUs();
-    original_streams_.reserve(device_count);
-    for (size_t device = 0; device < device_count; ++device) {
-      original_streams_.push_back(getCurrentCUDAStream(device));
-    }
-  }
-
-  CUDAMultiStreamGuard(const CUDAGuard&) = delete;
-  CUDAMultiStreamGuard& operator=(const CUDAGuard&) = delete;
+  CUDAMultiStreamGuard(const CUDAMultiStreamGuard&) = delete;
+  CUDAMultiStreamGuard& operator=(const CUDAMultiStreamGuard&) = delete;
 
   // See Note [Move construction for RAII guards is tricky]
-  CUDAMultiStreamGuard(CUDAGuard&& other) = delete;
+  CUDAMultiStreamGuard(CUDAMultiStreamGuard&& other) = delete;
 
   // See Note [Move assignment for RAII guards is tricky]
-  CUDAMultiStreamGuard& operator=(CUDAGuard&& other) = delete;
-
-  ArrayRef<CUDAStream> original_streams() const {
-    return original_streams_;
-  }
+  CUDAMultiStreamGuard& operator=(CUDAMultiStreamGuard&& other) = delete;
 
   /// Resets the CUDA stream on each device to the one that was active upon
   /// construction.
@@ -52,7 +42,7 @@ public:
   }
 
 private:
-  /// The original streams that were active on all devices.
+  /// The original streams that were active on the affected devices.
   std::vector<CUDAStream> original_streams_;
 };
 
