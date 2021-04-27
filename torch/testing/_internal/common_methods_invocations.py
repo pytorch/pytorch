@@ -423,6 +423,7 @@ def sample_inputs_binary(op_info, device, dtype, requires_grad):
 
     sample_inputs = []
     for shape_1, shape_2_or_scalar in test_cases:
+        arg: Any
         if isinstance(shape_2_or_scalar, tuple):
             # shape
             arg = make_tensor(shape_2_or_scalar, device, dtype, low=low, high=high, requires_grad=requires_grad)
