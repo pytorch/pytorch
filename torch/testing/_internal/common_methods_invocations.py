@@ -457,22 +457,26 @@ class BinaryUfuncInfo(OpInfo):
     about the concept of ufuncs.
     """
 
-    def __init__(self,
-                 name,  # the string name of the function
-                 *,
-                 ref,  # a reference function
-                 domain=(None, None),  # the [low, high) domain of the function
-                 dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
-                 assert_autodiffed=True,
-                 sample_inputs_func=sample_inputs_binary,
-                 supports_inplace_autograd=False,
-                 **kwargs):
-        super(BinaryUfuncInfo, self).__init__(name,
-                                              dtypes=dtypes,
-                                              assert_autodiffed=assert_autodiffed,
-                                              sample_inputs_func=sample_inputs_func,
-                                              supports_inplace_autograd=supports_inplace_autograd,
-                                              **kwargs)
+    def __init__(
+        self,
+        name,  # the string name of the function
+        *,
+        ref,  # a reference function
+        domain=(None, None),  # the [low, high) domain of the function
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+        assert_autodiffed=True,
+        sample_inputs_func=sample_inputs_binary,
+        supports_inplace_autograd=False,
+        **kwargs
+    ):
+        super(BinaryUfuncInfo, self).__init__(
+            name,
+            dtypes=dtypes,
+            assert_autodiffed=assert_autodiffed,
+            sample_inputs_func=sample_inputs_func,
+            supports_inplace_autograd=supports_inplace_autograd,
+            **kwargs
+        )
         self.ref = ref
         self.domain = domain
 
@@ -3478,11 +3482,12 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients', 'test_method_grad',
                                 device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                    )),
-    BinaryUfuncInfo('add',
-                    ref=np.add,
-                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    supports_out=True,
-                    ),
+    BinaryUfuncInfo(
+        "add",
+        ref=np.add,
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=True,
+    ),
     OpInfo('addmm',
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
            # alpha=beta=1 is tested in the following opinfo, because that special case will
@@ -5624,28 +5629,32 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    sample_inputs_func=sample_inputs_logit,
                    safe_casts_outputs=True),
-    BinaryUfuncInfo('mul',
-                    aliases=('multiply',),
-                    ref=np.multiply,
-                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    supports_out=True,
-                    ),
-    BinaryUfuncInfo('sub',
-                    aliases=('subtract',),
-                    ref=np.subtract,
-                    supports_out=True,
-                    ),
-    BinaryUfuncInfo('div',
-                    aliases=('divide',),
-                    ref=np.divide,
-                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    supports_out=True,
-                    ),
-    BinaryUfuncInfo('true_divide',
-                    ref=np.true_divide,
-                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    supports_out=True,
-                    )
+    BinaryUfuncInfo(
+        "mul",
+        aliases=("multiply",),
+        ref=np.multiply,
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=True,
+    ),
+    BinaryUfuncInfo(
+        "sub",
+        aliases=("subtract",),
+        ref=np.subtract,
+        supports_out=True,
+    ),
+    BinaryUfuncInfo(
+        "div",
+        aliases=("divide",),
+        ref=np.divide,
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=True,
+    ),
+    BinaryUfuncInfo(
+        "true_divide",
+        ref=np.true_divide,
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=True,
+    )
 ]
 
 # Common operator groupings
