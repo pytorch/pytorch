@@ -39,7 +39,7 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           python3 pytorch/.github/scripts/run_torchbench.py \
-                  --pytorch-path "${PWD}"/pytorch \
+                  --pytorch-path "${HOME}"/pytorch \
                   --torchbench-path "${PWD}"/benchmark \
                   --pr-num "$PR_NUM" \
                   --pr-base-sha "$PR_BASE_SHA" \
