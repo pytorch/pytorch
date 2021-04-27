@@ -13,8 +13,7 @@ from functools import partial
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, iter_indices, TEST_WITH_ASAN, run_tests,
-    torch_to_numpy_dtype_dict, make_tensor,
-    TEST_SCIPY, set_default_dtype)
+    torch_to_numpy_dtype_dict, make_tensor, TEST_SCIPY, set_default_dtype)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
@@ -91,7 +90,6 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
 # TODO: update to use opinfos consistently
 class TestBinaryUfuncs(TestCase):
 
-    @onlyOnCPUAndCUDA
     def test_add_broadcast_empty(self, device):
         # empty + empty
         self.assertRaises(RuntimeError, lambda: torch.randn(5, 0, device=device) + torch.randn(0, 5, device=device))
@@ -1182,10 +1180,11 @@ class TestBinaryUfuncs(TestCase):
     # Also tests that reverse operations are equivalent to forward ops
     # NOTE: division ops are tested separately above
     def test_binary_ops_with_scalars(self, device):
-        for python_op, torch_op in ((operator.add, torch.add),
-                                    (operator.sub, torch.sub),
-                                    (operator.mul, torch.mul),
-                                    (operator.truediv, torch.div)):
+        for ops in ((operator.add, torch.add),
+                    (operator.sub, torch.sub),
+                    (operator.mul, torch.mul),
+                    (operator.truediv, torch.div)):
+            python_op, torch_op = ops
 
             for a, b in product(range(-10, 10), range(-10, 10)):
                 for op in (lambda x: x * .5, lambda x: math.floor(x)):
@@ -2253,7 +2252,6 @@ class TestBinaryUfuncs(TestCase):
     def test_logaddexp2(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=True)
 
-    @onlyOnCPUAndCUDA
     def test_add(self, device):
         dtypes = [torch.float, torch.double] + torch.testing.get_all_complex_dtypes()
         for dtype in dtypes:
