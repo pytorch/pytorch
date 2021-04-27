@@ -88,8 +88,11 @@ std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
     int64_t dim) {
   auto self_ = moveBatchDimToFront(self, self_bdim); 
   auto rank = rankWithoutBatchDim(self, self_bdim);
-  dim = maybe_wrap_dim(dim, rank + 1) + 1;
-  return { self.unsqueeze(dim), valIfNonempty(self_bdim, 0) };
+  dim = maybe_wrap_dim(dim, rank + 1);
+  if (self_bdim) {
+    dim += 1;
+  }
+  return { self_.unsqueeze(dim), valIfNonempty(self_bdim, 0) };
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
