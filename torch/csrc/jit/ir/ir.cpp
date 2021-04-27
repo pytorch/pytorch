@@ -2059,14 +2059,6 @@ std::vector<Value*> inlineCallTo(
         callee,
         to_replace,
         module_instance_info);
-    for (auto block : new_node->blocks()) {
-      inlineCallStackOfBlock(
-          block,
-          new_callstack_entries,
-          callee,
-          to_replace,
-          module_instance_info);
-    }
   }
   const auto& old_outputs = to_replace->outputs();
 
