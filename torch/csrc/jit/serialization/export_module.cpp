@@ -413,7 +413,7 @@ void ScriptModuleSerializer::writeArchive(
     const std::string& archive_name,
     const std::string& archive_dir,
     const std::string& tensor_dir,
-    bool tensor_cptr_naming_scheme) {
+    bool tensor_cdata_naming_scheme) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
@@ -429,7 +429,7 @@ void ScriptModuleSerializer::writeArchive(
       &memoizedClassTypes,
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
-        if (tensor_cptr_naming_scheme) {
+        if (tensor_cdata_naming_scheme) {
           tensor_names.push_back(
               std::to_string(reinterpret_cast<std::intptr_t>(
                   tensor.storage().unsafeGetStorageImpl())) +
@@ -452,7 +452,7 @@ void ScriptModuleSerializer::writeArchive(
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string file_name = tensor_dir + tensor_names[i++];
-    if (tensor_cptr_naming_scheme &&
+    if (tensor_cdata_naming_scheme &&
         std::find(
             pre_serialized_files.begin(),
             pre_serialized_files.end(),
@@ -636,7 +636,7 @@ void ScriptModuleSerializer::serialize_unified_format(
       "data",
       archive_dir,
       /*tensor_dir=*/".data/",
-      /*tensor_cptr_nameing_scheme=*/true);
+      /*tensor_cdata_naming_scheme=*/true);
   // Then we serialize all code info.
   convertTypes(module.type());
   // The tensor constants from the code are written to a separate archive
@@ -648,7 +648,7 @@ void ScriptModuleSerializer::serialize_unified_format(
       "constants",
       archive_dir,
       /*tensor_dir=*/".data/",
-      /*tensor_cptr_nameing_scheme=*/true);
+      /*tensor_cdata_naming_scheme=*/true);
 
   // Note: writeFiles() call needs to be made in addition to calling this
   // function to have the code actually saved (tensors are saved)
