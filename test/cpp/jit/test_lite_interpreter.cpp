@@ -664,6 +664,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModel) {
   std::ostringstream oss;
   bool backPortSuccess =
       torch::jit::_backport_for_mobile(test_model_file_v5, oss);
+
   AT_ASSERT(backPortSuccess);
 
   // Check backport model version
