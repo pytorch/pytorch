@@ -49,6 +49,11 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
     // when using C++. The reason is unclear.
     try {
       pybind11::gil_scoped_acquire ag;
+      // Cache the function since importing and getting it has a non-negligible
+      // cost. Storing a py::object by value will cause issues at shutdown as we
+      // might attempt to destroy it once the Python interpreter is gone (and,
+      // anyways, we wouldn't be holding the GIL). Thus we "leak" the object by
+      // heap-allocating it but never deleting it, so it never gets destroyed.
       static py::object& extractorFn = *new py::object(
           py::module::import("torch._jit_internal").attr("_extract_tensors"));
       return extractorFn(py_obj_).cast<std::vector<at::Tensor>>();
