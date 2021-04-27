@@ -347,11 +347,15 @@ Tensor resolve_neg(const Tensor& self) {
   return result.copy_(self);
 }
 
-Tensor resolve_conj(const Tensor& self) {
-  if (!self.is_conj()) { return self; }
+Tensor _resolve_conj(const Tensor& self) {
   auto result = at::empty_like(self, self.options());
   // conjugation is handled in `copy_()`
   return result.copy_(self);
+}
+
+Tensor resolve_conj(const Tensor& self) {
+  if (!self.is_conj()) { return self; }
+  return at::_resolve_conj(self);
 }
 
 Tensor resolve_conj_(const Tensor& self) {

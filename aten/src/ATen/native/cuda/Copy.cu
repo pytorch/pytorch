@@ -72,7 +72,7 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
       });
     } else {
-      if (!same_conj) {
+      if (!same_conj && same_type) {
         AT_DISPATCH_COMPLEX_TYPES(
             dtype, "copy_conj_", [&] {
               gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(x); });
