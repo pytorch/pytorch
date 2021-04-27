@@ -619,8 +619,6 @@ class SyncBatchNorm(_BatchNorm):
         Synchronization of batchnorm statistics occurs only while training, i.e.
         synchronization is disabled when model.eval() is set or if self.training
         is otherwise ``False``.
-        Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
-        for a brief introduction to all features related to distributed training.
 
     Examples::
 
