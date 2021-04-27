@@ -22,7 +22,7 @@
 
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 constexpr auto kProcessGroupDefaultTimeout =
-    std::chrono::milliseconds(10 * 1000);
+    std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
 
@@ -34,7 +34,7 @@ enum class OpType : std::uint8_t {
   ALLREDUCE_COALESCED = 2,
   REDUCE = 3,
   ALLGATHER = 4,
-  ALLGATHER_BASE = 5,
+  _ALLGATHER_BASE = 5,
   ALLGATHER_COALESCED = 6,
   GATHER = 7,
   SCATTER = 8,
@@ -175,7 +175,9 @@ class ProcessGroup : public torch::CustomClassHolder {
   // extend this struct and define its options if it wants to provide more
   // config options (beyond basic ones defined here) to end user.
   struct Options : torch::CustomClassHolder {
-    explicit Options(std::chrono::milliseconds timeout, std::string backend)
+    explicit Options(
+        std::string backend,
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
         : timeout(timeout), backend(backend) {}
     virtual ~Options() = default;
 
@@ -226,14 +228,15 @@ class ProcessGroup : public torch::CustomClassHolder {
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
   // is interpreted as a contigious collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+  // Note: this function will be deprecated in near future.
+  virtual c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) = 0;
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
   // * do not add dependencies on this function,
-  // * do not implement it in your ProcessGroup, implement allgather_base
+  // * do not implement it in your ProcessGroup, implement _allgather_base
   //   instead.
   virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
