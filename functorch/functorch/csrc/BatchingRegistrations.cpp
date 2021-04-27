@@ -258,17 +258,17 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
   auto size_physical = self_physical.getPhysicalShape(size);
   auto self_physical_dim = self_physical.tensor().dim();
 
-  TORCH_CHECK(self_physical_dim <= size_physical.size(),
+  TORCH_CHECK((uint64_t)self_physical_dim <= size_physical.size(),
        "expand: the number of sizes provided (", /*logical*/size.size(), ") ",
        "must be greater or equal to the number of dimensions in the tensor (",
        /*logical dim*/self.dim(), ")");
 
-  if (self_physical_dim == size_physical.size()) {
+  if ((uint64_t)self_physical_dim == size_physical.size()) {
     auto result = self_physical.tensor().expand(size_physical, implicit);
     return self_physical.getPhysicalToLogicalMap().apply(result);
   }
 
-  TORCH_INTERNAL_ASSERT(self_physical_dim < size_physical.size());
+  TORCH_INTERNAL_ASSERT((uint64_t)self_physical_dim < size_physical.size());
   // Here, we know we are expanding a (logical) tensor to a larger number
   // of dimensions. We have to be careful because we can't call expand directly
   // due to the presence of batch dimensions.
@@ -363,7 +363,7 @@ std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntAr
 
 // Checks if the batch dims in `bdims` appear at the front of the tensor.
 static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
-  for (int64_t idx = 0; idx < bdims.size(); idx++) {
+  for (uint64_t idx = 0; idx < bdims.size(); idx++) {
     if (bdims[idx].dim() != idx) {
       return false;
     }
@@ -1380,7 +1380,7 @@ Tensor& BatchedTensor_requires_grad_(Tensor& self, bool requires_grad) {
 }
 
 
-TORCH_LIBRARY_IMPL(_, BatchedOutOfTree, m) {
+TORCH_LIBRARY_IMPL(_, FT_BATCHED_KEY, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
 
@@ -1559,13 +1559,7 @@ Tensor matmul_decomposed(
           dim_tensor1, "D and ", dim_tensor2, "D");
 }
 
-TORCH_LIBRARY_IMPL(aten, BatchedOutOfTree, m) {
-
-#define VMAP_SUPPORT(op, batch_rule) \
-  m.impl(op, PrimBatchRule7< \
-      decltype(&batch_rule), &batch_rule, to_operator_t<decltype(batch_rule)> \
-      >::apply);
-
+TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // VMAP_OUTPLACE_OP("abs", abs_batch_rule);
   // m.impl("abs", PrimBatchRule7<decltype(&abs_batch_rule), &abs_batch_rule, to_operator_t<decltype(abs_batch_rule)>>::apply);
 
@@ -1688,10 +1682,10 @@ TORCH_LIBRARY_IMPL(aten, BatchedOutOfTree, m) {
   m.impl("clone", clone_batching_rule);
   // m.impl("ones_like", ones_like_batching_rule);
 
-  using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, Scalar);
+//   using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, Scalar);
   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
-  using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
-
+//   using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
+// 
 // #define BINARY_POINTWISE(op) \
 //   m.impl(#op".Tensor", binary_pointwise_batching_rule<TensorTensorType, at::op>); \
 //   m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
@@ -1783,7 +1777,6 @@ TORCH_LIBRARY_IMPL(aten, BatchedOutOfTree, m) {
 // //   COMPARISON_POINTWISE(ne);
 // // 
 // #undef COMPARISON_POINTWISE
-#undef VMAP_SUPPORT
 }
 
 }
