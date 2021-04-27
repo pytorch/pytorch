@@ -617,13 +617,10 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             return DispatchKey::XPU;
           }
           case DeviceType::MKLDNN:
-            TORCH_INTERNAL_ASSERT(0, "caffe2");
           case DeviceType::OPENGL:
-            TORCH_INTERNAL_ASSERT(0, "caffe2");
           case DeviceType::OPENCL:
-            TORCH_INTERNAL_ASSERT(0, "caffe2");
           case DeviceType::IDEEP:
-            TORCH_INTERNAL_ASSERT(0, "caffe2");
+            TORCH_INTERNAL_ASSERT(0, "This is a grandfathered Caffe2 device type ", device_.type(), ", it shouldn't ever convert to a DispatchKey.  File a bug describing what you were doing if you think this is in error.");
           case DeviceType::HIP:
             return DispatchKey::HIP;
           case DeviceType::FPGA:
