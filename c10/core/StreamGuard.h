@@ -123,4 +123,27 @@ private:
   c10::impl::InlineOptionalStreamGuard<impl::VirtualGuardImpl> guard_;
 };
 
+/**
+ * A MultiStreamGuard is an RAII class that sets the current streams of a set of
+ * devices all at once, and resets them to their original values on destruction.
+ */
+struct MultiStreamGuard {
+  /// Set the current streams to the passed streams on each of their respective
+  /// devices.
+  explicit MultiStreamGuard(ArrayRef<Stream> streams) : guard_(streams) {}
+
+  /// Copy is disallowed
+  MultiStreamGuard(const MultiStreamGuard&) = delete;
+  MultiStreamGuard& operator=(const MultiStreamGuard&) = delete;
+
+  // See Note [Move construction for RAII guards is tricky]
+  MultiStreamGuard(MultiStreamGuard&& other) = delete;
+
+  // See Note [Move assignment for RAII guards is tricky]
+  MultiStreamGuard& operator=(MultiStreamGuard&& other) = delete;
+
+private:
+  c10::impl::InlineMultiStreamGuard<impl::VirtualGuardImpl> guard_;
+};
+
 } // namespace c10

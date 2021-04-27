@@ -15,7 +15,7 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #ifdef USE_CUDA_NOT_ROCM
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 #endif
 
 #if TENSORPIPE_HAS_SHM_TRANSPORT
@@ -428,7 +428,7 @@ struct MultiStreamGuard {
       : guard(toCUDAStreams(ctx->getReservedStreams())) {}
 
  private:
-  at::cuda::CUDAMultiStreamGuard guard;
+  c10::cuda::CUDAMultiStreamGuard guard;
 #endif
 };
 
