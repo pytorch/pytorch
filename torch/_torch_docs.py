@@ -5032,13 +5032,17 @@ lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True) -> (Tensor, 
 
 Unpacks the data and pivots from a LU factorization of a tensor.
 
-Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
+Returns a tuple of tensors as ``(the P tensor (permutation matrix), the L tensor, the U tensor)``.
 
 Args:
     LU_data (Tensor): the packed LU factorization data
     LU_pivots (Tensor): the packed LU factorization pivots
-    unpack_data (bool): flag indicating if the data should be unpacked
-    unpack_pivots (bool): flag indicating if the pivots should be unpacked
+    unpack_data (bool): flag indicating if the data should be unpacked.
+                        If ``False``, then the returned ``L`` and ``U`` are ``None``.
+                        Default: ``True``
+    unpack_pivots (bool): flag indicating if the pivots should be unpacked into a permutation matrix ``P``.
+                          If ``False``, then the returned ``P`` is  ``None``.
+                          Default: ``True``
 
 Examples::
 
