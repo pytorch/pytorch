@@ -1,4 +1,9 @@
+import fnmatch
+import io
+import shutil
+import tempfile
 import torch
+import torch.utils.show_pickle
 
 from torch.jit.mobile import (
     _load_for_lite_interpreter,
@@ -20,7 +25,7 @@ pytorch_test_dri = Path(__file__).resolve().parents[1]
 #         increment = torch.ones([2, 4], dtype=torch.float64)
 #         return self.x + y + increment
 
-# output_model_path = pathlib.Path(tmpdirname, "script_module_v5.ptl")
+# output_model_path = Path(tmpdirname, "script_module_v5.ptl")
 # script_module = torch.jit.script(TestModule(1))
 # optimized_scripted_module = optimize_for_mobile(script_module)
 # exported_optimized_scripted_module = optimized_scripted_module._save_for_lite_interpreter(
@@ -107,8 +112,8 @@ class testVariousModelVersions(TestCase):
         script_module_v5 = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
 
         with tempfile.TemporaryDirectory() as tmpdirname:
-            backport_model_path = pathlib.Path(tmpdirname, "backport_script_module_v5.ptl")
-            _backport_for_mobile(str(script_module_v5), str(backport_model_path))
+            backport_model_path = Path(tmpdirname, "backport_script_module_v5.ptl")
+            _backport_for_mobile(script_module_v5, backport_model_path)
             buf = io.StringIO()
             torch.utils.show_pickle.main(["", tmpdirname + "/" + backport_model_path.name + "@*/bytecode.pkl"], output_stream=buf)
             output = buf.getvalue()
@@ -183,7 +188,7 @@ class testVariousModelVersions(TestCase):
         jit_module_v5 = torch.jit.load(str(script_module_v5))
 
         with tempfile.TemporaryDirectory() as tmpdirname:
-            output_model_path = pathlib.Path(tmpdirname, "resave_script_module_v5.ptl")
+            output_model_path = Path(tmpdirname, "resave_script_module_v5.ptl")
             exported_optimized_scripted_module = jit_module_v5._save_for_lite_interpreter(str(output_model_path))
             buf = io.StringIO()
             torch.utils.show_pickle.main(["", tmpdirname + "/" + output_model_path.name + "@*/bytecode.pkl"], output_stream=buf)

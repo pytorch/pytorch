@@ -123,9 +123,9 @@ def _backport_for_mobile(f_input, f_output) -> None:
 
     if ((isinstance(f_input, str) or isinstance(f_input, pathlib.Path)) and (
             isinstance(f_output, str) or isinstance(f_output, pathlib.Path))):
-        return torch._C._backport_for_mobile(str(f_input), f_output)
+        return torch._C._backport_for_mobile(str(f_input), str(f_output))
     else:
-        return torch._C._backport_for_mobile_from_buffer(f_input.read(), f_output)
+        return torch._C._backport_for_mobile_from_buffer(f_input.read(), str(f_output))
 
 def _backport_for_mobile_to_buffer(f_input):
     r"""
