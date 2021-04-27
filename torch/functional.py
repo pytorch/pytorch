@@ -411,15 +411,6 @@ def einsum(equation, *operands, optimize=None):
         >>> torch.einsum('bn,anm,bm->ba', l, A, r, optimize=[(1, 2), (0, 1)])
         tensor([[-3.1469,  8.0020, -0.0642],
                 [ 4.1302,  7.5634,  9.8182]])
-
-        # contraction path from opt_einsum library
-        >>> import opt_einsum as oe
-        >>> path, path_info = oe.contract_path('bn,anm,bm->ba', l, A, r)
-        >>> path
-        [(0, 2), (0, 1)]
-        >>> torch.einsum('bn,anm,bm->ba', l, A, r, optimize=path)
-        tensor([[ -4.6594,  -1.9125,  -2.3473],
-                [-14.7899,  -2.7818,  -3.8833]])
     """
     if has_torch_function(operands):
         return handle_torch_function(einsum, operands, equation, *operands)
