@@ -12,6 +12,7 @@
 
 #include <c10/hip/impl/HIPGuardImpl.h>
 
+#include <ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 
 // Use of c10::hip namespace here makes hipification easier, because
