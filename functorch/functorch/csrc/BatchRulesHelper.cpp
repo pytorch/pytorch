@@ -25,9 +25,14 @@ optional<int64_t> valIfNonempty(optional<int64_t> maybe_empty, int64_t new_val) 
 }
 
 int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical_dim) {
+  // NB: assumes the batch dim is at the front of the tensor
   optional<int64_t> bdim = has_batch_dim ? optional<int64_t>(0) : nullopt;
   auto rank = rankWithoutBatchDim(tensor, bdim);
-  return maybe_wrap_dim(rank, logical_dim) + 1;
+  auto wrapped_dim = maybe_wrap_dim(rank, logical_dim);
+  if (has_batch_dim) {
+    return wrapped_dim + 1;
+  }
+  return wrapped_dim;
 }
 
 }}
