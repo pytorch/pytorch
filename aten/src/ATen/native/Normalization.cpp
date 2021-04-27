@@ -460,7 +460,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
       output = output.transpose(1, 2).squeeze(0);
     }
 
-    return {output, save_mean, save_var, reserve, int64_t{1}};
+    return std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t>(
+				output, save_mean, save_var, reserve, 1);
   }
 
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
