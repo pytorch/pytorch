@@ -4206,6 +4206,16 @@ class TestONNXRuntime(unittest.TestCase):
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
 
+    def test_item(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, i: int):
+                return int(x[y[i]].item())
+
+        x = torch.arange(6, dtype=torch.float)
+        y = torch.tensor([0, 1, 2, 3, 4], dtype=torch.long)
+        i = 3
+        self.run_test(torch.jit.script(M()), (x, y, i))
+
     @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_nonzero(self):
@@ -8422,6 +8432,33 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (x, y), test_with_inputs=[(new_x, new_y)],
                       input_names=['input_x', 'input_y'],
                       dynamic_axes={'input_x': [0, 1, 2, 3], 'input_y': [0, 1, 2, 3]})
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_to_device(self):
+        class M_ToDevice(torch.nn.Module):
+            def forward(self, x, y):
+                return x.to(y.device), y
+
+        class M_ToDeviceDtype(torch.nn.Module):
+            def forward(self, x, y):
+                return x.to(y.device, dtype=torch.long), y
+
+        x = torch.randn(6)
+        y = torch.randn(6)
+
+        self.run_test(M_ToDevice(), (x, y))
+        self.run_test(M_ToDeviceDtype(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()
+    def test_fill(self):
+        class FillModule(torch.nn.Module):
+            def forward(self, x, filled_value: int):
+                return x.fill_(filled_value)
+
+        x = torch.randn((4, 5, 6))
+        filled_value = 7
+        self.run_test(FillModule(), (x, filled_value))
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,

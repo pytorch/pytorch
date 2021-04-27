@@ -17,7 +17,7 @@ from torch._C import OptionalType
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
 #
-# - These files is ONLY for ATen operators (e.g., operators that show up in the
+# - These files are ONLY for ATen operators (e.g., operators that show up in the
 #   trace as aten::blah).  If you need to special case a primitive operator,
 #   look at _run_symbolic_function
 # - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
@@ -126,9 +126,33 @@ def _is_packed_list(list_value):
 
 
 def parse_args(*arg_descriptors):
+    """A decorator which converts args from torch._C.Value to built-in types.
+
+    For example:
+    @parse_args('v', 'i', 'fs')
+    foo(g, a, b, c):
+      assert isinstance(a, torch._C.Value)
+      assert isinstance(b, int)
+      assert isinstance(c, list)
+      assert isinstance(c[0], float)
+
+    Args:
+      arg_descriptors: list of str, where each element is
+        a string that specifies the type to convert to. Valid descriptors:
+        "v": no conversion, keep torch._C.Value.
+        "i": int
+        "is": list(int)
+        "f": float
+        "fs": list of float
+        "b": bool
+        "s": str
+        "t": torch.Tensor
+    """
+
     def decorator(fn):
         fn._arg_descriptors = arg_descriptors
 
+        @wraps(fn)
         def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)
@@ -146,11 +170,7 @@ def parse_args(*arg_descriptors):
             if len(kwargs) == 1:
                 assert '_outputs' in kwargs
             return fn(g, *args, **kwargs)
-        # In Python 2 functools.wraps chokes on partially applied functions, so we need this as a workaround
-        try:
-            wrapper = wraps(fn)(wrapper)
-        except Exception:
-            pass
+
         return wrapper
     return decorator
 

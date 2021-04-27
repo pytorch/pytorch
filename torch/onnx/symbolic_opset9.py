@@ -1948,7 +1948,7 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 def to(g, self, *args):
     # ONNX doesn't have a concept of a device, so we ignore device casts
     if len(args) == 4:
-        if args[0].type().isSubtypeOf(ListType.ofInts()):
+        if args[0].node().kind() == 'prim::device' or args[0].type().isSubtypeOf(ListType.ofInts()):
             # aten::to(Tensor, Device, bool, bool, memory_format)
             return self
         else:
@@ -2946,6 +2946,10 @@ def __getitem_(g, self, i):
     return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
 
 
+def item(g, self):
+    return self
+
+
 def take(g, self, index):
     self_flattened = g.op('Reshape', self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
     out = index_select(g, self_flattened, 0, index)
@@ -3074,3 +3078,14 @@ def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device
 
 def mv(g, self, vec):
     return matmul(g, self, vec)
+
+
+@parse_args('v', 'v')
+def fill(g, self, value):
+    dtype = self.type().scalarType()
+    if dtype is None:
+        dtype = 6  # float
+    else:
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+
+    return full_like(g, self, value, dtype)
