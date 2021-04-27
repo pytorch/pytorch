@@ -729,7 +729,7 @@ class TestIndexing(TestCase):
         N = (1 << 31) + 5
         dt = torch.int8
         a = torch.ones(N, dtype=dt, device=device)
-        indices = torch.LongTensor([-2, 0, -2, -1, 0, -1, 1])
+        indices = torch.tensor([-2, 0, -2, -1, 0, -1, 1], device=device, dtype=torch.long)
         values = torch.tensor([6, 5, 6, 6, 5, 7, 11], dtype=dt, device=device)
 
         a.index_put_((indices, ), values, accumulate=True)
@@ -742,8 +742,8 @@ class TestIndexing(TestCase):
         self.assertEqual(a[-1], 14)
 
         a = torch.ones((2, N), dtype=dt, device=device)
-        indices0 = torch.LongTensor([0, -1, 0, 1])
-        indices1 = torch.LongTensor([-2, -1, 0, 1])
+        indices0 = torch.tensor([0, -1, 0, 1], device=device, dtype=torch.long)
+        indices1 = torch.tensor([-2, -1, 0, 1], device=device, dtype=torch.long)
         values = torch.tensor([12, 13, 10, 11], dtype=dt, device=device)
 
         a.index_put_((indices0, indices1), values, accumulate=True)
@@ -759,6 +759,7 @@ class TestIndexing(TestCase):
         self.assertEqual(a[-1, -1], 14)
         self.assertEqual(a[0, -1], 1)
 
+    @onlyOnCPUAndCUDA
     def test_index_put_accumulate_duplicate_indices(self, device):
         for i in range(1, 512):
             # generate indices by random walk, this will create indices with

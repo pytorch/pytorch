@@ -229,6 +229,8 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
       {
       // Sort the inputs into sorted with the corresponding indices
       auto range = at::arange(num_indices, linearIndex.options());
+      // linearIndex can not be negative, and we take advantage of this
+      // fact to sort on less bits for better performance.
       int64_t nbits = cuda::cub::get_num_bits(largestIndex(self) / sliceSize);
       cuda::cub::sort_pairs(
         linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
