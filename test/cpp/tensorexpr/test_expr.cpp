@@ -437,7 +437,7 @@ TEST(Expr, BinaryMath01) {
   }
 }
 
-TEST(Expr, LogicalOps) {
+TEST(Expr, LogicalOps01) {
   KernelScope kernel_scope;
   ExprHandle a(23);
   ExprHandle b(11);
@@ -468,6 +468,25 @@ TEST(Expr, LogicalOps) {
   ASSERT_EQ(eval6.value<int>(), 0);
   ASSERT_EQ(eval7.value<int>(), 1);
   ASSERT_EQ(eval8.value<int>(), 1);
+}
+
+TEST(Expr, LogicalOps02) {
+  KernelScope kernel_scope;
+  ExprHandle a(23);
+  ExprHandle b(11);
+  ExprHandle c(0.72f);
+  ExprHandle d(0.72f);
+
+  ExprHandle f1 = (a > b) || (c > d);
+  ExprHandle f2 = (a > b) && (c <= d);
+  ExprHandle f3 = (a > b) && (c > d);
+  ExprHandle ff1 = f1 && f2;
+  ExprHandle ff2 = f2 || f3;
+
+  SimpleIRExprEval eval1(ff1);
+  SimpleIRExprEval eval2(ff2);
+  ASSERT_EQ(eval1.value<int>(), 1);
+  ASSERT_EQ(eval2.value<int>(), 1);
 }
 
 TEST(Expr, BitwiseOps) {

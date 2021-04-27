@@ -525,13 +525,6 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   CompareSelectBias bias() const {
     return bias_;
   }
-  bool is_ret_default() const {
-    if (!ret_val1_->isConstant() || !ret_val2_->isConstant()) {
-      return false;
-    }
-    return (immediateAs<int>(ret_val1_) == 1) &&
-        (immediateAs<int>(ret_val2_) == 0);
-  }
 
   static ExprHandle make(
       const ExprHandle& lhs,

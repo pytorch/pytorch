@@ -51,33 +51,17 @@ ExprHandle ExprHandle::operator<=(const ExprHandle& other) const {
 }
 
 ExprHandle ExprHandle::operator&&(const ExprHandle& other) const {
-  auto compare = dynamic_cast<const CompareSelect*>(this->node());
-  CHECK(compare);
-  if (!compare->is_ret_default()) {
-    throw std::runtime_error("invalid && operator");
+  if (!this->node()->dtype().is_integral()) {
+    throw unsupported_dtype();
   }
-  CompareSelect* ret = new CompareSelect(
-      compare->lhs(),
-      compare->rhs(),
-      other.node(),
-      new IntImm(0),
-      compare->compare_select_op());
-  return ExprHandle(ret);
+  return IfThenElse::make(*this, other, IntImm::make(0));
 }
 
 ExprHandle ExprHandle::operator||(const ExprHandle& other) const {
-  auto compare = dynamic_cast<const CompareSelect*>(this->node());
-  CHECK(compare);
-  if (!compare->is_ret_default()) {
-    throw std::runtime_error("invalid || operator");
+  if (!this->node()->dtype().is_integral()) {
+    throw unsupported_dtype();
   }
-  CompareSelect* ret = new CompareSelect(
-      compare->lhs(),
-      compare->rhs(),
-      new IntImm(1),
-      other.node(),
-      compare->compare_select_op());
-  return ExprHandle(ret);
+  return IfThenElse::make(*this, IntImm::make(1), other);
 }
 
 ExprHandle ExprHandle::operator&(const ExprHandle& other) const {
