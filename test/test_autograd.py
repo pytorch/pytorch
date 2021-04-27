@@ -2952,6 +2952,12 @@ class TestAutograd(TestCase):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
+    def test_sinc(self):
+        # The derivative of sinc(x) at x=0 has to be special cased.
+        # A naive computation will result in 0/0 -> NaN.
+        a = torch.tensor([0.0, 1.0], dtype=torch.double, requires_grad=True)
+        gradcheck(torch.sinc, a)
+
     def test_igamma(self):
         # 1e-3 offset to avoid zeros
         # NOTE: derivative for s is not implemented
@@ -7343,25 +7349,6 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
     def test_cdist(self, device):
-        def _test_cdist_for_size(sizex, sizey=None):
-            if sizey is None:
-                sizey = sizex
-            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-                x = torch.randn(sizex, device=device, dtype=torch.double)
-                y = torch.randn(sizey, device=device, dtype=torch.double)
-                eps = 1e-6
-                # to avoid extremum
-                x = x - (((x - y) < eps).double() * 2 * eps)
-                x.requires_grad = True
-                y.requires_grad = True
-                f_args_variable = (x, y)
-
-                def f(a, b):
-                    return torch.cdist(a, b, p)
-                f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                run_functional_checks(self, "test_cdist", "cdist", f,
-                                      True, f_args_variable, f_args_tensor)
-
         def _test_euclidean_large_cdist(sizex, sizey=None):
             if sizey is None:
                 sizey = sizex
@@ -7378,12 +7365,6 @@ class TestAutogradDeviceType(TestCase):
             loss = dist.sum()
             loss.backward()
 
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-        _test_cdist_for_size((1, 1), (S, 1))
         _test_euclidean_large_cdist((2000, 5))
 
     # Ensure that cdist backward with p<1 does not produce NaNs

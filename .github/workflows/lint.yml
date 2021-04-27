@@ -38,8 +38,11 @@ jobs:
           pip install ruamel.yaml==0.17.4
           .github/scripts/lint_native_functions.py
       - name: Extract scripts from GitHub Actions workflows
-        run: tools/extract_scripts.py --out=.extracted_scripts
-      - name: ShellCheck
+        run: |
+          # For local lints, remove the .extracted_scripts folder if it was already there
+          rm -rf .extracted_scripts
+          tools/extract_scripts.py --out=.extracted_scripts
+      - name: Install ShellCheck
         # https://github.com/koalaman/shellcheck/tree/v0.7.2#installing-a-pre-compiled-binary
         run: |
           set -x
@@ -48,6 +51,8 @@ jobs:
           sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
           rm -r "shellcheck-${scversion}"
           shellcheck --version
+      - name: Run ShellCheck
+        run: |
           tools/run_shellcheck.sh .jenkins/pytorch .extracted_scripts
       - name: Ensure correct trailing newlines
         run: |
@@ -204,8 +209,10 @@ jobs:
           path: flake8-output/
       - name: Fail if there were any warnings
         run: |
-          cat flake8-output.txt
-          [ ! -s flake8-output.txt ]
+          set -eux
+          # Re-output flake8 status so GitHub logs show it on the step that actually failed
+          cat "${GITHUB_WORKSPACE}"/flake8-output.txt
+          [ ! -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]
 
   clang-tidy:
     if: github.event_name == 'pull_request'
