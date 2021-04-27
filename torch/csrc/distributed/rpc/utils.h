@@ -188,6 +188,35 @@ inline std::shared_ptr<LazyStreamContext> createLazyStreamContext(
       std::move(current_stream_provider));
 }
 
+using future_factory_t = std::function<std::shared_ptr<JitFuture>(
+    const std::vector<c10::DeviceIndex>&)>;
+
+// A registry for Future factories that create either ivalue::Future or
+// CUDAFuture. The RPC agent is responsible for registering Future
+// factories.
+class FutureFactoryRegistry final {
+ public:
+  static FutureFactoryRegistry& getInstance() {
+    // Leaky singleton to avoid module destructor races.
+    static FutureFactoryRegistry* registry = new FutureFactoryRegistry();
+    return *registry;
+  }
+
+  void registerFutureFactory(c10::DeviceType type, future_factory_t factory) {
+    factories_[static_cast<size_t>(type) & 0xFF] = std::move(factory);
+  }
+
+  std::shared_ptr<JitFuture> createFuture(
+      c10::DeviceType type,
+      const std::vector<c10::DeviceIndex>& devices = {}) {
+    return factories_[static_cast<size_t>(type) & 0xFF](devices);
+  }
+
+ private:
+  future_factory_t factories_[static_cast<size_t>(
+      c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+};
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
