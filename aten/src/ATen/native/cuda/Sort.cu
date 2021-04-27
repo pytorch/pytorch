@@ -344,21 +344,15 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   return std::forward_as_tuple(values, indices);
 }
 
-// If the dim being sorted is smaller than 2048/1024, then we will use the
-// implementation THC. Otherwise we use cub's segmented sort
 std::tuple<Tensor &,Tensor &> sort_out_cuda(const Tensor & self, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
   return sort_out_stable_cuda(self, /*stable=*/false, dim, descending, values, indices);
 }
 
-// If the dim being sorted is smaller than 2048/1024, then we will use the
-// implementation THC. Otherwise we use cub's segmented sort
 std::tuple<Tensor,Tensor> sort_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
   Tensor values, indices;
   return sort_out_stable_cuda(self, stable, dim, descending, values, indices);
 }
 
-// If the dim being sorted is smaller than 2048/1024, then we will use the
-// implementation THC. Otherwise we use cub's segmented sort
 std::tuple<Tensor,Tensor> sort_cuda(const Tensor & self, int64_t dim, bool descending) {  int64_t threshold;
   return sort_stable_cuda(self, /*stable=*/false, dim, descending);
 }
