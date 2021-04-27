@@ -1,3 +1,4 @@
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdint.h>
 
 #include <ATen/nnapi/NeuralNetworks.h>
@@ -160,6 +161,7 @@ int load_nnapi_model(
     operand.scale = operands[i].scale;
     operand.zeroPoint = operands[i].zero_point;
     operand.dimensionCount = operands[i].dimension_count;
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     operand.dimensions = operands[i].dimension_count ? (const uint32_t*)next_pointer : NULL;
 
     next_pointer += 4 * operands[i].dimension_count;
@@ -172,7 +174,9 @@ int load_nnapi_model(
   for (int i = 0; i < ser_model->value_count; i++) {
     uint32_t len = values[i].source_length;
     const uint8_t* stored_pointer = next_pointer;
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     const void* value_pointer = NULL;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t value_length;
 
     switch ((SourceType)values[i].source_type) {
@@ -187,6 +191,7 @@ int load_nnapi_model(
           CAFFE_ENFORCE(len == 12);
           uint32_t buffer_number = *(uint32_t*)stored_pointer;
           uint32_t buffer_offset = *(uint32_t*)(stored_pointer + 4);
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           uint32_t operand_length = *(uint32_t*)(stored_pointer + 8);
           CAFFE_ENFORCE(buffer_number < num_buffers);
           CAFFE_ENFORCE(buffer_offset + operand_length >= buffer_offset);  // No integer overflow
@@ -202,6 +207,7 @@ int load_nnapi_model(
         CAFFE_ENFORCE(false, "Unknown source type: ", values[i].source_type);
     }
 
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     CAFFE_ENFORCE(value_pointer != NULL);
 
     next_pointer += value_physical_size(len);
@@ -254,6 +260,7 @@ int load_nnapi_model(
   // TODO: Maybe eliminate required_size and just rely on next_pointer for bounds checking.
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
   CAFFE_ENFORCE(next_pointer == (const uint8_t*)serialized_model + required_size);
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   if (out_bytes_consumed != NULL) {
     *out_bytes_consumed = next_pointer - (const uint8_t*)serialized_model;
   }
