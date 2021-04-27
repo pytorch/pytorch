@@ -7,12 +7,14 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OpSchemaTestOp)
   .NumInputs(1).NumOutputs(1)
   .SetDoc(R"DOC(Test Documentation)DOC")
   .Input(0, "in0", "dummy input.")
   .Output(0, "out0", "dummy output.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorSchemaTest, BasicSchema) {
   const OpSchema* schema = OpSchemaRegistry::Schema("OpSchemaTestOp");
 #ifdef CAFFE2_NO_OPERATOR_SCHEMA
@@ -35,9 +37,11 @@ TEST(OperatorSchemaTest, BasicSchema) {
   EXPECT_FALSE(schema->Verify(def3));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OpSchemaSpecifiedInputOutputOp)
   .NumInputs({2, 4}).NumOutputs({1, 3});
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorSchemaTest, SpecifiedInputOutput) {
   const OpSchema* schema
       = OpSchemaRegistry::Schema("OpSchemaSpecifiedInputOutputOp");
@@ -60,11 +64,13 @@ TEST(OperatorSchemaTest, SpecifiedInputOutput) {
   EXPECT_FALSE(schema->Verify(def3));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OpSchemaInputOutputRelationOp)
     .NumInputsOutputs([](int in, int out) {
       return out == in || out == in * 2;
     });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorSchemaTest, InputOutputRelation) {
   const OpSchema* schema
       = OpSchemaRegistry::Schema("OpSchemaInputOutputRelationOp");
@@ -87,9 +93,11 @@ TEST(OperatorSchemaTest, InputOutputRelation) {
   EXPECT_FALSE(schema->Verify(def3));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OpSchemaSameInputOutputOp)
     .SameNumberOfOutput();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorSchemaTest, SameInputOutput) {
   const OpSchema* schema =
       OpSchemaRegistry::Schema("OpSchemaSameInputOutputOp");
@@ -111,10 +119,13 @@ TEST(OperatorSchemaTest, SameInputOutput) {
   EXPECT_FALSE(schema->Verify(def3));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OpSchemaCalculateOutputOp)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(1, 5).NumOutputs(2, 6)
     .OutputCalculator([](int n) { return n + 1; });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorSchemaTest, CalculateOutput) {
   const OpSchema* schema =
       OpSchemaRegistry::Schema("OpSchemaCalculateOutputOp");
@@ -136,11 +147,13 @@ TEST(OperatorSchemaTest, CalculateOutput) {
   EXPECT_TRUE(schema->Verify(def3));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OpSchemaInplace)
     .NumInputs(2).NumOutputs(2)
     .AllowInplace({{0, 0}})
     .EnforceInplace({{1, 1}});
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorSchemaTest, Inplace) {
   const OpSchema* schema =
       OpSchemaRegistry::Schema("OpSchemaInplace");
@@ -166,8 +179,10 @@ TEST(OperatorSchemaTest, Inplace) {
   EXPECT_FALSE(schema->Verify(def4));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OpSchemaSameInputOutputTensorInference).IdenticalTypeAndShape();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorSchemaTest, TensorInferenceIdentical) {
   const OpSchema* schema =
       OpSchemaRegistry::Schema("OpSchemaSameInputOutputTensorInference");
@@ -190,15 +205,18 @@ TEST(OperatorSchemaTest, TensorInferenceIdentical) {
   EXPECT_EQ(out[0].SerializeAsString(), shapes[0].SerializeAsString());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OpSchemaArbitraryTensorInference)
     .TensorInferenceFunction(
         [](const OperatorDef&, const vector<TensorShape>&) {
           vector<TensorShape> shapes(1);
           shapes[0].set_data_type(TensorProto::FLOAT);
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           shapes[0].add_dims(1701);
           return shapes;
         });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorSchemaTest, TensorInferenceArbitrary) {
   const OpSchema* schema =
       OpSchemaRegistry::Schema("OpSchemaArbitraryTensorInference");
@@ -218,6 +236,7 @@ TEST(OperatorSchemaTest, TensorInferenceArbitrary) {
   EXPECT_EQ(out[0].dims(0), 1701);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorSchemaTest, TestCastSchema) {
   // This tests a use case of the schema: the Cast op takes in the def and
   // deduces the
@@ -245,6 +264,7 @@ TEST(OperatorSchemaTest, TestCastSchema) {
   EXPECT_EQ(out[0].dims_size(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OpSchemaCostInference)
     .NumInputs(2)
     .NumOutputs(2)
@@ -255,6 +275,7 @@ OPERATOR_SCHEMA(OpSchemaCostInference)
       return c;
     });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorSchemaTest, TestCostInference) {
   const OpSchema* schema = OpSchemaRegistry::Schema("OpSchemaCostInference");
 #ifdef CAFFE2_NO_OPERATOR_SCHEMA
@@ -268,10 +289,14 @@ TEST(OperatorSchemaTest, TestCostInference) {
       "OpSchemaCostInference", "", vector<string>{"in"}, vector<string>{"out"});
   vector<TensorShape> shapes(2);
   shapes[0].set_data_type(TensorProto::FLOAT);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   shapes[0].add_dims(10);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   shapes[0].add_dims(10);
   shapes[1].set_data_type(TensorProto::FLOAT);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   shapes[1].add_dims(10);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   shapes[1].add_dims(10);
   EXPECT_EQ(2000, schema->InferCost(def, shapes).flops);
 }
