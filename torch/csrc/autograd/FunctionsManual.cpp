@@ -3091,8 +3091,8 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
 }
 
 Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
-  auto self_pi = self * M_PI
-  auto self_squared_pi = self * self * M_PI
+  auto self_pi = self * M_PI;
+  auto self_squared_pi = self * self * M_PI;
   auto out = grad * ((self_pi * self_pi.cos() - self_pi.sin()) / self_squared_pi).conj();
   return at::where(self_squared_pi == 0.0, at::zeros({}, grad.options()), out);
 }
