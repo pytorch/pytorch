@@ -23,4 +23,5 @@ else
 fi
 
 # Build the package
+export CFLAGS='-fuse-ld=gold'
 SKIP_ALL_TESTS=1 "/builder/$build_script"
