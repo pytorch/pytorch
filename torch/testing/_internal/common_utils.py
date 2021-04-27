@@ -1227,18 +1227,24 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
-    def detect_nested_containers(self, *sequences):
+    def detect_nested_containers_with_tensorlikes(self, *sequences):
+        def check_subcontainer(item, sequence, iterator):
+            if any(isinstance(subitem, (torch.Tensor, np.ndarray)) for subitem in iterator):
+                raise type(
+                    f"{type(item).__name__.title()}"
+                    f"In"
+                    f"{type(sequence).__name__.title()}"
+                    f"Detected",
+                    (Exception,),
+                    dict()
+                )
+
         for sequence in sequences:
             for item in sequence:
-                if isinstance(item, (collections.abc.Sequence, collections.abc.Mapping)) and not isinstance(item, str):
-                    raise type(
-                        f"{type(item).__name__.title()}"
-                        f"In"
-                        f"{type(sequence).__name__.title()}"
-                        f"Detected",
-                        (Exception,),
-                        dict()
-                    )
+                if isinstance(item, collections.abc.Sequence):
+                    check_subcontainer(item, sequence, iter(item))
+                elif isinstance(item, collections.abc.Mapping):
+                    check_subcontainer(item, sequence, item.values())
 
     # Compares x and y
     # TODO: default exact_device to True
@@ -1349,7 +1355,7 @@ class TestCase(expecttest.TestCase):
                          f"Expected: {x}; Actual: {y}.")
             super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         elif isinstance(x, dict) and isinstance(y, dict):
-            self.detect_nested_containers(x.values(), y.values())
+            self.detect_nested_containers_with_tensorlikes(x.values(), y.values())
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
@@ -1369,7 +1375,7 @@ class TestCase(expecttest.TestCase):
                          f"Expected: {x}; Actual: {y}.")
             super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         elif is_iterable(x) and is_iterable(y):
-            self.detect_nested_containers(x, y)
+            self.detect_nested_containers_with_tensorlikes(x, y)
             debug_msg = ("Attempted to compare the lengths of [iterable] types: "
                          f"Expected: {len(x)}; Actual: {len(y)}.")
             super().assertEqual(len(x), len(y), msg=self._get_assert_msg(msg, debug_msg=debug_msg))
