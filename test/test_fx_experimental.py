@@ -4,7 +4,7 @@ import unittest
 import sys
 import math
 import numbers
-from typing import Callable, Dict, Union, List
+from typing import Callable, Dict, Union, List, Optional
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
@@ -1221,10 +1221,20 @@ class {test_classname}(torch.nn.Module):
             (torch.Tensor, torch.nn.Parameter),
             (List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
             (List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
+            (Optional[List[torch.Tensor]], List[torch.Tensor]),
+            (Optional[List[int]], List[int]),
         ]
         for sig_type, arg_type in should_be_equal:
-            print(sig_type, arg_type)
             self.assertTrue(type_matches(sig_type, arg_type))
+
+        should_fail = [
+            (int, float),
+            (Union[int, float], str),
+            (List[torch.Tensor], List[int])
+        ]
+
+        for sig_type, arg_type in should_fail:
+            self.assertFalse(type_matches(sig_type, arg_type))
 
     @skipIfNoMkldnn
     def test_prepare_for_inference_cpu(self):
