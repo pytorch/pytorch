@@ -1,12 +1,14 @@
 from torch.utils.data import IterDataPipe
-from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple
-from typing import Iterable, Iterator, Tuple, IO, cast
-from io import BufferedIOBase
-
 import os
 import sys
 import zipfile
 import warnings
+
+from io import BufferedIOBase
+from typing import Iterable, Iterator, Tuple, IO, cast
+
+from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple
+
 
 class ReadFilesFromZipIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     r""" :class:`ReadFilesFromZipIterDataPipe`.
@@ -24,7 +26,6 @@ class ReadFilesFromZipIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
         super().__init__()
         self.datapipe : Iterable[Tuple[str, BufferedIOBase]] = datapipe
         self.length : int = length
-
 
     def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]]:
         if not isinstance(self.datapipe, Iterable):
@@ -54,7 +55,6 @@ class ReadFilesFromZipIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
                 warnings.warn(
                     "Unable to extract files from corrupted zipfile stream {} due to: {}, abort!".format(pathname, e))
                 raise e
-
 
     def __len__(self):
         if self.length == -1:

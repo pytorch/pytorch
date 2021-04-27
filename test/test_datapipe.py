@@ -107,7 +107,7 @@ class TestIterableDataPipeBasic(TestCase):
 
         temp_dir = self.temp_dir.name
         datapipe1 = ListDirFiles(temp_dir, '')
-        datapipe2 = LoadFilesFromDisk(datapipe1)
+        datapipe2 = LoadFilesFromDisk(datapipe1, mode='b')
 
         count = 0
         for rec in datapipe2:
@@ -125,7 +125,7 @@ class TestIterableDataPipeBasic(TestCase):
             tar.add(self.temp_files[1])
             tar.add(self.temp_files[2])
         datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.tar')
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
+        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1, mode='b')
         datapipe3 = dp.iter.ReadFilesFromTar(datapipe2)
         # read extracted files before reaching the end of the tarfile
         count = 0
@@ -154,7 +154,7 @@ class TestIterableDataPipeBasic(TestCase):
             myzip.write(self.temp_files[1])
             myzip.write(self.temp_files[2])
         datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.zip')
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
+        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1, mode='b')
         datapipe3 = dp.iter.ReadFilesFromZip(datapipe2)
         # read extracted files before reaching the end of the zipfile
         count = 0
@@ -181,7 +181,7 @@ class TestIterableDataPipeBasic(TestCase):
         img = Image.new('RGB', (2, 2), color='red')
         img.save(temp_pngfile_pathname)
         datapipe1 = dp.iter.ListDirFiles(temp_dir, ['*.png', '*.txt'])
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
+        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1, mode='b')
         datapipe3 = dp.iter.RoutedDecoder(datapipe2, handlers=[decoder_imagehandler('rgb')])
         datapipe3.add_handler(decoder_basichandlers)
 
@@ -209,7 +209,7 @@ class TestIterableDataPipeBasic(TestCase):
                 tar.add(file_pathname)
 
         datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.tar')
-        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
+        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1, mode='b')
         datapipe3 = dp.iter.ReadFilesFromTar(datapipe2)
         datapipe4 = dp.iter.GroupByKey(datapipe3, group_size=2)
 
