@@ -1,8 +1,9 @@
 import os
 import fnmatch
 import warnings
-from typing import Iterable, List, Union
+
 from io import BufferedIOBase
+from typing import Iterable, List, Union
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
