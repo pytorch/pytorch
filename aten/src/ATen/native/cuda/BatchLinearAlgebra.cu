@@ -1652,27 +1652,19 @@ static void apply_cholesky(const Tensor& self, bool upper, const Tensor& info) {
 
     MAGMAQueue magma_queue(self.get_device());
 
-    int64_t batch_limit = self.is_complex() ? 65535 : 262140;
     // Compute as many batches of 262140 possible
     // 262140 is the size of the largest batch of matrices that can be run with
     // violating maximum kernel configuration
     // For complex input the batch limit is 65535 (determined experimentally, see https://github.com/pytorch/pytorch/pull/47047#discussion_r516086923 for more information)
-    // The number of "mini"-batches are floor(batch_size / batch_limit)
-    // and these cover floor(batch_size / batch_limit) * batch_limit cholesky calls
-    int64_t mini_batches = batch_size / batch_limit, mini_idx;
-    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
+    int64_t batch_limit = self.is_complex() ? 65535 : 262140;
+
+    for (int64_t mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+      int64_t nbatches = std::min(batch_limit, batch_size - mini_idx);
       scalar_t** self_array_cur = &self_array[mini_idx];
       magma_int_t* info_array_cur = &info_data[mini_idx];
 
       magmaCholeskyBatched<scalar_t>(
-        uplo, n, self_array_cur, lda, info_array_cur, batch_limit, magma_queue);
-    }
-
-    // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
-    // which concisely is equal to batch_size % batch_limit
-    if (batch_size % batch_limit != 0) {
-      magmaCholeskyBatched<scalar_t>(
-        uplo, n, &self_array[mini_idx], lda, &info_data[mini_idx], batch_size % batch_limit, magma_queue);
+        uplo, n, self_array_cur, lda, info_array_cur, nbatches, magma_queue);
     }
   }
 #endif
