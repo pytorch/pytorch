@@ -563,22 +563,41 @@ bool Fusion::hasReduction() {
 std::vector<Val*> Fusion::getTerminatingOutputs() {
   FUSER_PERF_SCOPE("getTerminatingOutputs");
 
-  std::unordered_set<Val*> used_vals;
-
-  const auto exprs = ExprSort::getExprs(
-      this, std::vector<Val*>(outputs().begin(), outputs().end()));
-
-  for (auto expr : exprs) {
-    for (auto inp : expr->inputs())
-      used_vals.emplace(inp);
-  }
+  auto is_reachable_to_output = [](Val* val) {
+    // traverse to consumers of val and see if there is an output
+    std::deque<Val*> consumers;
+    for (auto use : val->uses()) {
+      for (auto consumer : use->outputs()) {
+        consumers.push_back(consumer);
+      }
+    }
+    while (!consumers.empty()) {
+      auto consumer = consumers.back();
+      consumers.pop_back();
+      if (consumer->isFusionOutput()) {
+        return true;
+      }
+      // consumer is not an output; proceed to its consumers
+      for (auto use : consumer->uses()) {
+        for (auto consumer_of_consumer : use->outputs()) {
+          consumers.push_back(consumer_of_consumer);
+        }
+      }
+    }
+    return false;
+  };
 
   std::vector<Val*> terminating_outputs;
+
   for (auto out : outputs()) {
-    if (used_vals.find(out) != used_vals.end())
+    // If there is another output reachable from this output, it's not
+    // terminating.
+    if (is_reachable_to_output(out)) {
       continue;
+    }
     terminating_outputs.push_back(out);
   }
+
   return terminating_outputs;
 }
 
