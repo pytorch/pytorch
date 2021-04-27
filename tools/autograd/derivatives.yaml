@@ -658,6 +658,9 @@
 - name: polygamma(int n, Tensor self) -> Tensor
   self: grad * polygamma(n + 1, self)
 
+- name: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
+  self: grad * polygamma(n + 1, self)
+
 - name: log(Tensor self) -> Tensor
   self: grad.div(self.conj())
 
@@ -1032,7 +1035,7 @@
   self: grad * self.cos().conj()
 
 - name: sinc(Tensor self) -> Tensor
-  self: grad * ((M_PI * self * (M_PI * self).cos() - (M_PI * self).sin()) / (M_PI * self * self)).conj()
+  self: sinc_backward(grad, self)
 
 - name: sinh(Tensor self) -> Tensor
   self: grad * self.cosh().conj()
