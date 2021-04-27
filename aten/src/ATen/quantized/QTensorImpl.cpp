@@ -6,6 +6,7 @@ QTensorImpl::QTensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     QuantizerPtr quantizer)
     : TensorImpl(std::move(storage), key_set, data_type),
       quantizer_(quantizer) {}
@@ -15,6 +16,7 @@ QTensorImpl::QTensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     QuantizerPtr quantizer)
     : TensorImpl(type, std::move(storage), key_set, data_type),
       quantizer_(quantizer) {}
