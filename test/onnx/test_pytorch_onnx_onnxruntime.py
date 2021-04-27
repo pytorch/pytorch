@@ -2361,6 +2361,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(RandLike(), x)
 
+    def test_bernoulli(self):
+        class Bernoulli(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.bernoulli(x).size(0))
+
+        x = torch.empty(3, 3).uniform_(0, 1)
+        self.run_test(Bernoulli(), x)
+
+        class BernoulliOut(torch.nn.Module):
+            def forward(self, x):
+                out = torch.tensor([1], dtype=torch.double)
+                return torch.mul(x.to(torch.double), torch.bernoulli(x, out=out).size(0))
+
+        x = torch.empty(2, 3, 3).uniform_(0, 1)
+        self.run_test(BernoulliOut(), x)
+
     def test_reshape_different_rank(self):
         class ReshapeModel(torch.nn.Module):
             def forward(self, x):

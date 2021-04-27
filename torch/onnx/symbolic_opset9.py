@@ -2405,7 +2405,20 @@ def rrelu(g, input, lower, upper, training, generator):
     return g.op("PRelu", input, p)
 
 
-@parse_args("v")
+def bernoulli(g, input, generator=None, out=None):
+    if generator is not None and not sym_help._is_none(generator):
+        _unimplemented("Bernoulli", "generator is not supported for multinomial")
+
+    self = input if out is None else out
+    dtype = sym_help._try_get_scalar_type(self)
+    if dtype is None:
+        dtype = "Float"
+    p = g.op('RandomUniformLike', input, high_f=1.0, low_f=0.0)
+    output = g.op('Less', p, input)
+    return g.op("Cast", output, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+
+
+@parse_args('v')
 def log_sigmoid(g, input):
     p = g.op("Sigmoid", input)
     return g.op("Log", p)
