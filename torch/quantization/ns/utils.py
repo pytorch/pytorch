@@ -6,10 +6,11 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.fx.quantize import is_activation_post_process
+from .mappings import (
+    get_node_type_to_io_type_map,
+)
 
-from .ns_types import NSNodeTargetType
-
-from typing import Any, Tuple, Callable, Dict, Set
+from typing import Any, Tuple, Callable
 
 def getattr_from_fqn(gm: GraphModule, fqn: str) -> Any:
     """
@@ -40,10 +41,10 @@ def get_node_first_input_and_output_type(
     node: Node,
     gm: GraphModule,
     logger_cls: Callable,
-    node_type_to_io_type_map: Dict[str, Set[NSNodeTargetType]],
 ) -> Tuple[NodeInputOrOutputType, NodeInputOrOutputType]:
 
     # TODO(future PR): clean this up
+    node_type_to_io_type_map = get_node_type_to_io_type_map()
     FUNS_IO_TYPE_FP32 = node_type_to_io_type_map['funs_io_type_fp32']
     FUNS_IO_TYPE_INT8 = node_type_to_io_type_map['funs_io_type_int8']
     FUNS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['funs_io_type_fp32_or_int8']
@@ -73,7 +74,7 @@ def get_node_first_input_and_output_type(
             assert isinstance(first_arg, Node)
             _prev_node_input_type, prev_node_output_type = \
                 get_node_first_input_and_output_type(
-                    first_arg, gm, logger_cls, node_type_to_io_type_map)
+                    first_arg, gm, logger_cls)
             return (prev_node_output_type, prev_node_output_type)
         is_known_fp32_input_module = any(
             isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32  # type: ignore
@@ -101,8 +102,7 @@ def get_node_first_input_and_output_type(
             prev_node = node.args[0]
             assert isinstance(prev_node, Node)
             _prev_node_input_type, prev_node_output_type = \
-                get_node_first_input_and_output_type(
-                    prev_node, gm, logger_cls, node_type_to_io_type_map)
+                get_node_first_input_and_output_type(prev_node, gm, logger_cls)
             return (prev_node_output_type, NodeInputOrOutputType.FP32)
 
         elif node.target == 'to':
@@ -113,8 +113,7 @@ def get_node_first_input_and_output_type(
             prev_node = node.args[0]
             assert isinstance(prev_node, Node)
             _prev_node_input_type, prev_node_output_type = \
-                get_node_first_input_and_output_type(
-                    prev_node, gm, logger_cls, node_type_to_io_type_map)
+                get_node_first_input_and_output_type(prev_node, gm, logger_cls)
 
             cur_node_dtype_target = node.args[1]
             assert cur_node_dtype_target is torch.float16, \
