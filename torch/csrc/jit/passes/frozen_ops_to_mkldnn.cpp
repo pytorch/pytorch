@@ -181,7 +181,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     auto k = node->kind();
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
         k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
-        k == prim::MKLDNNHardTanh) {
+        k == prim::MKLDNNHardTanh || k == aten::tanh) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -844,11 +844,19 @@ class MKLDNNSubgraphSlicer {
       case aten::sigmoid:
       case aten::hardsigmoid:
       case aten::hardswish:
+      case aten::tanh:
+      case aten::batch_norm:
       // TODO: max_pool on mkldnn can be slower than in eager. ideally, we'd
       // only fuse it if we knew including max_pool lead to fewer layout
       // conversions. from initial testing including it speeds up models
       case aten::max_pool2d:
       case aten::max_pool3d:
+      case aten::avg_pool2d:
+      case aten::adaptive_avg_pool2d:
+      case aten::avg_pool3d:
+        // case aten::adaptive_max_pool2d: // return tuples which break fusion
+        // case aten::adaptive_max_pool3d: // return tuples which break fusion
+        // case aten::adaptive_avg_pool3d: // no ideep binding
         return true;
     }
 
@@ -992,6 +1000,7 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
           aten::sigmoid_,
           aten::hardsigmoid_,
           aten::hardtanh_,
+          aten::tanh_,
       };
       return mkldnn_ops.count(node_to_functionalize->kind()) != 0;
     });
