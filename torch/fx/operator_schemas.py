@@ -104,7 +104,8 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
 
 def create_type_hint(x):
     if isinstance(x, list) or isinstance(x, tuple):
-        ret_type = (lambda x: List[x]) if isinstance(x, list) else (lambda x: Tuple[x, ...])
+        # todo(chilli): Figure out the right way for mypy to handle this
+        ret_type = (lambda x: List[x]) if isinstance(x, list) else (lambda x: Tuple[x, ...])  # type: ignore[valid-type, return-value]
         if len(x) == 0:
             return ret_type(Any)
         base_type = x[0]

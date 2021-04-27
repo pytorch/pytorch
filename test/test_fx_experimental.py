@@ -30,7 +30,13 @@ from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.fx.operator_schemas import _torchscript_type_to_python_type, normalize_function, normalize_module, type_matches, create_type_hint
+from torch.fx.operator_schemas import (
+    _torchscript_type_to_python_type,
+    normalize_function,
+    normalize_module,
+    type_matches,
+    create_type_hint
+)
 from torch.fx.passes.shape_prop import extract_tensor_metadata, ShapeProp
 
 try:

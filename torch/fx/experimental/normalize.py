@@ -41,6 +41,7 @@ class NormalizeArgs(Transformer):
             return type(arg)
 
         arg_types = map_aggregate(n.args, get_type)
+        assert(isinstance(arg_types, tuple))
         arg_types = tuple([create_type_hint(i) for i in arg_types])
         kwarg_types = {k: get_type(v) for k, v in kwargs.items()}
         if n.op == 'call_function':
