@@ -131,9 +131,6 @@ public:
   inline operator T*() {
     return values;
   }
-  inline void set_value(int i, T val) {
-    values[i] = val;
-  }
   template <int64_t mask_>
   static Vec256<T> blend(const Vec256<T>& a, const Vec256<T>& b) {
     int64_t mask = mask_;
@@ -642,10 +639,10 @@ Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
 // Vectorized version of std::fmax
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
-inline Vec256<T> fmax(const Vec256<T> &a, const Vec256<T> &b) {
+Vec256<T> inline fmax(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    c.set_value(i, std::fmax(a[i], b[i]));
+    c[i] = std::fmax(a[i], b[i]);
   }
   return c;
 }
@@ -653,10 +650,10 @@ inline Vec256<T> fmax(const Vec256<T> &a, const Vec256<T> &b) {
 // Vectorized version of std::fmin
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
-inline Vec256<T> fmin(const Vec256<T> &a, const Vec256<T> &b) {
+Vec256<T> inline fmin(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    c.set_value(i, std::fmin(a[i], b[i]));
+    c[i] = std::fmin(a[i], b[i]);
   }
   return c;
 }
