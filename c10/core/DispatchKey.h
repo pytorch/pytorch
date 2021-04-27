@@ -112,6 +112,9 @@ enum class DispatchKey : uint8_t {
   // [Masquerading as CUDA]
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
 
+  SparseCsrCPU,
+  SparseCsrCUDA,
+
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
@@ -169,7 +172,7 @@ enum class DispatchKey : uint8_t {
   //     // inplace/view ops called through `at::` inside your backend
   //     // kernel will dispatch to InplaceOrView kernels and do a lot
   //     // of extra work.
-  //     at::AutoDispatchBelowInplaceOrView guard(true);
+  //     at::AutoDispatchBelowInplaceOrView guard;
   //     at::redispatch::my_functional_op(...);
   //   }
   // }

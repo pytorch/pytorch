@@ -1,6 +1,7 @@
 import re
 import torch
 from ..utils import is_per_tensor, is_per_channel
+from ..quantize import is_activation_post_process
 
 from torch.fx import GraphModule, map_arg
 
@@ -99,20 +100,20 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Opti
     return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
     of extracted qparams from the module
     '''
-    dtype = activation_post_process.dtype  # type: ignore
+    dtype = activation_post_process.dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
     if dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
-        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore
-        if is_per_channel(activation_post_process.qscheme):  # type: ignore
-            ch_axis = int(activation_post_process.ch_axis)  # type: ignore
+        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
+        if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
+            ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             quantize_op = torch.quantize_per_channel
         else:
             scale = float(scale)
             zero_point = int(zero_point)
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
-            quantize_op = torch.quantize_per_tensor  # type: ignore
+            quantize_op = torch.quantize_per_tensor
     elif dtype == torch.float16:
         node_type = "call_method"
         quantize_op = "to"
@@ -345,47 +346,58 @@ def create_qparam_nodes(quantizer: QuantizerCls, node_name: str, scale: Any, zer
     return (scale_node, zero_point_node)
 
 
-def all_node_args_have_no_tensors(node: Node) -> bool:
+def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module], cache: Dict[Node, bool]) -> bool:
     """
     If we know for sure that all of this node's args have no
     tensors (are primitives), return True.  If we either
     find a tensor or are not sure, return False. Note: this
     function is not exact.
     """
+    if cache and node in cache:
+        return cache[node]
+
+    result = False  # will be overwritten
     if not isinstance(node, Node):
-        return True
+        result = True
     elif node.op == 'placeholder':
-        return False
+        result = False
     elif node.op == 'call_module':
-        return False
+        assert isinstance(node.target, str)
+        if is_activation_post_process(modules[node.target]):
+            result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
+    elif node.op == 'call_module':
+        result = False
     elif node.op == 'get_attr':
-        return False
-    elif node.target is getattr and node.args[1] == 'ndim':
+        result = False
+    elif node.target is getattr and node.args[1] in ['ndim', 'shape']:
         # x1 = x0.ndim
-        return True
+        result = True
     elif node.op == 'call_method' and node.target == 'size':
         # x1 = x0.size(0)
-        return True
-
-    found_one_tensor = False
-    for arg in node.args:
-        if isinstance(arg, list):
-            for list_el in arg:
-                if isinstance(list_el, Node):
-                    this_list_el_args_have_no_tensors = \
-                        all_node_args_have_no_tensors(list_el)
-                    found_one_tensor = found_one_tensor or \
-                        (not this_list_el_args_have_no_tensors)
-        elif isinstance(arg, int):
-            pass
-        else:
-            if isinstance(arg, Node):
-                this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg)
-                found_one_tensor = found_one_tensor or \
-                    (not this_arg_args_have_no_tensors)
+        result = True
+    else:
+        found_one_tensor = False
+        for arg in node.args:
+            if isinstance(arg, list):
+                for list_el in arg:
+                    if isinstance(list_el, Node):
+                        this_list_el_args_have_no_tensors = \
+                            all_node_args_have_no_tensors(list_el, modules, cache)
+                        found_one_tensor = found_one_tensor or \
+                            (not this_list_el_args_have_no_tensors)
+            elif isinstance(arg, int):
+                pass
             else:
-                found_one_tensor = True
-    return not found_one_tensor
+                if isinstance(arg, Node):
+                    this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg, modules, cache)
+                    found_one_tensor = found_one_tensor or \
+                        (not this_arg_args_have_no_tensors)
+                else:
+                    found_one_tensor = True
+            result = not found_one_tensor
+    if cache:
+        cache[node] = result
+    return result
 
 
 def node_return_type_is_int(node: Node) -> bool:

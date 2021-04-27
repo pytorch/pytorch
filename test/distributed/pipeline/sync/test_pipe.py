@@ -322,7 +322,17 @@ def test_input_pair(setup_rpc):
     assert a.grad is not None
     assert b.grad is not None
 
+def test_multi_sequence_input(setup_rpc):
+    class MultiSeq(nn.Module):
+        def forward(self, tup1, tup2):
+            return tup1, tup2
 
+    model = Pipe(nn.Sequential(MultiSeq()))
+    with pytest.raises(TypeError):
+        model(
+            [torch.rand(10), torch.rand(10)],
+            [torch.rand(10), torch.rand(10)]
+        )
 
 def test_input_singleton(setup_rpc):
     class One(nn.Module):

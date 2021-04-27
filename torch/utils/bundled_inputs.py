@@ -2,7 +2,7 @@
 from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Sequence, Dict, Callable
 import textwrap
 import torch
-from torch._C import TupleType, OptionalType, ListType
+from torch._C import TupleType, ListType
 
 
 T = TypeVar("T")
@@ -105,6 +105,14 @@ def augment_many_model_functions_with_bundled_inputs(
     if not inputs:
         raise Exception("Please provide inputs for at least 1 function")
 
+    if hasattr(model, "get_all_bundled_inputs") or hasattr(model, "get_bundled_inputs_functions_and_info"):
+        raise Exception(
+            "Models can only be augmented with bundled inputs once. "
+            "This Model seems to have already been augmented with "
+            "bundled inputs. Please start afresh with one that "
+            "doesn't have bundled inputs.",
+        )
+
     get_bundled_inputs_functions_and_info_template = ""
 
     for function, input_list in inputs.items():
@@ -113,11 +121,9 @@ def augment_many_model_functions_with_bundled_inputs(
         if input_list is not None and not isinstance(input_list, Sequence):
             raise TypeError("Error inputs for function {0} is not a Sequence".format(function_name))
 
-        function_arg_types = [arg.type for arg in function.schema.arguments[1:]]  # type: ignore
+        function_arg_types = [arg.type for arg in function.schema.arguments[1:]]  # type: ignore[attr-defined]
         deflated_inputs_type: ListType = ListType(TupleType(function_arg_types))
-        inflated_inputs_type: OptionalType[ListType] = OptionalType(deflated_inputs_type)
         model._c._register_attribute("_bundled_inputs_deflated_{name}".format(name=function_name), deflated_inputs_type, [])
-        model._c._register_attribute("_bundled_inputs_inflated_{name}".format(name=function_name), inflated_inputs_type, None)
 
         if hasattr(model, "_generate_bundled_inputs_for_" + function_name):
             if input_list is not None:
@@ -140,7 +146,7 @@ def augment_many_model_functions_with_bundled_inputs(
             deflated_inputs = []
             parts = []
             for inp_idx, args in enumerate(input_list):
-                if not isinstance(args, Tuple) and not isinstance(args, List):  # type: ignore
+                if not isinstance(args, Tuple) and not isinstance(args, List):  # type: ignore[arg-type]
                     raise TypeError(
                         "Error bundled input for function {0} idx: {1} is not a Tuple or a List".format(function_name, inp_idx)
                     )
@@ -170,9 +176,7 @@ def augment_many_model_functions_with_bundled_inputs(
         # Define get_all_bundled_inputs_for_<function_name> that caches the generated inputs.
         model.define(textwrap.dedent("""
             def get_all_bundled_inputs_for_{name}(self):
-                if self._bundled_inputs_inflated_{name} is None:
-                    self._bundled_inputs_inflated_{name} = self._generate_bundled_inputs_for_{name}()
-                all_inputs = self._bundled_inputs_inflated_{name}
+                all_inputs = self._generate_bundled_inputs_for_{name}()
                 assert all_inputs is not None
                 return all_inputs
             """).format(name=function_name))

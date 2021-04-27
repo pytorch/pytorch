@@ -95,21 +95,20 @@ class backend {
   // Registers a new backend with /p name, and the given /p preprocess
   // function.
   backend(const std::string& name) : backend_name_(name) {
-    static auto cls =
-        torch::class_<TBackendInterface>(kBackendsNamespace, name)
-            .def(torch::init<>())
-            ._def_unboxed(
-                "is_available",
-                getIsAvailableFunc<TBackendInterface>(),
-                getIsAvailableSchema())
-            ._def_unboxed(
-                "compile",
-                getCompileFunc<TBackendInterface>(),
-                getCompileSchema())
-            ._def_unboxed(
-                "execute",
-                getExecuteFunc<TBackendInterface>(),
-                getExecuteSchema());
+    static auto cls = torch::class_<TBackendInterface>(kBackendsNamespace, name)
+                          .def(torch::init<>())
+                          ._def_unboxed(
+                              "is_available",
+                              getIsAvailableFunc<TBackendInterface>(),
+                              getIsAvailableSchema())
+                          ._def_unboxed(
+                              "compile",
+                              getCompileFunc<TBackendInterface>(),
+                              getCompileSchema())
+                          ._def_unboxed(
+                              "execute",
+                              getExecuteFunc<TBackendInterface>(),
+                              getExecuteSchema());
   }
 };
 

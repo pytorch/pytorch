@@ -119,7 +119,7 @@ class Batch:
     def _setitem_by_index(self, index: int, value: Tensor) -> None:
         if not self.atomic:
             i = index
-            self.value = self.value[:i] + (value,) + self.value[i + 1 :]  # type: ignore
+            self.value = self.value[:i] + (value,) + self.value[i + 1 :]  # type: ignore[operator]
             return
 
         if index != 0:
@@ -149,7 +149,7 @@ def check(*inputs) -> None:
 
     """
     for input in inputs:
-        if isinstance(input, Sequence):
+        if isinstance(input, Sequence) and len(inputs) == 1:
             for x in input:
                 if not isinstance(x, Tensor):
                     raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
