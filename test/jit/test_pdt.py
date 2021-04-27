@@ -226,21 +226,7 @@ class TestPDT(JitTestCase):
         self.assertEqual(scripted_fn(100, class_with_args(True), ), test_model_with_args(100, class_with_args(True)))
 
     def test_nn_module(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                assert x is not None
-                return x
-
-        make_global(Foo)
-        scripted_model = torch.jit._script_pdt(Foo(), example_inputs=[(100, ), (10.80, ), ])
-        input = 120
-        self.assertEqual(scripted_model(input), input)
-
-    def test_nn_module_2(self):
-        class model(torch.nn.Module):
+        class TestPDTModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -252,15 +238,15 @@ class TestPDT(JitTestCase):
                 else:
                     return x
 
-        make_global(model)
-        scripted = torch.jit._script_pdt(model(), example_inputs=[(10, ), (10.80, ), (False, )])
-        inp = model()
-        self.assertEqual(scripted(50), inp(50))
-        self.assertEqual(scripted(1.8), inp(1.8))
-        self.assertTrue(scripted(True))
+        make_global(TestPDTModel)
+        pdt_model = TestPDTModel()
+        scripted_pdt_model = torch.jit._script_pdt(pdt_model, example_inputs=[(10, ), (10.80, ), (False, )])
+        self.assertEqual(scripted_pdt_model(50), pdt_model(50))
+        self.assertEqual(scripted_pdt_model(1.8), pdt_model(1.8))
+        self.assertTrue(scripted_pdt_model(True), pdt_model(True))
 
     def test_nested_nn_module_class(self):
-        class inner(torch.nn.Module):
+        class NestedPDTInner(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -269,7 +255,7 @@ class TestPDT(JitTestCase):
                     return x * 10
                 return x
 
-        class Wrapper(torch.nn.Module):
+        class NestedModulePDTWrapper(torch.nn.Module):
             def __init__(self, inner):
                 super().__init__()
                 self.inner = inner
@@ -277,10 +263,29 @@ class TestPDT(JitTestCase):
             def forward(self, x):
                 return self.inner(x)
 
+        make_global(NestedPDTInner, NestedModulePDTWrapper)
+        inner_pdt_model = NestedPDTInner()
+        wrapped_pdt_model  = NestedModulePDTWrapper(inner_pdt_model)
+        scripted_pdt_model = torch.jit._script_pdt(wrapped_pdt_model, example_inputs=[(20, ), (False, )])
+        self.assertEqual(scripted_pdt_model(30), wrapped_pdt_model(30))
+        self.assertEqual(scripted_pdt_model(1.9), wrapped_pdt_model(1.9))
+        self.assertTrue(scripted_pdt_model(True), wrapped_pdt_model(True))
 
-        make_global(inner, Wrapper)
-        scripted_inner = torch.jit._script_pdt(inner(), example_inputs=[(100, ), (10.80, ), ])
-        wrapped = torch.jit._script_pdt(Wrapper(scripted_inner), example_inputs=[(20, ), (False, )])
-        self.assertEqual(wrapped(30), wrapped(30))
-        self.assertEqual(wrapped(1.9), wrapped(1.9))
-        self.assertTrue(wrapped(True))
+    def test_nested_function_in_forward(self):
+        class NestedFunctionInForward(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return self.fun(x) + 10
+
+            def fun(self, x):
+                if isinstance(x, int):
+                    return x + 1
+                return 0
+
+        make_global(NestedFunctionInForward)
+        pdt_model = NestedFunctionInForward()
+        scripted_pdt_model = torch.jit._script_pdt(pdt_model, example_inputs=[(20, ), (False, )])
+        self.assertEqual(scripted_pdt_model(30), pdt_model(30))
+        self.assertEqual(scripted_pdt_model(10.9), pdt_model(10.9))
