@@ -615,6 +615,13 @@ class SyncBatchNorm(_BatchNorm):
         - Input: :math:`(N, C, +)`
         - Output: :math:`(N, C, +)` (same shape as input)
 
+    .. note::
+        Synchronization of batchnorm statistics occurs only while training, i.e.
+        synchronization is disabled when model.eval() is set or if self.training
+        is otherwise ``False``.
+        Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
+        for a brief introduction to all features related to distributed training.
+
     Examples::
 
         >>> # With Learnable Parameters
