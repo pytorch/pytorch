@@ -1715,7 +1715,9 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
 //     See https://github.com/pytorch/pytorch/issues/53879.
 Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   auto info_shape = IntArrayRef(
-    self.sizes().cbegin(), self.sizes().cend() - 2); // self.shape[:-2]
+      self.sizes().cbegin(), self.sizes().cend() - 2); // self.shape[:-2]
+
+  // 'self' is cloned here because legacy cholesky doesn't do the clone before
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   Tensor info = at::empty({info_shape}, self.options().dtype(kInt));
 
