@@ -187,7 +187,7 @@ void sortKeyValueInplace(Tensor& key,
 #undef HANDLE_A_CASE
 }
 
-// We perform a vectorized segmented sort in cub with inputs that have
+// We perform a segmented sort in cub with inputs that have
 // more than 1024/2048 elements along the selected dimension.
 // Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
 std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
