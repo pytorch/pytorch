@@ -64,7 +64,7 @@ c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int
     key_set = key_set.add(DispatchKey::CPU);
     key_set = key_set.add(DispatchKey::AutogradCPU);
   }
-  key_set = key_set.add(DispatchKey::TensorWrapper);
+  key_set = key_set.add(kGradWrapperKey);
   if (should_be_alive) {
     return c10::make_intrusive<TensorWrapper>(key_set, tensor, level, getLifeHandleForLevel(level));
   } else {
@@ -87,10 +87,10 @@ Tensor makeTensorWrapper(const Tensor& tensor, int64_t level) {
     key_set = key_set.add(DispatchKey::CPU);
     key_set = key_set.add(DispatchKey::AutogradCPU);
   }
-  key_set = key_set.add(DispatchKey::TensorWrapper);
+  key_set = key_set.add(kGradWrapperKey);
   auto life_handle = getLifeHandleForLevel(level);
   auto result = at::detail::make_tensor<TensorWrapper>(key_set, tensor, level, std::move(life_handle));
-  TORCH_INTERNAL_ASSERT(result.key_set().has(DispatchKey::TensorWrapper));
+  TORCH_INTERNAL_ASSERT(result.key_set().has(kGradWrapperKey));
   return result;
 }
 
@@ -161,7 +161,7 @@ const char* TensorWrapper::tensorimpl_type_name() const {
 
 
 TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor) {
-  if (!tensor.key_set().has(DispatchKey::TensorWrapper)) {
+  if (!tensor.key_set().has(kGradWrapperKey)) {
     return nullptr;
   }
   return (TensorWrapper*)(tensor.unsafeGetTensorImpl());
@@ -224,7 +224,7 @@ void dead_tensor_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Sta
 
 // TensorWrapper backend fallback: Unwrap and fallthrough.
 
-TORCH_LIBRARY_IMPL(_, TensorWrapper, m) {
+TORCH_LIBRARY_IMPL(_, FT_GRAD_WRAPPER_KEY, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dead_tensor_wrapper_fallback>());
 }
 

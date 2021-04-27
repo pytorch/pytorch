@@ -84,8 +84,8 @@ static DynamicLayer popDynamicLayer() {
 
   if (dynamicLayerStack.size() == 0) {
     // std::cout << "DynamicLayer off" << std::endl;
-    c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerFront, false);
-    c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerBack, false);
+    c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, false);
+    c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, false);
   }
 
   return result;
@@ -100,8 +100,8 @@ static int64_t pushDynamicLayer(DispatchKey key) {
 
   if (layerId == 2) {
     // std::cout << "DynamicLayer on" << std::endl;
-    c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerFront, true);
-    c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerBack, true);
+    c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, true);
+    c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, true);
   }
 
   return layerId;
@@ -202,11 +202,11 @@ static void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64
 }
 
 constexpr DispatchKeySet all_dynlayer_keyset = DispatchKeySet({
-  DispatchKey::DynamicLayerFront,
-  DispatchKey::DynamicLayerBack,
-  DispatchKey::TensorWrapper,
+  kDynamicLayerFrontModeKey,
+  kDynamicLayerBackModeKey,
+  kGradWrapperKey,
   // DispatchKey::Batched,
-  DispatchKey::BatchedOutOfTree,
+  kBatchedKey,
   DispatchKey::InplaceOrView
 }) | autograd_dispatch_keyset;
 
@@ -245,14 +245,14 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   auto layer = dynamicLayerStack.back();
 
   DispatchKeySet exclude = all_dynlayer_keyset;
-  exclude = exclude.remove(DispatchKey::DynamicLayerBack);
+  exclude = exclude.remove(kDynamicLayerBackModeKey);
   if (layer.key() == DispatchKey::Autograd) {
     exclude = exclude - autograd_dispatch_keyset;
     exclude = exclude.remove(DispatchKey::InplaceOrView);
   // } else if (layer.key() == DispatchKey::Batched) {
   //   exclude = exclude.remove(DispatchKey::Batched);
-  } else if (layer.key() == DispatchKey::BatchedOutOfTree) {
-    exclude = exclude.remove(DispatchKey::BatchedOutOfTree);
+  } else if (layer.key() == kBatchedKey) {
+    exclude = exclude.remove(kBatchedKey);
   } else {
     TORCH_INTERNAL_ASSERT(false);
   }
@@ -348,8 +348,8 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   SaveLocalDispatchKeySet save_guard;
   auto keyset = c10::impl::PODLocalDispatchKeySet();
   c10::impl::_force_tls_local_dispatch_key_set(keyset);
-  c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerFront, true);
-  c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerBack, true);
+  c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, true);
+  c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, true);
 
   // Re-dispatch
   op.callBoxed(stack);
@@ -380,11 +380,11 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   }
 }
 
-TORCH_LIBRARY_IMPL(_, DynamicLayerFront, m) {
+TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallback>());
 }
 
-TORCH_LIBRARY_IMPL(_, DynamicLayerBack, m) {
+TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_BACK_MODE_KEY, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dynamicLayerBackFallback>());
 }
 
