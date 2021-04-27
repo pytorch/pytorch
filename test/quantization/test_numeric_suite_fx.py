@@ -1119,10 +1119,12 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m, (torch.randn(4, 4),),
             results_len=2)
 
-    def _test_int8_shadows_int8_impl(self, m):
+    @skipIfNoFBGEMM
+    def test_int8_shadows_int8(self):
         """
         Verify that shadowing works where both modules are int8
         """
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
         mp = prepare_fx(m, qconfig_dict)
         mp(torch.randn(4, 1, 4, 4))
@@ -1134,16 +1136,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             mq1_shadows_mq2, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 1)
         self.assert_ns_compare_dict_valid(act_compare_dict)
-
-    @skipIfNoFBGEMM
-    def test_int8_shadows_int8_mod(self):
-        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
-        self._test_int8_shadows_int8_impl(m)
-
-    @skipIfNoFBGEMM
-    def test_int8_shadows_int8_fun(self):
-        m = LinearFunctional().eval()
-        self._test_int8_shadows_int8_impl(m)
 
     @skipIfNoFBGEMM
     def test_user_module_scriptable(self):
