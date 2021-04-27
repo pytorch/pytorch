@@ -369,7 +369,12 @@ void index_copy_kernel(
         handle_zero_idx_stride(data, strides, n);
       }
     };
-    iter.for_each(loop);
+    bool is_deterministic = at::globalContext().deterministicAlgorithms();
+    if (is_deterministic) {
+      iter.serial_for_each(loop, {0, iter.numel()});
+    } else {
+      iter.for_each(loop);
+    }
   });
 }
 
