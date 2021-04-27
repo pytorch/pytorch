@@ -1647,9 +1647,7 @@ def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
     for shape, axis in shapes_and_axes:
         tensor = make_tensor(shape, device, dtype, low=None, high=None,
                              requires_grad=requires_grad)
-
-        for t in (tensor, tensor.T):
-            samples.append(SampleInput(t, args=(axis,),))
+        samples.append(SampleInput(tensor, args=(axis,),))
 
     return samples
 
