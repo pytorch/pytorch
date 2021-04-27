@@ -1021,8 +1021,8 @@ struct to_ir {
     // result type is annotated, every return must convert to that type
     if (declared_return_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
-      // type. otherwise forgetting a return a function returning a tensor will
-      // cause a None to be converted to a tensor.
+      // type. otherwise forgetting to return a function returning a Tensor will
+      // cause a None to be converted to a Tensor.
       if (!(declared_return_type->isSubtypeOf(TensorType::get()) &&
             actual_return_type->isSubtypeOf(NoneType::get()))) {
         actual_return = tryConvertToType(

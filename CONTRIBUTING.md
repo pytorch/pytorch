@@ -417,12 +417,12 @@ is `./build/bin/FILENAME --gtest_filter=TESTSUITE.TESTNAME`, where
 `TESTNAME` is the name of the test you'd like to run and `TESTSUITE` is
 the suite that test is defined in.
 
-For example, if you wanted to run the test ` MayContainAlias`, which
+For example, if you wanted to run the test `MayContainAlias`, which
 is part of the test suite `ContainerAliasingTest` in the file
 `test/cpp/jit/test_alias_analysis.cpp`, the command would be:
 
 ```bash
-./build/bin/test_jit --gtest_filter=ContainerAliasingTest.UnionAliasing
+./build/bin/test_jit --gtest_filter=ContainerAliasingTest.MayContainAlias
 ```
 
 ## Writing documentation

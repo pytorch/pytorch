@@ -470,7 +470,7 @@ void Graph::lint() const {
   // - Params and return do NOT occur in nodes
   // - next_unique_ is greater than all uniques in graph
   // - uniques in all_nodes are unique
-  // - every use will occur later in the topsort
+  // - every use will occur later in the toposort
 
   struct LintScope {
     LintScope() = default;
