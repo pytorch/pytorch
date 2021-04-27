@@ -1,8 +1,9 @@
 import torch
 import warnings
+import itertools
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyCPU)
+    (instantiate_device_type_tests, dtypes, onlyCPU, onlyCUDA)
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -31,7 +32,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.tensor(crow_indices, dtype=torch.int64), sparse.crow_indices())
         self.assertEqual((len(crow_indices) - 1, max(col_indices) + 1), sparse.shape)
 
-    @dtypes(torch.float, torch.double)
+    @onlyCUDA
     def test_sparse_csr_constructor(self, device, dtype):
         crow_indices = [0, 2, 4]
         col_indices = [0, 1, 0, 1]
@@ -43,6 +44,46 @@ class TestSparseCSR(TestCase):
 
         self.assertEqual((2, 10), sparse.shape)
         self.assertEqual(torch.tensor(crow_indices, dtype=torch.int32, device=device), sparse.crow_indices())
+
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False,
+                                          include_bfloat16=False, include_complex=False))
+    def test_factory_device_type_inference(self, device, dtype):
+        sparse = torch.sparse_csr_tensor([0, 2, 4],
+                                         [0, 1, 0, 1],
+                                         [1, 2, 3, 4],
+                                         size=(2, 10),
+                                         dtype=dtype,
+                                         device=device)
+
+        self.assertEqual((2, 10), sparse.shape)
+        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32, device=device), sparse.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32, device=device), sparse.col_indices())
+        self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
+
+        cpu_cuda = ('cpu', 'cuda')
+        cpu_cuda_none = cpu_cuda + (None,)
+        for indices_device, values_device, device in itertools.product(cpu_cuda,
+                                                                       cpu_cuda,
+                                                                       cpu_cuda_none):
+            for index_dtype in [torch.int32, torch.int64]:
+                crow_indices = torch.tensor([0, 2, 4], dtype=index_dtype, device=indices_device)
+                col_indices = torch.tensor([0, 1, 0, 1], dtype=index_dtype, device=indices_device)
+                values = torch.tensor([1, 2, 3, 4], dtype=dtype, device=values_device)
+                if device is None and indices_device != values_device:
+                    with self.assertRaises(RuntimeError):
+                        torch.sparse_csr_tensor(crow_indices,
+                                                col_indices,
+                                                values,
+                                                size=(2, 10),
+                                                device=device)
+                else:
+                    t = torch.sparse_csr_tensor(crow_indices,
+                                                col_indices,
+                                                values,
+                                                size=(2, 10),
+                                                device=device)
+                    should_be_cuda = (device == 'cuda' or (device is None and values_device == 'cuda'))
+                    self.assertEqual(should_be_cuda, t.is_cuda)
 
     @dtypes(torch.double)
     def test_sparse_csr_print(self, device, dtype):
