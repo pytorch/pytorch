@@ -16,7 +16,7 @@ from contextlib import closing
 from unittest import mock
 from unittest.mock import Mock, patch
 
-import torch.distributed.elastic_launch as launch
+import torch.distributed.run as launch
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
