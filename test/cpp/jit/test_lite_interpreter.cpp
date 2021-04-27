@@ -628,10 +628,10 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
       filePath.substr(0, filePath.find_last_of("/\\") + 1);
   test_model_file_v5.append("script_module_v5.ptl");
 
-  auto version_v4 = torch::jit::_get_bytecode_version(test_model_file_v4);
+  auto version_v4 = torch::jit::_get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
 
-  auto version_v5 = torch::jit::_get_bytecode_version(test_model_file_v5);
+  auto version_v5 = torch::jit::_get_model_bytecode_version(test_model_file_v5);
   AT_ASSERT(version_v5 == 5);
 }
 
@@ -641,7 +641,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelV4) {
   auto test_model_file_v4 =
       filePath.substr(0, filePath.find_last_of("/\\") + 1);
   test_model_file_v4.append("script_module_v4.ptl");
-  auto version = torch::jit::_get_bytecode_version(test_model_file_v4);
+  auto version = torch::jit::_get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version == 4);
 
   std::ostringstream oss;
@@ -656,7 +656,8 @@ TEST(LiteInterpreterTest, BackPortByteCodeModel) {
   test_model_file_v5.append("script_module_v5.ptl");
 
   // Load check in model: script_module_v5.ptl
-  auto from_version = torch::jit::_get_bytecode_version(test_model_file_v5);
+  auto from_version =
+      torch::jit::_get_model_bytecode_version(test_model_file_v5);
   AT_ASSERT(from_version == 5);
 
   // Backport script_module_v5.ptl to an older version
@@ -667,9 +668,8 @@ TEST(LiteInterpreterTest, BackPortByteCodeModel) {
 
   // Check backport model version
   std::istringstream iss(oss.str());
-  auto backport_version = torch::jit::_get_bytecode_version(iss);
+  auto backport_version = torch::jit::_get_model_bytecode_version(iss);
   AT_ASSERT(backport_version == 4);
-  std::cout << "backport version: " << backport_version;
 
   // Load and run the backport model, then compare the result with expect result
   auto input_data = std::vector<IValue>({IValue(1)});
