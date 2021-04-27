@@ -11,6 +11,7 @@
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #ifdef USE_CUDA_NOT_ROCM
 #include <ATen/cuda/CUDAFuture.h>
@@ -285,17 +286,10 @@ class TensorPipeAgent : public RpcAgent {
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
     explicit AtomicJitFuture(const std::vector<c10::DeviceIndex>& devices) {
-#ifdef USE_CUDA_NOT_ROCM
-      if (!devices.empty()) {
-        jitFuture = std::make_shared<at::cuda::CUDAFuture>(
-            at::AnyClassType::get(), devices);
-      } else {
-#else
-      {
-#endif
-        TORCH_INTERNAL_ASSERT(devices.empty());
-        jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
-      }
+      c10::DeviceType type =
+          devices.empty() ? c10::DeviceType::CPU : c10::DeviceType::CUDA;
+      jitFuture =
+          FutureFactoryRegistry::getInstance().createFuture(type, devices);
     }
 
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
