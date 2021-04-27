@@ -8967,4 +8967,4 @@
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False) -> Tensor
   variants: function
   dispatch:
-    CPU: _segment_reduce_cpu
+    CPU, CUDA: segment_reduce_kernel
