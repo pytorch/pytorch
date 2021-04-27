@@ -65,6 +65,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   Stream getDefaultStream(Device d) const override {
     return getDefaultCUDAStream(d.index());
   }
+  Stream getStreamFromPool(Device d, bool isHighPriority) const override {
+    // Use a qualified name to avoid calling ourselves recursively.
+    return c10::cuda::getStreamFromPool(isHighPriority, d.index());
+  }
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
     CUDAStream cs(s);
