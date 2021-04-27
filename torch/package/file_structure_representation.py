@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 from typing import Dict, List
-from os import sep as os_separator
 
 from .glob_group import GlobPattern, GlobGroup
 
 
 class Directory:
     """A file structure representation. Organized as Directory nodes that have lists of
-    their Directory children."""
+    their Directory children. Directories for a package are created by calling
+    :meth:`PackageExporter.file_structure` or :meth:`PackageImporter.file_structure`."""
 
     def __init__(self, name: str, is_dir: bool):
         self.name = name
@@ -38,7 +38,7 @@ class Directory:
             file_path (str): Path of file to add. Last element is added as a file while
                 other paths items are added as directories.
         """
-        *dirs, file = file_path.split(os_separator)
+        *dirs, file = file_path.split("/")
         dir = self._get_dir(dirs)
         dir.children[file] = Directory(file, False)
 
@@ -50,7 +50,7 @@ class Directory:
         Returns:
             bool: if a Directory contains the specified file.
         """
-        lineage = filename.split(os_separator, maxsplit=1)
+        lineage = filename.split("/", maxsplit=1)
         child = lineage[0]
         grandchildren = lineage[1] if len(lineage) > 1 else None
         if child in self.children.keys():
@@ -123,7 +123,7 @@ def _create_directory_from_file_list(
     Returns:
             :class:`Directory`: a :class:`Directory` file structure representation created from a list of files.
     """
-    glob_pattern = GlobGroup(include, exclude=exclude, separator=os_separator)
+    glob_pattern = GlobGroup(include, exclude=exclude, separator="/")
 
     top_dir = Directory(filename, True)
     for file in file_list:
