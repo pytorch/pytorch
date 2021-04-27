@@ -37,7 +37,6 @@ namespace jit {
 // desugar to something similar. Additionally, any True refinements that were
 // present on `cond` can also be associated with the if node True output value.
 
-
 // The intersection of the refinements is the Value* which are in both
 // refinements and are refined to the same length
 // in an example like:
@@ -87,7 +86,8 @@ void joinIfRefinements(
     ListRefinement& curr_block_refinements,
     ListRefinement& true_block_refinements,
     ListRefinement& false_block_refinements,
-    std::unordered_map<Value*, BooleanRefinementMapping>& boolean_value_refinements) {
+    std::unordered_map<Value*, BooleanRefinementMapping>&
+        boolean_value_refinements) {
   IfView if_n(if_node);
   Block* b = if_node->owningBlock();
 
@@ -117,8 +117,7 @@ void joinIfRefinements(
       if (boolean_value_refinements.count(
               non_throwing_block->outputs().at(i))) {
         boolean_value_refinements[if_node->outputs().at(i)] =
-            boolean_value_refinements[non_throwing_block->outputs().at(
-                i)];
+            boolean_value_refinements[non_throwing_block->outputs().at(i)];
       }
     }
     return;
@@ -182,12 +181,11 @@ void joinIfRefinements(
             boolean_value_refinements[true_v].true_refine(),
             true_block_refinements));
       }
-    }
-    if (boolean_value_refinements.count(true_v) &&
+    } else if (
+        boolean_value_refinements.count(true_v) &&
         boolean_value_refinements.count(false_v)) {
-      out = boolean_value_refinements[true_v]
-                .intersectBooleanRefinementMapping(
-                    boolean_value_refinements[false_v]);
+      out = boolean_value_refinements[true_v].intersectBooleanRefinementMapping(
+          boolean_value_refinements[false_v]);
     }
     boolean_value_refinements[if_n.outputs().at(i)] = out;
   }
