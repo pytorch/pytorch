@@ -356,6 +356,12 @@
 - name: _conj(Tensor(a) self) -> Tensor(a)
   self: grad.conj()
 
+- name: _resolve_conj(Tensor(a) self) -> Tensor(a)
+  self: grad.conj_physical()
+
+- name: conj_physical(Tensor self) -> Tensor
+  self: grad.conj_physical()
+
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
   other: zeros_like(other)
