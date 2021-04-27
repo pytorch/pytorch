@@ -85,7 +85,7 @@ class TORCH_API ScriptModuleSerializer {
       const std::string& archive_name,
       const std::string& archive_dir,
       const std::string& tensor_dir,
-      bool tensor_cptr_naming_scheme = false);
+      bool tensor_cdata_naming_scheme = false);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
   std::vector<at::IValue> constant_table_;
