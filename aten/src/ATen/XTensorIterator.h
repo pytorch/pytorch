@@ -55,11 +55,11 @@ namespace internal {
 // deemed inefficient to parallelise over arrays shorter than 32768. Further,
 // no parallel algorithm (such as parallel_reduce) should split work into
 // smaller than GRAIN_SIZE chunks.
-constexpr int64_t GRAIN_SIZE = 32768;
+constexpr int64_t X_GRAIN_SIZE = 32768;
 } // namespace internal
 
-struct DimCounter {
-  DimCounter(IntArrayRef shape, Range range);
+struct XDimCounter {
+  XDimCounter(IntArrayRef shape, Range range);
 
   void increment(const std::array<int64_t, 2>& step);
   bool is_done() const;
@@ -71,10 +71,10 @@ struct DimCounter {
   int64_t offset;
 };
 
-struct TORCH_API OperandInfo {
+struct TORCH_API XOperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
-  OperandInfo() {}
-  C10_ALWAYS_INLINE explicit OperandInfo(c10::MaybeOwned<Tensor>&& t) : tensor(std::move(t)) {
+  XOperandInfo() {}
+  C10_ALWAYS_INLINE explicit XOperandInfo(c10::MaybeOwned<Tensor>&& t) : tensor(std::move(t)) {
     if (tensor->defined()) {
       device = tensor->device();
       target_dtype = tensor->scalar_type();
@@ -83,7 +83,7 @@ struct TORCH_API OperandInfo {
     validate();
   }
 
-  C10_ALWAYS_INLINE ~OperandInfo() = default;
+  C10_ALWAYS_INLINE ~XOperandInfo() = default;
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   StrideVector stride_bytes;
@@ -132,25 +132,25 @@ struct TORCH_API OperandInfo {
   }
 };
 
-struct SplitUntil32Bit;
+struct XSplitUntil32Bit;
 
-enum class FastSetupType : uint8_t {
+enum class XFastSetupType : uint8_t {
   NONE,
   CONTIGUOUS,
   CHANNELS_LAST,
   NON_OVERLAPPING_DENSE
 };
 
-class TensorIteratorConfig;
-struct TensorIterator;
+class XTensorIteratorConfig;
+struct XTensorIterator;
 
-struct TORCH_API TensorIteratorBase : public impl::MetaBase {
+struct TORCH_API XTensorIteratorBase : public impl::MetaBase {
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
   using StrideVector = SmallVector<int64_t, 6>;
 
-  TensorIteratorBase();
-  void build(TensorIteratorConfig&);
+  XTensorIteratorBase();
+  void build(XTensorIteratorConfig&);
 
   // The inner-loop function operates on the fastest moving dimension. It
   // implements element-wise operations in terms of 1-d strided tensors.
@@ -164,7 +164,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   // parallelization of the inner loop.
   using loop2d_t = c10::function_ref<void(char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
 
-  using loop_subiter_t = c10::function_ref<void(TensorIteratorBase& subiter)>;
+  using loop_subiter_t = c10::function_ref<void(XTensorIteratorBase& subiter)>;
 
   void foreach_reduced_elt(loop_subiter_t loop, bool parallelize=true);
 
@@ -233,7 +233,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
 
   /// Splits this TensorIterator into two iterators. Together they iterate over
   /// the entire operation. Used by `with_32bit_indexing()`.
-  std::unique_ptr<TensorIterator> split(int dim);
+  std::unique_ptr<XTensorIterator> split(int dim);
 
   /// Returns the dimension with the largest extent: (size[dim]-1) * stride[dim]
   int get_dim_to_split() const;
@@ -267,11 +267,11 @@ public:
             std::enable_if_t<std::is_convertible<
               loop1d_t, c10::function_ref<void(char**, const int64_t* strides, int64_t size)>
             >::value, int> = 0>
-  void for_each(loop1d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE) {
+  void for_each(loop1d_t loop, int64_t grain_size = at::internal::X_GRAIN_SIZE) {
     for_each(loop_2d_from_1d(loop), grain_size);
   }
 
-  void for_each(loop2d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
+  void for_each(loop2d_t loop, int64_t grain_size = at::internal::X_GRAIN_SIZE);
 
   void parallel_reduce(loop2d_t loop);
 
@@ -310,7 +310,7 @@ public:
 
   /// An "iteratable" object that recursively splits this iterator into sub-iterators
   /// that can use 32-bit indexing.
-  SplitUntil32Bit with_32bit_indexing() const;
+  XSplitUntil32Bit with_32bit_indexing() const;
 
   /// If the kernel should accumulate into the output. Only relevant for CUDA
   /// reductions.
@@ -341,20 +341,20 @@ public:
 
 protected:
   // Mutable reference as it moves tensors out of TensorIteratorConfig
-  void populate_operands(TensorIteratorConfig&);
+  void populate_operands(XTensorIteratorConfig&);
   void mark_outputs();
-  void mark_resize_outputs(const TensorIteratorConfig&);
-  void compute_mem_overlaps(const TensorIteratorConfig&);
-  void compute_shape(const TensorIteratorConfig&);
-  void compute_strides(const TensorIteratorConfig&);
+  void mark_resize_outputs(const XTensorIteratorConfig&);
+  void compute_mem_overlaps(const XTensorIteratorConfig&);
+  void compute_shape(const XTensorIteratorConfig&);
+  void compute_strides(const XTensorIteratorConfig&);
   void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);
-  void compute_types(const TensorIteratorConfig&);
+  void compute_types(const XTensorIteratorConfig&);
   ScalarType compute_common_dtype();
   void allocate_or_resize_outputs();
-  bool fast_set_up(const TensorIteratorConfig&);
-  FastSetupType compute_fast_setup_type(const TensorIteratorConfig&);
-  void compute_names(const TensorIteratorConfig&);
+  bool fast_set_up(const XTensorIteratorConfig&);
+  XFastSetupType compute_fast_setup_type(const XTensorIteratorConfig&);
+  void compute_names(const XTensorIteratorConfig&);
   void propagate_names_to_outputs();
   void coalesce_dimensions();
 
@@ -420,7 +420,7 @@ protected:
   ///
   /// This list is initially populated prior to build(), but build() mutates
   /// OperandInfo to populate more information.
-  SmallVector<OperandInfo, 4> operands_;
+  SmallVector<XOperandInfo, 4> operands_;
 
   /// Number of outputs in operands_ (the length of the outputs prefix
   /// in operands_).
@@ -450,43 +450,43 @@ protected:
   bool is_meta_ = false;
 };
 
-struct TORCH_API TensorIterator final : public TensorIteratorBase {
-  TensorIterator() : TensorIteratorBase() {}
+struct TORCH_API XTensorIterator final : public XTensorIteratorBase {
+  XTensorIterator() : XTensorIteratorBase() {}
   // Slicing is OK, TensorIterator guaranteed NOT to have any fields
-  TensorIterator(const TensorIteratorBase& iter) : TensorIteratorBase(iter) {}
+  XTensorIterator(const XTensorIteratorBase& iter) : XTensorIteratorBase(iter) {}
 
-  static TensorIterator binary_float_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator unary_op(Tensor& out, const Tensor& a);
-  static TensorIterator unary_float_op(Tensor& out, const Tensor& a);
-  static TensorIterator nullary_op(Tensor& out);
-  static TensorIterator reduce_op(Tensor& out, const Tensor& a);
-  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
+  static XTensorIterator binary_float_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static XTensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static XTensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static XTensorIterator unary_op(Tensor& out, const Tensor& a);
+  static XTensorIterator unary_float_op(Tensor& out, const Tensor& a);
+  static XTensorIterator nullary_op(Tensor& out);
+  static XTensorIterator reduce_op(Tensor& out, const Tensor& a);
+  static XTensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
   const Tensor& maybe_get_output(int64_t output_idx) override;
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 };
 
-class TORCH_API TensorIteratorConfig final {
+class TORCH_API XTensorIteratorConfig final {
 public:
-  friend struct TensorIteratorBase;
-  friend struct TensorIterator;
+  friend struct XTensorIteratorBase;
+  friend struct XTensorIterator;
 
-  TensorIteratorConfig() {}
+  XTensorIteratorConfig() {}
 
-  C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
+  C10_DISABLE_COPY_AND_ASSIGN(XTensorIteratorConfig);
 
   /// Construction
-  TensorIteratorConfig& add_output(const Tensor& output);
-  TensorIteratorConfig& add_input(const Tensor& input);
+  XTensorIteratorConfig& add_output(const Tensor& output);
+  XTensorIteratorConfig& add_input(const Tensor& input);
 
   // Advanced API: stores input/output Tensors without incrementing
   // the reference count. The caller must ensure that these Tensors
   // live at least as long as this TensorIteratorConfig and any
   // TensorIteratorBase built from this TensorIteratorConfig.
-  TensorIteratorConfig& add_borrowed_output(const Tensor& output);
-  TensorIteratorConfig& add_borrowed_input(const Tensor& input);
+  XTensorIteratorConfig& add_borrowed_output(const Tensor& output);
+  XTensorIteratorConfig& add_borrowed_input(const Tensor& input);
 
   // Sets the check_mem_overlap_ flag, which is true by default.
   // If true, inputs are checked for partial overlap with the outputs and
@@ -497,7 +497,7 @@ public:
   // not, and if the operator is idempotent (for example, Tensor.fill_(0)), then
   // checking memory overlap is BC-breaking. Please don't check memory overlap
   // in that case.
-  TensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap) {
+  XTensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap) {
     check_mem_overlap_ = check_mem_overlap;
     return *this;
   }
@@ -507,7 +507,7 @@ public:
   // Setting either of promote_inputs_to_common_dtype_
   //   or cast_common_dtype_to_outputs_ to true will set
   //   check_all_same_dtype_ to false.
-  TensorIteratorConfig& check_all_same_dtype(const bool _check_all_same_dtype) {
+  XTensorIteratorConfig& check_all_same_dtype(const bool _check_all_same_dtype) {
     check_all_same_dtype_ = _check_all_same_dtype;
     return *this;
   }
@@ -516,7 +516,7 @@ public:
   // If true, all operands must be on the same device, with the possible
   //   exception of CPU scalars, which can be passed to some CUDA kernels
   //   as kernel arguments.
-  TensorIteratorConfig& check_all_same_device(const bool _check_all_same_device) {
+  XTensorIteratorConfig& check_all_same_device(const bool _check_all_same_device) {
     check_all_same_device_ = _check_all_same_device;
     return *this;
   }
@@ -525,7 +525,7 @@ public:
   // If true, the iterator's "common dtype" must be computable
   //   (see the [Common Dtype Computation] note) and
   //   canCast(common dtype, output dtype) must be true for all outputs.
-  TensorIteratorConfig& enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
+  XTensorIteratorConfig& enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
     enforce_safe_casting_to_output_ = _enforce_safe_casting_to_output;
     return *this;
   }
@@ -536,7 +536,7 @@ public:
   //   the inputs in the common dtype are passed as the actual inputs to
   //   the operation.
   // Setting this flag to true sets check_all_same_dtype_ to false.
-  TensorIteratorConfig& promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
+  XTensorIteratorConfig& promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
     promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
     if (_promote_inputs_to_common_dtype) {
       check_all_same_dtype_ = false;
@@ -548,18 +548,18 @@ public:
   // NOTE: If set to true, the promote_inputs_to_common_dtype_ must also be true.
   // If true, if the iterator's "common dtype" is an integral type (including bool)
   //   then it is changed to the default float scalar type.
-  TensorIteratorConfig& promote_integer_inputs_to_float(const bool _promote_integer_inputs_to_float) {
+  XTensorIteratorConfig& promote_integer_inputs_to_float(const bool _promote_integer_inputs_to_float) {
     promote_integer_inputs_to_float_ = _promote_integer_inputs_to_float;
     TORCH_INTERNAL_ASSERT(!promote_integer_inputs_to_float_ || promote_inputs_to_common_dtype_);
     return *this;
   }
 
-  TensorIteratorConfig& is_reduction(const bool _is_reduction) {
+  XTensorIteratorConfig& is_reduction(const bool _is_reduction) {
     is_reduction_ = _is_reduction;
     return *this;
   }
 
-  TensorIteratorConfig& allow_cpu_scalars(const bool _allow_cpu_scalars) {
+  XTensorIteratorConfig& allow_cpu_scalars(const bool _allow_cpu_scalars) {
     allow_cpu_scalars_ = _allow_cpu_scalars;
     return *this;
   }
@@ -571,7 +571,7 @@ public:
   //   These temporaries are then copied to the original outputs after
   //   the operation is performed (see cast_outputs()).
   // Setting this flag to true sets check_all_same_dtype_ to false.
-  TensorIteratorConfig& cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
+  XTensorIteratorConfig& cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
     cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
     if (_cast_common_dtype_to_outputs) {
       check_all_same_dtype_ = false;
@@ -579,20 +579,20 @@ public:
     return *this;
   }
 
-  TensorIteratorConfig& resize_outputs(bool resize_outputs) {
+  XTensorIteratorConfig& resize_outputs(bool resize_outputs) {
     resize_outputs_ = resize_outputs;
     return *this;
   }
 
   // Bypass output dtype/device computation and fix the dtype/device as specified here.
-  TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device);
-  TensorIteratorConfig& declare_static_shape(IntArrayRef shape);
-  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims);
+  XTensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device);
+  XTensorIteratorConfig& declare_static_shape(IntArrayRef shape);
+  XTensorIteratorConfig& declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims);
 
   // It would be better if this was && qualified, but this would be at the cost
   // of a lot of boilerplate above
-  TensorIterator build() {
-    TensorIterator iter;
+  XTensorIterator build() {
+    XTensorIterator iter;
     iter.build(*this);
     return iter;
   }
@@ -621,14 +621,14 @@ private:
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
 /// the original TensorIterator.
-struct TORCH_API SplitUntil32Bit {
+struct TORCH_API XSplitUntil32Bit {
   struct TORCH_API iterator {
     iterator() {};
-    iterator(const TensorIteratorBase& iter);
+    iterator(const XTensorIteratorBase& iter);
     iterator(iterator&&) = default;
 
     // Guaranteed to be a TensorIterator proper!
-    TensorIterator& operator*() const;
+    XTensorIterator& operator*() const;
     iterator& operator++();
     bool operator==(const iterator& other) const {
       // two iterators are equal if they are the same object or they're both empty
@@ -638,16 +638,16 @@ struct TORCH_API SplitUntil32Bit {
     bool operator!=(const iterator& other) const { return !(*this == other); }
 
     /// stack of TensorIterators to be split
-    std::vector<std::unique_ptr<TensorIterator>> vec;
+    std::vector<std::unique_ptr<XTensorIterator>> vec;
   };
 
-  SplitUntil32Bit(const TensorIteratorBase& iter) : iter(iter) {}
+  XSplitUntil32Bit(const XTensorIteratorBase& iter) : iter(iter) {}
 
   iterator begin() const;
   iterator end() const;
 
 private:
-  const TensorIteratorBase& iter;
+  const XTensorIteratorBase& iter;
 };
 
 }  // namespace at

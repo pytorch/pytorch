@@ -22,7 +22,7 @@ using namespace vec256;
 
 // Note: Undefined behavior when performing addition is intentionally
 // ignored.
-void add_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
+void add_kernel(XTensorIteratorBase& iter, const Scalar& alpha_scalar) {
   if (iter.dtype() == ScalarType::Bool) {
       using scalar_t = bool;
       auto alpha = alpha_scalar.to<scalar_t>();
@@ -76,7 +76,22 @@ void atan2_kernel(TensorIteratorBase& iter) {
 // Note: Undefined behavior when performing subtraction is intentionally
 // ignored.
 void sub_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) __ubsan_ignore_undefined__ {
-  add_kernel(iter, -alpha_scalar);
+  if (iter.dtype() == ScalarType::Bool) {
+      using scalar_t = bool;
+      auto alpha = -alpha_scalar.to<scalar_t>();
+      cpu_kernel(iter,
+        [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a + alpha * b; });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "add_cpu/sub_cpu", [&]() {
+      auto alpha = -alpha_scalar.to<scalar_t>();
+      auto alpha_vec = Vec256<scalar_t>(alpha);
+      cpu_kernel_vec(iter,
+        [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a + alpha * b; },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
+          return vec256::fmadd(b, alpha_vec, a);
+        });
+      });
+  }
 }
 
 void mul_kernel(TensorIteratorBase& iter) {

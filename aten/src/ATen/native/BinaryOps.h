@@ -3,7 +3,10 @@
 #include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at { struct TensorIterator; }
+namespace at {
+  struct TensorIterator;
+  struct XTensorIteratorBase;
+  } // namespace at
 
 namespace at { namespace native {
 
@@ -37,6 +40,8 @@ inline void sub_check(const Tensor& self, const Scalar& scalar) {
 }
 
 using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
+using x_structured_binary_fn_alpha =
+    void (*)(XTensorIteratorBase&, const Scalar& alpha);
 using structured_binary_fn = void(*)(TensorIteratorBase&);
 
 using binary_fn_alpha = void(*)(TensorIterator&, const Scalar& alpha);
@@ -45,7 +50,7 @@ using binary_fn = void(*)(TensorIterator&);
 using binary_clamp_fn_alpha =
     void(*)(TensorIterator&, const Scalar& alpha, const Scalar& min_val, const Scalar& max_val);
 
-DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
+DECLARE_DISPATCH(x_structured_binary_fn_alpha, add_stub);
 DECLARE_DISPATCH(binary_clamp_fn_alpha, add_clamp_stub);
 DECLARE_DISPATCH(structured_binary_fn_alpha, sub_stub);
 DECLARE_DISPATCH(structured_binary_fn, mul_stub);

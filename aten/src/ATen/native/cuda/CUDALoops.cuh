@@ -36,6 +36,7 @@
 #include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/XTensorIterator.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
@@ -151,6 +152,55 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
 
   bool contiguous = iter.is_contiguous();
   bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
+
+  if (!dynamic_casting) {
+    if (contiguous) {
+      launch_vectorized_kernel(numel, f, data);
+    } else {
+      auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
+      auto output_offset_calculator = make_output_offset_calculator(iter);
+      auto loader = memory::LoadWithoutCast();
+      auto storer = memory::StoreWithoutCast();
+      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
+    }
+  } else {
+    at::detail::Array<ScalarType, traits::arity> dtypes;
+    for (int i = 0; i < traits::arity; i++) {
+      dtypes[i] = iter.tensor(i + 1).scalar_type();
+    }
+    auto loader = memory::LoadWithCast<traits::arity>(dtypes);
+    auto storer = memory::StoreWithCast(iter.tensor(0).scalar_type());
+    if (contiguous) {
+      auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
+      auto output_offset_calculator = TrivialOffsetCalculator<1>();
+      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
+    } else {
+      auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
+      auto output_offset_calculator = make_output_offset_calculator(iter);
+      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
+    }
+  }
+}
+
+template <typename func_t>
+void gpu_kernel_impl(XTensorIteratorBase& iter, const func_t& f) {
+  using traits = function_traits<func_t>;
+  using arg0_t = typename traits::result_type;
+  constexpr int ntensors = traits::arity + 1;
+
+  TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
+
+  at::detail::Array<char*, ntensors> data;
+  for (int i = 0; i < ntensors; i++) {
+    data[i] = (char*)iter.data_ptr(i);
+  }
+
+  int64_t numel = iter.numel();
+
+  bool contiguous = iter.is_contiguous();
+  bool dynamic_casting = needs_dynamic_casting_x<func_t>::check(iter);
 
   if (!dynamic_casting) {
     if (contiguous) {
