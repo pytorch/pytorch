@@ -2708,7 +2708,7 @@ std::tuple<Tensor, Tensor, Tensor> lu_unpack(
 
   // now that we know the final permutation,
   // scatter 1s at proper locations.
-  permutation_matrix.scatter_add_(
+  permutation_matrix.scatter_(
     -2,
     unpacked_pivots.unsqueeze(-2).to(at::kLong),
     at::ones({1}, permutation_matrix.options()).expand(permutation_matrix.sizes())
