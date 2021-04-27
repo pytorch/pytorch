@@ -538,11 +538,13 @@ class Tensor(torch._C._TensorBase):
             )
         return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
+    @_wrap_type_error_to_not_implemented
     def __rsub__(self, other):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__rsub__, (self, other), self, other)
         return _C._VariableFunctions.rsub(self, other)
 
+    @_wrap_type_error_to_not_implemented
     def __rdiv__(self, other):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__rdiv__, (self, other), self, other)
@@ -551,7 +553,7 @@ class Tensor(torch._C._TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
 
-    __pow__ = _C._TensorBase.pow
+    __pow__ = _wrap_type_error_to_not_implemented(_C._TensorBase.pow)
 
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
