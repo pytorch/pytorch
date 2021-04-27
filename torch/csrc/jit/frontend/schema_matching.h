@@ -8,10 +8,9 @@
 namespace torch {
 namespace jit {
 
-// Try to match a list of inputs and keyword 'attributes' to this
-// schema. Return the flat list of positional inputs to the call or
-// `c10::nullopt` on failure (`failure_messages` contains a good error
-// report in this case)
+// try to match a list if inputs and keyword 'attributes' to this schema,
+// if it works return the flat list of positional inputs to the call
+// if it returns nullopt, then failure_messages contains a good error report
 
 struct MatchedSchema {
   std::vector<Value*> inputs;
@@ -57,7 +56,7 @@ TORCH_API c10::optional<size_t> findInputWithName(
 TORCH_API Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,
-    TypePtr concrete_type,
+    const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions);
 } // namespace jit

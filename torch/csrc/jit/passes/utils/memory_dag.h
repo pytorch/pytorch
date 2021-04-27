@@ -4,8 +4,6 @@
 #include <c10/util/Optional.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/sparse_bitset.h>
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/ir/type_hashing.h>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -14,6 +12,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 // Uses a compressed index representation for faster comparisons
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 typedef c10::SparseBitVector<256> MemoryLocations;
 namespace torch {
 namespace jit {
@@ -31,6 +30,7 @@ class MemoryDAG;
  */
 class TORCH_API MemoryDAGBuilder {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   MemoryDAGBuilder() {}
   MemoryDAGBuilder(const MemoryDAGBuilder&) = delete;
   MemoryDAGBuilder& operator=(const MemoryDAGBuilder&) = delete;
@@ -40,7 +40,7 @@ class TORCH_API MemoryDAGBuilder {
 
   void addToContainedElements(Element* contained, Element* container);
 
-  // Make a fresh Element (i.e. an Element that doesn't point to anything) and
+  // Make a fresh element (i.e. an element that doesn't point to anything) and
   // return it.
   Element* makeFreshValue(const Value* v);
 
@@ -56,8 +56,8 @@ class TORCH_API MemoryDAGBuilder {
 // AliasDb to provide a higher-level API.
 //
 // We maintain a DAG where:
-//   - Vertices (called "Elements") represent Values and
-//     other aliasing entities (e.g. the stuff inside a list)
+//   - Vertices (called "elements") represent values and
+//     other aliasing entities (e.g. like the stuff inside a list)
 //   - Edges represent a "points-to" relationship.
 //
 // Leaves in this DAG are entities that don't point to anything, and thus
@@ -82,7 +82,7 @@ class TORCH_API MemoryDAG {
   bool mayAlias(const Element* a, const Element* b) const;
   bool mayAlias(Element* a, Element* b) const;
 
-  // Does `a` hold reference to any memory that is stored in `b`, or vice versa?
+  // Does a hold reference to any memory that is stored in elem, or vice versa?
   bool mayContainAlias(const Element* a, const Element* b) const;
   bool mayContainAlias(Element* a, Element* b) const;
 
@@ -98,20 +98,18 @@ class TORCH_API MemoryDAG {
       MemoryLocations& cont) const;
 
   /**
-   * The following methods are special cases where we need to mutate the
+   * The following methods are special cases where we need to reach mutate the
    * internals of MemoryDAG for efficiency reasons. Don't call them unless you
    * know what you're doing! In particular, don't add new mutating methods
    * without ensuring that you are maintaining cache consistency for memory
    * locations.
    */
-
   // Adding wildcards can trigger extremely expensive cache invalidations. This
   // method adds them in a more efficient cache-aware way.
   void setWildcards(
       const std::unordered_set<const Value*>& wildcards,
       const ska::flat_hash_map<const Value*, Element*>& elementMap,
-      const std::function<std::vector<Element*>(const Value*)>&
-          getWildcardElement);
+      const std::function<Element*(const Value*)>& getWildcardElement);
   Element* unsafeMakeFreshValue(const Value* v);
 
  private:
@@ -129,21 +127,26 @@ struct Element {
   // wildcard constructor
   explicit Element(unsigned index_);
 
-  // Index that represents this element in the owning DAG's bit vector
+  // Index into the owning DAG's bit vector that represents this element.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   unsigned index;
 
   // All elements that this element *may* point to. It's possible to have
   // multiple elements that you might point to due to control flow/complex ops
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   MemoryLocations pointsTo;
   // Backreference for points-to.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   MemoryLocations pointedFrom;
 
   // Elements can contain other elements (e.g. List[Tensor])
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   MemoryLocations containedElements;
 
   // The values that this element corresponds to. May be empty if this element
   // doesn't represent a first-class value.
   // This is for debug information only.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_set<const Value*> values;
 
  private:

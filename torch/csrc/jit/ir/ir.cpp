@@ -470,7 +470,7 @@ void Graph::lint() const {
   // - Params and return do NOT occur in nodes
   // - next_unique_ is greater than all uniques in graph
   // - uniques in all_nodes are unique
-  // - every use will occur later in the toposort
+  // - every use will occur later in the topsort
 
   struct LintScope {
     LintScope() = default;
@@ -969,16 +969,6 @@ bool Node::matches(
 }
 
 bool Node::mustBeNone() const {
-  // Gate this as lambda so we can perform some other checks beforehand
-  auto is_optional = [this]() {
-    if (output()->type()->kind() == OptionalType::Kind) {
-      return true;
-    }
-    if (auto union_type = output()->type()->cast<UnionType>()) {
-      return union_type->to_optional() != c10::nullopt;
-    }
-    return false;
-  };
   // We can statically deduce this Node has returning None if:
   return
       // It's an AutogradZero node, or ...
@@ -986,7 +976,8 @@ bool Node::mustBeNone() const {
       // It has only one output and that output is NoneType, or ...
       (outputs().size() == 1 && output()->type() == NoneType::get()) ||
       // It's a constant optional with no value in the attributes.
-      (kind_ == prim::Constant && !this->hasAttributes() && is_optional());
+      (kind_ == prim::Constant && !this->hasAttributes() &&
+       output()->type()->kind() == OptionalType::Kind);
 }
 
 void Node::dump() const {
@@ -1115,6 +1106,7 @@ bool Node::hasSideEffects() const {
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
+    case cuda::synchronize:
 #endif
     case prim::Enter:
     case prim::Exit:

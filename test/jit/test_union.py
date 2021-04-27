@@ -39,7 +39,7 @@ class TestUnion(JitTestCase):
         scripted = torch.jit.script(fn)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a member of"
-                                    r" Union\[int, float\] but "
+                                    r" Union\[float, int\] but "
                                     "instead found type str"):
             scripted("1")
 
@@ -87,8 +87,8 @@ class TestUnion(JitTestCase):
         scripted = torch.jit.script(fn)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a member of"
-                                    r" Union\[str, __torch__.jit.test"
-                                    r"_union.Color\] but instead found "
+                                    r" Union\[__torch__.jit.test_union."
+                                    r"Color, str\] but instead found "
                                     "type int"):
             scripted(1)
 
@@ -108,7 +108,7 @@ class TestUnion(JitTestCase):
         scripted = torch.jit.script(fn)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a member of"
-                                    r" Union\[str, int\] but instead "
+                                    r" Union\[int, str\] but instead "
                                     r"found type List\[str\]"):
             scripted(["foo", "bar", "baz"])
 
@@ -117,26 +117,6 @@ class TestUnion(JitTestCase):
             return "foo"
 
         self.checkScript(fn, (1,))
-
-    def test_union_return_type_with_same_type_branching(self):
-        def fn(x: int) -> Union[int, str]:
-            if x % 2:
-                return "foo"
-            else:
-                return "bar"
-
-        self.checkScript(fn, (1,))
-        self.checkScript(fn, (8,))
-
-    def test_union_return_type_with_different_type_branching(self):
-        def fn(x: int) -> Union[int, str]:
-            if x % 2:
-                return "foo"
-            else:
-                return 1
-
-        self.checkScript(fn, (1,))
-        self.checkScript(fn, (8,))
 
     def test_union_as_annotation(self):
         def fn() -> Union[int, str]:
@@ -152,6 +132,14 @@ class TestUnion(JitTestCase):
             u2: Union[int, str] = 1
             l.append(u1)
             l.append(u2)
+
+        self.checkScript(fn, ())
+
+    def test_union_as_annotation_py2(self):
+        def fn():
+            # type: () -> Union[int, str]
+            x: Union[int, str] = "foo"
+            return x
 
         self.checkScript(fn, ())
 
@@ -183,7 +171,7 @@ class TestUnion(JitTestCase):
             scripted = torch.jit.script(fn)
             scripted()
 
-    def test_union_does_not_replace_existing_union_annotated_type(self):
+    def test_union_does_not_replace_existing_annotated_type_union(self):
         def fn():
             x: List[Union[int, str]] = [1, "foo", 3]
             x.append(2.0)
@@ -193,7 +181,7 @@ class TestUnion(JitTestCase):
             scripted = torch.jit.script(fn)
             scripted()
 
-    def test_union_does_not_replace_existing_annotated_type_with_empty_container(self):
+    def test_union_does_not_replace_existing_annotated_type_empty_container(self):
         def fn():
             x: List[int] = []
             x.append("foo")
@@ -210,7 +198,7 @@ class TestUnion(JitTestCase):
 
         s = fn.graph
 
-        FileCheck().check("x : Union[str, int, float]")     \
+        FileCheck().check("x : Union[float, int, str]")    \
                    .run(s)
 
     def test_unions_of_a_single_argument_vanish(self):
@@ -220,7 +208,7 @@ class TestUnion(JitTestCase):
 
         s = fn.graph
 
-        FileCheck().check("x : int")     \
+        FileCheck().check("x : int")    \
                    .run(s)
 
     def test_union_redundant_arguments_are_skipped(self):
@@ -230,7 +218,7 @@ class TestUnion(JitTestCase):
 
         s = fn.graph
 
-        FileCheck().check("x : Union[str, int]")     \
+        FileCheck().check("x : Union[int, str]")    \
                    .run(s)
 
     def test_union_redundant_arguments_are_skipped_container(self):
@@ -240,7 +228,7 @@ class TestUnion(JitTestCase):
 
         s = fn.graph
 
-        FileCheck().check("x : Union[str[], float[]]")     \
+        FileCheck().check("x : Union[float[], str[]]")     \
                    .run(s)
 
     def test_union_argument_order_is_ignored(self):
@@ -253,10 +241,10 @@ class TestUnion(JitTestCase):
             return "foo"
 
         for s in (fn1.graph, fn2.graph):
-            FileCheck().check("x : Union[str, int]")     \
+            FileCheck().check("x : Union[int, str]")     \
                     .run(s)
 
-    def test_union_argument_order_is_ignored_with_container(self):
+    def test_union_argument_order_is_ignored_container(self):
         @torch.jit.script
         def fn1(x: Union[List[str], List[int]]) -> str:
             return "foo"
@@ -266,7 +254,7 @@ class TestUnion(JitTestCase):
             return "foo"
 
         for s in (fn1.graph, fn2.graph):
-            FileCheck().check("x : Union[str[], int[]]")     \
+            FileCheck().check("x : Union[int[], str[]]")     \
                     .run(s)
 
     def test_union_T_None_is_equivalent_to_optional_T(self):
@@ -325,16 +313,6 @@ class TestUnion(JitTestCase):
 
         self.checkScript(fn, ())
 
-    def test_union_with_dynamic_type_refinement(self):
-        def fn(x: Union[List[int], int]) -> int:
-            lst = [1, 2, 3]
-            if isinstance(x, int):
-                x = lst
-            return lst[0]
-
-        self.checkScript(fn, (1,))
-        self.checkScript(fn, ([4, 5, 6],))
-
     def test_union_as_dict_key(self):
         def fn():
             x: Dict[Union[int, str], str] = {}
@@ -355,26 +333,6 @@ class TestUnion(JitTestCase):
             return x["baz"]
 
         self.checkScript(fn, ())
-
-    def test_union_schema_matching_on_internal_type_schema_different_container_type(self):
-        def eager(x: Union[List[int], Dict[str, int]]) -> int:
-            if isinstance(x, List):
-                return x[0]
-            return list(x.values())[0]
-
-        @torch.jit.script
-        def script(x: Union[List[int], Dict[str, int]]) -> int:
-            if isinstance(x, List[int]):
-                return x[0]
-            return list(x.values())[0]
-
-        list_input_ref = eager([1, 2, 3])
-        list_input_out = script([1, 2, 3])
-        self.assertEqual(list_input_ref, list_input_out)
-
-        dict_input_ref = eager({"foo": 1, "bar": 2, "baz": 3})
-        dict_input_out = script({"foo": 1, "bar": 2, "baz": 3})
-        self.assertEqual(dict_input_ref, dict_input_out)
 
     def test_union_module_with_union_instance_variable(self):
         class M(torch.nn.Module):
@@ -405,55 +363,3 @@ class TestUnion(JitTestCase):
                 return x
 
         self.checkModule(M(1), ("foo",))
-
-    def test_union_subtractive_refinement(self):
-        def fn(x: Union[List[int], int]) -> int:
-            if not isinstance(x, int):
-                x.append(1)
-                return x[0]
-            else:
-                return x
-
-        self.checkScript(fn, (1,))
-        self.checkScript(fn, ([1, 2, 3],))
-
-    def test_union_subtractive_refinement_with_container(self):
-        def eager_fn(x: Union[List[int], int]) -> int:
-            if not isinstance(x, list):
-                return x
-            else:
-                x.append(1)
-                return x[0]
-
-        @torch.jit.script
-        def script_fn(x: Union[List[int], int]) -> int:
-            if not torch.jit.isinstance(x, List[int]):
-                return x
-            else:
-                x.append(1)
-                return x[0]
-
-        self.assertEqual(eager_fn(1), script_fn(1))
-        self.assertEqual(eager_fn([1, 2, 3]), script_fn([1, 2, 3]))
-
-    def test_union_memory_aliasing(self):
-        def eager_fn():
-            x : List[torch.Tensor] = []
-            z : List[Optional[List[torch.Tensor]]] = []
-            z.append(x)
-            x_alias = z[0]
-            if isinstance(x_alias, list):
-                x_alias.append(torch.tensor(3))
-            return x
-
-        @torch.jit.script
-        def script_fn():
-            x : List[torch.Tensor] = []
-            z : List[Optional[List[torch.Tensor]]] = []
-            z.append(x)
-            x_alias = z[0]
-            if torch.jit.isinstance(x_alias, List[torch.Tensor]):
-                x_alias.append(torch.tensor(3))
-            return x
-
-        self.assertEqual(eager_fn(), script_fn())

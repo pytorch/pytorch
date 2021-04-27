@@ -88,14 +88,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::UnionType: {
       auto actual_type = toTypeInferredIValue(obj);
       auto actual_type_ptr = actual_type.type();
-      if (auto union_type = type->expect<UnionType>()) {
-        if (!union_type->can_hold_type(actual_type_ptr)) {
-          throw py::cast_error(c10::str(
-              "Expected a member of ",
-              union_type->annotation_str(),
-              " but instead found type ",
-              actual_type.type()->annotation_str()));
-        }
+      auto union_type = type->expect<UnionType>();
+      if (!actual_type_ptr->isSubtypeOf(union_type)) {
+        throw py::cast_error(c10::str(
+            "Expected a member of ",
+            union_type->annotation_str(),
+            " but instead found type ",
+            actual_type.type()->annotation_str()));
       }
       return actual_type;
     }
