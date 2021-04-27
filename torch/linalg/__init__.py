@@ -105,6 +105,8 @@ If ``check_errors=True`` and ``info`` contains positive integers, then a Runtime
 
 .. note:: Given inputs on a CUDA device, this function may synchronize that device with the CPU.
 
+.. warning:: This function is "experimental" and it may change in a future PyTorch release.
+
 .. seealso::
         :func:`torch.linalg.cholesky` is a NumPy compatible variant that always checks for errors.
 
