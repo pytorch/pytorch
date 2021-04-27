@@ -171,7 +171,12 @@ class TORCH_CUDA_CU_API Fusion final {
   //! Return in insertion order
   const std::deque<Val*>& deterministic_vals() const noexcept;
 
-  //! Return all used Vals in math expressions
+  //! Return all Vals in math expressions that cannot be eliminated.
+  //!
+  //! It is generally equivalent to vals that are used to generate
+  //! outputs, however, when a multi-output expression exists, and only
+  //! some of the outputs are used, the remaining unused outputs are
+  //! also included as they must show up in the final code.
   std::vector<Val*> usedMathVals();
 
   //! Return the set of Exprs registered with this fusion. Warning: This will

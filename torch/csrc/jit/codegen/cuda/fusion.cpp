@@ -489,6 +489,22 @@ std::vector<Val*> Fusion::usedMathVals() {
   // FusionOuterSplit test.
   const auto inputs = InputsOf::outputs(this, outputs());
   auto used_math_vals = DependencyCheck::getAllValsBetween(inputs, outputs());
+  // When an expre has multiple outputs and only some of them are
+  // used, the rest aren't included in used_math_vals as they are not
+  // used. However, we want them to be included as they must show up
+  // in the fusion.
+  for (auto val : used_math_vals) {
+    auto def = val->definition();
+    if (def == nullptr || def->outputs().size() < 2) {
+      continue;
+    }
+    for (auto out : def->outputs()) {
+      if (std::find(used_math_vals.begin(), used_math_vals.end(), out) ==
+          used_math_vals.end()) {
+        used_math_vals.push_back(out);
+      }
+    }
+  }
   return used_math_vals;
 }
 
