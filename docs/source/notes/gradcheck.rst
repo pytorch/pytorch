@@ -15,10 +15,13 @@ Notations and background information
 ------------------------------------
 
 Throughout this note, we will use the following convention:
+
 1. :math:`x`, :math:`y`, :math:`a`, :math:`b`, :math:`v`, :math:`u`, :math:`ur` and :math:`ui` as real-valued vectors and :math:`z` is a complex-valued vector that can be rewritten in terms of two real-valued vectors as :math:`z = a + i b`.
+
 2. :math:`N` and :math:`M` are two integers that we will use for the dimension of the input and output space respectively.
 
 3. :math:`f: \mathcal{R}^N \to \mathcal{R}^M` as our basic real-to-real function such that :math:`y = f(x)`.
+
 4. :math:`g: \mathcal{C}^N \to \mathcal{R}^M` as our basic complex-to-real function such that :math:`y = g(z)`.
 
 
@@ -48,10 +51,10 @@ Similarly to the real case, when the input is actually in :math:`\mathcal{R}^N`,
 Default backward mode gradcheck behavior
 ----------------------------------------
 
-Functions in :math:`\mathcal{R}^N \to \mathcal{R}^M`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Real-to-real functions
+^^^^^^^^^^^^^^^^^^^^^^
 
-To test a function :math:`f: \mathcal{R}^N \to \mathcal{R}^M, x \to y`, we reconstruct the full Jacobian matrix :math:`J_f` of size :math:`M \times N` in two ways: analytical and numerical.
+To test a function :math:`f: \mathcal{R}^N \to \mathcal{R}^M, x \to y`, we reconstruct the full Jacobian matrix :math:`J_f` of size :math:`M \times N` in two ways: analytically and numerically.
 The analytical version uses our backward mode AD while the numerical version uses finite difference.
 The two reconstructed Jacobian matrices are then compared elementwise for equality.
 
@@ -76,8 +79,8 @@ For functions with a single output, we simply use :math:`v = 1` to recover the f
 
 For functions with more than one output, we resort to a for-loop which iterates over the outputs where each :math:`v` is a one-hot vector corresponding to each output one after the other. This allows to reconstruct the :math:`J_f` matrix row by row.
 
-Functions in :math:`\mathcal{C}^N \to \mathcal{R}^M`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Complex-to-real functions
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To test a function :math:`g: \mathcal{C}^N \to \mathcal{R}^M, z \to y` with :math:`z = a + i b`, we reconstruct the (complex-valued) matrix that contains :math:`2 * CW`.
 
@@ -118,8 +121,8 @@ Default complex input analytical evaluation
 
 Since backward mode AD computes exactly twice the :math:`CW` derivative already, we simply use the same trick as for the real-to-real case here and reconstruct the matrix row by row when there are multiple real outputs.
 
-Functions with outputs in :math:`\mathcal{C}^M`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Functions with complex outputs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In this case, the user-provided function does not follow the assumption from the autograd that the function we compute backward AD for is real-valued.
 This means that using autograd directly on this function is not well defined.
@@ -136,12 +139,12 @@ Fast backward mode gradcheck
 
 While the above formulation of gradcheck is great, both, to ensure correctness and debuggability, it is very slow because it reconstructs the full Jacobian matrices.
 This section presents a way to perform gradcheck in a faster way without affecting its correctness.
-The debuggability can be recovered by adding special code logic when we detect an error. In that case, we can run the slow code that reconstructs the full matrix to give full details to the user.
+The debuggability can be recovered by adding special logic when we detect an error. In that case, we can run the default version that reconstructs the full matrix to give full details to the user.
 
 The high level strategy here is to find a scalar quantity that can be computed efficiently by both the numerical and analytical methods and that represents the full matrix computed by the slow gradcheck well enough to ensure that it will catch any discrepancy in the Jacobians.
 
-Fast gradcheck for functions in :math:`\mathcal{R}^N \to \mathcal{R}^M`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Fast gradcheck for real-to-real functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The scalar quantity that we want to compute here is :math:`v^T J_f u` for a given random vector :math:`v \in \mathcal{R}^M` and a random unit norm vector :math:`u \in \mathcal{R}^N`.
 
@@ -149,10 +152,10 @@ For the numerical evaluation, we can efficiently compute :math:`J_f u \approx \f
 
 For the analytical version, we can use backward mode AD to compute :math:`v^T J_f` directly. We then perform the dot product with :math:`u` to get the expected value.
 
-Fast gradcheck for functions in :math:`\mathcal{C}^N \to \mathcal{R}^M`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Fast gradcheck for complex-to-real functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In a similar way to the real-to-real case, we want to perform a reduction of the full matrix. But the :math:`2 * CW` matrix is complex-valued and so in this case, we will compare to complex scalars.
+Similar to the real-to-real case, we want to perform a reduction of the full matrix. But the :math:`2 * CW` matrix is complex-valued and so in this case, we will compare to complex scalars.
 
 Due to some constraints on what we can compute efficiently in the numerical case and to keep the number of numerical evaluations to a minimum, we compute the following (albeit surprising) scalar value:
 
@@ -195,24 +198,25 @@ Why not use a complex :math:`u`
 """""""""""""""""""""""""""""""
 
 At this point, you might be wondering why we did not select a complex :math:`u` and just performed the reduction :math:`2 * v^T CW u'`.
-The problem is that when doing the numerical evaluation, considering :math:`u' = ur' + i ui'`, we would need to compute:
+To dive into this, in this paragraph, we will use the complex version of :math:`u` noted :math:`u' = ur' + i ui'`.
+Using such complex :math:`u'`, the problem is that when doing the numerical evaluation, we would need to compute:
 
 .. math::
     \begin{aligned}
-        2*CW u' &= (dy/da + i dy/db)(ur' + i ui') \\
-                &= dy/da ur' + i dy/da ui' + i dy/db ur' - dy/db ui'
+        2*CW u' &= (\frac{\partial y}{\partial a} + i \frac{\partial y}{\partial b})(ur' + i ui') \\
+                &= \frac{\partial y}{\partial a} ur' + i \frac{\partial y}{\partial a} ui' + i \frac{\partial y}{\partial b} ur' - \frac{\partial y}{\partial b} ui'
     \end{aligned}
 
 Which would require four evaluations of real-to-real finite difference (twice as much compared to the approached proposed above).
 Since this approach does not have more degrees of freedom (same number of real valued variables) and we try to get the fastest possible evaluation here, we use the other formulation above.
 
 
-Fast gradcheck for functions with outputs in :math:`\mathcal{C}^M`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Fast gradcheck for functions with complex outputs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Just like in the slow case, we consider two real-valued function and use the appropriate rule from above for each function.
+Just like in the slow case, we consider two real-valued functions and use the appropriate rule from above for each function.
 
-Gradgrad check implementation
+Gradgradcheck implementation
 -----------------------------
 
 PyTorch also provide a utility to verify second order gradients. The goal here is to make sure that the backward implementation is also properly differentiable and computes the right thing.
@@ -220,4 +224,4 @@ PyTorch also provide a utility to verify second order gradients. The goal here i
 This feature is implemented by considering the function :math:`F: x, v \to v^T J_f` and use the gradcheck defined above on this function.
 Note that :math:`v` in this case is just a random vector with the same type as :math:`f(x)`.
 
-The fast version of gradgrad check is implemented by using the fast version of gradcheck on that same function :math:`F`.
+The fast version of gradgradcheck is implemented by using the fast version of gradcheck on that same function :math:`F`.
