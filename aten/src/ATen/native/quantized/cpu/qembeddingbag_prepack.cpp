@@ -30,10 +30,13 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
   at::Tensor weight_contig =
       qweight.contiguous(qweight.suggest_memory_format());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int bit_width, scale_bias_bytes;
   uint8_t* weight_data = static_cast<uint8_t*>(weight_contig.data_ptr());
   if (qweight.scalar_type() == c10::kQUInt8) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     bit_width = 8;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     scale_bias_bytes = 8; // extra 8 bytes to store FP scale and bias per row.
   } else {
     bit_width = 4;
@@ -74,6 +77,7 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
       weight_contig.suggest_memory_format());
   auto* output_data = output.data_ptr<uint8_t>();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (bit_width == 8) {
     at::parallel_for(
         0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
@@ -272,6 +276,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
       "bit_width must be either 2 or 4 to use 'qembeddingbag_nbit_prepack'."
       "For 8bit, consider using 'embedding_bag_byte_prepack'.");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int NUM_ELEM_PER_BYTE = 8 / bit_width;
   TORCH_CHECK(
       weight_contig.size(weight.dim() - 1) % NUM_ELEM_PER_BYTE == 0,
@@ -314,6 +319,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
       const float* input_row = weight_data + row * embedding_cols;
       std::uint8_t* output_row = output_data + row * output_columns;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float Xmin, Xmax;
       if (optimized_qparams) {
         at::Tensor xmax_tensor, xmin_tensor;
@@ -333,6 +339,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
       // Set scale to 1.0f for the corner case of Xmax == Xmin .
       // Any non-zero scale would work because during quantization
       // (X - Xmin) / scale will be 0 for all X unless scale is 0.
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       at::Half scale = range == 0 ? 1.0f : range / ((1 << bit_width) - 1);
       float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
       if (scale == 0 || std::isinf(inverse_scale)) {
