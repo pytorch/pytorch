@@ -35,10 +35,10 @@ class TestCustomOps(unittest.TestCase):
                 return torch.ops.custom_namespace.custom_add(a, b)
 
         def symbolic_custom_add(g, self, other):
-            return g.op('Add', self, other)
+            return g.op("Add", self, other)
 
         from torch.onnx import register_custom_op_symbolic
-        register_custom_op_symbolic('custom_namespace::custom_add', symbolic_custom_add, 9)
+        register_custom_op_symbolic("custom_namespace::custom_add", symbolic_custom_add, 9)
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         y = torch.randn(2, 3, 4, requires_grad=False)
@@ -51,5 +51,5 @@ class TestCustomOps(unittest.TestCase):
         np.testing.assert_array_equal(caffe2_out[0], model(x, y).cpu().numpy())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

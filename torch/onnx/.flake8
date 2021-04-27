@@ -1,0 +1,5 @@
+[flake8]
+select =
+  # Q0 is part of flake8-quotes: https://anaconda.org/conda-forge/flake8-quotes
+  Q0
+inline-quotes = double

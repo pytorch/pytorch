@@ -31,9 +31,9 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
     # specified as well
     assert len(ops) == len(graph.node)
     for i in range(0, len(ops)):
-        assert graph.node[i].op_type == ops[i]['op_name']
+        assert graph.node[i].op_type == ops[i]["op_name"]
         if "attributes" in ops[i] :
-            attributes = ops[i]['attributes']
+            attributes = ops[i]["attributes"]
             assert len(attributes) == len(graph.node[i].attribute)
             for j in range(0, len(attributes)):
                 for attribute_field in attributes[j].keys():
@@ -60,7 +60,7 @@ class TestONNXOpset(TestCase):
 
         ops = [{"op_name" : "IsNaN"}]
         ops = {9 : ops, 10 : ops}
-        x = torch.tensor([1.0, float('nan'), 2.0])
+        x = torch.tensor([1.0, float("nan"), 2.0])
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
     def test_topk(self):
@@ -133,7 +133,7 @@ class TestONNXOpset(TestCase):
             def forward(self, x):
                 size = [v * 2 for v in x.size()[2:]]
                 size = [int(i) for i in size]
-                return torch.nn.functional.interpolate(x, size=size, mode='nearest')
+                return torch.nn.functional.interpolate(x, size=size, mode="nearest")
 
         module = MyModule()
         ops8 = [{"op_name" : "Upsample", "attributes" : [{"name": "mode", "s": ("nearest").encode(), "type": 3},
@@ -258,7 +258,7 @@ class TestONNXOpset(TestCase):
                 size = [v * 2 for v in x.size()[2:]]
                 return torch.nn.functional.interpolate(x,
                                                        size=size,
-                                                       mode='nearest')
+                                                       mode="nearest")
         ops_9 = [{"op_name" : "Shape"},
                  {"op_name" : "Constant"},
                  {"op_name" : "Gather"},
@@ -320,7 +320,7 @@ class TestONNXOpset(TestCase):
                 size = [int(i) for i in size]
                 return torch.nn.functional.interpolate(x,
                                                        size=size,
-                                                       mode='nearest')
+                                                       mode="nearest")
         ops_9 = [{"op_name" : "Constant"},
                  {"op_name" : "Upsample",
                   "attributes" :
@@ -334,5 +334,5 @@ class TestONNXOpset(TestCase):
         check_onnx_opsets_operator(MyDynamicModel(), x, ops, opset_versions=[9, 10])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
