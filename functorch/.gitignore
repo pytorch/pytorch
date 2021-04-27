@@ -2,3 +2,4 @@ build/
 dist/
 functorch.egg-info/
 *__pycache__*
+functorch/version.py
