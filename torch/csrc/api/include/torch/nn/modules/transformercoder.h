@@ -29,6 +29,7 @@ namespace nn {
 /// TransformerEncoderLayer encoderLayer(TransformerEncoderLayerOptions(512, 8).dropout(0.1));
 /// TransformerEncoder encoder(TransformerEncoderOptions(encoderLayer, 6).norm(LayerNorm(LayerNormOptions({2}))));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API TransformerEncoderImpl : public Cloneable<TransformerEncoderImpl> {
 
   public:
@@ -86,6 +87,7 @@ TORCH_MODULE(TransformerEncoder);
 /// const auto tgt = torch::rand({20, 32, 512});
 /// auto out = transformer_decoder(tgt, memory);
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API TransformerDecoderImpl : public Cloneable<TransformerDecoderImpl> {
 
   public:

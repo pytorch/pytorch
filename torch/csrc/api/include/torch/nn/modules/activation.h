@@ -220,6 +220,7 @@ TORCH_MODULE(LogSigmoid);
 /// ```
 /// Softmax model(SoftmaxOptions(1));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API SoftmaxImpl : public torch::nn::Cloneable<SoftmaxImpl> {
  public:
   explicit SoftmaxImpl(int64_t dim) : SoftmaxImpl(SoftmaxOptions(dim)) {}
@@ -255,6 +256,7 @@ TORCH_MODULE(Softmax);
 /// ```
 /// Softmin model(SoftminOptions(1));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API SoftminImpl : public torch::nn::Cloneable<SoftminImpl> {
  public:
   explicit SoftminImpl(int64_t dim) : SoftminImpl(SoftminOptions(dim)) {}
@@ -290,6 +292,7 @@ TORCH_MODULE(Softmin);
 /// ```
 /// LogSoftmax model(LogSoftmaxOptions(1));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LogSoftmaxImpl : public torch::nn::Cloneable<LogSoftmaxImpl> {
  public:
   explicit LogSoftmaxImpl(int64_t dim) : LogSoftmaxImpl(LogSoftmaxOptions(dim)) {}
@@ -755,6 +758,7 @@ TORCH_MODULE(Tanhshrink);
 /// ```
 /// Threshold model(ThresholdOptions(42.42, 24.24).inplace(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ThresholdImpl : public torch::nn::Cloneable<ThresholdImpl> {
  public:
   ThresholdImpl(double threshold, double value)
@@ -792,6 +796,7 @@ TORCH_MODULE(Threshold);
 /// ```
 /// MultiheadAttention model(MultiheadAttentionOptions(20, 10).bias(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API MultiheadAttentionImpl
   : public torch::nn::Cloneable<MultiheadAttentionImpl> {
  public:

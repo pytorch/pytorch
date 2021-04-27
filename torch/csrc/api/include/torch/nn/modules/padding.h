@@ -187,6 +187,7 @@ TORCH_MODULE(ReplicationPad3d);
 /// ```
 /// ZeroPad2d model(ZeroPad2dOptions({1, 1, 2, 0}));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ZeroPad2dImpl : public Cloneable<ZeroPad2dImpl> {
  public:
   ZeroPad2dImpl(ExpandingArray<4> padding)

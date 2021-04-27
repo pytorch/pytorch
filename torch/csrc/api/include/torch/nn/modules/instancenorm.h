@@ -38,6 +38,7 @@ class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNorm
 /// ```
 class TORCH_API InstanceNorm1dImpl : public InstanceNormImpl<1, InstanceNorm1dImpl> {
  protected:
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void _check_input_dim(const Tensor& input) override;
 
  public:
@@ -66,6 +67,7 @@ TORCH_MODULE(InstanceNorm1d);
 /// ```
 class TORCH_API InstanceNorm2dImpl : public InstanceNormImpl<2, InstanceNorm2dImpl> {
  protected:
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void _check_input_dim(const Tensor& input) override;
 
  public:
@@ -94,6 +96,7 @@ TORCH_MODULE(InstanceNorm2d);
 /// ```
 class TORCH_API InstanceNorm3dImpl : public InstanceNormImpl<3, InstanceNorm3dImpl> {
  protected:
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void _check_input_dim(const Tensor& input) override;
 
  public:

@@ -27,9 +27,11 @@ struct TORCH_API TransformerEncoderLayerOptions {
   TORCH_ARG(int64_t, nhead);
 
   /// the dimension of the feedforward network model, default is 2048
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, dim_feedforward) = 2048;
 
   /// the dropout value, default is 0.1
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, dropout) = 0.1;
 
   /// the activation function of intermediate layer, either ``torch::kReLU`` or ``torch::GELU``, default is ``torch::kReLU``
@@ -58,9 +60,11 @@ struct TORCH_API TransformerDecoderLayerOptions {
   TORCH_ARG(int64_t, nhead);
 
   /// dimension of the feedforward network model. Default: 2048
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, dim_feedforward) = 2048;
 
   /// dropout value. Default: 1
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, dropout) = 0.1;
 
   /// activation function of intermediate layer, can be either ``torch::kGELU`` or ``torch::kReLU``. Default: ``torch::kReLU``

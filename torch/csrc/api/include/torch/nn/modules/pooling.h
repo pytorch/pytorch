@@ -560,6 +560,7 @@ TORCH_MODULE(MaxUnpool3d);
 /// ```
 /// FractionalMaxPool2d model(FractionalMaxPool2dOptions(5).output_size(1));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FractionalMaxPool2dImpl : public torch::nn::Cloneable<FractionalMaxPool2dImpl> {
  public:
   FractionalMaxPool2dImpl(ExpandingArray<2> kernel_size)
@@ -603,6 +604,7 @@ TORCH_MODULE(FractionalMaxPool2d);
 /// ```
 /// FractionalMaxPool3d model(FractionalMaxPool3dOptions(5).output_size(1));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FractionalMaxPool3dImpl : public torch::nn::Cloneable<FractionalMaxPool3dImpl> {
  public:
   FractionalMaxPool3dImpl(ExpandingArray<3> kernel_size)

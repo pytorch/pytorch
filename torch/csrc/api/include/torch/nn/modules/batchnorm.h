@@ -91,6 +91,7 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
 
   Tensor forward(const Tensor& input) {
     this->_check_input_dim(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double exponential_average_factor;
     if (this->options.momentum() == c10::nullopt) {
       exponential_average_factor = 0.0;
@@ -139,6 +140,7 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
 /// ```
 class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
  protected:
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void _check_input_dim(const Tensor& input) override;
 
  public:
@@ -167,6 +169,7 @@ TORCH_MODULE(BatchNorm1d);
 /// ```
 class TORCH_API BatchNorm2dImpl : public BatchNormImplBase<2, BatchNorm2dImpl> {
  protected:
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void _check_input_dim(const Tensor& input) override;
 
  public:
@@ -195,6 +198,7 @@ TORCH_MODULE(BatchNorm2d);
 /// ```
 class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
  protected:
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual void _check_input_dim(const Tensor& input) override;
 
  public:

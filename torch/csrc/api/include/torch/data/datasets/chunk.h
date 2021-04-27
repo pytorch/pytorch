@@ -249,6 +249,7 @@ struct ChunkDatasetOptions {
   ChunkDatasetOptions(
       size_t preloader_count,
       size_t batch_size,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       size_t cache_size = 2048,
       size_t cross_chunk_shuffle_count = 1)
       : preloader_count_(preloader_count),
@@ -280,6 +281,7 @@ struct ChunkDatasetOptions {
   TORCH_ARG(size_t, batch_size);
 
   /// The capacity of the queue for batch caching.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(size_t, cache_size) = 2048;
 
   // The number of chunks to perfrom cross-chunk shuffling. Default to 1 meaning
@@ -328,6 +330,7 @@ class ChunkDataset final
       : chunk_reader_(std::move(chunk_reader)),
         chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         options_(std::move(options)),
         preprocessing_policy_(preprocessing_policy),
         quit_worker_(false),
