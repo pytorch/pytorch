@@ -1687,6 +1687,24 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
+def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
+    shapes_and_axes = [
+        ((3, 4, 5), 0),
+        ((3, 4, 5), 1),
+        ((3, 4, 5), 3),
+        ((3, 4, 5), -1),
+        ((3, 4, 5), -3),
+        ((), 0)
+    ]
+
+    samples = []
+    for shape, axis in shapes_and_axes:
+        tensor = make_tensor(shape, device, dtype, low=None, high=None,
+                             requires_grad=requires_grad)
+        samples.append(SampleInput(tensor, args=(axis,),))
+
+    return samples
+
 # TODO: reconcile with torch.linalg.det and torch.linalg.slogdet
 # Creates matrices with a positive nonzero determinant
 def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
@@ -5269,6 +5287,11 @@ op_db: List[OpInfo] = [
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
                   supports_out=False,
                   sample_inputs_func=sample_repeat_tile),
+    OpInfo('unsqueeze',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           assert_autodiffed=True,
+           sample_inputs_func=sample_unsqueeze),
     OpInfo('var',
            dtypes=floating_types_and(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -5819,10 +5842,6 @@ def method_tests():
         ('squeeze', (S, 1, S, 1), (1,), '1_dim', (True,), [0]),
         ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim', (True,), [0]),
         ('squeeze', (), (0,), 'scalar', (True,), [0]),
-        ('unsqueeze', (S, S, S), (0,), 'first', (True,), [0]),
-        ('unsqueeze', (S, S, S), (1,), 'middle', (True,), [0]),
-        ('unsqueeze', (S, S, S), (3,), 'last', (True,), [0]),
-        ('unsqueeze', (), (0,), 'scalar', (True,), [0]),
         ('chunk', (S, S, S), (2,), '', (True, 'prim::ConstantChunk')),
         ('chunk', (S, S, S), (S, 1), 'dim', (True, 'prim::ConstantChunk'), [1]),
         ('split', (S, S, S), (2,), '', (True,)),
