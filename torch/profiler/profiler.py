@@ -296,7 +296,7 @@ class profile(object):
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
 
-    def export_chrome_trace(self, path: str, use_gzip: bool=False):
+    def export_chrome_trace(self, path: str, use_gzip: bool = False):
         """
         Exports the collected trace in Chrome JSON format.
         """
