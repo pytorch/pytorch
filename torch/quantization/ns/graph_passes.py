@@ -11,6 +11,7 @@ from .utils import (
     return_first_non_observer_node,
     get_number_of_non_param_args,
     get_target_type_str,
+    get_arg_indices_of_inputs_to_log,
 )
 
 from .ns_types import (
@@ -34,6 +35,7 @@ def _insert_logger_after_node(
     ref_name: str,
     results_type: str,
     index_within_arg: int,
+    index_of_arg: int,
 ) -> Node:
     """
     Given a starting graph of
@@ -52,7 +54,7 @@ def _insert_logger_after_node(
     # create the logger object
     logger_obj = logger_cls(
         ref_node_name, node.name, model_name, ref_name, target_type,
-        results_type, index_within_arg)
+        results_type, index_within_arg, index_of_arg)
     # attach the logger object to the parent module
     setattr(gm, logger_node_name, logger_obj)
     logger_node = node.graph.create_node(
@@ -95,23 +97,32 @@ def remove_observers_add_loggers(
 
             if node in node_to_instrument_inputs_to_ref_node_name:
                 ref_name = node_to_instrument_inputs_to_ref_node_name[node]
-                if type(node.args[0]) == Node:
-                    # create a single input logger
-                    prev_node = env[node.args[0].name]
-                    env[node.args[0].name] = _insert_logger_after_node(
-                        prev_node, gm, logger_cls, '_ns_logger_', node.name,
-                        model_name, ref_name, NSSingleResultValuesType.NODE_INPUT.value,
-                        index_within_arg=0)
-                elif type(node.args[0]) == torch.fx.immutable_collections.immutable_list:
-                    # create N input loggers, one for each node
-                    for arg_idx, arg in enumerate(node.args[0]):
-                        prev_node = env[arg.name]
-                        env[prev_node.name] = _insert_logger_after_node(
+                # Ops such add and mul are special because either
+                # one or two of the first two arguments can be tensors,
+                # and if one argument is a tensor it can be first or
+                # second (x + 1 versus 1 + x).
+                arg_indices_to_log = get_arg_indices_of_inputs_to_log(node)
+                for node_arg_idx in arg_indices_to_log:
+                    node_arg = node.args[node_arg_idx]
+                    if type(node_arg) == Node:
+                        # create a single input logger
+                        prev_node = env[node_arg.name]
+                        env[node_arg.name] = _insert_logger_after_node(
                             prev_node, gm, logger_cls, '_ns_logger_', node.name,
-                            model_name, ref_name, NSSingleResultValuesType.NODE_INPUT.value,
-                            index_within_arg=arg_idx)
-                else:
-                    raise AssertionError(f"type {type(node.args[0])} is not handled yet")
+                            model_name, ref_name,
+                            NSSingleResultValuesType.NODE_INPUT.value,
+                            index_within_arg=0, index_of_arg=node_arg_idx)
+                    elif type(node_arg) == torch.fx.immutable_collections.immutable_list:
+                        # create N input loggers, one for each node
+                        for arg_idx, arg in enumerate(node_arg):
+                            prev_node = env[arg.name]
+                            env[prev_node.name] = _insert_logger_after_node(
+                                prev_node, gm, logger_cls, '_ns_logger_', node.name,
+                                model_name, ref_name,
+                                NSSingleResultValuesType.NODE_INPUT.value,
+                                index_within_arg=arg_idx, index_of_arg=node_arg_idx)
+                    else:
+                        pass
 
             # ensure env is populated with base node
             # Note: runs for both inputs and outputs
@@ -123,7 +134,7 @@ def remove_observers_add_loggers(
                 env[node.name] = _insert_logger_after_node(
                     env[node.name], gm, logger_cls, '_ns_logger_', node.name,
                     model_name, ref_name, NSSingleResultValuesType.NODE_OUTPUT.value,
-                    index_within_arg=0)
+                    index_within_arg=0, index_of_arg=0)
 
         else:
             env[node.name] = new_graph.node_copy(node, load_arg)
@@ -532,7 +543,7 @@ def create_a_shadows_b(
                             prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
                             node_b.name, name_b, ref_name,
                             NSSingleResultValuesType.NODE_INPUT.value,
-                            index_within_arg=0)
+                            index_within_arg=0, index_of_arg=0)
                     elif isinstance(node_b.args[0], list):
                         # first, save the prev_node instances, because they
                         # will be overwritten in the env after the first logger
@@ -545,7 +556,7 @@ def create_a_shadows_b(
                                 prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
                                 node_b.name, name_b, ref_name,
                                 NSSingleResultValuesType.NODE_INPUT.value,
-                                index_within_arg=arg_idx)
+                                index_within_arg=arg_idx, index_of_arg=0)
                     else:
                         # logging of inputs which are not lists is not supported yet
                         raise AssertionError(f"type {type(node_b.args[0])} is not handled yet")
@@ -603,7 +614,7 @@ def create_a_shadows_b(
                             dtype_cast_node, gm_b, logger_cls, '_ns_logger_a_inp_',
                             ref_node_name, name_a, ref_name,
                             NSSingleResultValuesType.NODE_INPUT.value,
-                            index_within_arg=0)
+                            index_within_arg=0, index_of_arg=0)
                         input_logger: Union[Node, List[Node]] = dtype_cast_node
                     else:
                         assert isinstance(dtype_cast_node, list)
@@ -613,7 +624,8 @@ def create_a_shadows_b(
                                 dtype_cast_node_inner, gm_b, logger_cls, '_ns_logger_a_inp_',
                                 ref_node_name, name_a, ref_name,
                                 NSSingleResultValuesType.NODE_INPUT.value,
-                                index_within_arg=dtype_cast_idx)
+                                index_within_arg=dtype_cast_idx,
+                                index_of_arg=0)
                             new_loggers.append(dtype_cast_logger)
                         dtype_cast_node = new_loggers
                         input_logger = dtype_cast_node
@@ -670,7 +682,7 @@ def create_a_shadows_b(
                     env_c[node_a_shadows_c.name], gm_b, logger_cls, '_ns_logger_a_',
                     node_a_shadows_c.name, name_a, ref_name,
                     NSSingleResultValuesType.NODE_OUTPUT.value,
-                    index_within_arg=0)
+                    index_within_arg=0, index_of_arg=0)
                 # subgraph so far:
                 #
                 #       dtype_cast_node -> (logger_a_input)? -> subgraph_a_copy -> logger_a
@@ -684,7 +696,7 @@ def create_a_shadows_b(
                     env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_',
                     node_b.name, name_b, ref_name,
                     NSSingleResultValuesType.NODE_OUTPUT.value,
-                    index_within_arg=0)
+                    index_within_arg=0, index_of_arg=0)
                 # subgraph so far:
                 #
                 #       dtype_cast_node -> (logger_a_input)? -> subgraph_a_copy -> logger_a
