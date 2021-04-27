@@ -2,17 +2,11 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/backport.h>
-#include <torch/csrc/jit/mobile/interpreter.h>
-#include <torch/csrc/jit/mobile/observer.h>
-#include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/serialization/import_export_constants.h>
-#include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
-#include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
 
 #include <exception>
-#include <fstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -26,7 +20,6 @@ namespace jit {
 
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
-using caffe2::serialize::PyTorchStreamWriter;
 using caffe2::serialize::ReadAdapterInterface;
 
 namespace {
@@ -62,27 +55,7 @@ TypePtr resolveTypeName(
 c10::IValue readArchive(
     const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit,
-    std::unique_ptr<PyTorchStreamReader>& stream_reader) {
-  std::stringstream picklename;
-  picklename << archive_name << ".pkl";
-  at::DataPtr pickle_ptr;
-  size_t pickle_size = 0;
-  std::tie(pickle_ptr, pickle_size) =
-      stream_reader->getRecord(picklename.str());
-
-  size_t bytes_read = 0;
-  auto data = reinterpret_cast<const char*>(pickle_ptr.get());
-  auto reader = [&](char* buffer, size_t len) -> size_t {
-    if (bytes_read >= pickle_size) {
-      return 0;
-    }
-    len = std::min(pickle_size - bytes_read, len);
-    // Copy len bytes into buffer
-    const char* start = data + bytes_read;
-    std::memcpy(buffer, start, len);
-    bytes_read += len;
-    return len;
-  };
+    PyTorchStreamReader& stream_reader) {
   std::shared_ptr<CompilationUnit> jit_compilation_unit =
       std::make_shared<CompilationUnit>();
   auto type_resolver = [&](const c10::QualifiedName& qn) {
@@ -129,43 +102,11 @@ c10::IValue readArchive(
     }
   };
 
-  static const std::string slash = "/";
-  auto read_record = [&](const std::string& name) {
-    std::size_t found = name.find(slash);
-    std::stringstream ss;
-    // In version 4, the tensor root_key doesn't include the parent path
-    // To support backward compatibility, when the name doesn't include slash
-    // assume it's version 4 and attach the archive_name_plus_slash
-    // The example tensor format is:
-    // torch._utils._rebuild_tensor_v2(
-    //     pers.obj(('storage', torch.FloatStorage, '17', 'cpu', 22736),),
-    //     0,
-    //     (1, 464, 7, 7),
-    //     (22736, 49, 7, 1),
-    //     False,
-    //     collections.OrderedDict())
-    if (found == std::string::npos) {
-      ss << archive_name << slash << name;
-      return std::get<0>(stream_reader->getRecord(ss.str()));
-    }
-
-    // In version 4+, the tensor root_key in bytecode will include the parent
-    // path. The example tensor format is: torch._utils._rebuild_tensor_v2(
-    //     pers.obj(('storage', torch.FloatStorage, 'constants/17', 'cpu',
-    //     22736),), 0, (1, 464, 7, 7), (22736, 49, 7, 1), False,
-    //     collections.OrderedDict())
-    ss << name;
-    return std::get<0>(stream_reader->getRecord(ss.str()));
-  };
   c10::optional<at::Device> device;
 
-  Unpickler unpickler(
-      reader,
-      std::move(type_resolver),
-      std::move(obj_loader),
-      std::move(read_record),
-      device);
-  return unpickler.parse_ivalue();
+  auto ivalues = torch::jit::readArchiveAndTensors(
+      archive_name, type_resolver, obj_loader, device, stream_reader);
+  return ivalues;
 }
 
 TensorIndexMap get_tensors_archive_table(const IValue& value) {
@@ -278,8 +219,10 @@ void check_zip_file(std::shared_ptr<ReadAdapterInterface>& rai) {
     // which begins with 0x04034b50. Furthermore, PyTorch will never produce zip
     // files that do not start with the file entry, so it is relatively safe to
     // perform this check.
-    TORCH_CHECK(false, "file issue");
+    TORCH_WARN("The zip file might be problematic. Please check it again.");
+    return true;
   }
+  return false;
 }
 
 std::vector<IValue> get_bytecode_vals(
@@ -507,8 +450,7 @@ int64_t _get_bytecode_version(const std::string& filename) {
 
 int64_t _get_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
   auto mobile_compilation_unit = std::make_shared<mobile::CompilationUnit>();
-  auto reader = torch::make_unique<caffe2::serialize::PyTorchStreamReader>(
-      std::move(rai));
+  PyTorchStreamReader reader(std::move(rai));
   auto bvals = get_bytecode_vals(mobile_compilation_unit, reader);
   if (!bvals.empty() && bvals[0].isInt()) {
     int64_t model_version = bvals[0].toInt();
