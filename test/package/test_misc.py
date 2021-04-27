@@ -6,7 +6,7 @@ from textwrap import dedent
 from unittest import skipIf
 
 from torch.package import PackageExporter, PackageImporter, is_from_package
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, IS_FBCODE, IS_SANDCASTLE
 
 try:
     from .common import PackageTestCase
@@ -217,6 +217,7 @@ class TestMisc(PackageTestCase):
         self.assertTrue(imported_mod.is_from_package())
         self.assertFalse(mod.is_from_package())
 
+    @skipIf(IS_FBCODE or IS_SANDCASTLE, "yaml not available in fbcode")
     def test_broken_modules(self):
         """
         When created with raise_packaging_errors=True, PackageExporter
