@@ -296,7 +296,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // root_key
   std::string root_key = (get_tensor_id_ == nullptr)
       ? c10::to_string(tensor_data_.size())
-      : get_tensor_id_();
+      : get_tensor_id_(tensor);
   pushString(root_key);
   // location
   pushString(tensor.device().str());
