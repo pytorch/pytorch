@@ -1215,7 +1215,7 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
       m, "Future")
-      .def(py::init([](std::vector<c10::DeviceIndex> devices = {}) {
+      .def(py::init([](std::vector<c10::Device> devices = {}) {
         c10::intrusive_ptr<c10::ivalue::Future> fut;
 #ifdef USE_CUDA
         if (devices.empty()) {

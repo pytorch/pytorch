@@ -16,7 +16,7 @@ namespace cuda {
 
 struct TORCH_CUDA_CPP_API CUDAFuture final : at::ivalue::Future {
  public:
-  CUDAFuture(at::TypePtr type, std::vector<c10::DeviceIndex> devices);
+  CUDAFuture(at::TypePtr type, std::vector<c10::Device> devices);
 
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) override;
 

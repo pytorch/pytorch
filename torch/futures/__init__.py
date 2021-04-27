@@ -34,13 +34,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         if devices is None:
             devices = []
-        device_indices = []
-        for d in devices:
-            d = torch.device(d)
-            if d.type != "cuda":
-                raise ValueError(f"Expected CUDA devices, got {d}")
-            device_indices.append(d.index)
-        super().__init__(device_indices)
+        super().__init__([torch.device(d) for d in devices])
 
     def done(self) -> bool:
         r"""

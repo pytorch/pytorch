@@ -289,8 +289,13 @@ class TensorPipeAgent : public RpcAgent {
         bool noCuda = true) {
 #ifdef USE_CUDA_NOT_ROCM
       if (!noCuda) {
+        std::vector<c10::Device> fullDevices;
+        fullDevices.reserve(devices.size());
+        for (const c10::DeviceIndex index : devices) {
+          fullDevices.emplace_back(c10::kCUDA, index);
+        }
         jitFuture = std::make_shared<at::cuda::CUDAFuture>(
-            at::AnyClassType::get(), devices);
+            at::AnyClassType::get(), std::move(fullDevices));
       } else {
 #else
       {
