@@ -39,14 +39,14 @@ struct C10_API PODLocalDispatchKeySet {
     return DispatchKeySet(DispatchKeySet::RAW, included_) ^ c10::default_included_set;
   }
   DispatchKeySet excluded() const {
-    return DispatchKeySet(DispatchKeySet::RAW, excluded_);
+    return DispatchKeySet(DispatchKeySet::RAW, excluded_) ^ c10::default_excluded_set;
   }
 
   void set_included(DispatchKeySet x) {
     included_ = (x ^ c10::default_included_set).raw_repr();
   }
   void set_excluded(DispatchKeySet x) {
-    excluded_ = x.raw_repr();
+    excluded_ = (x ^ c10::default_excluded_set).raw_repr();
   }
 };
 static_assert(std::is_pod<PODLocalDispatchKeySet>::value, "PODLocalDispatchKeySet must be a POD type.");
