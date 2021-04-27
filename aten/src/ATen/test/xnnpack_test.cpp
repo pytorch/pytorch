@@ -5,6 +5,7 @@
 
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/native/xnnpack/Common.h>
+#include <ATen/native/xnnpack/Pooling.h>
 
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 
@@ -37,6 +38,12 @@ void test_hardswish_(at::Tensor input, const at::Tensor& expected) {
   ASSERT_TRUE(check);
 }
 
+void test_global_average_pool(at::Tensor input, const at::Tensor& expected) {
+  ASSERT_TRUE(at::native::xnnpack::use_global_average_pool(input));
+  auto result = at::native::xnnpack::global_average_pool(input);
+  auto check = almostEqual(expected, result);
+  ASSERT_TRUE(check);
+}
 
 // Since XNNPACK path is only taken #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 // We can't compare regular CPU path with XNNPACK path in the same test binary
@@ -70,4 +77,48 @@ TEST(TestXNNPackOps, TestHardSwish) {
   }
 }
 
+TEST(TestXNNPackOps, TestGlobal) {
+  // input, expected_result pair
+  std::vector<std::pair<at::Tensor, at::Tensor>> input_result_pairs = {
+    {
+      torch::tensor({{
+        {{0.0852, 0.7312, 0.9943, 0.7105},
+        {0.0956, 0.9072, 0.3124, 0.9362},
+        {0.5878, 0.8883, 0.5086, 0.9494}},
+        {{0.1056, 0.4968, 0.7740, 0.7593},
+        {0.8519, 0.3543, 0.8078, 0.5517},
+        {0.1413, 0.4608, 0.1706, 0.0314}}
+      }}, {torch::kFloat32}),
+      torch::tensor({{
+        {{0.6422}},
+        {{0.4588}}
+      }}, {torch::kFloat32})
+    },
+    {
+      torch::tensor({{
+          {{0.0280, 0.9073},
+          {0.2103, 0.5298}},
+          {{0.5335, 0.9901},
+          {0.2902, 0.2955}}
+        },
+        {
+          {{0.2363, 0.7024},
+          {0.7903, 0.8260}},
+          {{0.3802, 0.5959},
+          {0.5749, 0.8855}}
+        }}, {torch::kFloat32}),
+        torch::tensor(
+          {{{{0.4188}},
+          {{0.5273}}},
+          {{{0.6388}},
+          {{0.6091}}}},
+          {torch::kFloat32}
+        )
+    }
+  };
+
+  for (const auto& input_result : input_result_pairs) {
+    test_global_average_pool(input_result.first, input_result.second);
+  }
+}
 #endif
