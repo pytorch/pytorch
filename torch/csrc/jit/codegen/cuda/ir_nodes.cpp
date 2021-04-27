@@ -523,12 +523,6 @@ IterDomain::IterDomain(
       extent,
       " .");
 
-  TORCH_INTERNAL_ASSERT(
-      !extent->isZeroInt(),
-      "Cannot create an iter domain with a extent that is zero but received ",
-      extent,
-      " .");
-
   name_ = fusion_->registerVal(this);
 }
 
@@ -563,6 +557,9 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
   TORCH_CHECK(
       outer->start()->isZeroInt() && inner->start()->isZeroInt(),
       "Merging IterDomains with starting values that aren't 0 is not supported at this time.");
+  TORCH_CHECK(
+      !outer->extent()->isZeroInt() && !inner->extent()->isZeroInt(),
+      "Merging IterDomains with ending values that are 0 is not supported at this time.");
   TORCH_CHECK(
       outer->isReduction() == inner->isReduction() ||
           (!outer->isReduction() && inner->extent()->isOneInt()) ||
@@ -610,6 +607,10 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   TORCH_CHECK(
       in->start()->isZeroInt(),
       "Splitting IterDomains with starting values that aren't 0 is not supported at this time.");
+
+  TORCH_CHECK(
+      !in->extent()->isZeroInt(),
+      "Splitting IterDomains with ending values that are 0 is not supported at this time.");
 
   TORCH_CHECK(factor->isAnInt(), "Cannot split by non-integer value ", factor);
 

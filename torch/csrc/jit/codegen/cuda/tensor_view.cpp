@@ -995,7 +995,7 @@ TensorView* TensorViewBuilder::build() const {
       domain[i] = new IterDomain(new Int(0), new Int());
     } else {
       TORCH_CHECK(
-          shape_[i] > 0,
+          shape_[i] >= 0,
           "Invalid extent value. ",
           "For a tensor representing a single scalar use ndims = 0 with no sizes set.");
       domain[i] = new IterDomain(new Int(0), new Int(shape_[i]));
