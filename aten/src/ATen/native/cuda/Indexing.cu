@@ -14,13 +14,12 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCGeneral.h>
-#include <THC/THCTensorSort.cuh>
+#include <THC/THCTensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCThrustAllocator.cuh>
-#include <thrust/execution_policy.h>
-#include <thrust/sort.h>
+#include <ATen/cuda/cub.cuh>
 #include <THC/THCAtomics.cuh>
 
+#include <limits>
 
 #include <c10/macros/Macros.h>
 
@@ -183,7 +182,18 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
 }
 
 
+void index_put_accum_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_indices, Tensor &sorted_indices, int64_t num_indices);
+
 namespace {
+
+int64_t largestIndex(const Tensor &self) {
+  int64_t result = 0;
+  for (int64_t i = 0; i < self.dim(); i++) {
+    result += (self.sizes()[i] - 1) * self.strides()[i];
+  }
+  return result;
+}
+
 void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
@@ -194,34 +204,40 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
   std::vector<int64_t> inversePerm;
   std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices, !unsafe);
   int64_t num_indices = linearIndex.numel();
+
+  TORCH_CHECK(num_indices <= std::numeric_limits<int>::max(),
+    "index_put of tensors larger than INT_MAX is not supported yet in pytorch");
+
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
       auto src_ = permuted ? src.contiguous() : src;
       linearIndex = linearIndex.reshape(-1);
       auto sorted_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       auto orig_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      using device_ptr = thrust::device_ptr<int64_t>;
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
       linearIndex.divide_(sliceSize, "trunc");
+
+      // cub on CUDA <= 11.2 have a bug that for small sizes
+      // cub's sort can be much slower than thrust's merge sort
+      // this bug is fixed in CUDA 11.3
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11030
+      if (num_indices < 50000) {
+        index_put_accum_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
+      } else
+#endif
       {
-      sorted_indices.copy_(linearIndex);
-      auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-      auto policy = thrust::cuda::par(allocator).on(stream);
-
-      // Fill sortedOrigIndices with sequential indices
-      const auto count_iter = thrust::counting_iterator<int64_t>(0);
-      auto orig_data = device_ptr(orig_indices.data_ptr<int64_t>());
-      thrust::copy(policy, count_iter, count_iter + num_indices, orig_data);
-
-      // Sort the inputs into sorted with the corresponding indices; we
-      // don't need a stable or multidimensional sort, so just use Thrust
-      // directly
-      // Sort; a stable sort is not required
-      // NB - not passing comparator causes thrust to use radix sort, and it hurts perf A LOT, at least for medium (few K) sized indices
-      auto sorted_data = device_ptr(sorted_indices.data_ptr<int64_t>());
-      thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
+      // Sort the inputs into sorted with the corresponding indices
+      auto range = at::arange(num_indices, linearIndex.options());
+      // linearIndex can not be negative, and we take advantage of this
+      // fact to sort on less bits for better performance.
+      int64_t nbits = cuda::cub::get_num_bits(largestIndex(self) / sliceSize);
+      cuda::cub::sort_pairs(
+        linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
+        range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
+        num_indices, false, 0, nbits);
       }
+
       TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
       const int UNROLL = 4;
       const int indices_per_block = 4;
@@ -430,9 +446,6 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
 }
 
 Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("index_add_cuda_");
   dim = maybe_wrap_dim(dim, self.dim());
 
   TensorArg self_arg{self, "self", 1}, index_arg{index, "index", 3}, source_arg{source, "source", 4};
@@ -462,6 +475,16 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   at::assert_no_internal_overlap(self);
   at::assert_no_partial_overlap(self, index);
   at::assert_no_partial_overlap(self, source);
+
+  if (globalContext().deterministicAlgorithms()){
+    torch::List<c10::optional<Tensor>> indices;
+    indices.reserve(dim + 1);
+    for (int64_t i = 0; i < dim; i++) {
+      indices.emplace_back();
+    }
+    indices.emplace_back(index);
+    return self.index_put_(indices, source * alpha, true);
+  }
 
   // The `source` is partitioned into two parts:
   // -the size of each slice we are indexing, which is the
