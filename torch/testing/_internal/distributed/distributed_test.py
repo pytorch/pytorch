@@ -4409,7 +4409,7 @@ class DistributedTest:
 
             # Determine num iters for this rank via the passed in mapping.
             num_iters = iteration_mapping[rank]
-             # If we throw StopIteration when earliest rank terminates, we should ensure
+            # If we throw StopIteration when earliest rank terminates, we should ensure
             # that we iterate for that minimum number of times.
             num_iters_tensor = torch.tensor([num_iters], device=torch.cuda.current_device())
             dist.all_reduce(num_iters_tensor, op=dist.ReduceOp.MIN)
@@ -4417,15 +4417,15 @@ class DistributedTest:
             total_iters = 0
             if test_case.throw_on_early_termination:
                 if min_num_iters == num_iters:
-                    # Early termination rank
+                    # Early termination rank(s)
                     exception_ctx = self.assertRaisesRegex(
-                        RuntimeError, "generator raised StopIteration"
+                        RuntimeError, f"Rank {self.rank} exhausted all inputs"
                     )
                 else:
                     # Non early termination rank
                     exception_ctx = self.assertRaisesRegex(
-                        StopIteration,
-                        "Detected at least one rank that exhausted inputs. Throwing StopIteration across all ranks.",
+                        RuntimeError,
+                        "Detected at least one rank that exhausted inputs."
                     )
             else:
                 exception_ctx = suppress()
