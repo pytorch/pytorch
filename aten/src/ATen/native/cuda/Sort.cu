@@ -38,7 +38,7 @@ constexpr T get_padding_value() {
     if /*constexpr*/ (descending) {
       return -limit::infinity();
     } else {
-      return limit::infinity();
+      return limit::quiet_NaN();
     }
   } else {
     if /*constexpr*/ (descending) {
