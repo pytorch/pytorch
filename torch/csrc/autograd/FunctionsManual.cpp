@@ -119,12 +119,6 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
-static Tensor wrapped_scalar_tensor(const Scalar& scalar) {
-  auto tensor = scalar_to_tensor(scalar);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
 Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
   if (!at::isComplexType(self_st) && gradient_result.is_complex()) {
     // R -> C
@@ -392,12 +386,12 @@ Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
 
 Tensor rad2deg_backward(const Tensor& grad) {
   constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
-  return at::mul(grad, wrapped_scalar_tensor(Scalar(M_180_PI)));
+  return at::mul(grad, at::native::wrapped_scalar_tensor(Scalar(M_180_PI)));
 }
 
 Tensor deg2rad_backward(const Tensor& grad) {
   constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
-  return at::mul(grad, wrapped_scalar_tensor(Scalar(M_PI_180)));
+  return at::mul(grad, at::native::wrapped_scalar_tensor(Scalar(M_PI_180)));
 }
 
 Tensor unsqueeze_multiple(const Tensor & t, IntArrayRef dim, size_t n_dims) {
@@ -3096,6 +3090,11 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
   return grad / (self + 1).conj();
 }
 
+Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
+  auto out = grad * ((M_PI * self * (M_PI * self).cos() - (M_PI * self).sin()) / (M_PI * self * self)).conj();
+  return at::where(self == 0.0, at::zeros({}, grad.options()), out);
+}
+
 Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices) {
   return _sparse_mask_helper(sparse_grad_out.coalesce(), indices.contiguous());
 }
@@ -3130,7 +3129,7 @@ Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, cons
   if (zero_infinity) {
     return at::where(
         loss.unsqueeze(0).unsqueeze(2) == 0,
-        at::zeros({0}, raw_grad.options()),
+        at::zeros({}, raw_grad.options()),
         raw_grad * grad_out.unsqueeze(0).unsqueeze(2));
   } else {
     return raw_grad * grad_out.unsqueeze(0).unsqueeze(2);
