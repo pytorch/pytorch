@@ -1,13 +1,13 @@
 import torch
-import io
 
-from torch.jit.mobile import _load_for_lite_interpreter, _get_bytecode_version, _backport_for_mobile_to_buffer, _backport_for_mobile, _backport_to_version_for_mobile_to_buffer, _backport_to_version_for_mobile
+from torch.jit.mobile import (
+    _load_for_lite_interpreter,
+    _get_model_bytecode_version,
+    _backport_for_mobile_to_buffer,
+    _backport_for_mobile,
+    _backport_to_version_for_mobile_to_buffer,
+    _backport_to_version_for_mobile)
 from torch.testing._internal.common_utils import TestCase, run_tests
-import pathlib
-import tempfile
-import torch.utils.show_pickle
-import shutil
-import fnmatch
 from pathlib import Path
 
 pytorch_test_dri = Path(__file__).resolve().parents[1]
@@ -95,12 +95,12 @@ SCRIPT_MODULE_V5_BYTECODE_PKL = '''
         '''
 
 class testVariousModelVersions(TestCase):
-    def test_get_bytecode_version(self):
+    def test_get_model_bytecode_version(self):
         script_module_v4 = pytorch_test_dri / "cpp" / "jit" / "script_module_v4.ptl"
         script_module_v5 = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
 
-        version_v4 = _get_bytecode_version(script_module_v4)
-        version_v5 = _get_bytecode_version(script_module_v5)
+        version_v4 = _get_model_bytecode_version(script_module_v4)
+        version_v5 = _get_model_bytecode_version(script_module_v5)
 
         assert(version_v4 == 4)
         assert(version_v5 == 5)
@@ -136,7 +136,7 @@ class testVariousModelVersions(TestCase):
         buffer = _backport_for_mobile_to_buffer(str(script_module_v5))
         buf = io.StringIO()
         bytesio = io.BytesIO(buffer)
-        backport_version = _get_bytecode_version(bytesio)
+        backport_version = _get_model_bytecode_version(bytesio)
         assert(backport_version == 4)
 
 
@@ -185,7 +185,7 @@ class testVariousModelVersions(TestCase):
         buffer = _backport_to_version_for_mobile_to_buffer(script_module_v5, 4)
         buf = io.StringIO()
         bytesio = io.BytesIO(buffer)
-        backport_version = _get_bytecode_version(bytesio)
+        backport_version = _get_model_bytecode_version(bytesio)
         assert(backport_version == 4)
 
 
@@ -208,13 +208,12 @@ class testVariousModelVersions(TestCase):
         script_module_v4 = pytorch_test_dri / "cpp" / "jit" / "script_module_v4.ptl"
         script_module_v5 = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
 
-        # Load model v5 and run forward method
+        # Load model v4 and v5 and run forward method
         jit_module_v4 = torch.jit.load(str(script_module_v4))
         jit_module_v5 = torch.jit.load(str(script_module_v5))
         mobile_module_v4 = _load_for_lite_interpreter(str(script_module_v4))
         mobile_module_v5 = _load_for_lite_interpreter(str(script_module_v5))
 
-        # mobile_module = _load_for_lite_interpreter(str(model_5))
         module_input = 1
         jit_module_v4_result = jit_module_v4(module_input)
         jit_module_v5_result = jit_module_v5(module_input)
