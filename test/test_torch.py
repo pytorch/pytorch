@@ -1132,17 +1132,17 @@ class AbstractTestCases:
                             ii[dim] = idx[i, j, k]
                             if method == 'scatter_add_':
                                 expected[tuple(ii)] += src[i, j, k]
-                            elif not is_scalar:
+                            else:
                                 # method may be 'scatter_' or 'scatter'
                                 # both might have a reduction argument
+                                value = src if is_scalar else src[i, j, k]
+
                                 if reduction == "add":
-                                    expected[tuple(ii)] += src[i, j, k]
+                                    expected[tuple(ii)] += value
                                 elif reduction == "multiply":
-                                    expected[tuple(ii)] *= src[i, j, k]
+                                    expected[tuple(ii)] *= value
                                 else:
-                                    expected[tuple(ii)] = src[i, j, k]
-                            else:
-                                expected[tuple(ii)] = src
+                                    expected[tuple(ii)] = value
 
                 self.assertEqual(actual, expected, atol=0, rtol=0)
 
@@ -1199,12 +1199,12 @@ class AbstractTestCases:
         def test_scatterReduce(self):
             for method in ["add", "multiply"]:
                 self._test_scatter_base(self, lambda t: t, 'scatter', reduction=method)
-                self._test_scatter_base(self, lambda t: t, True, 'scatter', reduction=method)
+                self._test_scatter_base(self, lambda t: t, 'scatter', True, reduction=method)
 
         def test_scatterReduceInplace(self):
             for method in ["add", "multiply"]:
                 self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
-                self._test_scatter_base(self, lambda t: t, True, 'scatter_', reduction=method)
+                self._test_scatter_base(self, lambda t: t, 'scatter_', True, reduction=method)
 
         def test_structseq_repr(self):
             a = torch.arange(250).reshape(5, 5, 10)
