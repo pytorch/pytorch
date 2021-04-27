@@ -1379,6 +1379,8 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
     index_tensor = partial(torch.tensor, device=device, dtype=torch.long)
 
     def unique_idx(numel, max_idx):
+        # Generate unique random indices vector of `numel`
+        # elements in range [0, max_idx).
         indices = random.sample(range(max_idx), numel)
         return index_tensor(indices)
 
