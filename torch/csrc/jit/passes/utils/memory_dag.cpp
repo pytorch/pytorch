@@ -8,6 +8,7 @@
 namespace torch {
 namespace jit {
 namespace {
+
 void makePointerToImpl(Element* from, Element* to) {
   from->pointsTo.set(to->index);
   to->pointedFrom.set(from->index);
@@ -17,7 +18,7 @@ Element* makeFreshValueImpl(
     const Value* v,
     std::vector<std::unique_ptr<Element>>& indexToElementMap_) {
   if (v == nullptr) {
-    // Create a wildcard element, with no corresponding value
+    // Create a Wildcard (an Element with no corresponding Value)
     indexToElementMap_.emplace_back(
         std::make_unique<Element>(indexToElementMap_.size()));
     return indexToElementMap_.back().get();
@@ -131,11 +132,13 @@ Element* MemoryDAGBuilder::makeFreshValue(const Value* v) {
   return makeFreshValueImpl(v, indexToElementMap_);
 }
 
+// This function builds up a bitset representing the "alias set" for
+// `e` (`MemoryLocations` is just a typedef'd c10::SparseBitVector).
 const MemoryLocations& MemoryDAG::getMemoryLocations(const Element* e) const {
   // Note on cache invalidation: all mutation should occur through
-  // MemoryDAGBuilder. Thus, once we consume the builder to create an immutable
-  // MemoryDAG, we can cache here without worrying that we might potentially get
-  // invalidated.
+  // MemoryDAGBuilder. Thus, once we consume the builder to create an
+  // immutable MemoryDAG, we can cache here without worrying that we
+  // might potentially get invalidated.
   if (e->cachedMemoryLocations_) {
     return *e->cachedMemoryLocations_;
   }
@@ -158,26 +161,27 @@ const MemoryLocations& MemoryDAG::getMemoryLocations(const Element* e) const {
 void MemoryDAG::setWildcards(
     const std::unordered_set<const Value*>& wildcards,
     const ska::flat_hash_map<const Value*, Element*>& elementMap,
-    const std::function<Element*(const Value*)>& getWildcardElement) {
+    const std::function<std::vector<Element*>(const Value*)>&
+        getWildcardElement) {
   std::unordered_map<Element*, MemoryLocations> cacheUpdates;
-  // If an element is set as a wildcard, that means that all its memory
-  // locations must point to the wildcard element.
+  // If an Element is set as a Wildcard, that means that all its memory
+  // locations must point to the Wildcard element.
   for (const Value* v : wildcards) {
-    auto wildcardElement = getWildcardElement(v);
-    TORCH_INTERNAL_ASSERT(wildcardElement);
-
-    const MemoryLocations pointeeSet = getMemoryLocations(elementMap.at(v));
-    for (const auto& pointee : pointeeSet) {
-      auto from = this->fromIndex(pointee);
-      // avoid cycles where the wildcard points to itself
-      if (from != wildcardElement) {
-        makePointerToImpl(from, wildcardElement);
+    std::vector<Element*> wildcardElement_list = getWildcardElement(v);
+    MemoryLocations pointeeSet = getMemoryLocations(elementMap.at(v));
+    for (auto wildcardElement : wildcardElement_list) {
+      for (const auto& pointee : pointeeSet) {
+        Element* from = this->fromIndex(pointee);
+        // Avoid cycles where the Wildcard points to itself
+        if (from != wildcardElement) {
+          makePointerToImpl(from, wildcardElement);
+        }
       }
+      // Track which memory locations we edited with a new pointer to the
+      // Wildcard
+      // Element.
+      cacheUpdates[wildcardElement] |= pointeeSet;
     }
-
-    // Track which memory locations we edited with a new pointer to the wildcard
-    // element.
-    cacheUpdates[wildcardElement] |= pointeeSet;
   }
 
   // Update caches in-place.
@@ -193,20 +197,22 @@ void MemoryDAG::setWildcards(
       continue;
     }
 
-    auto wildcardElement = getWildcardElement(*(e->values.begin()));
-    if (!wildcardElement) {
+    auto wildcardElement_List = getWildcardElement(*(e->values.begin()));
+    if (wildcardElement_List.empty()) {
       // This value is not a wildcard.
       continue;
     }
-    auto it = cacheUpdates.find(wildcardElement);
-    if (it == cacheUpdates.end()) {
-      // We didn't rewrite any MemoryLocations to point to this element.
-      continue;
-    }
-    // If this element contains an edited memory location, update the cache to
-    // contain the pointed-to wildcard element as well.
-    if (getMemoryLocations(e.get()).intersects(it->second)) {
-      e->cachedMemoryLocations_->set(wildcardElement->index);
+    for (auto wildcardElement : wildcardElement_List) {
+      auto it = cacheUpdates.find(wildcardElement);
+      if (it == cacheUpdates.end()) {
+        // We didn't rewrite any MemoryLocations to point to this element.
+        continue;
+      }
+      // If this element contains an edited memory location, update the cache to
+      // contain the pointed-to wildcard element as well.
+      if (getMemoryLocations(e.get()).intersects(it->second)) {
+        e->cachedMemoryLocations_->set(wildcardElement->index);
+      }
     }
   }
 }

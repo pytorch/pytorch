@@ -34,6 +34,12 @@ namespace jit {
  * Values that contain other mutable types, such as List[Tensor], are
  * initialized as containing the Wildcard set for all contained mutable types.
  *
+ * The AliasDb API references the idea of "mutable" vs "immutable"
+ * types. "Mutable" means that the object's value can change, while
+ * "immutable" means that the value is fixed. (For example, `List` is
+ * mutable, so you can add and delete elements from it. On the other
+ * hand, you can't modify a Tuple once you create it, making `Tuple` an
+ * immutable container.)
  */
 class AliasDb {
  public:
@@ -53,15 +59,16 @@ class AliasDb {
   bool writesToWildcard(Node* n) const;
 
   // Does `n` write to an alias of one of the values in `vs`?
-  // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
+  // If `recurseBlocks` is true, consider writes on the nodes in `n`s
+  // sub-blocks
   TORCH_API bool writesToAlias(Node* n, const ValueSet& vs) const;
 
-  // Does `a` and `b` potentially share a memory location or do either
-  // hold in memory any element that exists in the other
+  // Do `a` and `b` potentially share a memory location or do either
+  // hold in memory any element that exists in the other?
   TORCH_API bool mayContainAlias(Value* a, Value* b) const;
 
   // Do any values in group `a` share a memory location or hold in memory
-  // any element that exists in group `b`
+  // any element that exists in group `b`?
   TORCH_API bool mayContainAlias(
       const at::ArrayRef<Value*> a,
       const at::ArrayRef<Value*> b) const;
@@ -69,7 +76,7 @@ class AliasDb {
   // Do `a` and `b` potentially share a memory location?
   TORCH_API bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
-  // value in group `b`? i.e. may they overlap?
+  // value in group `b`, i.e. may they overlap?
   TORCH_API bool mayAlias(const ValueSet& a, const ValueSet& b) const;
 
   // Do any nodes write to an alias set input to `n`?
@@ -84,8 +91,8 @@ class AliasDb {
   // Do any nodes write to `v`s memory location?
   TORCH_API bool hasWriters(const Value* v) const;
 
-  // Is the operation in-place? i.e. doesn't write anywhere but locations it
-  // reads from.
+  // Is the operation in-place (doesn't write anywhere but locations it
+  // reads from)?
   TORCH_API bool isMutable(Node* n) const;
 
   TORCH_API bool escapesScope(const at::ArrayRef<Value*>& vs) const;
@@ -97,8 +104,8 @@ class AliasDb {
 
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
-  // Tries to preserve value dependencies, so other nodes might be moved. We
-  // make two guarantees about the postcondition of the node list:
+  // Tries to preserve value dependencies, so other Nodes might be moved. We
+  // make two guarantees about the postcondition of the Node list:
   //   - `n` is directly after `movePoint`.
   //   - only nodes between `n` and `movePoint` have been moved.
   //
@@ -110,7 +117,7 @@ class AliasDb {
   bool couldMoveAfterTopologically(Node* n, Node* movePoint);
   bool couldMoveBeforeTopologically(Node* n, Node* movePoint);
 
-  // For debugging: print alias db state to stdout
+  // For debugging: print AliasDb state to stdout
   TORCH_API void dump() const;
   TORCH_API std::string toString() const;
 
@@ -118,13 +125,17 @@ class AliasDb {
   //
   // Returns `true` if the output file was successfully generated
   //
-  // WARNING: The output dot file path can't include shell specific notations,
-  //  for example you can't use "~/temp/aliasdb.dot"
-  //  (instead, use "/home/user/temp/aliasdb.dot")
+  // WARNING: The output dot file path can't include shell specific notations.
+  // For example, you can't use "~/temp/aliasdb.dot" (use
+  // "/home/user/temp/aliasdb.dot" instead)
   //
   TORCH_API bool dumpToGraphvizFile(const char* filename) const;
   TORCH_API std::string toGraphviz() const;
 
+  // Returns `true` if the given element is mutable or if it is a
+  // container type with an internal mutable element (e.g.
+  // `Tuple[int, Tensor]` has an internal mutable type `Tensor`, so
+  // it would be considered a "mutable type" in AliasDb)
   static bool isMutableType(const Value* v);
   static bool isMutableType(const TypePtr& type);
 
@@ -135,7 +146,7 @@ class AliasDb {
    * graph mutation.
    *
    * WARNING: These methods should be considered INTERNAL. They do not perform
-   * very many correctness checks, the user is responsible for making sure they
+   * many correctness checks, the user is responsible for making sure they
    * are updating AliasDb correctly. `Lint()`ing the AliasDb can help with
    * this.
    */
@@ -181,7 +192,7 @@ class AliasDb {
   // Register `v` as a wildcard value.
   c10::optional<Element*> setWildcard(const Value* v);
 
-  // Is this a value which will not alias
+  // Is this a value which will not alias?
   bool nonAliasingValue(const Value* elem) const;
 
   /**
@@ -239,9 +250,9 @@ class AliasDb {
 
   // Mapping of values to MemoryDAG elements
   ska::flat_hash_map<const Value*, Element*> elementMap_;
-  // All wildcard elements (one for each unique mutable type).
+  // All wildcard elements (one for each unique mutable type)
   std::unordered_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
-  Element* getWildcard(const TypePtr& type) const;
+  std::vector<Element*> getWildcard(const TypePtr& type) const;
   c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
   void addContainedTypesToFreshElement(
       Element* container_elem,
@@ -252,7 +263,8 @@ class AliasDb {
   bool mayAliasWildcard(const at::ArrayRef<Value*> vs) const;
   bool hasWriters(const at::ArrayRef<Value*>& values) const;
 
-  // cached mapping of type ptrs to their mutable types
+  // Cached mapping of any mutable TypePtrs (e.g. `List`, `Dict`,
+  // `Tuple` to their mutable types
   mutable std::unordered_map<TypePtr, TypePtr> mapped_mutable_types_;
 
   /**

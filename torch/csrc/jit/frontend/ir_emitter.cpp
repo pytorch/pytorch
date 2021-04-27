@@ -1658,19 +1658,20 @@ struct to_ir {
         graph->createStore(x, fv)->insertBefore(false_block->return_node());
       }
 
+      auto unified = unifyTypes(tv->type(), fv->type(), /*default_to_union=*/false);
+
       // If the variable we're looking at is known to be Union[T1, T2],
       // then it's okay to have one branch return T1 and the other
-      // return T2
+      // return T2. We need to set `unified` to be the annotated Union
+      // type, not just the result of `unifyTypes`; this covers the case
+      // that we have Union[T1, T2, ..., TN]
       SugaredValuePtr true_val = save_true->findInParentFrame(x);
       SugaredValuePtr false_val = save_false->findInParentFrame(x);
-      bool default_to_union = false;
       if (true_val && false_val) {
         if (tv->type() == fv->type() && tv->type()->kind() == UnionType::Kind) {
-          default_to_union = true;
+          unified = tv->type();
         }
       }
-
-      auto unified = unifyTypes(tv->type(), fv->type(), default_to_union);
 
       // attempt to unify the types. we allow variables to be set to different
       // types in each branch as long as that variable is not already in scope,

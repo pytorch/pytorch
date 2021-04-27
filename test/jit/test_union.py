@@ -487,3 +487,25 @@ class TestUnion(JitTestCase):
 
         self.assertEqual(eager(1), script(1))
         self.assertEqual(eager([1, 2, 3]), script([1, 2, 3]))
+
+    def test_union_memory_aliasing(self):
+        def eager():
+            x : List[torch.Tensor] = []
+            z : List[Optional[List[torch.Tensor]]] = []
+            z.append(x)
+            x_alias = z[0]
+            if isinstance(x_alias, list):
+                x_alias.append(torch.tensor(3))
+            return x
+
+        @torch.jit.script
+        def script():
+            x : List[torch.Tensor] = []
+            z : List[Optional[List[torch.Tensor]]] = []
+            z.append(x)
+            x_alias = z[0]
+            if torch.jit.isinstance(x_alias, List[torch.Tensor]):
+                x_alias.append(torch.tensor(3))
+            return x
+
+        self.assertEqual(eager(), script())
