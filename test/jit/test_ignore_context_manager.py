@@ -31,6 +31,8 @@ class TestIgnoreContextManager(JitTestCase):
                     c = l[0] + a + b
                     d = 9
                 return c + d
+        model = A()
+        print("MODEL:", model())
         s = torch.jit.script(A())
         self.assertEqual(s(), 20)
 
