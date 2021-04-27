@@ -61,10 +61,6 @@ struct IntegerValueRefiner {
           }
         }
       }
-      if (n->kind() == prim::RaiseException) {
-        throwing_blocks_.insert(b);
-      }
-
       for (size_t input = 0; input < n->inputs().size(); ++input) {
         Value* input_v = n->inputs().at(input);
         if (!input_v->type()->cast<IntType>()) {
@@ -147,6 +143,8 @@ struct IntegerValueRefiner {
             true_block_refinements,
             false_block_refinements,
             info_);
+      } else {
+        handleCommonRefinentOperators(n, throwing_blocks_, info_);
       }
     }
 

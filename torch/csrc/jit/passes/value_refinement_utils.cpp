@@ -191,5 +191,51 @@ void joinIfRefinements(
   }
 }
 
+bool handleCommonRefinentOperators(
+    Node* n,
+    std::unordered_set<Block*>& throwing_blocks,
+    std::unordered_map<Value*, BooleanRefinementMapping>& info) {
+  if (n->kind() == prim::RaiseException) {
+    throwing_blocks.insert(n->owningBlock());
+    return true;
+  }
+  if (n->kind() == aten::__not__ &&
+      n->inputs().at(0)->type()->cast<BoolType>()) {
+    // __not__(inp) -> reverse refinements
+    if (info.count(n->input())) {
+      auto& input_ref = info[n->input()];
+      info[n->output()] = BooleanRefinementMapping(
+          input_ref.false_refine(), input_ref.true_refine());
+    }
+    return true;
+  }
+  if (n->matches("aten::eq(bool a, bool b) -> bool") ||
+      (n->matches("aten::ne(bool a, bool b) -> bool"))) {
+    for (size_t const_index : {0, 1}) {
+      if (n->input(const_index)->node()->kind() != prim::Constant) {
+        continue;
+      }
+      auto const_input = constant_as<bool>(n->input(const_index)).value();
+      auto non_const_input = n->input(1 - const_index);
+      if (!info.count(non_const_input)) {
+        continue;
+      }
+      // value == False / value != True -> equivalent to __not__ value
+      // value == True / value != False -> equivalent to value
+      auto& input_ref = info[non_const_input];
+      if ((!const_input && n->kind() == aten::eq) ||
+          (const_input && n->kind() == aten::ne)) {
+        info[n->output()] = BooleanRefinementMapping(
+            input_ref.false_refine(), input_ref.true_refine());
+      } else {
+        info[n->output()] = BooleanRefinementMapping(
+            input_ref.true_refine(), input_ref.false_refine());
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 } // namespace jit
 } // namespace torch

@@ -71,5 +71,12 @@ TORCH_API void joinIfRefinements(
     ListRefinement& false_block_refinements,
     std::unordered_map<Value*, BooleanRefinementMapping>& info);
 
+// handles adding blocks to throwing blocks and propagating refinements via
+// boolean comparisons
+TORCH_API bool handleCommonRefinentOperators(
+    Node* n,
+    std::unordered_set<Block*>& throwing_blocks,
+    std::unordered_map<Value*, BooleanRefinementMapping>& info);
+
 } // namespace jit
 } // namespace torch
