@@ -76,7 +76,7 @@ def _export_operator_list(module: LiteScriptModule):
     # TODO fix mypy here
     return torch._C._export_operator_list(module._c)  # type: ignore[attr-defined]
 
-def _get_bytecode_version(f_input):
+def _get_model_bytecode_version(f_input) -> int:
     r"""
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
@@ -90,10 +90,10 @@ def _get_bytecode_version(f_input):
 
     .. testcode::
 
-        from torch.jit.mobile import _get_bytecode_version
+        from torch.jit.mobile import _get_model_bytecode_version
 
         # Get bytecode version from a saved file path
-        version = _get_bytecode_version("path/to/model.ptl")
+        version = _get_model_bytecode_version("path/to/model.ptl")
 
     """
     if isinstance(f_input, str):
@@ -103,6 +103,6 @@ def _get_bytecode_version(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
     if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)):
-        return torch._C._get_bytecode_version(str(f_input))
+        return torch._C._get_model_bytecode_version(str(f_input))
     else:
-        return torch._C._get_bytecode_version_from_buffer(f.read())
+        return torch._C._get_model_bytecode_version_from_buffer(f_input.read())
