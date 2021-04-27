@@ -2202,12 +2202,11 @@ add_docstr(torch.conj_physical,
            r"""
 conj(input, *, out=None) -> Tensor
 
-Computes the element-wise conjugate of the given :attr:`input` tensor. If :attr:`input` has a non-complex dtype,
-this function just returns :attr:`input`.
+Computes the element-wise conjugate of the given :attr:`input` tensor.
 
 .. note::
    This operation is not privy to the input's conjugate bit and performs the conjuate operation regardless of the fact
-   conjugate bit is set or not, i.e. `torch.conj_physical(self).is_conj() == self.is_conj()`.
+   conjugate bit is set or not.
 
 .. warning:: In the future, :func:`torch.conj_physical` may return a non-writeable view for an :attr:`input` of
              non-complex dtype. It's recommended that programs not modify the tensor returned by :func:`torch.conj_physical`
@@ -2224,7 +2223,7 @@ Keyword args:
 
 Example::
 
-    >>> torch.conj(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
+    >>> torch.conj_physical(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
     tensor([-1 - 1j, -2 - 2j, 3 + 3j])
 """.format(**common_args))
 

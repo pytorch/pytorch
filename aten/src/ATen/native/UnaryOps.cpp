@@ -352,6 +352,8 @@ Tensor _conj(const Tensor& self) {
 }
 
 Tensor conj(const Tensor& self) {
+  // This might look like an infinite recursion but it's not.
+  // This actually calls into `conj()` defined in the Tensor class.
   return self.conj();
 }
 
