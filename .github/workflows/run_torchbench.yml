@@ -33,16 +33,14 @@ jobs:
         run: |
           PR_BODY_FILE=/tmp/pr-body.txt
           echo $PR_BODY > ${PR_BODY_FILE}
-          pushd pytorch
           . activate pr-ci
-          python3 ./.github/scripts/run_torchbench.py \
+          python3 pytorch/.github/scripts/run_torchbench.py \
                   --pytorch-path ${PWD}/pytorch \
                   --torchbench-path ${PWD}/benchmark \
                   --pr-num $PR_NUM \
                   --pr-base-sha $PR_BASE_SHA \
                   --pr-head-sha $PR_HEAD_SHA \
                   --pr-body $PR_BODY_FILE
-          popd
       - name: Remove conda environment
         run: |
           conda env remove --name pr-ci
