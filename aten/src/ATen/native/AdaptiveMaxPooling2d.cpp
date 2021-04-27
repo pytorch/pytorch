@@ -52,6 +52,11 @@ TORCH_META_FUNC(adaptive_max_pool2d) (const Tensor& input, IntArrayRef output_si
     set_output(1, {sizeB, sizeD, osizeH, osizeW}, input.options().dtype(kLong));
   }
 }
+
+TORCH_META_FUNC(adaptive_max_pool2d_backward)
+(const Tensor& gradOutput, const Tensor& input, const Tensor& indices) {
+  set_output(0, input.sizes(), input.options());
+}
 } // namespace meta
 
 namespace native {
@@ -222,81 +227,6 @@ static void adaptive_max_pool2d_backward_out_frame(
     }
   });
 }
-
-Tensor& adaptive_max_pool2d_backward_out_cpu_template(
-          Tensor& gradInput,
-          const Tensor& gradOutput_,
-          const Tensor& input,
-          const Tensor& indices)
-{
-  int dimW = 2;
-  int dimH = 1;
-  int64_t sizeB = 1;
-  int sizeD;
-  int isizeH;
-  int isizeW;
-  int osizeH;
-  int osizeW;
-
-  /* get contiguous gradOutput */
-  auto gradOutput = gradOutput_.contiguous();
-
-  /* resize */
-  gradInput.resize_as_(input);
-  gradInput.zero_();
-
-  if (input.ndimension() == 4) {
-    sizeB = input.size(0);
-    dimW++;
-    dimH++;
-  }
-
-  sizeD  = input.size(dimH-1);
-  isizeH = input.size(dimH);
-  isizeW = input.size(dimW);
-  osizeH = gradOutput.size(dimH);
-  osizeW = gradOutput.size(dimW);
-
-  /* backprop */
-  if (input.ndimension() == 3)
-  {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_backward", [&] {
-      /* get raw pointers */
-      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-      int64_t *indices_data = indices.data_ptr<int64_t>();
-
-      adaptive_max_pool2d_backward_single_out_frame<scalar_t>(gradInput_data,
-                                                              gradOutput_data,
-                                                              indices_data,
-                                                              sizeD,
-                                                              isizeH, isizeW,
-                                                              osizeH, osizeW);
-      }
-    );
-  }
-  else
-  {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_backward", [&] {
-      /* get raw pointers */
-      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-      int64_t *indices_data = indices.data_ptr<int64_t>();
-
-      adaptive_max_pool2d_backward_out_frame<scalar_t>(gradInput_data,
-                                                       gradOutput_data,
-                                                       indices_data,
-                                                       sizeB,
-                                                       sizeD,
-                                                       isizeH, isizeW,
-                                                       osizeH, osizeW);
-      }
-    );
-  }
-
-  return gradInput;
-}
-
 } // namespace
 
 TORCH_IMPL_FUNC(adaptive_max_pool2d_out_cpu)
@@ -378,32 +308,77 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_out_cpu)
   }
 }
 
-Tensor& adaptive_max_pool2d_backward_out_cpu(const Tensor& gradOutput_,
-  const Tensor& input,
-  const Tensor& indices,
-  Tensor& gradInput)
-{
-  adaptive_max_pool2d_backward_out_cpu_template(
-    gradInput,
-    gradOutput_,
-    input,
-    indices);
-  return gradInput;
-}
+TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cpu)
+(const Tensor& gradOutput,
+ const Tensor& input,
+ const Tensor& indices,
+ const Tensor& gradInput) {
+  int dimW = 2;
+  int dimH = 1;
+  int64_t sizeB = 1;
+  int sizeD;
+  int isizeH;
+  int isizeW;
+  int osizeH;
+  int osizeW;
 
-Tensor adaptive_max_pool2d_backward_cpu(
-  const Tensor& gradOutput_,
-  const Tensor& input,
-  const Tensor& indices)
-{
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  adaptive_max_pool2d_backward_out_cpu_template(
-    gradInput,
-    gradOutput_,
-    input,
-    indices);
-  return gradInput;
-}
+  /* get contiguous gradOutput */
+  auto gradOutput_ = gradOutput.contiguous();
 
+  /* zero */
+  gradInput.zero_();
+
+  if (input.ndimension() == 4) {
+    sizeB = input.size(0);
+    dimW++;
+    dimH++;
+  }
+
+  sizeD = input.size(dimH - 1);
+  isizeH = input.size(dimH);
+  isizeW = input.size(dimW);
+  osizeH = gradOutput_.size(dimH);
+  osizeW = gradOutput_.size(dimW);
+
+  /* backprop */
+  if (input.ndimension() == 3) {
+    AT_DISPATCH_FLOATING_TYPES(
+        input.scalar_type(), "adaptive_max_pool2d_backward", [&] {
+          /* get raw pointers */
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
+          int64_t* indices_data = indices.data_ptr<int64_t>();
+
+          adaptive_max_pool2d_backward_single_out_frame<scalar_t>(
+              gradInput_data,
+              gradOutput_data,
+              indices_data,
+              sizeD,
+              isizeH,
+              isizeW,
+              osizeH,
+              osizeW);
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(
+        input.scalar_type(), "adaptive_max_pool2d_backward", [&] {
+          /* get raw pointers */
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
+          int64_t* indices_data = indices.data_ptr<int64_t>();
+
+          adaptive_max_pool2d_backward_out_frame<scalar_t>(
+              gradInput_data,
+              gradOutput_data,
+              indices_data,
+              sizeB,
+              sizeD,
+              isizeH,
+              isizeW,
+              osizeH,
+              osizeW);
+        });
+  }
+ }
 } // at::native
 } // at

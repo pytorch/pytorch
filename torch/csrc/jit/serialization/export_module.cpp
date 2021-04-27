@@ -69,7 +69,7 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   Inline(*graph);
 
-  torch::jit::Code code(graph, func.name());
+  torch::jit::MobileCode code(graph, func.name());
   auto instructions_copy = code.instructions();
 
   // operator names
