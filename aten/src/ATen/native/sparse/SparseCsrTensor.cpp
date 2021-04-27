@@ -103,6 +103,7 @@ Tensor sparse_csr_tensor(
       options.layout());
   TORCH_CHECK(crow_indices.numel() >= 1, "expected crow_indices.numel() >= 1, but got ",
               crow_indices.numel());
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int64_t, 2> size;
 
   if (col_indices.numel() > 0) {
