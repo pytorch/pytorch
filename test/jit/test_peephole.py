@@ -287,6 +287,103 @@ class TestPeephole(JitTestCase):
 
         run_peephole_and_check_const_value(foo.graph, "value=4")
 
+        def test_const_tuple_output(graph, const_inputs):
+            tup = graph.findNode("prim::TupleConstruct")
+            for i, elem in enumerate(tup.inputs()):
+                if i in const_inputs:
+                    self.assertIsNotNone(elem.toIValue())
+                else:
+                    self.assertIsNone(elem.toIValue())
+
+        # testing combinations of x1 : {True, False} x
+        # {then/else branch} x assert {True/False}
+
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) == 5:
+                x1 = True
+            else:
+                x1 = len(b) != 4
+            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # we can only infer len(b) == 4 here
+        test_const_tuple_output(foo.graph, [1])
+
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) == 5:
+                x1 = False
+            else:
+                x1 = len(b) != 4
+            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # cant infer anything
+        test_const_tuple_output(foo.graph, [])
+
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) == 5:
+                x1 = True
+            else:
+                x1 = len(b) == 4
+            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # we cant infer anything, only len(b) != 4
+        test_const_tuple_output(foo.graph, [])
+
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) == 5:
+                x1 = True
+            else:
+                x1 = len(b) != 4
+            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # can infer len(b) == 4
+        test_const_tuple_output(foo.graph, [1])
+
+        # swap branches
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) != 5:
+                x1 = len(b) != 4
+            else:
+                x1 = True
+            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # can infer len(b) == 4
+        test_const_tuple_output(foo.graph, [1])
+
+        # use __not__
+        @torch.jit.script
+        def foo(x: List[int], b: List[int]):
+            if len(x) != 5:
+                x1 = len(b) != 4
+            else:
+                x1 = True
+            assert not x1
+            return len(x), len(b)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        # can infer len(b) == 4
+        test_const_tuple_output(foo.graph, [1])
+
         # Test unsuccessful optimizations
 
         @torch.jit.script
