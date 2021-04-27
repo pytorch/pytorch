@@ -95,7 +95,9 @@ def _file_rendezvous_handler(url: str, **kwargs):
     path = result.path
     if sys.platform == 'win32':
         import urllib.request
-        path = urllib.request.url2pathname(result.path)
+        full_path = result.netloc + result.path
+        path = urllib.request.url2pathname(full_path)
+        path = os.path.normpath(path)
 
     if not path:
         raise _error("path missing")
