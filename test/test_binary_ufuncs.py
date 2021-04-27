@@ -883,7 +883,6 @@ class TestBinaryUfuncs(TestCase):
                     for x, y, z in zip(a_.tolist(), b_.tolist(), c_.tolist()):
                         self.assertEqual(x ^ y, z)
 
-    @onlyOnCPUAndCUDA
     @dtypes(torch.float)
     def test_add_with_tail(self, device, dtype):
         # test tensor where there is a tail which is not a multiple
