@@ -438,14 +438,29 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
   if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
-    return std::tuple_cat(
-             at::cudnn_batch_norm(
-               input.contiguous(input.suggest_memory_format()), weight.contiguous(),
-               bias.contiguous(),
-               running_mean.defined() ? running_mean.contiguous() : running_mean,
-               running_var.defined() ? running_var.contiguous() : running_var,
-               training, momentum, eps),
-             std::make_tuple(1));
+    auto weight_c = weight.contiguous();
+    auto bias_c = bias.contiguous();
+    auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
+    auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
+
+    Tensor input_c;
+    if (input.dim() == 2) {
+      // cudnn has poor performance for (N, C) contiguous layout
+      // Instead, reshape to (1, C, N) so the batch dimension is contiguous
+      input_c = input.unsqueeze(0).transpose(1, 2).contiguous();
+    } else {
+      input_c = input.contiguous(input.suggest_memory_format());
+    }
+    Tensor output, save_mean, save_var, reserve;
+    std::tie(output, save_mean, save_var, reserve) =
+        at::cudnn_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c,
+                             training, momentum, eps);
+
+    if (input.dim() == 2) {
+      output = output.transpose(1, 2).squeeze(0);
+    }
+
+    return {output, save_mean, save_var, reserve, 1};
   }
 
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
