@@ -3,7 +3,7 @@ import torch.fx
 import torch.fx as fx
 import operator
 from typing import Any, Callable, Dict, Tuple, Optional
-from torch.fx.node import Argument, Target, Node
+from torch.fx.node import Argument, Target, Node, map_aggregate
 from torch.fx.operator_schemas import normalize_module, normalize_function, create_type_hint
 
 from torch.fx import Transformer, Proxy
