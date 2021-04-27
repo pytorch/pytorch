@@ -4480,6 +4480,11 @@ class DistributedTest:
                 self.assertTrue(ddp_logging_data.join_uneven_inputs)
                 dist.barrier()
 
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_uneven_inputs_stop_iteration_sync_bn(self):
             # Tests that uneven inputs join handler correctly throws StopIteration
             # for models with SyncBN or general collective comm when
