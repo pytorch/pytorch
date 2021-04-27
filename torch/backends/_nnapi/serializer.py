@@ -5,6 +5,8 @@ import logging
 from typing import (
     Tuple,
     NamedTuple,
+    List,
+    Optional,
 )
 
 import torch
@@ -813,8 +815,8 @@ class _NnapiSerializer(object):
         assert node.outputsSize() == 1
         output = node.outputsAt(0)
         ctype = output.type()
-        const_vals = []
-        tensors = []
+        const_vals: Optional[List] = []
+        tensors: Optional[List] = []
         for inp in node.inputs():
             if const_vals is not None and inp in self.constants:
                 _, val = self.get_constant_value(inp)
@@ -824,7 +826,7 @@ class _NnapiSerializer(object):
             if tensors is not None and inp.type().kind() == "TensorType":
                 tensors.append(inp)
             else:
-                tensros = None
+                tensors = None
         if const_vals is not None:
             # NOTE: Now that TorchScript supports list constants,
             # this code path might not be used anymore.
@@ -930,6 +932,7 @@ class _NnapiSerializer(object):
             # TODO: Possibly support variable-sized inputs.
             out_dim_size += in_oper.shape[dim]
 
+        assert out_oper is not None
         out_oper = out_oper._replace(shape=change_element(out_oper.shape, dim, out_dim_size))
 
         if in_oper.dim_order == DimOrder.CHANNELS_LAST:
