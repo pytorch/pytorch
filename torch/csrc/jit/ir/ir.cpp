@@ -1289,6 +1289,7 @@ Node* Node::replaceWithNewSymbol(Symbol new_symbol) {
     v->replaceAllUsesWith(new_out);
   }
   replace_node->copyMetadata(this);
+  replace_node->copyAttributes(*this);
   TORCH_INTERNAL_ASSERT(
       (replace_node->maybeOperator() != nullptr) == had_operator,
       "invalid symbol replacement:",
