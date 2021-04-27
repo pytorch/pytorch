@@ -284,11 +284,9 @@ class TensorPipeAgent : public RpcAgent {
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
-    explicit AtomicJitFuture(
-        const std::vector<c10::DeviceIndex>& devices,
-        bool noCuda = true) {
+    explicit AtomicJitFuture(const std::vector<c10::DeviceIndex>& devices) {
 #ifdef USE_CUDA_NOT_ROCM
-      if (!noCuda) {
+      if (!devices.empty()) {
         jitFuture = std::make_shared<at::cuda::CUDAFuture>(
             at::AnyClassType::get(), devices);
       } else {
