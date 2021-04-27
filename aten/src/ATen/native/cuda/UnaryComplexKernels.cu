@@ -80,6 +80,7 @@ __host__ __device__ static inline c10::complex<T> conj_wrapper(c10::complex<T> v
   return std::conj(v);
 }
 
+// NB: Ignores the negative bit on tensors
 void conj_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cuda", [&]() {

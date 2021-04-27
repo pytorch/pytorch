@@ -2200,17 +2200,12 @@ Example::
 
 add_docstr(torch.conj_physical,
            r"""
-conj(input, *, out=None) -> Tensor
+conj_physical(input, *, out=None) -> Tensor
 
 Computes the element-wise conjugate of the given :attr:`input` tensor.
 
 .. note::
-   This operation is not privy to the input's conjugate bit and performs the conjuate operation regardless of the fact
-   conjugate bit is set or not.
-
-.. warning:: In the future, :func:`torch.conj_physical` may return a non-writeable view for an :attr:`input` of
-             non-complex dtype. It's recommended that programs not modify the tensor returned by :func:`torch.conj_physical`
-             when :attr:`input` is of non-complex dtype to be compatible with this change.
+   This performs the conjuate operation regardless of the fact conjugate bit is set or not.
 
 .. math::
     \text{out}_{i} = conj(\text{input}_{i})
@@ -2231,7 +2226,7 @@ add_docstr(torch.conj,
            r"""
 conj(input) -> Tensor
 
-Returns a view of :attr:`input` with the conjugate bit set to the negation of :attr:`input`'s
+Returns a view of :attr:`input` with the conjugate bit set to the negated value of :attr:`input`'s
 conjugate bit. If :attr:`input` has a non-complex dtype, this function just returns :attr:`input`.
 
 .. note::
