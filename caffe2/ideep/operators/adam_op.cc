@@ -4,6 +4,7 @@ using namespace caffe2;
 
 namespace {
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void adam_ideep_update(
     int N,
     const float* g,
@@ -89,8 +90,11 @@ class IDEEPAdamOp final : public IDEEPOperator {
 
   IDEEPAdamOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9f)),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999f)),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
   bool RunOnDevice() override {
     // Iter live on the CPU
@@ -169,13 +173,17 @@ class IDEEPAdamOp final : public IDEEPOperator {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes,cppcoreguidelines-avoid-magic-numbers)
   T beta1_{0.9};
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes,cppcoreguidelines-avoid-magic-numbers)
   T beta2_{0.999};
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes,cppcoreguidelines-avoid-magic-numbers)
   T epsilon_{1e-8};
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, GRAD, LR, ITER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_GRAD);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Adam, IDEEPAdamOp<float>);
 
 } // namespace
