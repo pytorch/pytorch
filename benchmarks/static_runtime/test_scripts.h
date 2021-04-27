@@ -195,6 +195,11 @@ const auto to_script_1 = R"JIT(
       return torch.to(input, dtype, non_blocking, copy)
 )JIT";
 
+const auto to_script_2 = R"JIT(
+  def forward(self, input:Tensor, other: Tensor, non_blocking: bool, copy: bool, memory_format: int):
+      return torch.to(input, other, non_blocking, copy, memory_format)
+)JIT";
+
 const std::string embedding_bag_default = R"JIT(
   def forward(self, a: Tensor, b: Tensor, c: Tensor):
       return torch.embedding_bag(a, b, c)
@@ -243,4 +248,24 @@ const auto div_tensor_mode = R"JIT(
 const auto div_scalar_mode = R"JIT(
   def forward(self, a: Tensor, b: float, c: str):
       return torch.div(a, b, rounding_mode=c)
+)JIT";
+
+const auto sub_tensor = R"JIT(
+  def forward(self, a: Tensor, b: Tensor):
+      return torch.sub(a, b)
+)JIT";
+
+const auto sub_scalar = R"JIT(
+  def forward(self, a: Tensor, b: int):
+      return torch.sub(a, b)
+)JIT";
+
+const auto sub_tensor_alpha = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: float):
+      return torch.sub(a, b, alpha=c)
+)JIT";
+
+const auto sub_scalar_alpha = R"JIT(
+  def forward(self, a: Tensor, b: float, c: int):
+      return torch.sub(a, b, alpha=c)
 )JIT";
