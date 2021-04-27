@@ -2729,7 +2729,7 @@ TupleTensorRefs3 lu_unpack_out(
   if (unpack_pivots) {
     checkSameDevice("lu_unpack", P, LU_data, "P");
     // Note that lu_unpack returns P such that P.dtype == LU_data.dtype,
-    // becauser otherwise we cannot use P in matric products (no int -> float promotion)
+    // because otherwise we cannot use P in matric products (no int -> float promotion)
     checkLinalgCompatibleDtype("lu_unpack", P, LU_data, "L");
 
     at::native::resize_output(P, P_tmp.sizes());
