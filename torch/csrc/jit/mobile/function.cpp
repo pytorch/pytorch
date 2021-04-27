@@ -60,7 +60,10 @@ bool Function::append_operator(
     }
   }
 
-  if (num_specified_args >= 0 && num_specified_args < args.size()) {
+  // num_specified_args >= 0 indicates number of arguments are available
+  // from model. We can use it to handle backward compatibility.
+  if (num_specified_args >= 0 &&
+      num_specified_args < static_cast<int64_t>(args.size())) {
     // Sanity check at load time, to save perf at runtime
     for (size_t i = num_specified_args; i < args.size(); ++i) {
       auto default_val = args[i].default_value();
@@ -70,7 +73,7 @@ bool Function::append_operator(
           i,
           "th arguement of operator",
           opname,
-          " does not have default value. ");
+          " does not have a specified value or default value. ");
     }
     fn = [fn, num_specified_args, args](Stack& stack) {
       for (size_t i = num_specified_args; i < args.size(); ++i) {

@@ -1012,7 +1012,11 @@ void testDefaultArgsPinv(int num_args) {
   }
 
   std::vector<torch::jit::IValue> inputs;
-  inputs.push_back(torch::rand({28, 28}));
+  const int N = 28;
+  auto input = torch::range(1, N * N, 1);
+  input[0] = 1; // a more stable matrix
+  input = input.view({N, N});
+  inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
 }
 } // namespace
@@ -1093,7 +1097,9 @@ TEST(LiteInterpreterTest, DefaultArgsPinv) {
   //              ('returns',
   //                  ((('name', ''), ('type', 'Tensor'), ('default_value',
   //                  None)),)))))
+}
 
+TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
   // The second argument is specified, but the value is the same as the default
   // value. It's treated as "not specified" since the value can be fetched from
   // schema.
@@ -1107,7 +1113,11 @@ TEST(LiteInterpreterTest, DefaultArgsPinv) {
   ASSERT_EQ(arg_nums.size(), 1);
   ASSERT_EQ(arg_nums["aten::linalg_pinv"], 1);
   std::vector<torch::jit::IValue> inputs;
-  inputs.push_back(torch::rand({28, 28}));
+  const int N = 28;
+  auto input = torch::range(1, N * N, 1);
+  input[0] = 1; // a more stable matrix
+  input = input.view({N, N});
+  inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
 }
 
