@@ -30,6 +30,13 @@ void test_hardswish(const at::Tensor& input, const at::Tensor& expected) {
   ASSERT_TRUE(check);
 }
 
+void test_hardswish_(at::Tensor input, const at::Tensor& expected) {
+  ASSERT_TRUE(at::native::xnnpack::use_hardswish(input));
+  at::native::xnnpack::hardswish_(input);
+  auto check = almostEqual(expected, input);
+  ASSERT_TRUE(check);
+}
+
 
 // Since XNNPACK path is only taken #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 // We can't compare regular CPU path with XNNPACK path in the same test binary
@@ -59,6 +66,7 @@ TEST(TestXNNPackOps, TestHardSwish) {
 
   for (const auto& input_result : input_result_pairs) {
     test_hardswish(input_result.first, input_result.second);
+    test_hardswish_(input_result.first, input_result.second);
   }
 }
 
