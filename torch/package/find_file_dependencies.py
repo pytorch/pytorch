@@ -51,7 +51,7 @@ class _ExtractModuleReferences(ast.NodeVisitor):
     def _grab_node_str(self, node):
         if isinstance(node, ast.Name):
             return node.id
-        elif isinstance(node, ast.Constant):
+        elif isinstance(node, (ast.Constant, ast.Str)):
             if sys.version_info[:2] < (3, 8):
                 return node.s
             else:

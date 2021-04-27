@@ -242,7 +242,7 @@ class TestMisc(PackageTestCase):
 
         broken_modules = [module.name for module in pe.broken_modules]
         self.assertEqual(len(broken_modules), 3)
-        self.assertIn("_yaml", broken_modules)
+        self.assertTrue(any(["_yaml" in module for module in broken_modules]))
 
         for module in pe.broken_modules:
             self.assertRegex(module.reason, r"could not be found")
