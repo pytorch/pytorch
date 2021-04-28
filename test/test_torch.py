@@ -6659,7 +6659,7 @@ else:
         # It does it through uint8 type
         if dtype is torch.bool:
             return
-        x = torch.randn(1, 2, 3, 4, device=device, dtype=torch.float).type(dtype)
+        x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
