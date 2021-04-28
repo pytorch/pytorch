@@ -59,6 +59,17 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
+if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
+  export BUILD_CAFFE2=OFF
+fi
+
+if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+  export ATEN_THREADING=TBB
+  export USE_TBB=1
+elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+  export ATEN_THREADING=NATIVE
+fi
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 
@@ -173,6 +184,11 @@ fi
 # Target only our CI GPU machine's CUDA arch to speed up the build
 export TORCH_CUDA_ARCH_LIST="5.2"
 
+# Add sm_75 support for the Linux CUDA 10.2 cuDNN 7 build
+if [[ "$BUILD_ENVIRONMENT" == *cuda10.2-cudnn7*build ]]; then
+  export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
 fi
@@ -229,12 +245,15 @@ else
       cp build/.ninja_log dist
     fi
 
+    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
+    mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
+
     # Build custom operator tests.
-    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
     CUSTOM_OP_TEST="$PWD/test/custom_operator"
     python --version
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir "$CUSTOM_OP_BUILD"
+    mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
     cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
     make VERBOSE=1
@@ -242,11 +261,11 @@ else
     assert_git_not_dirty
 
     # Build jit hook tests
-    JIT_HOOK_BUILD="$PWD/../jit-hook-build"
+    JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
     JIT_HOOK_TEST="$PWD/test/jit_hooks"
     python --version
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir "$JIT_HOOK_BUILD"
+    mkdir -p "$JIT_HOOK_BUILD"
     pushd "$JIT_HOOK_BUILD"
     cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
     make VERBOSE=1
@@ -254,10 +273,10 @@ else
     assert_git_not_dirty
 
     # Build custom backend tests.
-    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
     CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
     python --version
-    mkdir "$CUSTOM_BACKEND_BUILD"
+    mkdir -p "$CUSTOM_BACKEND_BUILD"
     pushd "$CUSTOM_BACKEND_BUILD"
     cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
     make VERBOSE=1

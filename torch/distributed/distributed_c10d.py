@@ -7,7 +7,6 @@ import warnings
 import time
 from torch._six import string_classes
 from datetime import timedelta
-from os import getenv
 from typing import Dict, Optional, Tuple, Union
 
 # This module is wildcard imported from torch.distributed.
@@ -459,12 +458,11 @@ def init_process_group(backend,
         group_name (str, optional, deprecated): Group name.
         pg_options (ProcessGroupOptions, optional): process group options
             specifying what additional options need to be passed in during
-            the construction of specific process groups. i.e. for the ``nccl``
+            the construction of specific process groups. As of now, the only
+            options we support is ``ProcessGroupNCCL.Options`` for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
-            process group can pick up high priority cuda streams.
-
-    .. note:: Note that if passing in pg_options and set the ``pg_options.timeout``,
-        it will override the default timeout of the ``timeout`` argument.
+            the nccl backend can pick up high priority cuda streams when
+            there're compute kernels waiting.
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.
@@ -500,14 +498,15 @@ def init_process_group(backend,
                 "are ignored since they are assigned by the "
                 "MPI runtime.".format(world_size, rank))
 
-        _update_default_pg(_new_process_group_helper(
+        default_pg = _new_process_group_helper(
             -1,
             -1,
             [],
             Backend.MPI,
             None,
             group_name=group_name,
-            timeout=timeout))
+            timeout=timeout)
+        _update_default_pg(default_pg)
     else:
         # backward compatible API
         if store is None:
@@ -517,7 +516,7 @@ def init_process_group(backend,
             store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
-        _update_default_pg(_new_process_group_helper(
+        default_pg = _new_process_group_helper(
             world_size,
             rank,
             [],
@@ -525,10 +524,11 @@ def init_process_group(backend,
             store,
             pg_options=pg_options,
             group_name=group_name,
-            timeout=timeout))
+            timeout=timeout)
+        _update_default_pg(default_pg)
 
-    _pg_group_ranks[GroupMember.WORLD] = {i: i for i in range(GroupMember.WORLD.size())}  # type: ignore
-    _backend = _pg_map[GroupMember.WORLD][0]  # type: ignore
+    _pg_group_ranks[GroupMember.WORLD] = {i: i for i in range(GroupMember.WORLD.size())}  # type: ignore[attr-defined, index]
+    _backend = _pg_map[GroupMember.WORLD][0]  # type: ignore[index]
     _default_pg_init_method = init_method
 
     # barrier at the end to ensure that once we return from this method, all
@@ -541,6 +541,9 @@ def init_process_group(backend,
         # Use store based barrier here since barrier() used a bunch of
         # default devices and messes up NCCL internal state.
         _store_based_barrier(rank, store, timeout)
+        # Set sequence numbers for gloo and nccl process groups.
+        if get_backend(default_pg) in [Backend.GLOO, Backend.NCCL]:
+            default_pg._set_sequence_number_for_group()
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -575,11 +578,6 @@ def _new_process_group_helper(world_size,
         raise RuntimeError("Expected timeout argument to be of type"
                            "datetime.timedelta")
 
-    if pg_options is not None and timeout != default_pg_timeout and pg_options.timeout != timeout:
-        raise RuntimeError("The timeout argument and timeout value defined in pg_options"
-                           " are conflicting, they have to be the same when manually"
-                           " passing in both arguments.")
-
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = (len(group_ranks) == 0)
 
@@ -610,31 +608,12 @@ def _new_process_group_helper(world_size,
 
         if backend == Backend.GLOO:
             if pg_options is not None:
-                assert isinstance(pg_options, ProcessGroupGloo.Options), \
-                    "Expected pg_options argument to be of type ProcessGroupGloo.Options"
-            else:
-                pg_options = ProcessGroupGloo.Options()
-                pg_options.timeout = timeout
-
-            # If user forget to set devices, we should do it by default
-            if not pg_options._devices:
-                ifname_env = getenv("GLOO_SOCKET_IFNAME")
-                if ifname_env is not None:
-                    pg_options._devices = [ProcessGroupGloo.create_device(interface=iface) for iface in ifname_env.split(",")]
-                else:
-                    pg_options._devices = [ProcessGroupGloo.create_default_device()]
-
-                # user pass in threads but not devices, error that both are required
-                if pg_options._threads != 2:
-                    raise RuntimeError("ProcessGroupGloo.Options threads and devices must be passed in together")
-                else:
-                    pg_options._threads = len(pg_options._devices) * 2
-
+                raise RuntimeError("GLOO options not supported")
             pg = ProcessGroupGloo(
                 prefix_store,
                 rank,
                 world_size,
-                pg_options)
+                timeout=timeout)
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif backend == Backend.NCCL:
@@ -648,7 +627,7 @@ def _new_process_group_helper(world_size,
                 # default pg_options for NCCL
                 pg_options = ProcessGroupNCCL.Options()
                 pg_options.is_high_priority_stream = False
-                pg_options.timeout = timeout
+                pg_options._timeout = timeout
 
             pg = ProcessGroupNCCL(
                 prefix_store,
@@ -1463,8 +1442,8 @@ def _object_to_tensor(obj):
     f = io.BytesIO()
     _pickler(f).dump(obj)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
-    byte_tensor = torch.ByteTensor(byte_storage)
-    local_size = torch.LongTensor([byte_tensor.numel()])
+    byte_tensor = torch.tensor(byte_storage, dtype=torch.uint8)
+    local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long)
     return byte_tensor, local_size
 
 
@@ -1542,7 +1521,7 @@ def all_gather_object(object_list, obj, group=None):
     ]
     # Allgather tensor sizes
     all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())  # type: ignore
+    max_object_size = int(max(object_size_list).item())  # type: ignore[type-var]
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     coalesced_output_tensor = torch.empty(
@@ -1556,7 +1535,9 @@ def all_gather_object(object_list, obj, group=None):
     all_gather(output_tensors, input_tensor, group=group)
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.ByteTensor)  # type:ignore[call-overload]
+        tensor = tensor.type(torch.uint8)  # type:ignore[call-overload]
+        if tensor.device != torch.device("cpu"):
+            tensor = tensor.cpu()
         tensor_size = object_size_list[i]
         object_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1633,7 +1614,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # gather, since each rank needs to broadcast a tensor of the same (maximal)
     # size.
     all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())  # type: ignore
+    max_object_size = int(max(object_size_list).item())  # type: ignore[type-var]
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     # Avoid populating output tensors if the result won't be gathered on this rank.
@@ -1656,7 +1637,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     if my_rank != dst:
         return
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.ByteTensor)  # type: ignore[call-overload]
+        tensor = tensor.type(torch.uint8)  # type: ignore[call-overload]
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1718,7 +1699,7 @@ def broadcast_object_list(object_list, src=0, group=None):
         tensor_list, size_list = zip(*[_object_to_tensor(obj) for obj in object_list])
         object_sizes_tensor = torch.cat(size_list)
     else:
-        object_sizes_tensor = torch.LongTensor(len(object_list))
+        object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long)
 
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
@@ -1738,7 +1719,10 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank == src:
         object_tensor = torch.cat(tensor_list)
     else:
-        object_tensor = torch.ByteTensor(torch.sum(object_sizes_tensor).item())
+        object_tensor = torch.empty(
+            torch.sum(object_sizes_tensor).int().item(),  # type: ignore[arg-type]
+            dtype=torch.uint8
+        )
 
     if is_nccl_backend:
         object_tensor = object_tensor.to(current_device)
@@ -1748,7 +1732,9 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank != src:
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
-            obj_view = obj_view.type(torch.ByteTensor)  # type: ignore[call-overload]
+            obj_view = obj_view.type(torch.uint8)  # type: ignore[call-overload]
+            if obj_view.device != torch.device("cpu"):
+                obj_view = obj_view.cpu()
             offset += obj_size
             object_list[i] = _tensor_to_object(obj_view, obj_size)
 
@@ -1821,7 +1807,6 @@ def scatter_object_list(
         )
         tensor_list, tensor_sizes = list(tensor_list), list(tensor_sizes)
 
-    obj_tensor_size = torch.LongTensor([0])
     # Src rank broadcasts the maximum tensor size. This is because all ranks are
     # expected to call into scatter() with equal-sized tensors.
     if my_rank == src:
@@ -1829,11 +1814,11 @@ def scatter_object_list(
         for tensor in tensor_list:
             tensor.resize_(max_tensor_size)
     else:
-        max_tensor_size = torch.LongTensor([0])
+        max_tensor_size = torch.tensor([0], dtype=torch.long)
     broadcast(max_tensor_size, src=src, group=group)
 
     # Scatter actual serialized objects
-    output_tensor = torch.ByteTensor(max_tensor_size.item())
+    output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8)
     scatter(
         output_tensor,
         scatter_list=None if my_rank != src else tensor_list,
@@ -1842,6 +1827,7 @@ def scatter_object_list(
     )
 
     # Scatter per-object sizes to trim tensors when deserializing back to object
+    obj_tensor_size = torch.tensor([0], dtype=torch.long)
     scatter(
         obj_tensor_size,
         scatter_list=None if my_rank != src else tensor_sizes,
@@ -1922,6 +1908,66 @@ def all_gather(tensor_list,
         return work
     else:
         work.wait()
+
+def _all_gather_base(output_tensor,
+                     input_tensor,
+                     group=None,
+                     async_op=False):
+    """
+    Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
+
+    Args:
+        output_tensor (Tensor): Output tensor. It should contain
+            correctly-sized tensors to be used for output of the collective.
+        input_tensor (Tensor): Tensor to be broadcast from current process.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        async_op (bool, optional): Whether this op should be an async op
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group
+
+    Examples:
+        >>> # All tensors below are of torch.int64 dtype.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> output_tensor = torch.zero(2, dtype=torch.int64)
+        >>> output_tensor
+        [tensor([0, 0])] # Rank 0 and 1
+        >>> tensor = torch.arange(1, dtype=torch.int64) + 1 + rank
+        >>> tensor
+        tensor([1]) # Rank 0
+        tensor([2]) # Rank 1
+        >>> dist.all_gather_base(output_tensor, tensor)
+        >>> output_tensor
+        tensor([1,2]) # Rank 0
+        tensor([1,2]) # Rank 1
+
+    .. warning::
+        `_all_gather_base` is experimental and subject to change.
+        It is the caller's responsibility to ensure the output_tensor
+        is correctly sized.
+
+    """
+    _check_single_tensor(input_tensor, "input_tensor")
+    _check_single_tensor(output_tensor, "output_tensor")
+    if _rank_not_in_group(group):
+        return
+
+    output_tensor = output_tensor if not output_tensor.is_complex() else torch.view_as_real(output_tensor)
+    input_tensor = input_tensor if not input_tensor.is_complex() else torch.view_as_real(input_tensor)
+
+    if group is None:
+        default_pg = _get_default_group()
+        work = default_pg._allgather_base(output_tensor, input_tensor)
+    else:
+        work = group._allgather_base(output_tensor, input_tensor)
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
 
 def all_gather_coalesced(output_tensor_lists,
                          input_tensor_list,
@@ -2665,5 +2711,11 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         # Use store based barrier here since barrier() used a bunch of
         # default devices and messes up NCCL internal state.
         _store_based_barrier(global_rank, default_store, timeout)
+        # Set sequence numbers for gloo and nccl process groups.
+        if pg != GroupMember.NON_GROUP_MEMBER and get_backend(pg) in [
+            Backend.GLOO,
+            Backend.NCCL,
+        ]:
+            pg._set_sequence_number_for_group()
 
     return pg

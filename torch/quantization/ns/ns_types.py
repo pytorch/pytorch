@@ -3,7 +3,7 @@ from typing import NamedTuple
 
 from torch.fx.graph import Node
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union, Callable
 
 class NSSingleResultValuesType(str, enum.Enum):
     WEIGHT = 'weight'
@@ -32,6 +32,9 @@ NSSubgraph = NamedTuple(
 #   # index of this node within the arg of the input/output node
 #   # for example, in cat([x1, x2, x3], dim=0), x2 would have index_within_arg == 1
 #   'index_within_arg': 0,
+#   # index of this node within the args of the input/output node
+#   # for example, in add(x1, x2), x2 would have index_of_arg == 1
+#   'index_of_arg': 0,
 # }
 NSSingleResultType = Dict[str, Any]
 
@@ -47,3 +50,9 @@ NSSingleResultType = Dict[str, Any]
 # }
 #
 NSResultsType = Dict[str, Dict[str, Dict[str, List[NSSingleResultType]]]]
+
+# Defines the underlying target type of a node, for example:
+# `F.conv1d` for a `call_function` conv node
+# `nn.Conv1d` for a `call_module` node calling the forward of a `nn.Conv1d` module
+# `'sigmoid'` for a `call_method` node calling `x.sigmoid()`
+NSNodeTargetType = Union[Callable, str]
