@@ -48,3 +48,8 @@ jobs:
       - name: Remove conda environment
         run: |
           conda env remove --name pr-ci
+      - name: Upload artifact
+        use: actions/upload-artifact@v2
+        with:
+          name: TorchBench result
+          path: ~/.torchbench/bisection/pr${{ github.event.number }}
