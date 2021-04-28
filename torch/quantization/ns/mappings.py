@@ -353,8 +353,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         ]),
     ]
 
-    # Assign base names to each set, using the string of the first
-    # type as the base name
     base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]] = {}
 
     counter = 0
