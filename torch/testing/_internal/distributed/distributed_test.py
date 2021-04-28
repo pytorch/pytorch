@@ -5264,6 +5264,7 @@ class DistributedTest:
             # but can be (nested) tuple, list, dict, etc.
             rank = self.rank
             torch.cuda.set_device(rank)
+
             class NestedOutputModule(torch.nn.Module):
                 def __init__(self):
                     self.lin = nn.Linear(100, 1, bias=False)
@@ -5294,9 +5295,9 @@ class DistributedTest:
                         }
 
             def get_loss(model_output):
+                loss = 0.0
                 if isinstance(model_output, torch.Tensor):
                     return model_output.sum()
-                loss = 0
                 elif isinstance(model_output, dict):
                     for value in model_output.values():
                         loss += get_loss(value)
