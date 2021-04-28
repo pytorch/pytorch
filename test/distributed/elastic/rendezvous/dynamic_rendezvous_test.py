@@ -1047,7 +1047,7 @@ class DummyRendezvousBackend(RendezvousBackend):
         return None
 
 
-class DynamicRendezvousHandlerTest(TestCase):
+class DynamicRendezvousHandlerFromBackendTest(TestCase):
     def setUp(self) -> None:
         self._run_id = "dummy_run_id"
         self._store = DummyStore()
@@ -1057,7 +1057,7 @@ class DynamicRendezvousHandlerTest(TestCase):
         self._timeout: Optional[RendezvousTimeout] = RendezvousTimeout()
 
     def _create_handler(self) -> DynamicRendezvousHandler:
-        return DynamicRendezvousHandler(
+        return DynamicRendezvousHandler.from_backend(
             run_id=self._run_id,
             store=self._store,
             backend=self._backend,
@@ -1068,9 +1068,6 @@ class DynamicRendezvousHandlerTest(TestCase):
 
     def test_init_initializes_handler(self) -> None:
         handler = self._create_handler()
-
-        self.assertIs(handler.store, self._store)
-        self.assertIs(handler.backend, self._backend)
 
         self.assertEqual(handler.get_backend(), self._backend.name)
         self.assertEqual(handler.get_run_id(), self._run_id)
@@ -1130,7 +1127,6 @@ class CreateHandlerTest(TestCase):
             run_id="dummy_run_id",
             min_nodes=3,
             max_nodes=6,
-            store_port="1234",
             join_timeout="50",
             last_call_timeout="60",
             close_timeout="70",
@@ -1142,9 +1138,6 @@ class CreateHandlerTest(TestCase):
 
     def test_create_handler_returns_handler(self) -> None:
         handler = create_handler(self._store, self._backend, self._params)
-
-        self.assertIs(handler.store, self._store)
-        self.assertIs(handler.backend, self._backend)
 
         self.assertEqual(handler.get_backend(), self._backend.name)
         self.assertEqual(handler.get_run_id(), self._params.run_id)
