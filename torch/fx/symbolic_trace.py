@@ -12,7 +12,7 @@ from torch._C import ScriptObject  # type: ignore[attr-defined]
 import torch.utils._pytree as pytree
 
 import sys
-from .node import Argument, map_aggregate
+from .node import Argument, map_aggregate, base_types
 from .graph import Graph, _PyTreeInfo
 from .graph_module import GraphModule
 from .proxy import TracerBase, Proxy
@@ -339,6 +339,16 @@ class Tracer(TracerBase):
                     out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', (), {})
                     if x == PH:
                         return out
+
+                    if type(x) in base_types:
+                        torch._assert(out == x, f"{name} has been specialized to have value {x}")
+                    else:
+                        torch.warnings.warn(
+                            "Was not able to add assertion to guarantee correct inputs to "
+                            "specialized function. It is up to the user to make sure that your inputs match the "
+                            "inputs you specialized the function with."
+                        )
+
                     return x
 
                 return pytree.tree_map(concrete_args[name], replace_ph)

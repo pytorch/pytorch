@@ -1911,8 +1911,19 @@ class TestFX(JitTestCase):
         mod = Foo()
         mod_true = symbolic_trace(mod, concrete_args={'y': True})
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
+        print(mod_true.code)
         self.assertEqual(mod_true(3, True), 6)
+        with self.assertRaises(AssertionError):
+            mod_true(3, False)
         self.assertEqual(mod_false(3, False), 3)
+        with self.assertRaises(AssertionError):
+            mod_false(3, True)
+
+        def f_higher(a, f):
+            return f(a)
+
+        nf = symbolic_trace(f_higher, concrete_args={'f': lambda x: x * 2})
+        self.assertEqual(nf(3, lambda x: x * 2), 6)
 
     def test_custom_traceback_raised_when_exception_source_is_graphmodule(self):
         class M(torch.nn.Module):

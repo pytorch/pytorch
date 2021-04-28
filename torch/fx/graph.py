@@ -938,7 +938,7 @@ class Graph:
             has_orig_self = (orig_args[0] == 'self')
             if has_orig_self:
                 free_vars.insert(0, 'self')
-            if len(free_vars) > 0:  # pytree has no placeholders in it
+            if len(free_vars) > 0:  # pytree has placeholders in it
                 body.insert(0, f"{', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(orig_args)}], self._in_spec)\n")
         else:
             orig_args = free_vars
