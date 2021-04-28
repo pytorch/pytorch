@@ -292,7 +292,13 @@ static inline double calc_digamma(double x) {
       // If the argument is a negative integer, NaN is returned
       return std::numeric_limits<double>::quiet_NaN();
     }
-    return calc_digamma(1 - x) - c10::pi<double> / tan(c10::pi<double> * x);
+    // Extracts the fractional part of x as r, since tan(pi * r) is more numerically
+    // accurate than tan(pi * x). While these operations are mathematically equivalent
+    // since both x and r are in radians and tan() has a periodicity of pi, in practice
+    // the computation of pi * x is a source of error (when |x| > 1).
+    double q, r;
+    r = std::modf(x, &q);
+    return calc_digamma(1 - x) - c10::pi<double> / tan(c10::pi<double> * r);
   }
 
   // Push x to be >= 10
@@ -344,9 +350,13 @@ static inline float calc_digamma(float x) {
     // If the argument is a negative integer, NaN is returned
       return std::numeric_limits<float>::quiet_NaN();
     }
-    // Avoid rounding errors for `tan`'s input.
-    // Those make a big difference at extreme values.
-    float pi_over_tan_pi_x = (float)(c10::pi<double> / tan(c10::pi<double> * (double)x));
+    // Extracts the fractional part of x as r, since tan(pi * r) is more numerically
+    // accurate than tan(pi * x). While these operations are mathematically equivalent
+    // since both x and r are in radians and tan() has a periodicity of pi, in practice
+    // the computation of pi * x is a source of error (when |x| > 1).
+    double q, r;
+    r = std::modf(x, &q);
+    float pi_over_tan_pi_x = (float)(c10::pi<double> / tan(c10::pi<double> * r));
     return calc_digamma(1 - x) - pi_over_tan_pi_x;
   }
 
