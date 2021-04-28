@@ -18,9 +18,12 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SampleAs, SampleAsOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SampleAsGradient, SampleAsGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SampleAs)
     .NumInputs(2)
     .NumOutputs(1)
@@ -44,6 +47,7 @@ label value is > 0.
         "from X corresponding to the non-zero elements in labels are copied "
         "into Y.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SampleAsGradient)
     .NumInputs(3)
     .NumOutputs(1)
@@ -76,6 +80,7 @@ class GetSampleAsGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SampleAs, GetSampleAsGradient);
 
 } // namespace caffe2
