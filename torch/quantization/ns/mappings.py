@@ -384,6 +384,8 @@ def add_op_to_sets_of_related_ops(
             if related_op in set_of_related_ops:
                 set_of_related_ops.add(op)
                 return
+        # if we got here, related_op was not found
+        raise AssertionError(f"{related_op} was not found")
     else:
         counter = 0
         while str(counter) in base_name_to_sets_of_related_ops:
