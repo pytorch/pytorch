@@ -10,6 +10,7 @@ namespace at {
 DLDataType getDLDataType(const Tensor& t) {
   DLDataType dtype;
   dtype.lanes = 1;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dtype.bits = t.element_size() * 8;
   switch (t.scalar_type()) {
     case ScalarType::Byte:
@@ -18,12 +19,14 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::Char:
       dtype.code = DLDataTypeCode::kDLInt;
       break;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case ScalarType::Double:
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::Float:
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case ScalarType::Int:
       dtype.code = DLDataTypeCode::kDLInt;
       break;
@@ -124,6 +127,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 8:
           stype = ScalarType::Byte;
           break;
@@ -134,15 +138,19 @@ ScalarType toScalarType(const DLDataType& dtype) {
       break;
     case DLDataTypeCode::kDLInt:
       switch (dtype.bits) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 8:
           stype = ScalarType::Char;
           break;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 16:
           stype = ScalarType::Short;
           break;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 32:
           stype = ScalarType::Int;
           break;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 64:
           stype = ScalarType::Long;
           break;
@@ -153,12 +161,15 @@ ScalarType toScalarType(const DLDataType& dtype) {
       break;
     case DLDataTypeCode::kDLFloat:
       switch (dtype.bits) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 16:
           stype = ScalarType::Half;
           break;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 32:
           stype = ScalarType::Float;
           break;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         case 64:
           stype = ScalarType::Double;
           break;
@@ -173,6 +184,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
   return stype;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ATenDLMTensor {
   Tensor handle;
   DLManagedTensor tensor;
@@ -198,8 +210,10 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape =
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<int64_t*>(src.sizes().data());
   atDLMTensor->tensor.dl_tensor.strides =
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<int64_t*>(src.strides().data());
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   return &(atDLMTensor->tensor);
@@ -209,6 +223,7 @@ Tensor fromDLPack(const DLManagedTensor* src) {
   Device device = getATenDevice(src->dl_tensor.ctx);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   auto deleter = [src](void* self) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     src->deleter(const_cast<DLManagedTensor*>(src));
   };
   if (!src->dl_tensor.strides) {
