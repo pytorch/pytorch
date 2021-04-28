@@ -822,19 +822,18 @@ class DistributedDataParallel(Module):
         else:
             self.require_forward_param_sync = False
 
-        # TODO. Right now we add this sink for static_graph training only. once
-        # this feature is stable, we will add this sink for all cases. E.g.
-        # This sink can help capture more accuracte backward start time as well.
-        if self.static_graph:
-            # Need to grab list of tensors from user output in order to pass
-            # to custom autograd function.
-            output_tensor_list, treespec = tree_flatten(output)
-            passthrough_tensor_list = _DDPSink.apply(
-                self.reducer,
-                *output_tensor_list
-            )
-            # Reconstruct output data structure.
-            output = tree_unflatten(passthrough_tensor_list, treespec)
+        # Run tensors in output through a passthrough autograd function. This is
+        # so that we can run certain logic at the beginning of the backwards
+        # pass via the backwards implemented in _DDPSink.
+        # Need to grab list of tensors from user output in order to pass
+        # to custom autograd function.
+        output_tensor_list, treespec = tree_flatten(output)
+        passthrough_tensor_list = _DDPSink.apply(
+            self.reducer,
+            *output_tensor_list
+        )
+        # Reconstruct output data structure.
+        output = tree_unflatten(passthrough_tensor_list, treespec)
         return output
 
     def scatter(self, inputs, kwargs, device_ids):
