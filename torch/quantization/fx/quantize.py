@@ -559,9 +559,10 @@ def handle_copy_nodes(
             maybe_observer_node = node.args[0]
             if isinstance(maybe_observer_node, Node) and len(maybe_observer_node.args) > 0:
                 observed_node = maybe_observer_node.args[0]
-                if is_activation_post_process_node(maybe_observer_node, modules) and \
-                   (observed_node.op, observed_node.target) == ("call_function", operator.getitem):
-                    actpp_to_remove.add(maybe_observer_node)
+                if is_activation_post_process_node(maybe_observer_node, modules):
+                    assert isinstance(observed_node, Node)
+                    if (observed_node.op, observed_node.target) == ("call_function", operator.getitem):
+                        actpp_to_remove.add(maybe_observer_node)
             unmatched_nodes.add(node)
 
         # rule 5: for special node, we'll just remove observer for its input
