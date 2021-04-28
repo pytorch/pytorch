@@ -71,7 +71,7 @@ void flip_kernel(TensorIterator& iter, const Tensor& input) {
 
 } // Anonymous namespace
 
-REGISTER_DISPATCH(flip_stub, &flip_cpu_kernel);
+REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
 } // namespace native
 } // namespace at
