@@ -842,3 +842,55 @@ bool test_mean_dim3() {
       return almostEqual(Y1, Y2);
     });
 }
+
+
+bool test_chunk() {
+__block std::vector<int64_t> size{1, 4, 2, 2};
+return TEST(size, __PRETTY_FUNCTION__, ^bool {
+  auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto Y1 = at::chunk(X1, 2, 1);
+  auto X2 = X1.metal();
+  auto Y2 = at::chunk(X2, 2, 1);
+  auto A1 = Y1[0].contiguous();
+  auto A2 = Y1[1].contiguous();
+  auto Z1 = Y2[0].cpu();
+  auto Z2 = Y2[1].cpu();
+  bool b1 = checkRtol(A1 - Z1, {A1, Z1});
+  bool b2 = checkRtol(A2 - Z2, {A2, Z2});
+  return b1 && b2;
+});
+}
+
+bool test_chunk2() {
+__block std::vector<int64_t> size{1, 9, 2, 2};
+return TEST(size, __PRETTY_FUNCTION__, ^bool {
+  auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto Y1 = at::chunk(X1, 2, 1);
+  auto X2 = X1.metal();
+  auto Y2 = at::chunk(X2, 2, 1);
+  auto A1 = Y1[0].contiguous();
+  auto A2 = Y1[1].contiguous();
+  auto Z1 = Y2[0].cpu();
+  auto Z2 = Y2[1].cpu();
+  bool b1 = checkRtol(A1 - Z1, {A1, Z1});
+  bool b2 = checkRtol(A2 - Z2, {A2, Z2});
+  return b1 && b2;
+});
+}
+
+bool test_chunk3() {
+__block std::vector<int64_t> size{1, 16, 2, 2};
+return TEST(size, __PRETTY_FUNCTION__, ^bool {
+  auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto Y1 = at::chunk(X1, 2, 1);
+  auto X2 = X1.metal();
+  auto Y2 = at::chunk(X2, 2, 1);
+  auto A1 = Y1[0].contiguous();
+  auto A2 = Y1[1].contiguous();
+  auto Z1 = Y2[0].cpu();
+  auto Z2 = Y2[1].cpu();
+  bool b1 = checkRtol(A1 - Z1, {A1, Z1});
+  bool b2 = checkRtol(A2 - Z2, {A2, Z2});
+  return b1 && b2;
+});
+}
