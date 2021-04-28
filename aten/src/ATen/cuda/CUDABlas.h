@@ -197,8 +197,30 @@ void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>));
 template <>
 void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
 
-// This guards blocks use of getrfBatched and getriBatched on platforms other than cuda
+// This guards blocks use of geqrfBatched, getrfBatched, getriBatched on platforms other than cuda
 #ifdef CUDART_VERSION
+
+#define CUDABLAS_GEQRF_BATCHED_ARGTYPES(Dtype)                   \
+  cublasHandle_t handle, int m, int n, Dtype **A_array, int lda, \
+      Dtype **tau_array, int *info, int batchsize
+
+template <class Dtype>
+void geqrfBatched(CUDABLAS_GEQRF_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::blas::geqrfBatched: not implemented for ",
+      typeid(Dtype).name());
+}
+template <>
+void geqrfBatched<float>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(float));
+template <>
+void geqrfBatched<double>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(double));
+template <>
+void geqrfBatched<c10::complex<double>>(
+    CUDABLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<double>));
+template <>
+void geqrfBatched<c10::complex<float>>(
+    CUDABLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<float>));
 
 #define CUDABLAS_GETRF_ARGTYPES(Dtype)  \
   int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize
