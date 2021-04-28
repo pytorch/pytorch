@@ -12,7 +12,6 @@
 #include <torch/csrc/distributed/rpc/agent_utils.h>
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
-#include <torch/csrc/distributed/rpc/utils.h>
 
 #ifdef USE_CUDA_NOT_ROCM
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
@@ -189,22 +188,25 @@ constexpr int64_t kIbvTransportPriority = 100;
 // The UV transport just uses TCP and should work everywhere, thus keep it last.
 constexpr int64_t kUvTransportPriority = 0;
 
-constexpr int64_t kCmaChannelPriority = 200;
-constexpr int64_t kMultiplexedUvChannelPriority = 100;
+constexpr int64_t kCmaChannelPriority = 1200;
+constexpr int64_t kMultiplexedUvChannelPriority = 1100;
 // The basic channel reuses a transport as a channel, and is thus our fallback.
-constexpr int64_t kBasicChannelPriority = 0;
+constexpr int64_t kBasicChannelPriority = 1000;
 
+// CPU channel have higher priority than CUDA channels, since the latter might
+// handle CPU-to-CPU transfers, but will always be less efficient than their
+// CPU-only counterparts.
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaIpcChannelPriority = 301;
+constexpr int64_t kCudaIpcChannelPriority = 300;
 #endif
 
 #if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaGdrChannelPriority = 201;
+constexpr int64_t kCudaGdrChannelPriority = 200;
 #endif
 
 #ifdef USE_CUDA_NOT_ROCM
-constexpr int64_t kCudaXthChannelPriority = 401;
-constexpr int64_t kCudaBasicChannelPriority = 101;
+constexpr int64_t kCudaXthChannelPriority = 400;
+constexpr int64_t kCudaBasicChannelPriority = 0;
 #endif
 
 std::unique_ptr<TransportRegistration> makeUvTransport() {
@@ -517,6 +519,30 @@ TensorPipeAgent::TensorPipeAgent(
       nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       processGroup_(std::move(processGroup)) {
+  // register Future factories
+  FutureFactoryRegistry::getInstance().registerFutureFactory(
+      c10::DeviceType::CPU,
+      [](const std::vector<c10::DeviceIndex>& devices)
+          -> std::shared_ptr<JitFuture> {
+        TORCH_INTERNAL_ASSERT(devices.empty());
+        return std::make_shared<JitFuture>(at::AnyClassType::get());
+      });
+
+#ifdef USE_CUDA_NOT_ROCM
+  FutureFactoryRegistry::getInstance().registerFutureFactory(
+      c10::DeviceType::CUDA,
+      [](const std::vector<c10::DeviceIndex>& devices)
+          -> std::shared_ptr<JitFuture> {
+        if (!devices.empty()) {
+          return std::make_shared<at::cuda::CUDAFuture>(
+              at::AnyClassType::get(), devices);
+        } else {
+          return std::make_shared<JitFuture>(at::AnyClassType::get());
+        }
+      });
+#endif
+
+  // collect worker names
   prepareNames();
 
   {
@@ -979,8 +1005,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   }
   ClientPipe& clientPipe = it->second;
 
-  auto futureResponseMessage = std::make_shared<AtomicJitFuture>(
-      devices_, reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
+  auto futureResponseMessage = std::make_shared<AtomicJitFuture>(devices_);
   uint64_t messageId = nextMessageID_++;
   requestMessage.setId(messageId);
 
