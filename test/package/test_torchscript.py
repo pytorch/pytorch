@@ -570,10 +570,6 @@ class PackageScriptModuleTest(PackageTestCase):
             e.save_pickle("model", "inline.pkl", scripted_inline)
             e.save_pickle("model", "imported.pkl", scripted_imported)
 
-        with PackageExporter("test_torch.pt", verbose=False) as e:
-            e.save_pickle("model", "inline.pkl", scripted_inline)
-            e.save_pickle("model", "imported.pkl", scripted_imported)
-
         buffer.seek(0)
         importer = PackageImporter(buffer)
         loaded_inline = importer.load_pickle("model", "inline.pkl")
