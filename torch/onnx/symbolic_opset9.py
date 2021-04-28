@@ -2407,7 +2407,7 @@ def rrelu(g, input, lower, upper, training, generator):
 
 def bernoulli(g, input, generator=None, out=None):
     if generator is not None and not sym_help._is_none(generator):
-        _unimplemented("Bernoulli", "generator is not supported for multinomial")
+        _unimplemented("Bernoulli", "generator is not supported for bernoulli")
 
     self = input if out is None else out
     dtype = sym_help._try_get_scalar_type(self)
