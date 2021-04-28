@@ -12,7 +12,8 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional, Set, Tuple
+from enum import Enum
+from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 from torch.distributed import Store
 
@@ -414,6 +415,69 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
         them before us.
         """
         self._dirty = True
+
+
+class _Action(Enum):
+    """Specifies the possible actions based on the state of the rendezvous."""
+
+    KEEP_ALIVE = 1
+    ADD_TO_PARTICIPANTS = 2
+    ADD_TO_WAIT_LIST = 3
+    REMOVE_FROM_PARTICIPANTS = 4
+    REMOVE_FROM_WAIT_LIST = 5
+    MARK_RENDEZVOUS_COMPLETE = 6
+    MARK_RENDEZVOUS_CLOSED = 7
+    SYNC = 8
+    ERROR_CLOSED = 9
+    ERROR_TIMEOUT = 10
+    FINISH = 11
+
+
+class _RendezvousContext:
+    """Holds the context of the rendezvous.
+
+    Attributes:
+        node:
+            The node descriptor associated with the current rendezvous handler
+            instance.
+        state:
+            The current state of the rendezvous.
+        settings:
+            The rendezvous settings.
+    """
+
+    node: _NodeDesc
+    state: _RendezvousState
+    settings: RendezvousSettings
+
+    def __init__(
+        self, node: _NodeDesc, state: _RendezvousState, settings: RendezvousSettings
+    ) -> None:
+        self.node = node
+        self.state = state
+        self.settings = settings
+
+
+class _RendezvousOpExecutor(ABC):
+    """Executes rendezvous operations."""
+
+    @abstractmethod
+    def run(
+        self, state_handler: Callable[[_RendezvousContext, float], _Action], deadline: float
+    ) -> None:
+        """Executes a rendezvous operation.
+
+        An operation is run inside a state machine and is expected to transition
+        the rendezvous from one state to another.
+
+        Args:
+            state_handler:
+                A callable that is expected to return the next state transition
+                action based on the current state of the rendezvous.
+            deadline:
+                The time, in seconds, at which the operation will be considered
+                timed-out.
+        """
 
 
 class DynamicRendezvousHandler(RendezvousHandler):
