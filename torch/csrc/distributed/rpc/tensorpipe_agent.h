@@ -11,6 +11,7 @@
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #ifdef USE_CUDA_NOT_ROCM
 #include <ATen/cuda/CUDAFuture.h>
@@ -284,17 +285,11 @@ class TensorPipeAgent : public RpcAgent {
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
-    AtomicJitFuture(bool noCuda = true) {
-#ifdef USE_CUDA_NOT_ROCM
-      if (!noCuda) {
-        jitFuture =
-            std::make_shared<at::cuda::CUDAFuture>(at::AnyClassType::get());
-      } else {
-#else
-      {
-#endif
-        jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
-      }
+    explicit AtomicJitFuture(const std::vector<c10::DeviceIndex>& devices) {
+      c10::DeviceType type =
+          devices.empty() ? c10::DeviceType::CPU : c10::DeviceType::CUDA;
+      jitFuture =
+          FutureFactoryRegistry::getInstance().createFuture(type, devices);
     }
 
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;

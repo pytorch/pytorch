@@ -43,16 +43,8 @@ from torch.quantization.ns.graph_matcher import (
     GraphMatchingException,
 )
 from torch.quantization.ns.mappings import (
-    FUNS_IO_TYPE_FP32,
-    FUNS_IO_TYPE_INT8,
-    FUNS_IO_TYPE_FP32_OR_INT8,
-    FUNS_UNMATCHABLE,
-    MODS_IO_TYPE_FP32,
-    MODS_IO_TYPE_INT8,
-    MODS_IO_TYPE_FP32_OR_INT8,
-    MODS_UNMATCHABLE,
-    METHS_IO_TYPE_FP32_OR_INT8,
-    METHS_UNMATCHABLE,
+    get_node_type_to_io_type_map,
+    get_unmatchable_types_map,
 )
 from torch.quantization._numeric_suite_fx import (
     extract_weights,
@@ -85,6 +77,18 @@ class LinearReluFunctional(nn.Module):
         return x
 
 
+class LinearFunctional(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w1 = nn.Parameter(torch.empty(4, 4))
+        self.b1 = nn.Parameter(torch.zeros(4))
+        torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+    def forward(self, x):
+        x = F.linear(x, self.w1, self.b1)
+        return x
+
+
 class LinearReluLinearFunctional(nn.Module):
     def __init__(self):
         super().__init__()
@@ -96,6 +100,17 @@ class LinearReluLinearFunctional(nn.Module):
         x = F.linear(x, self.w, self.b)
         x = F.relu(x)
         x = F.linear(x, self.w, self.b)
+        return x
+
+
+class AddMulFunctional(nn.Module):
+    def forward(self, x, y):
+        x = x + 1.0
+        x = x * 1.0
+        x = 1.0 + x
+        x = 1.0 * x
+        x = x + y
+        x = x * y
         return x
 
 
@@ -225,6 +240,22 @@ class AllConvFunctional(torch.nn.Module):
             self.dilation3d, self.groups)
         x = F.relu(x)
         return x
+
+@torch.fx.wrap
+def _wrapped_hardswish(x):
+    return F.hardswish(x)
+
+@torch.fx.wrap
+def _wrapped_hardswish_fp16(x):
+    x = x.dequantize()
+    x = F.hardswish(x)
+    x = x.to(torch.float16)
+    return x
+
+@torch.fx.wrap
+def _wrapped_sigmoid(x):
+    return F.sigmoid(x)
+
 
 
 class TestFXGraphMatcher(QuantizationTestCase):
@@ -594,6 +625,39 @@ class TestFXGraphMatcher(QuantizationTestCase):
             else:
                 raise AssertionError(
                     f"handing for {qhandler_cls} not implemented")
+
+    @skipIfNoFBGEMM
+    def test_user_defined_function(self):
+        """
+        Verify that graph matching works on user defined functions
+        """
+        class M1(nn.Module):
+            def forward(self, x):
+                x = F.hardswish(x)
+                return x
+
+        class M2(nn.Module):
+            def forward(self, x):
+                x = _wrapped_hardswish(x)
+                return x
+
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m1 = prepare_fx(M1().eval(), qconfig_dict)
+        m2 = prepare_fx(M2().eval(), qconfig_dict)
+
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        base_name_to_sets_of_related_ops['torch.nn.functional.hardswish'].add(
+            _wrapped_hardswish)
+
+        results = get_matching_subgraph_pairs(
+            m1, m2,
+            base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
+        expected_types = {
+            'base_op_torch.nn.functional.hardswish_0':
+                ((F.hardswish, F.hardswish), (_wrapped_hardswish, _wrapped_hardswish)),
+        }
+        self.assert_types_for_matched_subgraph_pairs(
+            results, expected_types, m1, m2)
 
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
@@ -979,6 +1043,13 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             results_len=2)
 
     @skipIfNoFBGEMM
+    def test_add_mul_inputs_activations(self):
+        m = AddMulFunctional().eval()
+        res = self._test_match_activations(
+            m, (torch.randn(2, 2), torch.randn(2, 2)),
+            results_len=6, should_log_inputs=True)
+
+    @skipIfNoFBGEMM
     def test_linear_fp16_weights(self):
         qconfig_dict = {'': torch.quantization.float16_static_qconfig}
         m = LinearReluFunctional().eval()
@@ -1017,6 +1088,22 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 should_log_inputs=should_log_inputs)
 
     @skipIfNoFBGEMM
+    def test_linear_fp16_vs_linear_fp16_shadow_activations(self):
+        m = LinearFunctional().eval()
+        qconfig_dict = {'': torch.quantization.float16_static_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mq1 = convert_fx(copy.deepcopy(mp))
+        mq2 = convert_fx(copy.deepcopy(mp))
+        mq1_shadows_mq2 = _add_shadow_loggers_impl(
+            'a', mq1, 'b', mq2, OutputLogger, should_log_inputs=False)
+        mq1_shadows_mq2(torch.randn(4, 4))
+        act_compare_dict = extract_shadow_logger_info(
+            mq1_shadows_mq2, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 1)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
+
+
+    @skipIfNoFBGEMM
     def test_op_with_either_fp32_or_int8_input(self):
         """
         Verify that shadowing works with ops which accept either fp32 or
@@ -1037,12 +1124,10 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m, (torch.randn(4, 4),),
             results_len=2)
 
-    @skipIfNoFBGEMM
-    def test_int8_shadows_int8(self):
+    def _test_int8_shadows_int8_impl(self, m):
         """
         Verify that shadowing works where both modules are int8
         """
-        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
         mp = prepare_fx(m, qconfig_dict)
         mp(torch.randn(4, 1, 4, 4))
@@ -1054,6 +1139,53 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             mq1_shadows_mq2, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 1)
         self.assert_ns_compare_dict_valid(act_compare_dict)
+
+    @skipIfNoFBGEMM
+    def test_int8_shadows_int8_mod(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        self._test_int8_shadows_int8_impl(m)
+
+    @skipIfNoFBGEMM
+    def test_int8_shadows_int8_fun(self):
+        m = LinearFunctional().eval()
+        self._test_int8_shadows_int8_impl(m)
+
+    @skipIfNoFBGEMM
+    def test_user_module_scriptable(self):
+        # Logging of the output of this class is not supported, because it is
+        # neither a tensor or an RNN return type.
+        class M1(nn.Module):
+            def forward(self, x):
+                x1 = x * 2
+                x2 = x * 4
+                return (x1, x2)
+
+        class M2(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x):
+                x1, x2 = self.m1(x)
+                return x1, x2
+
+        m = M2().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        prepare_custom_config_dict = {
+            'non_traceable_module_class': [M1],
+        }
+        mp1 = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
+        mp2 = copy.deepcopy(mp1)
+        unmatchable_types_map = get_unmatchable_types_map()
+        unmatchable_types_map['mods_unmatchable'].add(M1)
+        mp1_ns, mp2_ns = _add_loggers_impl(
+            'a', mp1, 'b', mp2, OutputLogger, should_log_inputs=False,
+            unmatchable_types_map=unmatchable_types_map)
+
+        # Scripting a model with loggers should succeed. If it fails because of
+        # incorrect dtypes, we can blocklist the associated types from being instrumented.
+        mp1_ns_scripted = torch.jit.script(mp1_ns)
+        mp2_ns_scripted = torch.jit.script(mp2_ns)
 
     @skipIfNoFBGEMM
     def test_user_module(self):
@@ -1132,6 +1264,21 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
         type_a_related_to_b = \
             get_type_a_related_to_b(base_name_to_sets_of_related_ops)
+
+        # TODO(future PR): clean this up
+        node_type_to_io_type_map = get_node_type_to_io_type_map()
+        FUNS_IO_TYPE_FP32 = node_type_to_io_type_map['funs_io_type_fp32']
+        FUNS_IO_TYPE_INT8 = node_type_to_io_type_map['funs_io_type_int8']
+        FUNS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['funs_io_type_fp32_or_int8']
+        MODS_IO_TYPE_FP32 = node_type_to_io_type_map['mods_io_type_fp32']
+        MODS_IO_TYPE_INT8 = node_type_to_io_type_map['mods_io_type_int8']
+        MODS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['mods_io_type_fp32_or_int8']
+        METHS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['meths_io_type_fp32_or_int8']
+
+        unmatchable_types_map = get_unmatchable_types_map()
+        FUNS_UNMATCHABLE = unmatchable_types_map['funs_unmatchable']
+        MODS_UNMATCHABLE = unmatchable_types_map['mods_unmatchable']
+        METHS_UNMATCHABLE = unmatchable_types_map['meths_unmatchable']
 
         # 1. check static quant module mappings
         static_quant_mod_mappings = get_default_static_quant_module_mappings()
@@ -1245,6 +1392,78 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             else:
                 raise AssertionError(
                     f"handing for {qhandler_cls} not implemented")
+
+    @skipIfNoFBGEMM
+    def test_user_defined_function(self):
+        """
+        Verify that NS APIs work on user defined functions
+        """
+        class M1(nn.Module):
+            def forward(self, x):
+                x = F.hardswish(x)
+                x = x.sigmoid()
+                return x
+
+        class M2(nn.Module):
+            def forward(self, x):
+                x = _wrapped_hardswish(x)
+                x = _wrapped_sigmoid(x)
+                return x
+
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m1 = prepare_fx(M1().eval(), qconfig_dict)
+        m2 = prepare_fx(M2().eval(), qconfig_dict)
+        data = torch.randn(4, 4)
+
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        base_name_to_sets_of_related_ops['torch.nn.functional.hardswish'].add(
+            _wrapped_hardswish)
+        base_name_to_sets_of_related_ops['torch.sigmoid'].add(
+            _wrapped_sigmoid)
+
+        # test compare weights
+        results = _extract_weights_impl(
+            'a', m1, 'b', m2,
+            base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
+        self.assertTrue(len(results) == 2)
+        # TODO(future PR): don't store empty dictionaries for nodes
+        #   without weights.
+
+        # test unshadowed activations
+
+        m1_ns, m2_ns = _add_loggers_impl(
+            'a', copy.deepcopy(m1), 'b', copy.deepcopy(m2), OutputLogger,
+            should_log_inputs=False,
+            base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
+
+        # calibrate
+        m1_ns(data)
+        m2_ns(data)
+
+        # check activation result correctness
+        act_compare_dict = extract_logger_info(m1_ns, m2_ns, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 2)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
+
+        # test shadowed activations
+
+        node_type_to_io_type_map = get_node_type_to_io_type_map()
+        node_type_to_io_type_map['funs_io_type_fp32'].add(_wrapped_hardswish)
+        node_type_to_io_type_map['funs_io_type_fp32'].add(_wrapped_sigmoid)
+
+        m2_shadows_m1_ns = _add_shadow_loggers_impl(
+            'a', m2, 'b', m1, OutputLogger,
+            should_log_inputs=False,
+            base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops,
+            node_type_to_io_type_map=node_type_to_io_type_map)
+
+        # calibrate
+        m2_shadows_m1_ns(data)
+
+        # check activation result correctness
+        act_compare_dict = extract_shadow_logger_info(m2_shadows_m1_ns, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == 2)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
