@@ -282,6 +282,7 @@ core_sources_full_mobile = [
 ]
 
 core_sources_full = core_sources_full_mobile + [
+    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
@@ -552,7 +553,6 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
-    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
     "torch/csrc/jit/passes/onnx/eval_peephole.cpp",

@@ -108,6 +108,9 @@ endif()
 
 if(USE_CUDA)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
+    list(APPEND TORCH_PYTHON_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp
+      )
     list(APPEND TORCH_PYTHON_SRCS ${GENERATED_THNN_CXX_CUDA})
 
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
