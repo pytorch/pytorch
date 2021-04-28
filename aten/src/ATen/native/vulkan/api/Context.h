@@ -80,8 +80,8 @@ class Context final {
       api::Shader::Layout::Factory::Handle set_layout;
       api::Pipeline::Layout::Factory::Handle pipe_layout;
       api::Shader::Factory::Handle shader_module;
-      api::Shader::WorkGroup local_work_group;
-      api::Pipeline::Factory::Handle pipe;
+      //api::Shader::WorkGroup local_work_group;
+      //api::Pipeline::Factory::Handle pipe;
 
       explicit OpCache(const GPU& gpu);
       OpCache(const OpCache&) = delete;
@@ -108,8 +108,7 @@ class Context final {
 
   void fill_cache(
       OpCache& cache,
-      const Shader::Descriptor& shader_descriptor,
-      const api::Shader::WorkGroup local_work_group);
+      const Shader::Descriptor& shader_descriptor);
 
   template<typename... Arguments>
   void dispatch(
@@ -196,6 +195,7 @@ inline void Context::dispatch(
       Command::Buffer&,
       const Shader::Layout::Signature&,
       const Shader::Descriptor&,
+      const Shader::WorkGroup&,
       const Shader::WorkGroup&);
 
   // Factor out template parameter independent code to minimize code bloat.
@@ -203,6 +203,7 @@ inline void Context::dispatch(
       command_buffer,
       shader_layout_signature,
       shader_descriptor,
+      global_work_group,
       local_work_group_size);
 
   detail::bind(
@@ -234,12 +235,14 @@ inline void Context::dispatch(
   Descriptor::Set dispatch_prologue(
       Command::Buffer&,
       const OpCache& opcache,
+      const Shader::WorkGroup& global_work_group,
       const VkDescriptorSet vk_descriptor_set);
 
   // Factor out template parameter independent code to minimize code bloat.
   Descriptor::Set descriptor_set = dispatch_prologue(
       command_buffer,
       opcache,
+      global_work_group,
       vk_descriptor_set);
 
   detail::bind(

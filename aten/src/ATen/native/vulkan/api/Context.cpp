@@ -190,6 +190,7 @@ Descriptor::Set dispatch_prologue(
     Command::Buffer& command_buffer,
     const Shader::Layout::Signature& shader_layout_signature,
     const Shader::Descriptor& shader_descriptor,
+    const Shader::WorkGroup& global_work_group,
     const Shader::WorkGroup& local_work_group_size) {
   Context* const context = api::context();
   const GPU gpu = context->gpu();
@@ -202,13 +203,28 @@ Descriptor::Set dispatch_prologue(
         shader_layout_signature,
       });
 
+  Shader::WorkGroup local_group_size = {4, 4, 4};
+
+  if (global_work_group.data[2u] == 1) {
+    if (global_work_group.data[1u] < 8) {
+      local_group_size.data[0u] = 16;
+      local_group_size.data[1u] = 4;
+      local_group_size.data[2u] = 1;
+    }
+    else {
+      local_group_size.data[0u] = 8;
+      local_group_size.data[1u] = 8;
+      local_group_size.data[2u] = 1;
+    }
+  }
+
   command_buffer.bind(
       pipeline.cache.retrieve({
         pipeline.layout.cache.retrieve({
           shader_layout.handle,
         }),
         shader.cache.retrieve(shader_descriptor),
-        local_work_group_size,
+        local_group_size,
       }));
 
   return descriptor.pool.allocate(shader_layout);
@@ -217,6 +233,7 @@ Descriptor::Set dispatch_prologue(
 Descriptor::Set dispatch_prologue(
     Command::Buffer& command_buffer,
     const Context::OpCache& opcache,
+    const Shader::WorkGroup& global_work_group,
     const VkDescriptorSet vk_descriptor_set) {
   Context* const context = api::context();
   const GPU gpu = context->gpu();
@@ -230,6 +247,7 @@ Descriptor::Set dispatch_prologue(
     opcache.layout_descriptor.signature,
   };
 
+  /*
   const api::Pipeline::Object pipe_obj = {
     opcache.pipe.get(),
     opcache.pipe_layout.get(),
@@ -237,6 +255,29 @@ Descriptor::Set dispatch_prologue(
   };
 
   command_buffer.bind(pipe_obj);
+  */
+  Shader::WorkGroup local_group_size = {4, 4, 4};
+
+  if (global_work_group.data[2u] == 1) {
+    if (global_work_group.data[1u] < 8) {
+      local_group_size.data[0u] = 16;
+      local_group_size.data[1u] = 4;
+      local_group_size.data[2u] = 1;
+    }
+    else {
+      local_group_size.data[0u] = 8;
+      local_group_size.data[1u] = 8;
+      local_group_size.data[2u] = 1;
+    }
+  }
+
+  command_buffer.bind(
+      pipeline.cache.retrieve({
+        opcache.pipe_layout.get(),
+        opcache.shader_module.get(),
+        local_group_size,
+      }));
+
 
   return Descriptor::Set(
       descriptor.pool.device_,
@@ -258,22 +299,22 @@ Context::OpCache::OpCache(const GPU& gpu):
   initted(false),
   set_layout{VK_NULL_HANDLE, VK_DELETER(DescriptorSetLayout)(gpu.device)},
   pipe_layout{VK_NULL_HANDLE, VK_DELETER(PipelineLayout)(gpu.device)},
-  shader_module{VK_NULL_HANDLE, VK_DELETER(ShaderModule)(gpu.device)},
-  pipe{VK_NULL_HANDLE, VK_DELETER(Pipeline)(gpu.device)} {
+  shader_module{VK_NULL_HANDLE, VK_DELETER(ShaderModule)(gpu.device)} {
+  //pipe{VK_NULL_HANDLE, VK_DELETER(Pipeline)(gpu.device)} {
 }
 
 void Context::fill_cache(
     Context::OpCache& opcache,
-    const Shader::Descriptor& shader_descriptor,
-    const api::Shader::WorkGroup local_work_group) {
+    const Shader::Descriptor& shader_descriptor) {
 
   //api::Descriptor::Pool& descriptor_pool = persistent()->descriptor_pool;
 
   opcache.set_layout = shader_.layout.cache.generate(opcache.layout_descriptor);
   opcache.pipe_layout = pipeline_.layout.cache.generate({opcache.set_layout.get()});
   opcache.shader_module = shader_.cache.generate(shader_descriptor);
-  opcache.local_work_group = local_work_group;
+  //opcache.local_work_group = local_work_group;
 
+  /*
   opcache.pipe = pipeline_.cache.generate(
     {
       opcache.pipe_layout.get(),
@@ -281,6 +322,7 @@ void Context::fill_cache(
       opcache.local_work_group,
     }
   );
+  */
 
   const api::Shader::Layout::Object shader_layout =
   {
@@ -304,7 +346,7 @@ Context::OpCache& Context::get_playground_cache() {
       VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
     }
   };
-  fill_cache(playground_cache, VK_KERNEL(playground), {64,1,1});
+  fill_cache(playground_cache, VK_KERNEL(playground));
   return playground_cache;
 }
 
@@ -321,7 +363,7 @@ Context::OpCache& Context::get_conv2d_dw_cache() {
       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     }
   };
-  fill_cache(conv2d_dw_cache, VK_KERNEL(conv2d_dw), {4,4,4});
+  fill_cache(conv2d_dw_cache, VK_KERNEL(conv2d_dw));
   return conv2d_dw_cache;
 }
 
@@ -338,7 +380,7 @@ Context::OpCache& Context::get_conv2d_pw_cache() {
       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     }
   };
-  fill_cache(conv2d_pw_cache, VK_KERNEL(conv2d_pw), {4,4,4});
+  fill_cache(conv2d_pw_cache, VK_KERNEL(conv2d_pw));
   return conv2d_pw_cache;
 }
 
@@ -355,7 +397,7 @@ Context::OpCache& Context::get_conv2d_cache() {
       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     }
   };
-  fill_cache(conv2d_cache, VK_KERNEL(conv2d), {4,4,4});
+  fill_cache(conv2d_cache, VK_KERNEL(conv2d));
   return conv2d_cache;
 }
 
@@ -370,7 +412,7 @@ Context::OpCache& Context::get_upsample_cache() {
       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     },
   };
-  fill_cache(upsample_cache, VK_KERNEL(upsample_nearest2d), {4,4,4});
+  fill_cache(upsample_cache, VK_KERNEL(upsample_nearest2d));
   return upsample_cache;
 }
 } // namespace api
