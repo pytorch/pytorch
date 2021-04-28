@@ -104,20 +104,17 @@ class TestPDT(JitTestCase):
         def test_dict(a):
             return a['foo']
 
-        make_global(test_dict)
-
-        inp = {'foo' : True, 'bar': False}
-        scripted_fn = torch.jit._script_pdt(test_dict, example_inputs=[(inp,)])
-        self.assertEqual(scripted_fn({'foo' : False, 'bar': True}, ), test_dict({'foo' : False, 'bar': True}, ))
-
-    def test_pdt_dict_1(self):
         def test_dict_int_list(a):
             return a[1]
 
-        make_global(test_dict_int_list)
+        make_global(test_dict, test_dict_int_list)
 
-        inp = {0 : [True, False], 1: [False, True]}
-        scripted_fn = torch.jit._script_pdt(test_dict_int_list, example_inputs=[(inp,)])
+        str_bool_inp = {'foo' : True, 'bar': False}
+        scripted_fn = torch.jit._script_pdt(test_dict, example_inputs=[(str_bool_inp,)])
+        self.assertEqual(scripted_fn({'foo' : False, 'bar': True}, ), test_dict({'foo' : False, 'bar': True}, ))
+
+        str_list_inp = {0 : [True, False], 1: [False, True]}
+        scripted_fn = torch.jit._script_pdt(test_dict_int_list, example_inputs=[(str_list_inp,)])
         self.assertEqual(scripted_fn({0 : [False, False], 1: [True, True]}, ),
                          test_dict_int_list({0 : [False, False], 1: [True, True]}, ))
 
@@ -126,11 +123,17 @@ class TestPDT(JitTestCase):
             assert not isinstance(a, bool)
             return a
 
-        def test_multiple_types_2(a):
-            assert a is not None
-            return a
+        def test_multiple_type_refinement(a):
+            if isinstance(a, bool):
+                return 1
+            elif isinstance(a, int):
+                return 1 + a
+            elif isinstance(a, float):
+                return 1 + int(a)
+            else:
+                return -1
 
-        make_global(test_multiple_types, test_multiple_types_2)
+        make_global(test_multiple_types, test_multiple_type_refinement)
 
         scripted_fn = torch.jit._script_pdt(test_multiple_types, example_inputs=[(1,), ("abc", ), (8.9,), ([3, 4, 5], )])
         self.assertEqual(scripted_fn(10), test_multiple_types(10))
@@ -138,58 +141,17 @@ class TestPDT(JitTestCase):
         self.assertEqual(scripted_fn(7.89999), test_multiple_types(7.89999))
         self.assertEqual(scripted_fn([10, 11, 14]), test_multiple_types([10, 11, 14]))
 
-        scripted_fn_2 = torch.jit._script_pdt(test_multiple_types_2, example_inputs=[(1,), ("abc", ), (8.9,),
+        scripted_fn = torch.jit._script_pdt(test_multiple_type_refinement, example_inputs=[(1,), ("abc", ), (8.9,),
                                               ([3, 4, 5],), (True, ), ({"a": True}, ), ])
-        self.assertEqual(scripted_fn_2(10), test_multiple_types_2(10))
-        self.assertEqual(scripted_fn_2("def"), test_multiple_types_2("def"))
-        self.assertEqual(scripted_fn_2(7.89999), test_multiple_types_2(7.89999))
-        self.assertEqual(scripted_fn_2([10, 11, 14]), test_multiple_types_2([10, 11, 14]))
-        self.assertEqual(scripted_fn_2(False), test_multiple_types_2(False))
-        self.assertEqual(scripted_fn_2({"abc" : True, "def": False}), test_multiple_types_2({"abc" : True, "def": False}))
+        self.assertEqual(scripted_fn(10), test_multiple_type_refinement(10))
+        self.assertEqual(scripted_fn("def"), test_multiple_type_refinement("def"))
+        self.assertEqual(scripted_fn(7.89999), test_multiple_type_refinement(7.89999))
+        self.assertEqual(scripted_fn([10, 11, 14]), test_multiple_type_refinement([10, 11, 14]))
+        self.assertEqual(scripted_fn(False), test_multiple_type_refinement(False))
+        self.assertEqual(scripted_fn({"abc" : True, "def": False}), test_multiple_type_refinement({"abc" : True, "def": False}))
 
-    def test_class_methods(self):
-        class M1:
-            def fn(a):  # noqa: B902
-                return a
-
-        make_global(M1)
-
-        scripted_fn = torch.jit._script_pdt(M1.fn, example_inputs=[(10, )])
-        self.assertEqual(scripted_fn(M1.fn(2)), M1.fn(2))  # type: ignore[arg-type]
-
-    def test_class_methods_all_types(self):
-        class M2:
-            def fn(a):  # noqa: B902
-                assert a is not None
-                return a
-
-        make_global(M2)
-
-        scripted_fn = torch.jit._script_pdt(M2.fn, example_inputs=[(10, ), (True, ), ({"abc" : True, "def": False}, )])
-        self.assertEqual(scripted_fn(M2.fn(2)), M2.fn(2))  # type: ignore[arg-type]
-        self.assertEqual(scripted_fn(M2.fn(False)), M2.fn(False))  # type: ignore[arg-type]
-        self.assertEqual(scripted_fn(M2.fn({"a": [1]})), M2.fn({"a": [1]}))  # type: ignore[arg-type]
-
-    def test_two_classes_with_same_func_name(self):
-        class M3:
-            def fn(a):  # noqa: B902
-                return a
-
-        class M4:
-            def fn(a):  # noqa: B902
-                assert a is not None
-                return a
-
-        make_global(M3, M4)
-
-        scripted_fn = torch.jit._script_pdt(M3.fn, example_inputs=[(10, )])
-        self.assertEqual(scripted_fn(M3.fn(2)), M3.fn(2))  # type: ignore[arg-type]
-
-        scripted_fn_2 = torch.jit._script_pdt(M4.fn, example_inputs=[(10, ), (True, ), ])
-        self.assertEqual(scripted_fn_2(M4.fn(2)), M4.fn(2))  # type: ignore[arg-type]
-
-    def test_class_as_profiled_types_1(self):
-        class user_defined_class:
+    def test_class_as_profiled_types(self):
+        class UserDefinedClass:
             def fn(self, b):
                 assert b is not None
                 return b
@@ -198,14 +160,15 @@ class TestPDT(JitTestCase):
             assert not isinstance(a, bool)
             return m.fn(a)
 
-        make_global(user_defined_class, test_model)
+        make_global(UserDefinedClass, test_model)
 
-        user_class = user_defined_class()
+        user_class = UserDefinedClass()
         scripted_fn = torch.jit._script_pdt(test_model, example_inputs=[(10, user_class, ), (10.9, user_class, ), ])
         self.assertEqual(scripted_fn(100, user_class, ), test_model(100, user_class))
+        self.assertEqual(scripted_fn(1.9, user_class, ), test_model(1.9, user_class))
 
-    def test_class_as_profiled_types_2(self):
-        class class_with_args:
+    def test_class_with_args_as_profiled_types(self):
+        class ClassWithArgs:
             def __init__(self, a: bool):
                 self.a = a
 
@@ -219,75 +182,8 @@ class TestPDT(JitTestCase):
             assert not isinstance(a, bool)
             return m.fn(a)
 
-        make_global(class_with_args, test_model_with_args)
+        make_global(ClassWithArgs, test_model_with_args)
 
-        user_class = class_with_args(False)
+        user_class = ClassWithArgs(False)
         scripted_fn = torch.jit._script_pdt(test_model_with_args, example_inputs=[(10, user_class, ), (10.9, user_class, ), ])
-        self.assertEqual(scripted_fn(100, class_with_args(True), ), test_model_with_args(100, class_with_args(True)))
-
-    def test_nn_module(self):
-        class TestPDTModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x) -> Any:
-                if isinstance(x, int):
-                    return x + 1
-                elif isinstance(x, float):
-                    return x - 1
-                else:
-                    return x
-
-        make_global(TestPDTModel)
-        pdt_model = TestPDTModel()
-        scripted_pdt_model = torch.jit._script_pdt(pdt_model, example_inputs=[(10, ), (10.80, ), (False, )])
-        self.assertEqual(scripted_pdt_model(50), pdt_model(50))
-        self.assertEqual(scripted_pdt_model(1.8), pdt_model(1.8))
-        self.assertTrue(scripted_pdt_model(True), pdt_model(True))
-
-    def test_nested_nn_module_class(self):
-        class NestedPDTInner(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                if isinstance(x, int):
-                    return x * 10
-                return x
-
-        class NestedModulePDTWrapper(torch.nn.Module):
-            def __init__(self, inner):
-                super().__init__()
-                self.inner = inner
-
-            def forward(self, x):
-                return self.inner(x)
-
-        make_global(NestedPDTInner, NestedModulePDTWrapper)
-        inner_pdt_model = NestedPDTInner()
-        wrapped_pdt_model = NestedModulePDTWrapper(inner_pdt_model)
-        scripted_pdt_model = torch.jit._script_pdt(wrapped_pdt_model, example_inputs=[(20, ), (2.7, ), (False, )])
-        self.assertEqual(scripted_pdt_model(30), wrapped_pdt_model(30))
-        self.assertEqual(scripted_pdt_model(1.9), wrapped_pdt_model(1.9))
-        self.assertTrue(scripted_pdt_model(True), wrapped_pdt_model(True))
-
-    def test_nested_function_in_forward(self):
-        class NestedFunctionInForward(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return self.fun(x) + 10
-
-            def fun(self, x):
-                if isinstance(x, bool):
-                    return 0
-                elif isinstance(x, int):
-                    return x + 1
-                return 0
-
-        make_global(NestedFunctionInForward)
-        pdt_model = NestedFunctionInForward()
-        scripted_pdt_model = torch.jit._script_pdt(pdt_model, example_inputs=[(20, ), (False, )])
-        self.assertEqual(scripted_pdt_model(30), pdt_model(30))
-        self.assertEqual(scripted_pdt_model(True), pdt_model(True))
+        self.assertEqual(scripted_fn(100, ClassWithArgs(True), ), test_model_with_args(100, ClassWithArgs(True)))
