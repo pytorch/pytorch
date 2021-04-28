@@ -242,6 +242,33 @@ RRefForkData UserRRef::fork() const {
 
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
+OwnerRRef::OwnerRRef(
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    TypePtr type,
+    c10::optional<std::vector<c10::DeviceIndex>> devices)
+    : OwnerRRef(ownerId, rrefId, type, /* value */ {}, std::move(devices)) {}
+
+OwnerRRef::OwnerRRef(
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    TypePtr type,
+    c10::optional<IValue> value,
+    c10::optional<std::vector<c10::DeviceIndex>> devices)
+    : RRef(ownerId, rrefId, type), devices_(std::move(devices)) {
+  if (devices_.has_value() && !devices_.value().empty()) {
+    future_ = FutureFactoryRegistry::getInstance().createFuture(
+        c10::DeviceType::CUDA, devices_.value());
+  } else {
+    future_ = FutureFactoryRegistry::getInstance().createFuture(
+        c10::DeviceType::CPU);
+  }
+
+  if (value.has_value()) {
+    future_->markCompleted(value.value());
+  }
+}
+
 const IValue& OwnerRRef::getValue() const {
   TORCH_CHECK(
       !getTimedOut(),
