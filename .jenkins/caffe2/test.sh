@@ -144,6 +144,7 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
 fi
 
 pip install --user pytest-sugar
+pip install --user onnxoptimizer==0.2.6
 "$PYTHON" \
   -m pytest \
   -x \
