@@ -799,7 +799,8 @@ void StaticRuntime::benchmark(
     const int warmup_runs,
     const int main_runs) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
-  std::cout << "Static runtime ms per iter: " << time_per_iter
+  std::cout << "Static runtime ms per iter: "
+            << time_per_iter
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
 
