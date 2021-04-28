@@ -21,7 +21,7 @@ from urllib.parse import quote
 import torch
 from torch.serialization import location_tag, normalize_storage_type
 
-from ._file_structure_representation import Folder, _create_folder_from_file_list
+from .file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern, GlobGroup
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
@@ -187,8 +187,8 @@ class PackageExporter:
 
     def file_structure(
         self, *, include: "GlobPattern" = "**", exclude: "GlobPattern" = ()
-    ) -> Folder:
-        """Returns a file structure representation of package's zipfile.
+    ) -> Directory:
+        """Creates and returns a :class:`Directory` file structure representation of package's zipfile.
 
         Args:
             include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
@@ -196,8 +196,11 @@ class PackageExporter:
                 a glob-style pattern, as described in :meth:`mock`
 
             exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
+
+        Returns:
+            :class:`Directory`
         """
-        return _create_folder_from_file_list(
+        return _create_directory_from_file_list(
             self.zip_file.archive_name(),
             self.zip_file.get_all_written_records(),
             include,
