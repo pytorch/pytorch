@@ -1301,7 +1301,7 @@ class TestFakeQuantize(TestCase):
             Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
             np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
-            self.assertTrue(Y.dtype ==float_type)
+            self.assertTrue(Y.dtype == float_type)
 
     def test_forward_per_channel_cachemask_cpu(self):
         self._test_forward_per_channel_cachemask_impl('cpu')
