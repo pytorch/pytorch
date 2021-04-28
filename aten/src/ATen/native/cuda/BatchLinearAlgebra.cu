@@ -1678,8 +1678,8 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
 
     // batched MAGMA doesn't support upper=true
-    // we transpose the input as a workaround
-    result.copy_(upper ? input.transpose(-2, -1) : input);
+    // we transpose and conjugate the input as a workaround
+    result.copy_(upper ? input.conj().transpose(-2, -1) : input);
   }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
