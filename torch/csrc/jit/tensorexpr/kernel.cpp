@@ -229,6 +229,7 @@ bool matmulIsSupported(const torch::jit::Node* node) {
 } // namespace jit
 } // namespace torch
 
+
 size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   if (idx < 0) {
     // Handle negative indexing
@@ -317,13 +318,43 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   return e;
 }
 
-ExprHandle tensorexpr::tensorOrConstant(
+ExprHandle broadcast(
+    BufHandle b,
+    const std::vector<ExprHandle>& axes) {
+  return b.load(computeIndicesToBroadcast(axes, b.dims()));
+}
+
+ExprHandle constant(const ArgValue& v) {
+  if (auto s = c10::get_if<tensorexpr::VarHandle>(&v)) {
+    return *s;
+  } else if (auto d = c10::get_if<double>(&v)) {
+    return DoubleImm::make(*d);
+  } else if (auto i = c10::get_if<int64_t>(&v)) {
+    return LongImm::make(*i);
+  } else if (auto b = c10::get_if<bool>(&v)) {
+    return BoolImm::make(*b);
+  } else if (c10::get_if<ArgNone>(&v)) {
+    // This is just a placeholder so we don't throw.  None-handling
+    // is operator-specific and should be handled properly in
+    // the operator-specific lowering code.
+    return IntImm::make(0);
+  }
+  TORCH_INTERNAL_ASSERT(false);
+  throw std::runtime_error("");
+}
+
+ExprHandle tensorOrConstant(
     const ArgValue& v,
     const std::vector<ExprHandle>& axes) {
   if (auto b = c10::get_if<BufHandle>(&v)) {
     return broadcast(*b, axes);
   }
   return constant(v);
+}
+
+// Convert boolean to integer, if needed.
+ExprHandle boolToInteger(const ExprHandle& x) {
+  return x.dtype().scalar_type() == ScalarType::Bool ? cast<int>(x) : x;
 }
 
 ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
@@ -355,21 +386,6 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
   return scalars_.at(v);
 }
 
-ExprHandle TensorExprKernel::tensorOrConstant(
-    const torch::jit::Value* v,
-    const std::vector<ExprHandle>& axes) {
-  auto ti = bufs_.find(v);
-  if (ti != bufs_.end()) {
-    return broadcast(BufHandle(ti->second), axes);
-  }
-  return constant(v);
-}
-
-ExprHandle tensorexpr::broadcast(
-    BufHandle b,
-    const std::vector<ExprHandle>& axes) {
-  return b.load(computeIndicesToBroadcast(axes, b.dims()));
-}
 
 std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
     const c10::VaryingShape<int64_t>& shape) {
@@ -585,50 +601,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
   }
 }
 
-ExprHandle tensorexpr::constant(const ArgValue& v) {
-  if (auto s = c10::get_if<tensorexpr::VarHandle>(&v)) {
-    return *s;
-  } else if (auto d = c10::get_if<double>(&v)) {
-    return DoubleImm::make(*d);
-  } else if (auto i = c10::get_if<int64_t>(&v)) {
-    return LongImm::make(*i);
-  } else if (auto b = c10::get_if<bool>(&v)) {
-    return BoolImm::make(*b);
-  } else if (c10::get_if<ArgNone>(&v)) {
-    // This is just a placeholder so we don't throw.  None-handling
-    // is operator-specific and should be handled properly in
-    // the operator-specific lowering code.
-    return IntImm::make(0);
-  }
-  TORCH_INTERNAL_ASSERT(false);
-  throw std::runtime_error("");
-}
-ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
-  if (v->node()->kind() == prim::Constant) {
-    const auto val = toIValue(v).value();
-    if (val.isDouble()) {
-      return DoubleImm::make(val.toDouble());
-    } else if (val.isInt()) {
-      return LongImm::make(val.toInt());
-    } else if (val.isBool()) {
-      return BoolImm::make(val.toBool());
-    } else if (val.isNone()) {
-      // This is just a placeholder so we don't throw.  None-handling
-      // is operator-specific and should be handled properly in
-      // the operator-specific lowering code.
-      return IntImm::make(0);
-    } else {
-      throw unsupported_dtype();
-    }
-  }
-
-  if (!scalars_.count(v)) {
-    throw malformed_input("no scalar in Constant");
-  }
-
-  return scalars_.at(v);
-}
-
 ExprHandle promoteIntegerToDefaultType(const ExprHandle& e) {
   auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
   if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
@@ -659,7 +631,7 @@ ExprHandle promoteHalfToFloat(const ExprHandle& e) {
   }
 }
 
-bool tensorexpr::checkTypes(
+bool checkTypes(
     const ScalarType highType,
     const int typeConstraints) {
   if (typeConstraints == kAllTypes) {
@@ -679,9 +651,9 @@ bool tensorexpr::checkTypes(
   return false;
 }
 
-void tensorexpr::promoteInputs(
+void promoteInputs(
     std::vector<ExprHandle>& inputs,
-    const int typeConstraints) {
+    const int typeConstraints = kAllTypes) {
   if (inputs.empty()) {
     return;
   }
@@ -701,7 +673,7 @@ void tensorexpr::promoteInputs(
   }
 }
 
-ExprHandle tensorexpr::demoteOutput(
+ExprHandle demoteOutput(
     const ExprHandle& e,
     const c10::optional<ScalarType> type) {
   if (!type.has_value()) {
@@ -784,12 +756,12 @@ std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
   return {res2.first, (res1.second || res2.second)};
 }
 
-std::vector<ExprHandle> tensorexpr::broadcastShapes(
+std::vector<ExprHandle> broadcastShapes(
     std::vector<std::vector<ExprHandle>> shapes) {
   return broadcastShapesImpl(shapes).first;
 }
 
-std::vector<ExprHandle> tensorexpr::broadcastShapes(
+std::vector<ExprHandle> broadcastShapes(
     const std::vector<ExprHandle>& a,
     const std::vector<ExprHandle>& b) {
   return broadcastShapesImpl(a, b).first;
@@ -814,20 +786,20 @@ std::vector<ExprHandle> TensorExprKernel::broadcastShapesMut(
   return res.first;
 }
 
-std::vector<ExprHandle> tensorexpr::valueShape(const ArgValue& v) {
+std::vector<ExprHandle> valueShape(const ArgValue& v) {
   if (auto b = c10::get_if<tensorexpr::BufHandle>(&v)) {
     return b->dims();
   }
   return {};
 }
 
-Tensor* tensorexpr::computeOneOperand(
+Tensor* computeOneOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
     const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
-    const int checkParamTypes) {
+    const int checkParamTypes = kAllTypes) {
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
@@ -842,7 +814,7 @@ Tensor* tensorexpr::computeOneOperand(
       });
 }
 
-Tensor* tensorexpr::computeTwoOperand(
+Tensor* computeTwoOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -865,7 +837,7 @@ Tensor* tensorexpr::computeTwoOperand(
       });
 }
 
-Tensor* tensorexpr::computeTwoOperandWithAlpha(
+Tensor* computeTwoOperandWithAlpha(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -889,7 +861,7 @@ Tensor* tensorexpr::computeTwoOperandWithAlpha(
       });
 }
 
-Tensor* tensorexpr::computeConditionWithTwoOperand(
+Tensor* computeConditionWithTwoOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -916,7 +888,7 @@ Tensor* tensorexpr::computeConditionWithTwoOperand(
       });
 }
 
-Tensor* tensorexpr::computeThreeOperand(
+Tensor* computeThreeOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -924,7 +896,7 @@ Tensor* tensorexpr::computeThreeOperand(
     const std::function<
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
         innerExpr,
-    bool promote_inputs) {
+    bool promote_inputs = true) {
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
@@ -944,7 +916,7 @@ Tensor* tensorexpr::computeThreeOperand(
         return demoteOutput(compute, outputType);
       });
 }
-Tensor* tensorexpr::computeFourOperand(
+Tensor* computeFourOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
@@ -973,9 +945,57 @@ Tensor* tensorexpr::computeFourOperand(
       });
 }
 
-// Convert boolean to integer, if needed.
-ExprHandle boolToInteger(const ExprHandle& x) {
-  return x.dtype().scalar_type() == ScalarType::Bool ? cast<int>(x) : x;
+Tensor* computeCat(
+    const std::vector<ArgValue>& inputList,
+    const ArgValue& argDim,
+    const std::vector<ExprHandle>& outputShape);
+
+Tensor* computeCatWoConditionals(
+    const std::vector<ArgValue>& inputList,
+    const ArgValue& argDim,
+    const std::vector<ExprHandle>& outputShape);
+
+Tensor* computeMatmul(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+  BufHandle ResultBuf("matmul", outputShape, dtype);
+  const Buf* a = c10::get<BufHandle>(inputs[0]).node();
+  const Buf* b = c10::get<BufHandle>(inputs[1]).node();
+
+  auto size_a = ExprVectorToExprHandleVector(a->dims());
+  auto size_b = ExprVectorToExprHandleVector(b->dims());
+  const IntImm* total_size = dynamic_cast<const IntImm*>(
+      IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
+
+  // For small sizes, where N*M*K < 1000, lower matmul to a naive 3-level
+  // loopnest. The number is not tuned very carefully, and in future we should
+  // fine-tune it as well as we should add more advanced native TE lowerings for
+  // matmuls. For bigger sizes we generate a TE ExternalCall, which would call
+  // an aten::matmul.
+  // Native, even naive, lowering is beneficial when the sizes are small because
+  // it allows to eliminate dispatch overhead.
+  if (total_size && total_size->value() < 1000) {
+    return Reduce(
+        "nnc_matmul",
+        {{size_a[0], "M"}, {size_b[1], "N"}},
+        Sum(),
+        [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+          BufHandle ah(a);
+          BufHandle bh(b);
+          return Load::make(ah, {m, k}) * Load::make(bh, {k, n});
+        },
+        {{size_a[1], "K"}});
+  } else {
+    return new Tensor(
+        ResultBuf.node(),
+        ExternalCall::make(
+            ResultBuf, "nnc_aten_matmul", {BufHandle(a), BufHandle(b)}, {}));
+  }
 }
 
 Tensor* tensorexpr::computeOperandValue(
@@ -2345,7 +2365,8 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   }
   return {highType, nonEmptyInputs};
 }
-Tensor* tensorexpr::computeCat(
+
+Tensor* computeCat(
     const std::vector<ArgValue>& inputList,
     const ArgValue& argDim,
     const std::vector<ExprHandle>& outputShape) {
@@ -2404,7 +2425,7 @@ Tensor* tensorexpr::computeCat(
         return load;
       });
 }
-Tensor* tensorexpr::computeCatWoConditionals(
+Tensor* computeCatWoConditionals(
     const std::vector<ArgValue>& input_list,
     const ArgValue& arg_dim,
     const std::vector<ExprHandle>& output_shape) {
@@ -2575,48 +2596,6 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   return new Tensor(ResultBuf.node(), s);
 }
 
-Tensor* tensorexpr::computeMatmul(
-    const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
-  Dtype dtype = kFloat;
-  if (outputType) {
-    dtype = Dtype(*outputType);
-  }
-  BufHandle ResultBuf("matmul", outputShape, dtype);
-  const Buf* a = c10::get<BufHandle>(inputs[0]).node();
-  const Buf* b = c10::get<BufHandle>(inputs[1]).node();
-
-  auto size_a = ExprVectorToExprHandleVector(a->dims());
-  auto size_b = ExprVectorToExprHandleVector(b->dims());
-  const IntImm* total_size = dynamic_cast<const IntImm*>(
-      IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
-
-  // For small sizes, where N*M*K < 1000, lower matmul to a naive 3-level
-  // loopnest. The number is not tuned very carefully, and in future we should
-  // fine-tune it as well as we should add more advanced native TE lowerings for
-  // matmuls. For bigger sizes we generate a TE ExternalCall, which would call
-  // an aten::matmul.
-  // Native, even naive, lowering is beneficial when the sizes are small because
-  // it allows to eliminate dispatch overhead.
-  if (total_size && total_size->value() < 1000) {
-    return Reduce(
-        "nnc_matmul",
-        {{size_a[0], "M"}, {size_b[1], "N"}},
-        Sum(),
-        [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
-          BufHandle ah(a);
-          BufHandle bh(b);
-          return Load::make(ah, {m, k}) * Load::make(bh, {k, n});
-        },
-        {{size_a[1], "K"}});
-  } else {
-    return new Tensor(
-        ResultBuf.node(),
-        ExternalCall::make(
-            ResultBuf, "nnc_aten_matmul", {BufHandle(a), BufHandle(b)}, {}));
-  }
-}
 
 Tensor* TensorExprKernel::computeSoftmax(
     const torch::jit::Value* v,
