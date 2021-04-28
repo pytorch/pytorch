@@ -53,7 +53,7 @@ at::DynamicLibrary& getNVRTCLibrary() {
   std::string alt_libname;
 #else
   if (major < 11 || (major == 11 && minor < 3)) {
-    lib_version = lib_version = std::to_string(major) + "." + std::to_string(minor);
+    lib_version = std::to_string(major) + "." + std::to_string(minor);
   } else if (major == 11) {
     lib_version = "11.2";
   } else {
