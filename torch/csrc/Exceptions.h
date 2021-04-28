@@ -329,6 +329,7 @@ struct PyWarningHandler: at::WarningHandler {
 public:
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
   TORCH_API PyWarningHandler() noexcept(true);
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   TORCH_API ~PyWarningHandler() noexcept(false) override;
 
   void process(const at::SourceLocation &source_location,
