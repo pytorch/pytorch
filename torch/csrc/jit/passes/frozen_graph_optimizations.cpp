@@ -21,10 +21,10 @@ void OptimizeFrozenGraph(
       FoldFrozenConvAddOrSub(graph);
       FoldFrozenConvMulOrDiv(graph);
     }
-#ifdef USE_CUDA
-    FuseFrozenConvAddRelu(graph);
-#endif
   }
+#ifdef USE_CUDA
+  FuseFrozenConvAddRelu(graph);
+#endif
 }
 
 } // namespace jit
