@@ -447,10 +447,17 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
       Compute("b", {{64, "x"}}, [&](const VarHandle& x) { return a.load(x); });
   Tensor* c = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "c", {{32, "x"}}, [&](const VarHandle& x) { return a.load(x + 10); });
+      "c",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{32, "x"}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      [&](const VarHandle& x) { return a.load(x + 10); });
   Tensor* d = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "d", {{96, "x"}}, [&](const VarHandle& x) { return a.load(x + 2); });
+      "d",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{96, "x"}},
+      [&](const VarHandle& x) { return a.load(x + 2); });
   LoopNest l({b, c, d});
 
   auto bounds_info = inferBounds(l.root_stmt());
@@ -580,18 +587,25 @@ TEST(BoundsInference, CacheReads) {
 
   Tensor* A = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   Tensor* B = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 30, j + 3);
       });
   Tensor* C = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "C",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
@@ -738,14 +752,16 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
 
   Tensor* A = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   Tensor* B = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return (i + 1) * (j + 1);
-      });
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return (i + 1) * (j + 1); });
 
   LoopNest l({A, B});
 
@@ -769,12 +785,16 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
 
   Tensor* A = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   Tensor* B = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B", {{64, "i"}, {64, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i, j) + 5;
       });
@@ -800,9 +820,10 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
 
   Tensor* A = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
 
   LoopNest l({A});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -1110,7 +1131,10 @@ TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
       100,
       Store::make(
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf,
+          {k},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto par = Block::make({forJ, forK});
 
   tensorexpr::analysis::MemDependencyChecker analyzer;
@@ -1143,7 +1167,10 @@ TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
       100,
       Store::make(
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf,
+          {k},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto par = Block::make({forK, forJ});
@@ -1181,7 +1208,10 @@ TEST(BoundsInference, HasConflictingOverlapWithLoads) {
       100,
       Store::make(
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf,
+          {k},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   auto forJ = For::make(
       j,
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -1233,7 +1263,11 @@ TEST(BoundsInference, IsOverlapping) {
   auto storeA3 = Store::make(a_buf, {i + 150}, i * 150);
   auto forI = For::make(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      i, 0, 100, Block::make({storeA1, storeB, storeC, storeA2, storeA3}));
+      i,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      100,
+      Block::make({storeA1, storeB, storeC, storeA2, storeA3}));
   tensorexpr::analysis::MemDependencyChecker analyzer;
   forI->accept(&analyzer);
   ASSERT_TRUE(
