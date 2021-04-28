@@ -29,7 +29,6 @@ struct Indexer {
     int64_t offset = *(int64_t*)&indexers[0][idx * indexer_strides[0]];
     for (int j = 1; j < num_indexers; j++) {
       offset += *(int64_t*)&indexers[j][idx * indexer_strides[j]];
-      // offset += value;
     }
     return offset;
   }
