@@ -36,10 +36,15 @@ C10_EXPORT bool RoIPoolOp<float, CPUContext>::RunOnDevice() {
 
   // For each ROI R = [batch_index x1 y1 x2 y2]: max pool over R
   for (int n = 0; n < num_rois; ++n) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int roi_batch_id = rois[0];
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int roi_start_w = round(rois[1] * spatial_scale_);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int roi_start_h = round(rois[2] * spatial_scale_);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int roi_end_w = round(rois[3] * spatial_scale_);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int roi_end_h = round(rois[4] * spatial_scale_);
     CAFFE_ENFORCE_GE(roi_batch_id, 0);
     CAFFE_ENFORCE_LT(roi_batch_id, batch_size);
@@ -113,12 +118,15 @@ C10_EXPORT bool RoIPoolOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIPool, RoIPoolOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIPoolGradient, RoIPoolGradientOp<float, CPUContext>);
 
 // Input: X, rois
 // Output case #1: Y, argmaxes (train mode)
 // Output case #2: Y           (test mode)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIPool)
     .NumInputs(2)
     .NumOutputs({1, 2})
@@ -188,6 +196,7 @@ Depending on the mode, there are multiple output cases:
 
 // Input: X, rois, argmaxes, dY (aka "gradOutput")
 // Output: dX (aka "gradInput")
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIPoolGradient).NumInputs(4).NumOutputs(1);
 
 class GetRoIPoolGradient : public GradientMakerBase {
@@ -201,6 +210,7 @@ class GetRoIPoolGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RoIPool, GetRoIPoolGradient);
 
 } // namespace caffe2
