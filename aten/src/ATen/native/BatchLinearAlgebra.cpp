@@ -1394,9 +1394,9 @@ std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool ch
 
   if (check_errors) {
     if (input.dim() > 2) {
-      batchCheckErrors(info, "torch.linalg.cholesky");
+      batchCheckErrors(info, "torch.linalg.cholesky_ex");
     } else {
-      singleCheckErrors(info.item<int64_t>(), "torch.linalg.cholesky");
+      singleCheckErrors(info.item<int64_t>(), "torch.linalg.cholesky_ex");
     }
   }
 
@@ -1411,18 +1411,37 @@ std::tuple<Tensor, Tensor> linalg_cholesky_ex(const Tensor& input, bool check_er
 }
 
 Tensor linalg_cholesky(const Tensor &self) {
-  bool check_errors = true;
-  Tensor result;
-  std::tie(result, std::ignore) = at::linalg_cholesky_ex(self, check_errors);
+  Tensor result, info;
+  std::tie(result, info) = at::linalg_cholesky_ex(self, /*check_errors=*/false);
+
+  // we pass check_errors=false above and do the check here
+  // so that the name of the function is correct in the error message
+  if (self.dim() > 2) {
+    batchCheckErrors(info, "torch.linalg.cholesky");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "torch.linalg.cholesky");
+  }
+
   return result;
 }
 
 Tensor& linalg_cholesky_out(const Tensor &self, Tensor &result) {
+  // linalg_cholesky_ex_outf includes these checks, but we do it here
+  // so that the name of the function is correct in the error message
   checkSameDevice("torch.linalg.cholesky", result, self);
   checkLinalgCompatibleDtype("torch.linalg.cholesky", result, self);
-  bool check_errors = true;
+
   Tensor info = at::empty({0}, self.options().dtype(kInt));
-  std::tie(result, info) = at::linalg_cholesky_ex_outf(self, check_errors, result, info);
+  std::tie(result, info) = at::linalg_cholesky_ex_outf(self, /*check_errors=*/false, result, info);
+
+  // we pass check_errors=false above and do the check here
+  // so that the name of the function is correct in the error message
+  if (self.dim() > 2) {
+    batchCheckErrors(info, "torch.linalg.cholesky");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "torch.linalg.cholesky");
+  }
+
   return result;
 }
 
