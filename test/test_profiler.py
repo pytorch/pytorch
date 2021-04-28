@@ -1,6 +1,7 @@
 import collections
 import gc
 import io
+import json
 import os
 import unittest
 
@@ -513,6 +514,25 @@ class TestProfiler(TestCase):
                 self.assertEqual(parts[-3:], ['pt', 'trace', 'json'])
                 file_num += 1
             self.assertEqual(file_num, 3)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profiler_metadata(self):
+        t1, t2 = torch.ones(1), torch.ones(1)
+        with profile() as prof:
+            torch.add(t1, t2)
+            prof.add_metadata("test_key1", "test_value1")
+            prof.add_metadata("test_key2", "test_value2")
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with io.open(fname, 'r') as f:
+                trace = json.load(f)
+                assert "metadata" in trace
+                metadata = trace["metadata"]
+                assert "test_key1" in metadata
+                assert metadata["test_key1"] == "test_value1"
+                assert "test_key2" in metadata
+                assert metadata["test_key2"] == "test_value2"
 
 
 if __name__ == '__main__':
