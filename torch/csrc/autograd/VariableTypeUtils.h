@@ -149,7 +149,8 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
 
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
 
-  // Special case when view info can be shared for forward and backward differentiable views
+  // To speed up the most common case, we specially handle when both the forward and backward
+  // view infos are the same, and so a single shared ViewInfo can be used for both of them.
   if ((!diff_view_meta || diff_view_meta->shared_view_info()) && is_bw_differentiable && is_fw_differentiable) {
     if (diff_view_meta) {
       creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
