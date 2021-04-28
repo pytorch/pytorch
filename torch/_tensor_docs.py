@@ -4368,6 +4368,13 @@ Args:
         as :attr:`other`.
 """)
 
+add_docstr_all('expand_dims',
+               r"""
+expand_dims(dim) -> Tensor
+
+See :func:`torch.expand_dims`
+""")
+
 add_docstr_all('sum_to_size',
                r"""
 sum_to_size(*size) -> Tensor

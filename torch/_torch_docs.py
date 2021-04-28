@@ -3170,6 +3170,13 @@ exp2(input, *, out=None) -> Tensor
 Alias for :func:`torch.special.exp2`.
 """)
 
+add_docstr(torch.expand_dims,
+           r"""
+expand_dims(input, dim) -> Tensor
+
+Alias for :func:`torch.unsqueeze`.
+""")
+
 add_docstr(torch.expm1,
            r"""
 expm1(input, *, out=None) -> Tensor

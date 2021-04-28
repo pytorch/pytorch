@@ -90,6 +90,7 @@ Indexing, Slicing, Joining, Mutating Ops
     dsplit
     column_stack
     dstack
+    expand_dims
     gather
     hsplit
     hstack

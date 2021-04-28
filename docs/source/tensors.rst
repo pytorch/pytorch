@@ -335,6 +335,7 @@ Tensor class reference
     Tensor.erfinv_
     Tensor.exp
     Tensor.exp_
+    Tensor.expand_dims
     Tensor.expm1
     Tensor.expm1_
     Tensor.expand
