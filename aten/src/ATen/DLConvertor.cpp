@@ -119,7 +119,7 @@ static Device getATenDevice(const DLDevice& ctx) {
 
 ScalarType toScalarType(const DLDataType& dtype) {
   ScalarType stype;
-  TORCH_CHECK(dtype.lanes != 1, "ATen does not support lanes != 1");
+  TORCH_CHECK(dtype.lanes == 1, "ATen does not support lanes != 1");
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
