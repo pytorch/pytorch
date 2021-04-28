@@ -18,11 +18,14 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SigmoidFocalLoss, SigmoidFocalLossOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SigmoidFocalLossGradient,
     SigmoidFocalLossGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SigmoidFocalLoss)
     .NumInputs(3)
     .NumOutputs(1)
@@ -77,6 +80,7 @@ See: https://arxiv.org/abs/1708.02002 for details.
        "loss",
        "Scalar loss.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SigmoidFocalLossGradient)
     .NumInputs(4)
     .NumOutputs(1)
@@ -114,6 +118,7 @@ class GetSigmoidFocalLossGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SigmoidFocalLoss, GetSigmoidFocalLossGradient);
 
 } // namespace caffe2
