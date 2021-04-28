@@ -91,20 +91,6 @@ static bool participatesInCurrentLevel(TensorList self) {
   return false;
 }
 
-Tensor mean_batching_rule(const Tensor& self, optional<ScalarType> dtype) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return self.mean(dtype);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  VmapDimVector dims;
-  for (int64_t i = 1; i < self_physical.tensor().dim(); i++) {
-    dims.push_back(i);
-  }
-  auto result = at::mean(self_physical.tensor(), dims, /*keepdim*/false, dtype);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-} 
-
 Tensor log_softmax_batching_rule(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1525,7 +1511,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("max_pool2d", at::native::max_pool2d); // composite
   m.impl("max_pool2d_with_indices", max_pool2d_with_indices_batching_rule);
 
-  m.impl("mean", mean_batching_rule);
   m.impl("mean.dim", mean_int_batching_rule);
   m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("log_softmax.int", log_softmax_batching_rule);
