@@ -141,6 +141,21 @@ TEST(StaticRuntime, EmbeddingBag) {
   testStaticRuntime(embedding_bag_max_last_offset, args);
 }
 
+TEST(StaticRuntime, LayerNorm) {
+
+  const auto input = torch::rand({20, 10, 10, 10});
+
+  for (int normalized_size: {2, 3}) {
+      std::vector<int64_t> normalized_shape(normalized_size, 10);
+      const auto weight = torch::rand(normalized_shape);
+      const auto bias = torch::rand(normalized_shape);
+      std::vector<IValue> args{input, normalized_shape, weight, bias};
+      testStaticRuntime(layer_norm_with_weights, args);
+      args = {input, normalized_shape};
+      testStaticRuntime(layer_norm_without_weights, args);
+  }
+}
+
 TEST(StaticRuntime, IndividualOps_Binary) {
   auto a = at::randn({2, 3});
   auto b = at::ones({2, 3});
