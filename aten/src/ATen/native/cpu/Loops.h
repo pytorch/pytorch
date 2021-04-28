@@ -31,6 +31,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/BinaryTensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec256/vec256.h>
 
@@ -270,6 +271,28 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op) {
   iter.cast_outputs();
 }
 
+template <typename func_t>
+void cpu_kernel(BinaryTensorIteratorBase& iter, func_t&& op) {
+  using traits = function_traits<func_t>;
+  // this could be extended to work with void return types
+  TORCH_INTERNAL_ASSERT(2 == traits::arity);
+  // dynamic casting not currently supported on CPU
+  // !!!!!!!!!!!!!! TODO: enable it!
+  // TORCH_INTERNAL_ASSERT(!needs_dynamic_casting_x<func_t>::check(iter));
+
+  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    if (is_contiguous<traits>(strides)) {
+      basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+    } else {
+      using Indices = std::make_index_sequence<traits::arity>;
+      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
+        basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+      });
+    }
+  });
+//  iter.cast_outputs();
+}
+
 // This function helps write elementwise kernels that requires multiple outputs.
 // It follows the similar structure of cpu_kernel.
 // Instead of `basic_loop` function, a new `multiple_outputs_loop` function is
@@ -324,6 +347,37 @@ void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop) {
     }
   });
   iter.cast_outputs();
+}
+
+template <bool check_dynamic_cast=true, typename func_t, typename vec_func_t>
+void cpu_kernel_vec(BinaryTensorIteratorBase& iter, func_t&& op, vec_func_t&& vop) {
+  using traits = function_traits<func_t>;
+  // this could be extended to work with void return types
+  TORCH_INTERNAL_ASSERT(2 == traits::arity);
+  // dynamic casting not currently supported on CPU, but some kernels (like Fill)
+  // explicitly dynamic_cast, so we give the opt-out of checking.
+  // !!!!!!!!!! TODO: enable the check!
+  /*
+  c10::guts::if_constexpr<check_dynamic_cast>([&] {
+    TORCH_INTERNAL_ASSERT(!needs_dynamic_casting_x<func_t>::check(iter));
+  });
+  */
+
+  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    if (is_contiguous<traits>(strides)) {
+      vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
+    } else {
+      using Indices = std::make_index_sequence<traits::arity>;
+      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
+        if (idx) {
+          vectorized_loop(data, n, idx, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
+        } else {
+          basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+        }
+      });
+    }
+  });
+// iter.cast_outputs();
 }
 
 template <typename func_t>

@@ -68,11 +68,11 @@ class TORCH_API BinaryTensorIteratorBase : public impl::MetaBase {
       TensorOptions options,
       DimnameList names) override;
 
- protected:
   ScalarType common_dtype() const {
-      return common_dtype_;
+    return common_dtype_;
   }
 
+ protected:
   Device common_device() const {
       return common_device_;
   }
@@ -105,6 +105,24 @@ class TORCH_API BinaryTensorIteratorBase : public impl::MetaBase {
   StrideVector get_strides() const;
   PtrVector get_base_ptrs() const;
   PtrVector get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const;
+
+  template <typename loop1d_t>
+  auto loop_2d_from_1d(const loop1d_t& loop) {
+    return
+        [loop, ntensor = ntensors()](
+            char** base, const int64_t* strides, int64_t size0, int64_t size1) {
+          PtrVector data(base, base + ntensor);
+          const int64_t* outer_strides = &strides[ntensor];
+          for (int64_t i = 0; i < size1; i++) {
+            if (i > 0) {
+              for (int64_t arg = 0; arg < ntensor; arg++) {
+                data[arg] += outer_strides[arg];
+              }
+            }
+            loop(data.data(), strides, size0);
+          }
+        };
+  }
 };
 
 } // namespace at
