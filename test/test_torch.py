@@ -7877,7 +7877,7 @@ tensor_op_tests = [
     ('geqrf', '', _new_t((20, 20)), lambda t, d: [],
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
+        1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA, skipIfRocm]),
 ]
 
 # Creates and decorates a generic test and adds it to the class.
@@ -8032,6 +8032,16 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         # ensure sharing is not broken
         c = deepcopy([a, a.grad])
         self.assertTrue(c[0].grad is c[1])
+
+    def test_tensor_base_init(self):
+        # Direct construction not OK
+        self.assertRaises(TypeError, lambda: torch._C._TensorBase())
+
+        # But construction of subclass is OK
+        class T(torch._C._TensorBase):
+            pass
+
+        T()
 
 # TODO: this empy class is temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
