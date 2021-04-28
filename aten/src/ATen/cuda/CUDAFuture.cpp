@@ -16,6 +16,12 @@
 #include <c10/macros/Export.h>
 #include <c10/util/intrusive_ptr.h>
 
+// We need this silly trick so HIPification doesn't change getStreamFromPool to
+// getStreamFromPoolMasqueradingAsCUDA. We'll be able to get rid of it once we
+// merge CUDAFuture into ivalue::Future and thus move it from ATen to c10, as
+// HIPification works differently in these two directories.
+#define GET_STREAM_FROM_POOL getStream##FromPool
+
 namespace at {
 namespace cuda {
 
@@ -166,7 +172,7 @@ std::function<void(void)> CUDAFuture::wrapCallback(
     for (const c10::DeviceIndex& idx : devices_) {
       // FIXME Should we find a way to allow to change the priority of
       // streams?
-      streams.push_back(impl_->getStreamFromPool(
+      streams.push_back(impl_->GET_STREAM_FROM_POOL(
           c10::Device(impl_->type(), idx), /*isHighPriority=*/false));
     }
 
