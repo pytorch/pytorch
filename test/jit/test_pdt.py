@@ -280,7 +280,9 @@ class TestPDT(JitTestCase):
                 return self.fun(x) + 10
 
             def fun(self, x):
-                if isinstance(x, int):
+                if isinstance(x, bool):
+                    return 0
+                elif isinstance(x, int):
                     return x + 1
                 return 0
 
@@ -288,4 +290,4 @@ class TestPDT(JitTestCase):
         pdt_model = NestedFunctionInForward()
         scripted_pdt_model = torch.jit._script_pdt(pdt_model, example_inputs=[(20, ), (False, )])
         self.assertEqual(scripted_pdt_model(30), pdt_model(30))
-        self.assertEqual(scripted_pdt_model(10.9), pdt_model(10.9))
+        self.assertEqual(scripted_pdt_model(True), pdt_model(True))
