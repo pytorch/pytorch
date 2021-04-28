@@ -17,6 +17,7 @@ using ::c10::IValue;
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
 constexpr static uint8_t PROTOCOL_VERSION = 2;
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 Pickler::~Pickler() {
   flush();
 }
@@ -239,6 +240,7 @@ void Pickler::pushInt(int64_t n) {
   } else {
     // Push 8 byte integer
     push<PickleOpCode>(PickleOpCode::LONG1);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     push<uint8_t>(8);
     push<int64_t>(n);
   }
@@ -453,6 +455,7 @@ void Pickler::pushSpecializedList(
 
 static inline double swapDouble(double value) {
   const char* bytes = reinterpret_cast<const char*>(&value);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double flipped;
   char* out_bytes = reinterpret_cast<char*>(&flipped);
   for (size_t i = 0; i < sizeof(double); ++i) {

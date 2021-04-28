@@ -104,6 +104,7 @@ static inline void slow_conv_transpose3d_shape_check(
   int dimh = 2;
   int dimw = 3;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (ndim == 5) {
     dimf++;
     dimd++;
@@ -684,6 +685,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
       output_padding_height,
       1);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t n_output_plane;
   if (grad_weight.defined()) {
     n_output_plane = grad_weight.size(1);
