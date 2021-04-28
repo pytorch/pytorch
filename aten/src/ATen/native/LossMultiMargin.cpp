@@ -254,7 +254,8 @@ Tensor multi_margin_loss_cpu(
     const Scalar& margin, const c10::optional<Tensor>& weight_opt,
     int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
   auto output = at::empty({0}, input.options());
   multi_margin_loss_out_cpu_template(
@@ -269,7 +270,8 @@ Tensor& multi_margin_loss_cpu_out(const Tensor& input,
     int64_t reduction,
     Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
   multi_margin_loss_out_cpu_template(
       output, input, target, p.toInt(), margin, weight, reduction);
@@ -284,7 +286,8 @@ Tensor multi_margin_loss_cpu_backward(
     const Scalar& margin, const c10::optional<Tensor>& weight_opt,
     int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
   auto grad_input = at::empty({0}, input.options());
   multi_margin_loss_backward_out_cpu_template(
@@ -307,7 +310,8 @@ Tensor& multi_margin_loss_cpu_backward_out(const Tensor& grad_output,
     int64_t reduction,
     Tensor& grad_input) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
 
   multi_margin_loss_backward_out_cpu_template(
       grad_input,
