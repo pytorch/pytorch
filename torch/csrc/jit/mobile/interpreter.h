@@ -8,6 +8,7 @@ namespace torch {
 namespace jit {
 namespace mobile {
 using Stack = std::vector<c10::IValue>;
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Code {
   std::vector<Instruction> instructions_;
   std::vector<c10::OperatorName> op_names_;
