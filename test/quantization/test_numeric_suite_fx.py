@@ -560,6 +560,18 @@ class TestFXGraphMatcher(QuantizationTestCase):
                     return True
             return False
 
+        unmatchable_types_map = get_unmatchable_types_map()
+        FUNS_UNMATCHABLE = unmatchable_types_map['funs_unmatchable']
+        MODS_UNMATCHABLE = unmatchable_types_map['mods_unmatchable']
+        METHS_UNMATCHABLE = unmatchable_types_map['meths_unmatchable']
+
+        def _op_is_unmatchable(op):
+            return (
+                op in FUNS_UNMATCHABLE or
+                op in MODS_UNMATCHABLE or
+                op in METHS_UNMATCHABLE
+            )
+
         default_quant_patterns = get_default_quant_patterns()
         for pattern, qhandler_cls in default_quant_patterns.items():
             base_op = None
@@ -605,19 +617,16 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 # RNNDynamicQuantizeHandler
                 pass
             elif qhandler_cls == qp.DefaultNodeQuantizeHandler:
-                ops_to_skip = [
-                    torch.nn.SiLU,
-                    torch.nn.functional.silu,
-                ]
-                if base_op in ops_to_skip:
-                    continue
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
             elif qhandler_cls in qhandler_cls_quant_op_same_signature:
                 # these ops use the same op signature for fp32 and quantized
                 # tensors
-                pass
+                self.assertTrue(
+                    _op_in_base_sets_of_related_ops(base_op) or
+                    _op_is_unmatchable(base_op),
+                    f"{base_op} not in sets of related ops or unmatchable")
             elif qhandler_cls in qhandler_cls_all_ops_quantizeable:
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
