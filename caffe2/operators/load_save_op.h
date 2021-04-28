@@ -353,6 +353,7 @@ std::string FormatString(const std::string& pattern, Ts... values) {
   if (bytes_written < 0) {
     throw std::runtime_error("FormatString failed");
   }
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (bytes_written > buffer.size()) {
     // Our initial buffer size wasn't enough, resize and run again.
     buffer.resize(bytes_written + 1);
