@@ -191,6 +191,7 @@ TORCH_MODULE(LeakyReLU);
 /// Applies the LogSigmoid function element-wise.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.LogSigmoid to learn
 /// about the exact behavior of this module.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LogSigmoidImpl : public torch::nn::Cloneable<LogSigmoidImpl> {
  public:
   Tensor forward(const Tensor& input);
@@ -554,6 +555,7 @@ TORCH_MODULE(GLU);
 /// Applies gelu over a given input.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.GELU to learn
 /// about the exact behavior of this module.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API GELUImpl : public torch::nn::Cloneable<GELUImpl> {
  public:
   Tensor forward(const Tensor& input);
@@ -596,6 +598,7 @@ TORCH_MODULE(SiLU);
 /// Applies sigmoid over a given input.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.Sigmoid to learn
 /// about the exact behavior of this module.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API SigmoidImpl : public torch::nn::Cloneable<SigmoidImpl> {
  public:
   Tensor forward(const Tensor& input);

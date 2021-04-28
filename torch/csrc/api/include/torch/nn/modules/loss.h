@@ -63,6 +63,7 @@ TORCH_MODULE(L1Loss);
 /// ```
 /// KLDivLoss model(KLDivLossOptions().reduction(torch::kNone));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API KLDivLossImpl : Cloneable<KLDivLossImpl> {
   explicit KLDivLossImpl(const KLDivLossOptions& options_ = {});
 
@@ -470,6 +471,7 @@ TORCH_MODULE(MultiLabelSoftMarginLoss);
 /// ```
 /// TripletMarginLoss model(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API TripletMarginLossImpl : public Cloneable<TripletMarginLossImpl> {
   explicit TripletMarginLossImpl(
       const TripletMarginLossOptions& options_ = {});
@@ -513,6 +515,7 @@ TORCH_MODULE(TripletMarginLoss);
 /// ```
 /// TripletMarginWithDistanceLoss model(TripletMarginWithDistanceLossOptions().margin(3).swap(false));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API TripletMarginWithDistanceLossImpl : public Cloneable<TripletMarginWithDistanceLossImpl> {
   explicit TripletMarginWithDistanceLossImpl(
       TripletMarginWithDistanceLossOptions options_ = {});
