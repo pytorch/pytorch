@@ -40,6 +40,8 @@ class PrefixStore : public Store {
 
   void setTimeout(const std::chrono::milliseconds& timeout) override;
 
+  void watchKey(const std::string& key, WatchKeyCallback callback) override;
+
  protected:
   std::string prefix_;
   c10::intrusive_ptr<Store> store_;
