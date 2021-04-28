@@ -572,6 +572,7 @@ class Tensor(torch._C._TensorBase):
     def __rfloordiv__(self, other):
         return torch.floor_divide(other, self)
 
+    __pos__ = _C._TensorBase.positive
     __neg__ = _C._TensorBase.neg
     __abs__ = _C._TensorBase.abs
 
