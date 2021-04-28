@@ -74,9 +74,6 @@ import pickle
 import pprint
 import urllib.parse
 
-if sys.version_info >= (3, 7):
-    import importlib.resources
-
 from typing import (
     Dict,
 )
@@ -317,6 +314,8 @@ def get_inline_skeleton():
 
     if sys.version_info < (3, 7):
         raise Exception("get_inline_skeleton requires Python 3.7")
+
+    import importlib.resources
 
     skeleton = importlib.resources.read_text(__package__, "skeleton.html")  # type: ignore[attr-defined]
     js_code = importlib.resources.read_text(__package__, "code.js")  # type: ignore[attr-defined]

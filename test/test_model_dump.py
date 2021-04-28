@@ -7,6 +7,7 @@ import torch
 import torch.utils.model_dump
 import torch.utils.mobile_optimizer
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_quantized import supported_qengines
 
 
 class SimpleModel(torch.nn.Module):
@@ -88,10 +89,12 @@ class TestModelDump(TestCase):
         qmodel = torch.quantization.convert(prepped)
         return qmodel
 
+    @unittest.skipUnless("qnnpack" in supported_qengines, "QNNPACK not available")
     def test_quantized_model(self):
         qmodel = self.get_quant_model()
         self.do_dump_model(torch.jit.script(qmodel))
 
+    @unittest.skipUnless("qnnpack" in supported_qengines, "QNNPACK not available")
     def test_optimized_quantized_model(self):
         qmodel = self.get_quant_model()
         smodel = torch.jit.trace(qmodel, torch.zeros(2, 16))
