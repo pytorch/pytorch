@@ -96,6 +96,9 @@ def transpose_lower(name, out_shape, inp_shapes, args):
         return args[0].load(idxs)
     return te.Compute(name, get_dim_args(out_shape), f)
 
+def dot_lower(name, out_shape, inp_shapes, args):
+    out = te.lower('aten::mul', args, inp_shapes[0][0], inp_shapes[0][1])
+
 
 lowering_functions[torch.ops.aten.ones_like] = ones_like_lower
 lowering_functions[torch.ops.aten.expand] = expand_lower

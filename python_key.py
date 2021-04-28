@@ -1,5 +1,6 @@
 import time
 import torch
+from string import ascii_lowercase
 import torch.nn as nn
 import torch.nn.functional as F
 import torch._C.key as key
@@ -56,13 +57,25 @@ def grad(f, inps):
         out = f(*args)
         out.backward()
         return tuple(key.removeKey(args[idx].grad).proxy for idx in range(len(inps)))
-    if len(inps) == 1:
-        def f_out(x):
-            return f_grad([x])
-    elif len(inps) == 2:
-        def f_out(a, b):
-            return f_grad([a, b])
-    return f_out
+    var_string = ', '.join(ascii_lowercase[:len(inps)])
+    scope = {'f_grad': f_grad}
+    exec(f"""
+def f_out({var_string}):
+    return f_grad([{var_string}])
+""", scope)
+    return scope['f_out']
+
+def f(a, b):
+    c = (a*b)
+    d = c + torch.cos(b)
+    e = torch.dot(c, d)
+    return e + torch.dot(a, b)
+
+inps = (torch.randn(5), torch.randn(5))
+grad_f = fx.symbolic_trace(grad(f, inps))
+grad_f = nnc_compile(grad_f, inps)
+print(grad_f.code)
+exit(0)
 
 
 class Foo(torch.nn.Module):

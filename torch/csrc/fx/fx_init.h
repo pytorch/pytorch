@@ -13,7 +13,7 @@ inline at::Tensor getValueFromPyTensor(const py::object& pyTensor) {
 }
 
 struct TORCH_API PythonTensorImpl : public c10::TensorImpl {
-  explicit PythonTensorImpl(py::object value): TensorImpl(c10::DispatchKeySet(c10::DispatchKey::PythonKey), getValueFromPyTensor(value).dtype(), c10::Device(at::kCPU)), value_(value) {
+  explicit PythonTensorImpl(py::object value): TensorImpl(c10::DispatchKeySet(c10::DispatchKey::FuncTorchPython), getValueFromPyTensor(value).dtype(), c10::Device(at::kCPU)), value_(value) {
     set_storage_access_should_throw();
     // asm("int $0x3\n");
     auto tensor = getValueFromPyTensor(value_);

@@ -120,7 +120,7 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
 
 bool isPythonTensor(at::Tensor tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(
-      c10::DispatchKey::PythonKey);
+      c10::DispatchKey::FuncTorchPython);
 }
 PythonTensorImpl* getPythonImpl(at::Tensor tensor) {
   return static_cast<PythonTensorImpl*>(tensor.unsafeGetTensorImpl());
@@ -266,7 +266,7 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 }
   return;
 }
-TORCH_LIBRARY_IMPL(_, PythonKey, m) {
+TORCH_LIBRARY_IMPL(_, FuncTorchPython, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonFallBack>());
 }
 

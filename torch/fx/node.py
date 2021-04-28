@@ -4,7 +4,7 @@ from .immutable_collections import immutable_dict, immutable_list
 import torch
 import builtins
 import types
-from torch.fx.operator_schemas import normalize_function, normalize_module
+from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
 
 if TYPE_CHECKING:
     from .graph import Graph
@@ -446,11 +446,13 @@ class Node:
 
     def normalized_arguments(
             self, root : torch.nn.Module, arg_types : Optional[Tuple[Any]] = None,
-            kwarg_types : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+            kwarg_types : Optional[Dict[str, Any]] = None,
+            normalize_to_only_use_kwargs : bool = False) -> Optional[ArgsKwargsPair]:
         """
         Returns normalized arguments to Python targets. This means that
         `args/kwargs` will be matched up to the module/functional's
-        signature and return exclusively kwargs in positional order.
+        signature and return exclusively kwargs in positional order
+        if `normalize_to_only_use_kwargs` is true.
         Also populates default values. Does not support positional-only
         parameters or varargs parameters.
 
@@ -462,10 +464,11 @@ class Node:
             root (torch.nn.Module): Module upon which to resolve module targets.
             arg_types (Optional[Tuple[Any]]): Tuple of arg types for the args
             kwarg_types (Optional[Dict[str, Any]]): Dict of arg types for the kwargs
+            normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.
 
         Returns:
 
-            Returns normalized_kwargs, or `None` if not successful.
+            Returns NamedTuple ArgsKwargsPair, or `None` if not successful.
         """
         if self.op == 'call_function':
             assert callable(self.target)
