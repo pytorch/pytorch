@@ -110,6 +110,7 @@ struct TORCH_API TensorIndex final {
   // Case 2: "..." / `at::indexing::Ellipsis`
   TensorIndex(at::indexing::EllipsisIndexType) : type_(TensorIndexType::Ellipsis) {}
   TensorIndex(const char *str) : TensorIndex(at::indexing::Ellipsis) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
     TORCH_CHECK_VALUE(
       strcmp(str, "...") == 0,
       "Expected \"...\" to represent an ellipsis index, but got \"", str, "\"");
