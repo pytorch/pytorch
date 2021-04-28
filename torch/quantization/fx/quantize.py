@@ -497,7 +497,7 @@ def handle_copy_nodes(
         modules: Dict[str, torch.nn.Module]):
     observed_nodes: Set[Node] = set()
     copy_nodes: Set[Node] = set()
-    non_tensor_input_binary_op_nodes: Set[Node] = set()
+    non_tensor_input_nodes: Set[Node] = set()
     unmatched_nodes: Set[Node] = set()
     actpp_to_remove: Set[Node] = set()
     env: Dict[Any, Any] = {}
@@ -519,8 +519,8 @@ def handle_copy_nodes(
                 # an observed copy node
                 actpp_to_remove.add(node)
 
-            # rule 2: if the previous node is a binary op without tensor input, we can remove the observer
-            if in_nodes(node.args[0], non_tensor_input_binary_op_nodes):
+            # rule 2: if the previous node is an op without tensor input, we can remove the observer
+            if in_nodes(node.args[0], non_tensor_input_nodes):
                 actpp_to_remove.add(node)
             observed_nodes.add(node)
 
@@ -553,7 +553,7 @@ def handle_copy_nodes(
 
 
         if all_node_args_have_no_tensors(node, modules, cache_for_no_tensor_check):
-            non_tensor_input_binary_op_nodes.add(node)
+            non_tensor_input_nodes.add(node)
         if root_node is None and node.op != 'placeholder':
             # rule 4: remove observer for getitem if it is followed by an unmatched node
             observer_node = node.args[0]

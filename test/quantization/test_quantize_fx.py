@@ -3560,7 +3560,27 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ns.call_function(torch.quantize_per_tensor),
             ns.call_method("dequantize")
         ])
-        m2(torch.rand(1, 2))
+        m2([torch.rand(1, 2)])
+
+        # testing prepare recognizes non-Tensor input for getitem
+        class M3(torch.nn.Module):
+            def forward(self, x):
+                s = x.shape
+                n, c = s[:2]
+                x = torch.sigmoid(x)
+                return x
+
+        m3 = M3().eval()
+        m3 = prepare_fx(m3, {"": default_qconfig})
+        self.checkGraphModuleNodes(m3, expected_node_occurrence={
+            ns.call_module(torch.quantization.MinMaxObserver): 1
+        })
+        m3 = convert_fx(m3)
+        self.checkGraphModuleNodes(m3, expected_node_list=[
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_method("dequantize")
+        ])
+        m3(torch.rand(1, 2, 3, 4))
 
 
     @skipIfNoFBGEMM
