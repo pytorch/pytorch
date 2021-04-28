@@ -21,6 +21,7 @@
 using namespace at;
 using namespace torch;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPGeneratorClass = nullptr;
 
 PyObject * THPGenerator_initDefaultGenerator(at::Generator cdata)
@@ -117,6 +118,7 @@ static PyObject * THPGenerator_manualSeed(PyObject *_self, PyObject *seed)
           "but got %s", THPUtils_typename(seed));
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(generator.mutex());
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint64_t seed_unpacked;
   try {
     // First try to interpret as unsigned long
@@ -164,11 +166,13 @@ static PyObject * THPGenerator_get_device(THPGenerator *self, void *unused) {
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPGenerator_properties[] = {
   {"device", (getter)THPGenerator_get_device, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPGenerator_methods[] = {
   {"get_state",       THPGenerator_getState,       METH_NOARGS,  nullptr},
   {"set_state",       THPGenerator_setState,       METH_O,       nullptr},
@@ -178,17 +182,20 @@ static PyMethodDef THPGenerator_methods[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPGenerator_members[] = {
   {(char*)"_cdata", T_ULONGLONG, offsetof(THPGenerator, cdata), READONLY, nullptr},
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPGeneratorType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C.Generator",                   /* tp_name */
   sizeof(THPGenerator),                        /* tp_basicsize */
   0,                                           /* tp_itemsize */
   THPGenerator_dealloc,                        /* tp_dealloc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
