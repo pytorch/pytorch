@@ -2,7 +2,9 @@
 // https://github.com/JuliaLang/julia/blob/v1.1.0/src/support/strtod.c
 
 #include <ATen/core/Macros.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <locale.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdlib.h>
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
@@ -21,9 +23,13 @@
 // respective
 //   C stdlib functions
 
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <ctype.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <errno.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <math.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <locale>
 
