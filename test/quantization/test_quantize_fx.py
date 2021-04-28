@@ -3527,6 +3527,42 @@ class TestQuantizeFxOps(QuantizationTestCase):
             expected_node_occurrence=count_check,
             expected_node_list=order_check)
 
+    def test_getitem(self):
+        """ Make sure we only insert observer for getitem if the following node is matched
+        or needs to be quantized
+        """
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                x = xs[0]
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        self.checkGraphModuleNodes(m, expected_node_occurrence={
+            ns.call_module(torch.quantization.MinMaxObserver): 0
+        })
+        m = convert_fx(m)
+        m(torch.rand(1, 2))
+
+        class M2(torch.nn.Module):
+            def forward(self, xs):
+                x = xs[0]
+                x = torch.sigmoid(x)
+                return x
+
+        m2 = M2().eval()
+        m2 = prepare_fx(m2, {"": default_qconfig})
+        self.checkGraphModuleNodes(m2, expected_node_occurrence={
+            ns.call_module(torch.quantization.MinMaxObserver): 1
+        })
+        m2 = convert_fx(m2)
+        self.checkGraphModuleNodes(m2, expected_node_list=[
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_method("dequantize")
+        ])
+        m2(torch.rand(1, 2))
+
+
     @skipIfNoFBGEMM
     def test_fixed_qparams_ops(self):
         class M(torch.nn.Module):
