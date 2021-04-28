@@ -5308,6 +5308,7 @@ op_db: List[OpInfo] = [
                   supports_out=False,
                   sample_inputs_func=sample_repeat_tile),
     OpInfo('unsqueeze',
+           aliases=('expand_dims',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            assert_autodiffed=True,
