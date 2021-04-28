@@ -77,7 +77,6 @@ class ErrorHandler:
         except Exception as e:
             warnings.warn(f"Unable to write error to file. {type(e).__name__}: {e}")
 
-
     def record_exception(self, e: BaseException) -> None:
         """
         Writes a structured information about the exception into an error file in
@@ -85,7 +84,6 @@ class ErrorHandler:
         that would have been written to the error file.
         """
         _write_error(e, self._get_error_file_path())
-
 
     def dump_error_file(self, rootcause_error_file: str, error_code: int = 0):
         """
@@ -100,6 +98,11 @@ class ErrorHandler:
                     log.warning(
                         f"child error file ({rootcause_error_file}) does not have field `message`. \n"
                         f"cannot override error code: {error_code}"
+                    )
+                elif isinstance(rootcause_error["message"], str):
+                    log.warning(
+                        f"child error file ({rootcause_error_file}) has a new message format. \n"
+                        f"skipping error code override"
                     )
                 else:
                     rootcause_error["message"]["errorCode"] = error_code
@@ -122,7 +125,7 @@ class ErrorHandler:
             # will write to the parent's error file. In this case just log the
             # original error file contents and overwrite the error file.
             self._rm(my_error_file)
-            self._write_error_file(my_error_file , json.dumps(rootcause_error))
+            self._write_error_file(my_error_file, json.dumps(rootcause_error))
             log.info(f"dumped error file to parent's {my_error_file}")
         else:
             log.error(
