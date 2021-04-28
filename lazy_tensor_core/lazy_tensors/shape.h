@@ -19,7 +19,8 @@ class Shape {
 
   Shape(PrimitiveType element_type, lazy_tensors::Span<const int64> dimensions)
       : element_type_(element_type),
-        dimensions_(dimensions.begin(), dimensions.end()) {}
+        dimensions_(dimensions.begin(), dimensions.end()),
+        dynamic_dimensions_(dimensions.size(), false) {}
 
   Shape(lazy_tensors::Span<const Shape> element_shapes)
       : element_type_(PrimitiveType::TUPLE),
@@ -27,7 +28,8 @@ class Shape {
 
   Shape(const client::ShapeData& shape_data)
       : element_type_(shape_data.element_type()),
-        dimensions_(shape_data.dimensions()) {
+        dimensions_(shape_data.dimensions()),
+        dynamic_dimensions_(shape_data.dimensions().size(), false) {
     for (const client::ShapeData& element_shape : shape_data.element_shapes()) {
       element_shapes_.push_back(Shape(element_shape));
     }
@@ -50,7 +52,7 @@ class Shape {
   bool is_dynamic_dimension(int dimension) const { return false; }
 
   void set_dynamic_dimension(int dimension, bool is_dynamic) {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    dynamic_dimensions_[dimension] = is_dynamic;
   }
 
   lazy_tensors::Span<const bool> dynamic_dimensions() const {
@@ -97,6 +99,7 @@ class Shape {
  private:
   PrimitiveType element_type_;
   std::vector<int64> dimensions_;
+  std::vector<bool> dynamic_dimensions_;
   std::vector<Shape> element_shapes_;
   Layout layout_;
 };
