@@ -142,7 +142,24 @@ class RendezvousTimeout:
 
 @dataclass(repr=False, eq=False, frozen=True)
 class RendezvousSettings:
-    """Holds the settings of the rendezvous."""
+    """Holds the settings of the rendezvous.
+
+    Attributes:
+        run_id:
+            The run id of the rendezvous.
+        min_nodes:
+            The minimum number of nodes to admit to the rendezvous.
+        max_nodes:
+            The maximum number of nodes to admit to the rendezvous.
+        timeout:
+            The timeout configuration of the rendezvous.
+        keep_alive_interval:
+            The amount of time a node waits before sending a heartbeat to keep
+            it alive in the rendezvous.
+        keep_alive_max_attempt:
+            The maximum number of failed heartbeat attempts after which a node
+            is considered dead.
+    """
 
     run_id: str
     min_nodes: int
