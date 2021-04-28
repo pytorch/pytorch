@@ -95,9 +95,26 @@ std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
   return { self_.unsqueeze(dim), valIfNonempty(self_bdim, 0) };
 }
 
+// NB: repeat is not actually a view, but it is in this file
+std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
+    const Tensor& self,
+    optional<int64_t> self_bdim,
+    IntArrayRef sizes) {
+  if (!self_bdim) {
+    return { self.repeat(sizes), nullopt };
+  }
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  VmapDimVector sizes_with_bdim = { sizes.begin(), sizes.end() };
+  sizes_with_bdim.insert(sizes_with_bdim.begin(), 1);
+  return { self_.repeat(sizes_with_bdim), 0 };
+}
+
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("flatten.using_ints", flatten_batch_rule);
   VMAP_SUPPORT("unsqueeze", unsqueeze_batch_rule);
+  VMAP_SUPPORT("repeat", repeat_batch_rule);
 }
 
 }}
