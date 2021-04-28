@@ -25,6 +25,7 @@ template <size_t D, typename Derived>
 class ConvNdImpl : public torch::nn::Cloneable<Derived> {
  public:
   explicit ConvNdImpl(detail::ConvNdOptions<D> options_) : options(std::move(options_)) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     reset();
   }
 
