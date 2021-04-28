@@ -228,10 +228,10 @@ private:
     DeviceType type = streams[0].device_type();
     for (size_t idx = 1; idx < streams.size(); idx++) {
       TORCH_CHECK_VALUE(
-        streams[1].device_type() == type,
+        streams[idx].device_type() == type,
         "Streams have a mix of device types: stream 0 is on ",
         streams[0].device(), " while stream ", idx, " is on device ",
-        streams[1].device());
+        streams[idx].device());
     }
     return type;
   }
