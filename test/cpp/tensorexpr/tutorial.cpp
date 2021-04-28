@@ -134,7 +134,7 @@ int main(int argc, char* argv[]) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         new IntImm(64),
         new IntImm(32)}; // IntImm stands for Integer Immediate
-                         // and represents an integer constant
+    // and represents an integer constant
 
     // Now we can create a Buf object by providing a name, dimensions, and a
     // data type of the elements:
