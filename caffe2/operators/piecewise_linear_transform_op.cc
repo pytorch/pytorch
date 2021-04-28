@@ -2,10 +2,12 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     PiecewiseLinearTransform,
     PiecewiseLinearTransformOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PiecewiseLinearTransform)
     .NumInputs(1, 4)
     .NumOutputs(1)
@@ -80,6 +82,7 @@ bound.
         "2-D tensor (Tensor) of size (num_batches x num_classes) "
         "containing transformed predictions");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(PiecewiseLinearTransform);
 } // namespace caffe2
 
