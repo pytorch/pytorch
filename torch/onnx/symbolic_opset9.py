@@ -1844,10 +1844,10 @@ def slice(g, self, *args):
         step = _parse_arg(step, 'i')
         if step != 1:
             raise RuntimeError("step!=1 is currently not supported")
-        is_start_none = start.type().kind() == 'NoneType'
+        is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == 'NoneType'
+        is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == 'NoneType'
         is_start_onnx_const = start.node().kind() == 'onnx::Constant'
-        is_end_none = start.type().kind() == 'NoneType'
-        is_end_onnx_const = start.node().kind() == 'onnx::Constant'
+        is_end_onnx_const = end.node().kind() == 'onnx::Constant'
         if ((not is_start_none) and (not is_start_onnx_const)) or \
            ((not is_end_none) and (not is_end_onnx_const)) or \
            dim.node().kind() != 'onnx::Constant':
@@ -1869,8 +1869,8 @@ def slice(g, self, *args):
         # aten::slice(t[] l, int start, int end, int step) -> t[]
         start, end, step = args
         dim = 0
-        is_start_none = start.type().kind() == 'NoneType'
-        is_end_none = start.type().kind() == 'NoneType'
+        is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == 'NoneType'
+        is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == 'NoneType'
         start = 0 if is_start_none else _parse_arg(start, 'i')
         end = 9223372036854775807 if is_end_none else _parse_arg(end, 'i')
         return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
