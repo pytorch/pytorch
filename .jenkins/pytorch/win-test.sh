@@ -92,8 +92,7 @@ echo "TEST PASSED"
 
 if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]]; then
   pushd "$TEST_DIR"
-  python -mpip install coverage==5.5
-  python -mpip install -e "$PROJECT_DIR/tools/coverage_plugins_package"
+  python -mpip install coverage
   echo "Generating XML coverage report"
   time python -mcoverage xml
   popd
