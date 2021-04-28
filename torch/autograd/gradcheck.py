@@ -757,7 +757,14 @@ def real_and_imag(fn, sample_outputs):
             outs = _as_tuple(fn(*inputs))
             return tuple(fn_to_apply(o) if o.is_complex() else o for o in outs)
         return wrapped_fn
-    return apply_to_c_outs(fn, torch.real), apply_to_c_outs(fn, torch.imag)
+
+    # TODO(@anjali411): remove this workaround once neg bit is added.
+    def torch_imag(x):
+        if x.is_conj():
+            return x.resolve_conj().imag
+        else:
+            return x.imag
+    return apply_to_c_outs(fn, torch.real), apply_to_c_outs(fn, torch_imag)
 
 
 def gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps, rtol,

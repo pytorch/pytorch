@@ -77,10 +77,10 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
       auto tensor = std::move(ivalue).toTensor();
       if (mut_arg) {
         // TODO: This is a waste if the argument is write only
-        native::resolve_conj_(tensor);
+        at::resolve_conj_(tensor);
         mutable_inputs.emplace_back(tensor);
       } else {
-        tensor = native::resolve_conj(tensor);
+        tensor = at::resolve_conj(tensor);
       }
       (*stack)[stack_start + i] = std::move(tensor);
     } else if (ivalue.isTensorList()) {
@@ -89,7 +89,7 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
         // At the time of writing this, no operators use tensorlists with mutable tensors.
         // We could add additional code logic in the future if this changes.
         TORCH_CHECK(!mut_arg, "Conjugate fallback doesn't work for mutable TensorLists.");
-        tensors[j] = native::resolve_conj(tensors[j]);
+        tensors[j] = at::resolve_conj(tensors[j]);
       }
       (*stack)[stack_start + i] = std::move(tensors);
     }
@@ -110,7 +110,6 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("conj", torch::CppFunction::makeFallthrough());
   m.impl("_conj", torch::CppFunction::makeFallthrough());
   m.impl("conj_physical_", torch::CppFunction::makeFallthrough());
-  m.impl("_resolve_conj", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj_", torch::CppFunction::makeFallthrough());
   m.impl("empty_like", torch::CppFunction::makeFallthrough());

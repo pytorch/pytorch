@@ -469,6 +469,7 @@ class TestUnaryUfuncs(TestCase):
             expect_fail = not torch.can_cast(expected.dtype, output.dtype)
         else:
             expect_fail = output.dtype != expected.dtype
+            print(output.dtype, expected.dtype)
 
         if expect_fail:
             with self.assertRaises(RuntimeError):

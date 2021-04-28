@@ -299,28 +299,30 @@
 
 - func: conj_physical(Tensor self) -> Tensor
   variants: function, method
-  structured_delegate: conj_physical.out
+  dispatch:
+    CompositeExplicitAutograd: conj_physical
+    CPU, CUDA: conj_physical
 
 - func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  structured: True
-  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: conj_physical_out
 
 - func: conj_physical_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
-  structured_delegate: conj_physical.out
-
-- func: _resolve_conj_neg(Tensor(a) self) -> Tensor(a)
-  variants: function, method
   dispatch:
-    CompositeExplicitAutograd: _resolve_conj_neg
+    CPU, CUDA: conj_physical_
 
 - func: resolve_conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: resolve_conj
+    CPU, CUDA: resolve_conj
 
-- func: resolve_conj_(Tensor(a) self) -> Tensor(a)
+- func: resolve_conj_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+  dispatch:
+    CPU, CUDA: resolve_conj_
+    CompositeExplicitAutograd: resolve_conj_
 
 - func: resolve_neg(Tensor(a) self) -> Tensor(a)
   variants: function, method

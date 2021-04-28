@@ -190,6 +190,7 @@ class OpInfo(object):
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
                                             # function around gradcheck (testing._internal.common_utils.gradcheck)
+                 test_conjugated_samples=True,
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -250,6 +251,8 @@ class OpInfo(object):
         self.aliases = ()
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
+
+        self.test_conjugated_samples = test_conjugated_samples
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -1822,31 +1825,31 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     return wrapped_fn
 
 def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwargs):
-        nd_tensor = make_tensor((S, S + 1, S + 2), device, dtype, low=None, high=None,
-                                requires_grad=requires_grad)
-        tensor = make_tensor((31,), device, dtype, low=None, high=None,
-                             requires_grad=requires_grad)
+    nd_tensor = make_tensor((S, S + 1, S + 2), device, dtype, low=None, high=None,
+                            requires_grad=requires_grad)
+    tensor = make_tensor((31,), device, dtype, low=None, high=None,
+                         requires_grad=requires_grad)
 
-        if self.ndimensional:
-            return [
-                SampleInput(nd_tensor, kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
-                SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
-                SampleInput(nd_tensor, kwargs=dict(s=(8,))),
-                SampleInput(tensor),
+    if self.ndimensional:
+        return [
+            SampleInput(nd_tensor, kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
+            SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
+            SampleInput(nd_tensor, kwargs=dict(s=(8,))),
+            SampleInput(tensor),
 
-                *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
-                  for dim in [-1, -2, -3, (0, -1)]),
-            ]
-        else:
-            return [
-                SampleInput(nd_tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
-                SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
-                SampleInput(nd_tensor, kwargs=dict(n=7)),
-                SampleInput(tensor),
+            *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
+                for dim in [-1, -2, -3, (0, -1)]),
+        ]
+    else:
+        return [
+            SampleInput(nd_tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
+            SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
+            SampleInput(nd_tensor, kwargs=dict(n=7)),
+            SampleInput(tensor),
 
-                *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
-                  for dim in [-1, -2, -3]),
-            ]
+            *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
+                for dim in [-1, -2, -3]),
+        ]
 
 # Metadata class for Fast Fourier Transforms in torch.fft.
 class SpectralFuncInfo(OpInfo):
@@ -3753,10 +3756,12 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 dtypes=[torch.int],
                                 active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                    )),
     OpInfo('view_as_real',
            dtypes=complex_types(),
            sample_inputs_func=sample_inputs_view_as_real,
+           test_conjugated_samples=False,
            ),
     OpInfo('view_as_complex',
            dtypes=floating_types_and(torch.half),
@@ -4106,7 +4111,7 @@ op_db: List[OpInfo] = [
                        # Skip since real and imag don't have out variants.
                        SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                        # Will be fixed after adding negative bit
-                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency_eager')
+                       SkipInfo('TestCommon', 'test_variant_consistency_eager'),
                    )),
     OpInfo('inverse',
            op=torch.inverse,
@@ -5928,6 +5933,7 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
     def map_arg(arg):
         def maybe_non_contig(tensor):
             return tensor if not non_contiguous else make_non_contiguous(tensor)
+
         def maybe_conj(tensor):
             return tensor if not dtype.is_complex else tensor.conj()
 
