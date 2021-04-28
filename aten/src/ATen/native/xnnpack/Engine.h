@@ -68,6 +68,13 @@ Tensor max_pool2d(
     const float output_max = +std::numeric_limits<float>::infinity());
 
 //
+// Global Average Pooling
+//
+
+bool use_global_average_pool(const Tensor& input);
+Tensor global_average_pool(const Tensor& input);
+
+//
 // Channel Shuffle
 //
 
