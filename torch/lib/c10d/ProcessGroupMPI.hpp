@@ -34,7 +34,7 @@ struct WorkEntry {
       src = *srcPtr;
     }
     if (dstPtr) {
-      dst = *dstPtr;
+      dst = std::make_shared<std::vector<at::Tensor>>(*dstPtr);
     }
   }
 
@@ -45,7 +45,11 @@ struct WorkEntry {
 
   // For input and output tensors (in-place), we will always use src
   std::vector<at::Tensor> src;
-  std::vector<at::Tensor> dst;
+
+  // We use `dst` for returning resulting vectors in WorkMPI::result, so we need to
+  // keep it alive.
+  std::shared_ptr<std::vector<at::Tensor>> dst;
+
   // src rank returned, for recv only
   int* srcRank = nullptr;
   std::function<void(std::unique_ptr<WorkEntry>&)> run;
@@ -80,8 +84,8 @@ class ProcessGroupMPI : public ProcessGroup {
   class WorkMPI : public ProcessGroup::Work {
    public:
     WorkMPI(
+        const std::shared_ptr<std::vector<at::Tensor>> outputs,
         const char* profilingTitle = nullptr,
-        const std::vector<at::Tensor>* outputTensors = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt)
         : ProcessGroup::Work(
@@ -89,9 +93,11 @@ class ProcessGroupMPI : public ProcessGroup {
               OpType::UNKNOWN,
               profilingTitle,
               inputTensors),
+          outputs_(outputs),
           future_(c10::make_intrusive<at::ivalue::Future>(
-            c10::ListType::create(c10::TensorType::get()))),
-          outputTensors_(outputTensors) { }
+            c10::ListType::create(c10::TensorType::get()))) {}
+
+    virtual std::vector<at::Tensor> result() override;
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
@@ -101,15 +107,15 @@ class ProcessGroupMPI : public ProcessGroup {
     friend class ProcessGroupMPI;
 
    private:
+    const std::shared_ptr<std::vector<at::Tensor>> outputs_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
-    const std::vector<at::Tensor>* outputTensors_;
   };
 
   class AsyncWork : public ProcessGroup::Work {
    public:
     AsyncWork(
-        at::Tensor tensor,
         MPI_Request request,
+        const std::vector<at::Tensor>* outputs,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
@@ -126,10 +132,12 @@ class ProcessGroupMPI : public ProcessGroup {
 
     void abort() override;
 
+   virtual std::vector<at::Tensor> result() override;
+
    protected:
     void populateException();
 
-    at::Tensor tensor_;
+    const std::vector<at::Tensor>* outputs_;
     MPI_Request request_;
     MPI_Status status_;
   };
@@ -168,7 +176,7 @@ class ProcessGroupMPI : public ProcessGroup {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+  c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;

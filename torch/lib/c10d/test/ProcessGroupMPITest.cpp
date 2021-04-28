@@ -15,7 +15,8 @@
 // to futures.
 void waitWork(
     c10::intrusive_ptr<::c10d::ProcessGroupMPI> pg,
-    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
+    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works,
+    std::vector<std::vector<at::Tensor>>* outputTensors) {
   for (auto& work : works) {
     try {
       work->wait();
@@ -23,19 +24,35 @@ void waitWork(
       std::cerr << "Exception received: " << ex.what() << std::endl;
       pg->abort();
     }
+    if (outputTensors) {
+      auto outputs = work->result();
+      outputTensors->emplace_back(outputs);
+    }
   }
 }
 
 // Wait using Futures
 void waitFuture(
     c10::intrusive_ptr<::c10d::ProcessGroupMPI> pg,
-    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
+    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works,
+    std::vector<std::vector<at::Tensor>>* outputTensors) {
   for (auto& work : works) {
+    auto fut = work->getFuture();
     try {
-      work->getFuture()->wait();
+      fut->wait();
     } catch (const std::exception& ex) {
       std::cerr << "Exception received: " << ex.what() << std::endl;
       pg->abort();
+    }
+    if (outputTensors) {
+      auto result = fut->value();
+      if (result.isNone()) {
+        outputTensors->emplace_back();
+      } else if (result.isTensorList()) {
+        outputTensors->emplace_back(result.toTensorVector());
+      } else {
+        throw std::runtime_error("future result should be tensor list or none");
+      }
     }
   }
 }
@@ -51,13 +68,14 @@ void testAllreduce(int iter = 1000) {
 
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (auto& tensors : allTensors) {
-    // Kick off work
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
         pg->allreduce(tensors);
     works.push_back(std::move(work));
   }
 
-  waitFuture(pg, works);
+  std::vector<std::vector<at::Tensor>> outputTensors;
+
+  waitFuture(pg, works, &outputTensors);
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -97,13 +115,15 @@ void testBroadcast(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  waitFuture(pg, works);
+  std::vector<std::vector<at::Tensor>> outputTensors;
+
+  waitFuture(pg, works, &outputTensors);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
     const auto expected = i;
-    auto data = allTensors[i][0].data_ptr<float>();
-    for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
+    auto data = outputTensors[i][0].data_ptr<float>();
+    for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
       if (data[j] != expected) {
         throw std::runtime_error("BOOM!");
       }
@@ -128,7 +148,9 @@ void testReduce(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  waitFuture(pg, works);
+  std::vector<std::vector<at::Tensor>> outputTensors;
+
+  waitFuture(pg, works, &outputTensors);
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -137,8 +159,8 @@ void testReduce(int iter = 10000) {
     // Verify outputs
     for (int i = 0; i < iter; ++i) {
       const auto expected = worldSize * i;
-      auto data = allTensors[i][0].data_ptr<float>();
-      for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
+      auto data = outputTensors[i][0].data_ptr<float>();
+      for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
         if (data[j] != expected) {
           throw std::runtime_error("BOOM!");
         }
@@ -169,20 +191,21 @@ void testAllgather(int iter = 10000) {
 
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (size_t i = 0; i < allTensors.size(); ++i) {
-    // Kick off work
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
         pg->allgather(allOutputTensors[i], allTensors[i]);
     works.push_back(std::move(work));
   }
 
-  waitFuture(pg, works);
+  std::vector<std::vector<at::Tensor>> outputTensors;
+
+  waitFuture(pg, works, &outputTensors);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
     for (int j = 0; j < worldSize; ++j) {
       const auto expected = i * j;
-      auto data = allOutputTensors[i][0][j].data_ptr<float>();
-      for (auto k = 0; k < allOutputTensors[i][0][j].numel(); ++k) {
+      auto data = outputTensors[i][j].data_ptr<float>();
+      for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
         if (data[k] != expected) {
           throw std::runtime_error("BOOM!");
         }
@@ -191,7 +214,7 @@ void testAllgather(int iter = 10000) {
   }
 }
 
-void testGather(int iter = 10000) {
+void testGather(int iter = 1000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   std::vector<std::vector<at::Tensor>> allTensors(iter);
   std::vector<std::vector<std::vector<at::Tensor>>> allOutputTensors(iter);
@@ -223,19 +246,27 @@ void testGather(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  waitFuture(pg, works);
+  std::vector<std::vector<at::Tensor>> outputTensors;
+
+  waitFuture(pg, works, &outputTensors);
 
   // Verify outputs
   if (rank == 0) {
     for (int i = 0; i < iter; ++i) {
       for (int j = 0; j < worldSize; ++j) {
         const auto expected = i * j;
-        auto data = allOutputTensors[i][0][j].data_ptr<float>();
-        for (auto k = 0; k < allOutputTensors[i][0][j].numel(); ++k) {
+        auto data = outputTensors[i][j].data_ptr<float>();
+        for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
           if (data[k] != expected) {
             throw std::runtime_error("BOOM!");
           }
         }
+      }
+    }
+  } else {
+    for (int i = 0; i < iter; ++i) {
+      if (outputTensors[i].size() != 0) {
+        throw std::runtime_error("BOOM!");
       }
     }
   }
@@ -259,7 +290,7 @@ void testScatter(int iter = 1) {
       allInputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
       allInputTensors[i][0].resize(worldSize);
       for (auto j = 0; j < worldSize; ++j) {
-        allInputTensors[i][0][j] = at::ones({16, 16}) * rank * i;
+        allInputTensors[i][0][j] = at::ones({16, 16}) * i * j;
       }
     } else {
       allInputTensors[i] = std::vector<std::vector<at::Tensor>>(0);
@@ -274,14 +305,16 @@ void testScatter(int iter = 1) {
     works.push_back(std::move(work));
   }
 
-  waitFuture(pg, works);
+  std::vector<std::vector<at::Tensor>> outputTensors;
+
+  waitFuture(pg, works, &outputTensors);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
     for (int j = 0; j < worldSize; ++j) {
       const auto expected = i * j;
-      auto data = allTensors[i][0].data_ptr<float>();
-      for (auto k = 0; k < allTensors[i][0].numel(); ++k) {
+      auto data = outputTensors[i][0].data_ptr<float>();
+      for (auto k = 0; k < outputTensors[i][0].numel(); ++k) {
         if (data[k] != expected) {
           throw std::runtime_error("BOOM!");
         }
@@ -313,11 +346,10 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
           pg->send(tensors, 1, 0);
       works.push_back(std::move(work));
     }
-    waitWork(pg, works);
-  }
-  if (rank == 1) {
+    waitWork(pg, works, nullptr);
+  } else if (rank == 1) {
     std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-    std::vector<int> srcRanks(allTensors.size(), -1);
+    std::vector<int> srcRanks;
     size_t i = 0;
     for (auto& tensors : allTensors) {
       // Kick off work
@@ -332,15 +364,23 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
       }
       ++i;
     }
-    waitWork(pg, works);
+
+    std::vector<std::vector<at::Tensor>> outputTensors;
+
+    waitWork(pg, works, &outputTensors);
+
+    for (const auto& work : works) {
+      srcRanks.push_back(work->sourceRank());
+    }
+
     // Verify outputs
     for (int i = 0; i < iter; ++i) {
       if (recvAnysource && srcRanks[i] != 0) {
         throw std::runtime_error("src rank is wrong for recvAnysource");
       }
       const auto expected = i;
-      auto data = allTensors[i][0].data_ptr<float>();
-      for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
+      auto data = outputTensors[i][0].data_ptr<float>();
+      for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
         if (data[j] != expected) {
           throw std::runtime_error("BOOM!");
         }

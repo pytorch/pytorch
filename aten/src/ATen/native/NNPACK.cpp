@@ -146,7 +146,8 @@ Tensor _nnpack_spatial_convolution(
     const IntArrayRef padding,
     const IntArrayRef stride) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   at::Tensor output = at::empty(
       conv_output_size(input.sizes(), weight.sizes(), padding, stride),
@@ -227,8 +228,9 @@ Tensor _nnpack_spatial_convolution(
   };
 
   const auto input_ = input.contiguous();
+  const auto weight_ = weight.contiguous();
   // If we don't have a defined bias Tensor, we need to create one filled with zeroes
-  const auto bias_ = bias.defined() ? bias : at::zeros({weight.size(0)}, input.options());
+  const auto bias_ = bias.defined() ? bias.contiguous() : at::zeros({weight.size(0)}, input.options());
 
   const auto compute = [&](const size_t batch_size) -> nnp_status {
     if ((batch_size == 1) || (output_subsample.width != 1) || (output_subsample.height != 1)) {
@@ -246,7 +248,7 @@ Tensor _nnpack_spatial_convolution(
             kernel_size,
             output_subsample,
             input_.data_ptr<float>() + batch * input_size_per_batch,
-            weight.data_ptr<float>(),
+            weight_.data_ptr<float>(),
             bias_.data_ptr<float>(),
             output.data_ptr<float>() + batch * output_size_per_batch,
             workspace,
@@ -273,7 +275,7 @@ Tensor _nnpack_spatial_convolution(
         input_padding,
         kernel_size,
         input_.data_ptr<float>(),
-        weight.data_ptr<float>(),
+        weight_.data_ptr<float>(),
         bias_.data_ptr<float>(),
         output.data_ptr<float>(),
         workspace,

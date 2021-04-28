@@ -227,7 +227,6 @@ from typing import List, Tuple
 import torch
 from torch.distributed.argparse_util import check_env, env
 from torch.distributed.elastic.multiprocessing import Std
-from torch.distributed.elastic.multiprocessing.errors import record
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
@@ -534,6 +533,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, List[str]]:
         start_method=args.start_method,
         redirects=Std.from_str(args.redirects),
         tee=Std.from_str(args.tee),
+        log_dir=args.log_dir,
     )
 
     with_python = not args.no_python
@@ -564,7 +564,6 @@ def config_from_args(args) -> Tuple[LaunchConfig, List[str]]:
     return config, cmd
 
 
-@record
 def run(args):
     if args.standalone:
         etcd_server = EtcdServer()

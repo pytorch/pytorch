@@ -13,10 +13,11 @@ from unittest import TestCase
 
 from torch.distributed.elastic.rendezvous.utils import (
     _PeriodicTimer,
+    _delay,
     _matches_machine_hostname,
     _parse_rendezvous_config,
-    parse_rendezvous_endpoint,
     _try_parse_port,
+    parse_rendezvous_endpoint,
 )
 
 
@@ -242,6 +243,17 @@ class UtilsTest(TestCase):
             with self.subTest(host=host):
                 self.assertFalse(_matches_machine_hostname(host))
 
+    def test_delay_suspends_thread(self) -> None:
+        for seconds in 0.2, (0.2, 0.4):
+            with self.subTest(seconds=seconds):
+                time1 = time.monotonic()
+
+                _delay(seconds)  # type: ignore[arg-type]
+
+                time2 = time.monotonic()
+
+                self.assertGreaterEqual(time2 - time1, 0.2)
+
 
 class PeriodicTimerTest(TestCase):
     def test_start_can_be_called_only_once(self):
@@ -285,7 +297,7 @@ class PeriodicTimerTest(TestCase):
         self.assertTrue(all(t.name != "PeriodicTimer" for t in threading.enumerate()))
 
     def test_timer_calls_background_thread_at_regular_intervals(self):
-        begin_time = time.monotonic()
+        timer_begin_time: float
 
         # Call our function every 200ms.
         call_interval = 0.2
@@ -304,17 +316,19 @@ class PeriodicTimerTest(TestCase):
         timer_stop_event = threading.Event()
 
         def log_call(self):
-            nonlocal begin_time, call_count
+            nonlocal timer_begin_time, call_count
 
-            actual_call_intervals.append(time.monotonic() - begin_time)
+            actual_call_intervals.append(time.monotonic() - timer_begin_time)
 
             call_count += 1
             if call_count == min_required_call_count:
                 timer_stop_event.set()
 
-            begin_time = time.monotonic()
+            timer_begin_time = time.monotonic()
 
         timer = _PeriodicTimer(timedelta(seconds=call_interval), log_call, self)
+
+        timer_begin_time = time.monotonic()
 
         timer.start()
 
