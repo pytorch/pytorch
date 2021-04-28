@@ -9,6 +9,7 @@ namespace {
 
 using transform::Graph;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> counter;
 
 class DummyCounterOp final : public OperatorBase {
@@ -20,25 +21,34 @@ class DummyCounterOp final : public OperatorBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DummyCounterOp1, DummyCounterOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CUDA_OPERATOR(DummyCounterOp1, DummyCounterOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DummyCounterOp1)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{0, 0}, {1, 1}});
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DummyCounterOp2, DummyCounterOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CUDA_OPERATOR(DummyCounterOp2, DummyCounterOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DummyCounterOp2)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{0, 0}, {1, 1}});
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DummyCounterOp3, DummyCounterOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CUDA_OPERATOR(DummyCounterOp3, DummyCounterOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DummyCounterOp3)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
@@ -49,6 +59,7 @@ OPERATOR_SCHEMA(DummyCounterOp3)
  *
  * R = ---> (Op3) ---> (Op3) --->
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PatternNetTransformTest, TestGenerateTransform) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -81,6 +92,7 @@ TEST(PatternNetTransformTest, TestGenerateTransform) {
   for (int i = 0; i < 4; i++) {
     EXPECT_FALSE(g.is_node_active(i));
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 4; i < 8; i++) {
     EXPECT_TRUE(g.is_node_active(i));
   }
@@ -89,6 +101,7 @@ TEST(PatternNetTransformTest, TestGenerateTransform) {
   EXPECT_TRUE(g.node(5).children.count(6));
   EXPECT_TRUE(g.node(6).children.count(7));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 4; i < 8; i++) {
     EXPECT_EQ(g.node(i).op.input().size(), 1);
     EXPECT_EQ(g.node(i).op.output().size(), 1);
@@ -108,6 +121,7 @@ TEST(PatternNetTransformTest, TestGenerateTransform) {
  *
  * R = ---> (Op3) ---> (Op3) --->
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PatternNetTransformTest, TestRepeatedTransform) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -115,6 +129,7 @@ TEST(PatternNetTransformTest, TestRepeatedTransform) {
   NetDef netdef;
   AddOp(&netdef, "DummyCounterOp1", {"in"}, {"out"});
   AddOp(&netdef, "DummyCounterOp2", {"out"}, {"out"});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 99; i++) {
     AddOp(&netdef, "DummyCounterOp1", {"out"}, {"out"});
     AddOp(&netdef, "DummyCounterOp2", {"out"}, {"out"});
@@ -140,6 +155,7 @@ TEST(PatternNetTransformTest, TestRepeatedTransform) {
   NetDef replaced_netdef = g.GetNetDef();
 
   EXPECT_EQ(replaced_netdef.op_size(), 200);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 200; i++) {
     EXPECT_EQ(replaced_netdef.op(i).type(), "DummyCounterOp3");
   }
@@ -158,6 +174,7 @@ TEST(PatternNetTransformTest, TestRepeatedTransform) {
  *          |_(Op3)-->(Op3)-->(Op2)_|
  *
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PatternNetTransformTest, TestHardTransform) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -216,6 +233,7 @@ TEST(PatternNetTransformTest, TestHardTransform) {
   EXPECT_EQ(14, counter.load());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PatternNetTransformTest, TestGeneralStringMatching) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -244,6 +262,7 @@ TEST(PatternNetTransformTest, TestGeneralStringMatching) {
   EXPECT_EQ(matches.size(), 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PatternNetTransformTest, TestDeviceOptionMatching) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -276,6 +295,7 @@ TEST(PatternNetTransformTest, TestDeviceOptionMatching) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PatternNetTransformTest, TestEngineMatching) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -307,6 +327,7 @@ TEST(PatternNetTransformTest, TestEngineMatching) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PatternNetTransformTest, TestSingularArgumentMatching) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -329,11 +350,13 @@ TEST(PatternNetTransformTest, TestSingularArgumentMatching) {
   {
     auto arg = op->add_arg();
     arg->set_name("stride_w");
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     arg->set_i(5);
   }
   {
     auto arg = op->add_arg();
     arg->set_name("stride_h");
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     arg->set_i(5);
   }
 
@@ -360,6 +383,7 @@ TEST(PatternNetTransformTest, TestSingularArgumentMatching) {
     arg->set_name("stride_h");
     arg->set_i(4);
   }
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   op = AddOp(&netdef, "Conv", {"mid"}, {"mid"}); // Has no args, will not match
   op = AddOp(&netdef, "Conv", {"mid"}, {"out"}); // Has different names
   {
@@ -423,6 +447,7 @@ TEST(PatternNetTransformTest, TestSingularArgumentMatching) {
  * Furthermore, we will apply the transform to G, TWICE.
  * It should reduce G to a single operator.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PatternNetTransformTest, TestNonStrictTopographicTransform) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -492,6 +517,7 @@ TEST(PatternNetTransformTest, TestNonStrictTopographicTransform) {
  * first two Op1 nodes will produce a match, but they are identical.
  * So, the pattern should match 4 times, but only be replaced twice.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PatternNetTransformTest, TestMultiInputOutputTransform) {
   Workspace ws;
   ws.CreateBlob("in1");
