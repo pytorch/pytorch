@@ -12,6 +12,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomOperatorTest, InferredSchema) {
   torch::RegisterOperators reg(
       "foo::bar", [](double a, at::Tensor b) { return a + b; });
@@ -30,6 +31,7 @@ TEST(CustomOperatorTest, InferredSchema) {
   ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
   Stack stack;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, 2.0f, at::ones(5));
   op->getOperation()(&stack);
   at::Tensor output;
@@ -38,6 +40,7 @@ TEST(CustomOperatorTest, InferredSchema) {
   ASSERT_TRUE(output.allclose(at::full(5, 3.0f)));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomOperatorTest, ExplicitSchema) {
   torch::RegisterOperators reg(
       "foo::bar_with_schema(float a, Tensor b) -> Tensor",
@@ -60,6 +63,7 @@ TEST(CustomOperatorTest, ExplicitSchema) {
   ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
   Stack stack;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, 2.0f, at::ones(5));
   op->getOperation()(&stack);
   at::Tensor output;
@@ -68,6 +72,7 @@ TEST(CustomOperatorTest, ExplicitSchema) {
   ASSERT_TRUE(output.allclose(at::full(5, 3.0f)));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomOperatorTest, ListParameters) {
   // Check that lists work well.
   torch::RegisterOperators reg(
@@ -103,11 +108,14 @@ TEST(CustomOperatorTest, ListParameters) {
 
   Stack stack;
   push(stack, c10::List<int64_t>({1, 2}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, c10::List<double>({1.0, 2.0}));
   push(
       stack,
       c10::List<c10::complex<double>>(
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {c10::complex<double>(2.4, -5.5), c10::complex<double>(-1.3, 2)}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, c10::List<at::Tensor>({at::ones(5)}));
   op->getOperation()(&stack);
   c10::List<double> output;
@@ -118,6 +126,7 @@ TEST(CustomOperatorTest, ListParameters) {
   ASSERT_EQ(output.get(1), 2.0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomOperatorTest, ListParameters2) {
   torch::RegisterOperators reg(
       "foo::lists2(Tensor[] tensors) -> Tensor[]",
@@ -139,6 +148,7 @@ TEST(CustomOperatorTest, ListParameters2) {
       op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
   Stack stack;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, c10::List<at::Tensor>({at::ones(5)}));
   op->getOperation()(&stack);
   c10::List<at::Tensor> output;
@@ -148,6 +158,7 @@ TEST(CustomOperatorTest, ListParameters2) {
   ASSERT_TRUE(output.get(0).allclose(at::ones(5)));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomOperatorTest, Aliasing) {
   torch::RegisterOperators reg(
       "foo::aliasing", [](at::Tensor a, at::Tensor b) -> at::Tensor {
@@ -192,11 +203,13 @@ graph(%x: Tensor, %y: Tensor):
   }
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static constexpr char op_list[] = "foofoo::bar.template;foo::another";
 #define TORCH_SELECTIVE_NAME_IN_SCHEMA(l, n)                                   \
   torch::detail::SelectiveStr<c10::impl::op_allowlist_contains_name_in_schema( \
       l, n)>(n)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestCustomOperator, OperatorGeneratorUndeclared) {
   // Try to register an op name that does not exist in op_list.
   // Expected: the op name is not registered.
@@ -204,6 +217,7 @@ TEST(TestCustomOperator, OperatorGeneratorUndeclared) {
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::not_exist(float a, Tensor b) -> Tensor"),
       [](Stack* stack) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double a;
         at::Tensor b;
         pop(stack, a, b);
@@ -215,6 +229,7 @@ TEST(TestCustomOperator, OperatorGeneratorUndeclared) {
   ASSERT_EQ(ops.size(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestCustomOperator, OperatorGeneratorBasic) {
   // The operator should be successfully registered since its name is in the
   // whitelist.
@@ -222,6 +237,7 @@ TEST(TestCustomOperator, OperatorGeneratorBasic) {
       TORCH_SELECTIVE_NAME_IN_SCHEMA(
           op_list, "foofoo::bar.template(float a, Tensor b) -> Tensor"),
       [](Stack* stack) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double a;
         at::Tensor b;
         pop(stack, a, b);
@@ -245,6 +261,7 @@ TEST(TestCustomOperator, OperatorGeneratorBasic) {
   ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
   Stack stack;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, 2.0f, at::ones(5));
   op->getOperation()(&stack);
   at::Tensor output;
