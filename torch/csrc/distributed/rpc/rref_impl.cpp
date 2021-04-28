@@ -254,7 +254,8 @@ OwnerRRef::OwnerRRef(
     const RRefId& rrefId,
     TypePtr type,
     c10::optional<IValue> value,
-    std::vector<c10::DeviceIndex> devices) : RRef(ownerId, rrefId, type) {
+    std::vector<c10::DeviceIndex> devices)
+    : RRef(ownerId, rrefId, type) {
   if (devices.empty()) {
     future_ =
         FutureFactoryRegistry::getInstance().createFuture(c10::DeviceType::CPU);
