@@ -325,6 +325,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Reducer::save_thread_local_state,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "set_per_iteration_param_outputs_unused",
+          &::c10d::Reducer::set_per_iteration_param_outputs_unused,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "_set_ddp_runtime_logging_sample_rate",
           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
           py::arg("sample_rate"),

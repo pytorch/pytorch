@@ -1,5 +1,6 @@
 #pragma once
 
+#include "c10/util/Exception.h"
 #include <atomic>
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
@@ -139,6 +140,13 @@ class Reducer {
   // Saves thread local state to be used by autograd engine callbacks.
   void save_thread_local_state();
 
+  void set_per_iteration_param_outputs_unused(const std::vector<size_t>& indices) {
+    TORCH_INTERNAL_ASSERT(per_iteration_param_outputs_unused_.empty());
+    for (auto & idx : indices) {
+      per_iteration_param_outputs_unused_.insert(idx);
+    }
+  }
+
   // An function for users to set sample_rate of collecting
   // runtime stats. The time stats will be recorded for the
   // first 10 iterations, after 10 iteratons time stats will be
@@ -177,6 +185,7 @@ class Reducer {
   const bool find_unused_parameters_;
   const bool gradient_as_bucket_view_;
   std::vector<VariableIndex> unused_parameters_;
+  std::unordered_set<size_t> per_iteration_param_outputs_unused_;
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
   // tensor for each model replica and each tensor is one-dim int32 tensor of
