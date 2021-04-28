@@ -41,6 +41,7 @@ std::string ShowNode(NodeRef node) {
 
 
 struct VisitorContext {
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   VisitorContext(std::function<bool(const caffe2::OperatorDef&)> func)
       : predicate(func) {}
 
@@ -338,6 +339,7 @@ void DumpGraph(NNGraph* g, const std::string& fname) {
         auto hash = std::hash<std::string>{}(device_annotation->getDevice());
         std::stringstream hex_stream;
         hex_stream << std::hex << hash;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         labelMap["color"] = "#" + hex_stream.str().substr(0, 6);
         labelMap["fontcolor"] = labelMap["color"];
       }
