@@ -986,6 +986,15 @@ class TestAsserts(TestCase):
                 fn()
 
     @onlyCPU
+    def test_mismatching_value_scalar_msg_abs_diff(self, device):
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Absolute difference: 1")):
+                fn()
+
+    @onlyCPU
     def test_mismatching_values_msg_rel_diff(self, device):
         actual = torch.tensor([[1, 2], [3, 4]], device=device)
         expected = torch.tensor([[1, 4], [3, 4]], device=device)
@@ -995,30 +1004,41 @@ class TestAsserts(TestCase):
                 fn()
 
     @onlyCPU
-    def test_assert_close_mismatching_values_msg_rtol(self, device):
-        rtol = 1e-3
-
+    def test_mismatching_value_scalar_msg_rel_diff(self, device):
         actual = torch.tensor(1, device=device)
         expected = torch.tensor(2, device=device)
 
-        for inputs in self.make_inputs(actual, expected):
-            with self.assertRaisesRegex(
-                AssertionError, re.escape(f"Greatest relative difference: 0.5 at 0 (up to {rtol} allowed)")
-            ):
-                torch.testing.assert_close(*inputs, rtol=rtol, atol=0.0)
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Relative difference: 0.5")):
+                fn()
+
+    @onlyCPU
+    def test_assert_close_mismatching_values_msg_rtol(self, device):
+        rtol = 1e-3
+
+        for actual, expected in (
+                (torch.tensor(1, device=device), torch.tensor(2, device=device)),
+                (torch.tensor([1, 1], device=device), torch.tensor([1, 2], device=device))
+        ):
+            for inputs in self.make_inputs(actual, expected):
+                with self.assertRaisesRegex(
+                        AssertionError, re.escape(f"(up to {rtol} allowed)")
+                ):
+                    torch.testing.assert_close(*inputs, rtol=rtol, atol=0.0)
 
     @onlyCPU
     def test_assert_close_mismatching_values_msg_atol(self, device):
         atol = 1e-3
 
-        actual = torch.tensor(1, device=device)
-        expected = torch.tensor(2, device=device)
-
-        for inputs in self.make_inputs(actual, expected):
-            with self.assertRaisesRegex(
-                AssertionError, re.escape(f"Greatest absolute difference: 1 at 0 (up to {atol} allowed)")
-            ):
-                torch.testing.assert_close(*inputs, rtol=0.0, atol=atol)
+        for actual, expected in (
+                (torch.tensor(1, device=device), torch.tensor(2, device=device)),
+                (torch.tensor([1, 1], device=device), torch.tensor([1, 2], device=device))
+        ):
+            for inputs in self.make_inputs(actual, expected):
+                with self.assertRaisesRegex(
+                        AssertionError, re.escape(f"(up to {atol} allowed)")
+                ):
+                    torch.testing.assert_close(*inputs, rtol=0.0, atol=atol)
 
     @onlyCPU
     def test_sequence_mismatching_len(self, device):

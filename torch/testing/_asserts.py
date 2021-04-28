@@ -213,12 +213,19 @@ def _check_values_equal(
     trace = _trace_mismatches(actual, expected, mismatches)
 
     if msg is None:
-        msg = (
-            f"Tensors are not equal!\n\n"
-            f"Mismatched elements: {trace.total_mismatches} / {trace.total_elements} ({trace.mismatch_ratio:.1%})\n"
-            f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx}\n"
-            f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx}"
-        )
+        msg = "Tensors are not equal!\n\n"
+        if trace.total_elements == 1:
+            msg += (
+                f"Absolute difference: {trace.max_abs_diff}\n"
+                f"Relative difference: {trace.max_rel_diff}"
+            )
+        else:
+            msg += (
+                f"Mismatched elements: {trace.total_mismatches} / {trace.total_elements} "
+                f"({trace.mismatch_ratio:.1%})\n"
+                f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx}\n"
+                f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx}"
+            )
     elif callable(msg):
         msg = msg(actual, expected, trace)
     return AssertionError(msg)
@@ -255,12 +262,21 @@ def _check_values_close(
 
     trace = _trace_mismatches(actual, expected, mismatches)
     if msg is None:
-        msg = (
-            f"Tensors are not close!\n\n"
-            f"Mismatched elements: {trace.total_mismatches} / {trace.total_elements} ({trace.mismatch_ratio:.1%})\n"
-            f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx} (up to {atol} allowed)\n"
-            f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx} (up to {rtol} allowed)"
-        )
+        msg = "Tensors are not close!\n\n"
+        if trace.total_elements == 1:
+            msg += (
+                f"Absolute difference: {trace.max_abs_diff} (up to {atol} allowed)\n"
+                f"Relative difference: {trace.max_rel_diff} (up to {rtol} allowed)"
+            )
+        else:
+            msg += (
+                f"Mismatched elements: {trace.total_mismatches} / {trace.total_elements} "
+                f"({trace.mismatch_ratio:.1%})\n"
+                f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx} "
+                f"(up to {atol} allowed)\n"
+                f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx} "
+                f"(up to {rtol} allowed)"
+            )
     elif callable(msg):
         msg = msg(actual, expected, trace)
     return AssertionError(msg)
