@@ -552,7 +552,6 @@ class ScriptModuleSerializer {
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     std::vector<c10::IValue> debug_info_elements;
     // Always save debug handles
-    debug_info_elements = std::vector<c10::IValue>();
     debug_info_elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
 
@@ -561,7 +560,6 @@ class ScriptModuleSerializer {
     auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);
     auto debug_info_telements = Tup(std::move(debug_info_elements));
-    writeArchive("mobile_debug_handles", debug_info_telements);
 
     // At the moment keeping this feature experimental
     // since we have not evaluated how this affect model size
@@ -570,6 +568,16 @@ class ScriptModuleSerializer {
     // TODO: Build utility to strip off debug map. It should also do the
     // same for debug_pkl files
     if (save_mobile_debug_info) {
+      // Note that stripping off debug map will not strip off
+      // debug handles.
+      // The reason we save debug handles conditionally is so that
+      // we dont end up with a model that has debug handles but has not
+      // debug map to correlate debug handels with.
+      // Once we have a model with both handles and debug map, we can
+      // strip off debug map and have a lean model served to production.
+      // If exception ocurrs we have a model with debug map that can be
+      // used to symbolicate debug handles
+      writeArchive("mobile_debug_handles", debug_info_telements);
       static constexpr size_t kMinToCompress = 200;
       // For delegated backends get source ranges that are in the debug info
       // map. Since delegated backend replace original module with lowered
