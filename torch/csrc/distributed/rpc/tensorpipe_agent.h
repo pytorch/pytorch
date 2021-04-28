@@ -11,6 +11,7 @@
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
@@ -280,9 +281,7 @@ class TensorPipeAgent : public RpcAgent {
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
-    explicit AtomicJitFuture(
-        const std::vector<c10::DeviceIndex>& devices,
-        bool noCuda = true) {
+    explicit AtomicJitFuture(const std::vector<c10::DeviceIndex>& devices) {
       std::vector<c10::Device> fullDevices;
       fullDevices.reserve(devices.size());
       for (const c10::DeviceIndex index : devices) {
