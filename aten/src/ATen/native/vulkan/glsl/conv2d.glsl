@@ -8,9 +8,7 @@ layout(std430) buffer;
 layout(set = 0, binding = 0) uniform PRECISION restrict writeonly image3D   uOutput;
 layout(set = 0, binding = 1) uniform PRECISION                    sampler3D uInput;
 layout(set = 0, binding = 2) uniform PRECISION                    sampler2D uKernel;
-layout(set = 0, binding = 3) buffer  PRECISION restrict readonly  Bias {
-  vec4 data[];
-} uBias;
+layout(set = 0, binding = 3) uniform PRECISION                    sampler2D uBias;
 layout(set = 0, binding = 4) uniform PRECISION restrict           Block {
   ivec4 size;
   ivec4 kernel;
@@ -36,7 +34,7 @@ void main() {
     kstart.x *= 4;
     kstart.y += pos.z * uBlock.ikernel.y;
 
-    vec4 sum = uBias.data[pos.z];
+    vec4 sum = texelFetch(uBias, ivec2(pos.z, 0), 0);
 
     for (int z4 = 0; z4 < uBlock.size.w; ++z4, kstart.x += uBlock.ikernel.x) {
       for (int y = start.y, ky = kstart.y; y < end.y; y += uBlock.dilate.y, ++ky) {
