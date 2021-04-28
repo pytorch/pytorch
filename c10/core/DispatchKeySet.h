@@ -224,10 +224,6 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::MSNPU,
   DispatchKey::Vulkan,
   DispatchKey::Metal,
-  DispatchKey::MKLDNN,
-  DispatchKey::OpenGL,
-  DispatchKey::OpenCL,
-  DispatchKey::IDEEP,
   DispatchKey::QuantizedCPU,
   DispatchKey::QuantizedCUDA,
   DispatchKey::CustomRNGKeyId,
@@ -235,7 +231,9 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::SparseCPU,
   DispatchKey::SparseCUDA,
   DispatchKey::SparseHIP,
-  DispatchKey::Meta,
+  DispatchKey::SparseCsrCPU,
+  DispatchKey::SparseCsrCUDA,
+  DispatchKey::Meta
 });
 
 // The set of dispatch keys that come after autograd

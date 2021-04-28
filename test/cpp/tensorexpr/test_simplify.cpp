@@ -524,10 +524,7 @@ TEST(Simplify, HashLargeExpression) {
   BufHandle d("D", {1}, kInt);
   BufHandle e("E", {1}, kInt);
   auto store_ramp_stmt = Store::make(
-      e,
-      {Ramp::make(0, 1, 4)},
-      Load::make(d, {Ramp::make(0, 1, 4)}, Broadcast::make(IntImm::make(1), 4)),
-      Broadcast::make(Cast::make(kInt, DoubleImm::make(1)), 4));
+      e, {Ramp::make(0, 1, 4)}, Load::make(d, {Ramp::make(0, 1, 4)}));
 
   auto if_stmt = Cond::make(
       CompareSelect::make(
@@ -3118,8 +3115,8 @@ TEST(Simplify, SimplifyConstantCond) {
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(1);
-    Stmt* true_val = Store::make(a, {0}, 1, 1);
-    Stmt* false_val = Store::make(b, {0}, 1, 1);
+    Stmt* true_val = Store::make(a, {0}, 1);
+    Stmt* false_val = Store::make(b, {0}, 1);
 
     Cond* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3134,8 +3131,8 @@ TEST(Simplify, SimplifyConstantCond) {
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(0);
-    Stmt* true_val = Store::make(a, {0}, 1, 1);
-    Stmt* false_val = Store::make(b, {0}, 1, 1);
+    Stmt* true_val = Store::make(a, {0}, 1);
+    Stmt* false_val = Store::make(b, {0}, 1);
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3151,8 +3148,8 @@ TEST(Simplify, SimplifyConstantCond) {
     BufHandle a("A", {1}, kInt);
     BufHandle b("B", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, 1, 1);
-    Stmt* false_val = Store::make(b, {0}, 1, 1);
+    Stmt* true_val = Store::make(a, {0}, 1);
+    Stmt* false_val = Store::make(b, {0}, 1);
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3167,8 +3164,8 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, x, 1);
-    Stmt* false_val = Store::make(a, {0}, x, 1);
+    Stmt* true_val = Store::make(a, {0}, x);
+    Stmt* false_val = Store::make(a, {0}, x);
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3183,8 +3180,8 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
-    Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
-    Stmt* false_val = Store::make(a, {0}, x + x, 1);
+    Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x);
+    Stmt* false_val = Store::make(a, {0}, x + x);
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3199,8 +3196,8 @@ TEST(Simplify, SimplifyConstantCond) {
     VarHandle x("x", kInt);
     BufHandle a("A", {1}, kInt);
     ExprHandle condition(x);
-    Stmt* true_val = Store::make(a, {0}, x, 1);
-    Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
+    Stmt* true_val = Store::make(a, {0}, x);
+    Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x);
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
@@ -3692,8 +3689,8 @@ TEST(Simplify, SimplifyFlattenBlock) {
     // Flatten multiple blocks down to one.
     // { { { stmt1, stmt2 } } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1, 1);
-    Store* store2 = Store::make(a, {0}, 0, 1);
+    Store* store1 = Store::make(a, {0}, 1);
+    Store* store2 = Store::make(a, {0}, 0);
 
     Block* block1 = new Block({store1, store2});
     Block* block2 = new Block({block1});
@@ -3715,8 +3712,8 @@ TEST(Simplify, SimplifyFlattenBlock) {
     // Flatten multiple sub blocks containing statements.
     // { { stmt1 }, { stmt2 } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1, 1);
-    Store* store2 = Store::make(a, {0}, 0, 1);
+    Store* store1 = Store::make(a, {0}, 1);
+    Store* store2 = Store::make(a, {0}, 0);
 
     Block* block1 = new Block({store1});
     Block* block2 = new Block({store2});
@@ -3738,8 +3735,8 @@ TEST(Simplify, SimplifyFlattenBlock) {
     // Flatten sub blocks with different depths.
     // { stmt1 , { { stmt2 } } } =>  { stmt1, stmt2 }
     BufHandle a("A", {1}, kInt);
-    Store* store1 = Store::make(a, {0}, 1, 1);
-    Store* store2 = Store::make(a, {0}, 0, 1);
+    Store* store1 = Store::make(a, {0}, 1);
+    Store* store2 = Store::make(a, {0}, 0);
 
     Block* block1 = new Block({store2});
     Block* block2 = new Block({block1});
@@ -4504,10 +4501,10 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Merge two inner SyncThreads.
     auto body = Block::make(
-        {Store::make(a, {0}, 1, 1),
+        {Store::make(a, {0}, 1),
          new SyncThreads(),
          new SyncThreads(),
-         Store::make(a, {1}, 0, 1)});
+         Store::make(a, {1}, 0)});
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
@@ -4520,7 +4517,7 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Eliminate outer SyncThreads.
     auto body = Block::make(
-        {new SyncThreads(), Store::make(a, {1}, 0, 1), new SyncThreads()});
+        {new SyncThreads(), Store::make(a, {1}, 0), new SyncThreads()});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
@@ -4532,13 +4529,13 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Merge many inner SyncThreads.
     auto body = Block::make(
-        {Store::make(a, {0}, 1, 1),
+        {Store::make(a, {0}, 1),
          new SyncThreads(),
          new SyncThreads(),
          new SyncThreads(),
          new SyncThreads(),
          new SyncThreads(),
-         Store::make(a, {1}, 0, 1)});
+         Store::make(a, {1}, 0)});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
@@ -4554,7 +4551,7 @@ TEST(Simplify, SimplifySyncThreads) {
     auto body = Block::make(
         {new SyncThreads(),
          new SyncThreads(),
-         Store::make(a, {1}, 0, 1),
+         Store::make(a, {1}, 0),
          new SyncThreads(),
          new SyncThreads(),
          new SyncThreads(),
@@ -4570,15 +4567,15 @@ TEST(Simplify, SimplifySyncThreads) {
   {
     // Merge multiple sections;
     auto body = Block::make(
-        {Store::make(a, {0}, 1, 1),
+        {Store::make(a, {0}, 1),
          new SyncThreads(),
          new SyncThreads(),
-         Store::make(a, {1}, 0, 1),
-         Store::make(a, {2}, 0, 1),
+         Store::make(a, {1}, 0),
+         Store::make(a, {2}, 0),
          new SyncThreads(),
          new SyncThreads(),
          new SyncThreads(),
-         Store::make(a, {3}, 0, 1)});
+         Store::make(a, {3}, 0)});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
@@ -4620,11 +4617,7 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
   BufHandle buf("buf", {num_lanes}, kInt);
   // The result isn't fully simplified currently and thus would be brittle to
   // match. Observe its value instead.
-  auto store = Store::make(
-      buf,
-      {Ramp::make(0, 1, num_lanes)},
-      simplified,
-      Broadcast::make(ExprHandle(1), num_lanes));
+  auto store = Store::make(buf, {Ramp::make(0, 1, num_lanes)}, simplified);
   SimpleIREvaluator eval(store, {buf});
   std::vector<int> output(num_lanes);
   eval(output);

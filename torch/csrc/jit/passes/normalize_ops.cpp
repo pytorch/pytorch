@@ -44,7 +44,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::absolute_, aten::abs_},
       {aten::clip, aten::clamp},
       {aten::clip_, aten::clamp_},
-      {aten::linalg_det, aten::det},
+      {aten::det, aten::linalg_det},
       {aten::matrix_power, aten::linalg_matrix_power},
       {aten::ger, aten::outer},
       {aten::arccos, aten::acos},
@@ -90,8 +90,10 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_erf, aten::erf},
       {aten::special_erfc, aten::erfc},
       {aten::special_erfinv, aten::erfinv},
+      {aten::special_expit, aten::sigmoid},
       {aten::special_exp2, aten::exp2},
       {aten::special_expm1, aten::expm1},
+      {aten::special_logit, aten::logit},
       {aten::orgqr, aten::linalg_householder_product},
       {aten::special_gammaln, aten::lgamma}};
   return alias_map;

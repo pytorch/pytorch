@@ -201,6 +201,16 @@
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
+      - run:
+          name: Report results
+          no_output_timeout: "5m"
+          command: |
+            set -ex
+            source /Users/distiller/workspace/miniconda3/bin/activate
+            pip install boto3
+            export PYTHONPATH="$PWD"
+            python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          when: always
       - store_test_results:
           path: test/test-reports
 

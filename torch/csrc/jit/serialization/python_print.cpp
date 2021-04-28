@@ -1411,6 +1411,7 @@ struct PythonPrintImpl {
       }
 
       // TODO fields
+
       for (auto& method : classType->methods()) {
         printFunction(*method);
       }

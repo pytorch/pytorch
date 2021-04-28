@@ -230,7 +230,8 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       "set_device",
       "device_index",
       "device_count",
-      "set_stream"};
+      "set_stream",
+      "synchronize"};
 
   if (cuda_ops.find(field) != cuda_ops.end()) {
     // Both current_device and set_device API's are a part of c10::cuda
@@ -243,6 +244,11 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       return std::make_shared<BuiltinFunction>(
           Symbol::cuda(field), c10::nullopt);
     }
+  }
+
+  if (field == "Stream" || field == "Event") {
+    auto class_type = getCustomClass("__torch__.torch.classes.cuda." + field);
+    return std::make_shared<ClassValue>(class_type);
   }
 
   py::object member = getattr(loc, field);
@@ -935,11 +941,12 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
 
   std::vector<std::pair<std::string, IValue>> fields;
 
-  std::tie(unqualName, field_names, field_annotations, field_defaults) = 
-      py::cast<std::tuple<std::string, 
-               std::vector<std::string>, 
-               std::vector<TypePtr>, 
-               std::vector<py::object>>>(props);
+  std::tie(unqualName, field_names, field_annotations, field_defaults) =
+      py::cast<std::tuple<
+          std::string,
+          std::vector<std::string>,
+          std::vector<TypePtr>,
+          std::vector<py::object>>>(props);
 
   // In `_get_named_tuple_properties`, we add a dummy value to represent
   // a missing default parameter, This provides a guarantee that the
@@ -952,6 +959,10 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
     if (!field_defaults[i].is_none()) {
       auto type = tryToInferType(field_defaults[i]);
       ival = toIValue(field_defaults[i], type.type());
+      TORCH_CHECK(
+          ival.tagKind() != "Tensor",
+          "Tensors are not "
+          "supported as default NamedTuple fields");
     }
     fields.emplace_back(std::pair<std::string, IValue>(field_names[i], ival));
   }
@@ -960,7 +971,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   if (auto type = get_python_cu()->get_type(qualifiedName)) {
     TORCH_CHECK(
         type->isSubtypeOf(tt),
-        "Can't to redefine NamedTuple: ",
+        "Can't redefine NamedTuple after creation: ",
         tt->repr_str());
     return type;
   }

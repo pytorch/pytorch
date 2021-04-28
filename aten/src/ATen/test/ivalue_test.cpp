@@ -5,6 +5,13 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/Dict.h>
 
+// Snippets for checking assembly.
+c10::IValue inspectTupleConstruction() {
+  std::tuple<std::string, std::string> s = std::make_tuple(
+      "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+  return c10::IValue(s);
+}
+
 namespace c10 {
 
 TEST(IValueTest, Basic) {
@@ -601,9 +608,9 @@ TEST(IValueTest, getSubValues) {
   IValue list(std::vector<at::Tensor>{t1, t2});
   IValue tuple(ivalue::Tuple::create({tv1, tv2}));
 
-  std::unordered_map<int64_t, at::Tensor> m;
-  m[1] = t1;
-  m[2] = t2;
+  c10::Dict<int64_t, at::Tensor> m;
+  m.insert(1, t1);
+  m.insert(2, t2);
 
   IValue dict(std::move(m));
 
@@ -631,6 +638,14 @@ TEST(IValueTest, getSubValues) {
 
     subvalues.clear();
   }
+}
+
+TEST(IValueTest, ScalarBool) {
+  Scalar expected(true);
+  IValue v(expected);
+  Scalar actual = v.toScalar();
+  EXPECT_TRUE(actual.isBoolean());
+  EXPECT_TRUE(actual.toBool());
 }
 
 // TODO(gmagogsfm): Add type conversion test?

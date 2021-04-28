@@ -257,10 +257,10 @@ class Linear(torch.nn.Module):
             # the type mismatch in assignment. Also, mypy has an issue with
             # iterables not being implemented, so we are ignoring those too.
             if not isinstance(cls._FLOAT_MODULE, Iterable):
-                cls._FLOAT_MODULE = [cls._FLOAT_MODULE]  # type: ignore
-            supported_modules = ', '.join([float_mod.__name__ for float_mod in cls._FLOAT_MODULE])  # type: ignore
+                cls._FLOAT_MODULE = [cls._FLOAT_MODULE]  # type: ignore[assignment]
+            supported_modules = ', '.join([float_mod.__name__ for float_mod in cls._FLOAT_MODULE])  # type: ignore[attr-defined]
             error_msg = 'nnq.{}.from_float only works for {}'.format(cls.__name__, supported_modules)
-            assert type(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore
+            assert type(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore[attr-defined]
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             activation_post_process = mod.activation_post_process
             if type(mod) == nni.LinearReLU:

@@ -6,6 +6,7 @@
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <cmath>
 #include <functional>
@@ -482,7 +483,7 @@ Tensor LBFGS::step(LossClosure closure) {
       // r/d is the final direction
       auto r = torch::mul(q, H_diag);
       d = r;
-      for (int64_t i = 0; i < num_old; i++) {
+      for(const auto i : c10::irange(num_old)) {
         auto be_i = old_dirs.at(i).dot(r) * ro.at(i);
         r.add_(old_stps.at(i), val((*al).at(i) - be_i));
       }

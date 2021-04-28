@@ -5,6 +5,7 @@
 #include <torch/utils.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <array>
 #include <cmath>
@@ -98,8 +99,8 @@ void RNNImplBase<Derived>::reset() {
   flat_weights_names_ = {};
   all_weights_ = {};
 
-  for (int64_t layer = 0; layer < options_base.num_layers(); layer++) {
-    for (int64_t direction = 0; direction < num_directions; direction++) {
+  for(const auto layer : c10::irange(options_base.num_layers())) {
+    for(const auto direction : c10::irange(num_directions)) {
       int64_t real_hidden_size = options_base.proj_size() > 0 ? options_base.proj_size() : options_base.hidden_size();
       int64_t layer_input_size = layer == 0 ? options_base.input_size() : real_hidden_size * num_directions;
 
