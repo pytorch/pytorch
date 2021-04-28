@@ -354,6 +354,7 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
       has_random);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
 } // namespace cpu
 } // namespace fuser
