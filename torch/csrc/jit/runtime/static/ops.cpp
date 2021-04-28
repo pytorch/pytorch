@@ -1202,6 +1202,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
     at::native::argmin_out(in0_t, dim, keepdim, out_t);
   };
 });
+
 REGISTER_OPERATOR_FUNCTOR(
     aten::layer_norm,
     aten_layer_norm,
@@ -1257,5 +1258,64 @@ REGISTER_OPERATOR_FUNCTOR(
             N);
       };
     });
+
+/* Support the following signatures of norm:
+ * norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype)
+ * norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *,
+ *                          ScalarType dtype)
+ * norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False)
+ */
+REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
+  TORCH_CHECK(
+      n->inputs().size() > 2,
+      "Please implement static runtime support for aten::norm 2-arg version");
+  auto val_2 = toIValue(n->inputs()[2]);
+  if (val_2) {
+    TORCH_CHECK(
+        val_2->isIntList() || val_2->isInt(),
+        "Please implement static runtime support for aten::norm w/ DimnameList");
+  }
+
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+
+    const size_t num_inp = p_node->inputs().size();
+    const auto in1_s = p_node->Input(1).toOptional<at::Scalar>();
+    if (num_inp == 3) {
+      at::native::norm_out(
+          in0_t,
+          in1_s,
+          c10::IntArrayRef{},
+          false,
+          p_node->Input(2).toScalarType(),
+          out_t);
+      return;
+    }
+
+    if (num_inp > 4) {
+      at::native::norm_out(
+          in0_t,
+          in1_s,
+          p_node->Input(2).toIntVector(), // dim
+          p_node->Input(3).toBool(), // keepdim
+          p_node->Input(4).toScalarType(), // dtype
+          out_t);
+      return;
+    }
+    at::native::norm_out(
+        in0_t,
+        in1_s,
+        p_node->Input(2).toIntVector(), // dim
+        p_node->Input(3).toBool(), // keepdim
+        out_t);
+  };
+});
+
 } // namespace jit
 } // namespace torch
