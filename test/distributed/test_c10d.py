@@ -4235,6 +4235,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         else:
             output = model(input_var)
         l = loss(output, target)
+        print(f"Got l {l}")
         l.backward()
 
     def _test_ddp_checkpointing(
@@ -4273,6 +4274,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 self.assertTrue(i.grad is not None)
                 self.assertTrue(j.grad is not None)
                 self.assertEqual(i.grad, j.grad)
+                # print(f"grads same {i.grad}, {j.grad}")
 
     # DDP works as expect when layer is checkpointed only once
     @requires_nccl()

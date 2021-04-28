@@ -5255,3 +5255,82 @@ class DistributedTest:
                     RuntimeError, f"Rank {self.rank} timed out in monitoredBarrier"
                 ):
                     process_group.monitored_barrier(timeout)
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        def test_ddp_static_graph_nested_types(self):
+            # Tests for static graph training when outputs are not just tensors
+            # but can be (nested) tuple, list, dict, etc.
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            class NestedOutputModule(torch.nn.Module):
+                def __init__(self):
+                    self.lin = nn.Linear(100, 1, bias=False)
+
+                def forward(inp, output_type):
+                    if output_type == "tuple":
+                        return (
+                            self.lin(inp),
+                            (
+                                self.lin(inp),
+                                self.lin(inp),
+                            )
+                        )
+                    elif output_type == "list":
+                        return [
+                            self.lin(inp),
+                            [
+                                self.lin(inp),
+                                self.lin(inp),
+                            ]
+                        ]
+                    elif output_type == "dict":
+                        return {
+                            "a": self.lin(inp),
+                            "b": {
+                                "c": self.lin(inp),
+                            }
+                        }
+
+            def get_loss(model_output):
+                if isinstance(model_output, torch.Tensor):
+                    return model_output.sum()
+                loss = 0
+                elif isinstance(model_output, dict):
+                    for value in model_output.values():
+                        loss += get_loss(value)
+                elif isinstance(model_output, tuple) or isinstance(model_output, list):
+                    for x in model_output:
+                        loss += get_loss(x)
+                else:
+                    raise ValueError(f"Unknown model output type {type(model_output)}")
+                return loss
+
+
+            model = NestedOutputModule().cuda(rank)
+            model_static_graph = copy.deepcopy(model)
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank]
+            )
+            model_static_graph = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank],
+            )
+            model_static_graph._set_static_graph()
+            inp = torch.randn(10, 100)
+            for i in range(6):
+                out = model(inp)
+                loss = get_loss(out)
+                loss.backward()
+                self._model_step(model)
+                out_static = model_static_graph(inp)
+                loss_static = get_loss(out_static)
+                loss_static.backward()
+                self._model_step(model_static_graph)
+                for (p, p_static) in zip(model.parameters(), model_static_graph.parameters()):
+                    self.assertEqual(p, p_static)
+
+            if self.rank == 0:
+                print("Done!")
