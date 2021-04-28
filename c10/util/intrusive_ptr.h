@@ -354,7 +354,6 @@ class intrusive_ptr final {
   }
 
   TTarget* operator->() const noexcept {
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
     return target_;
   }
 
@@ -403,7 +402,6 @@ class intrusive_ptr final {
    * This is helpful for C APIs.
    */
   TTarget* release() noexcept {
-    // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
     TTarget* result = target_;
     target_ = NullType::singleton();
     return result;

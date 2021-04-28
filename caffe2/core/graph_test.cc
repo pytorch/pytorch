@@ -9,7 +9,6 @@ namespace {
 
 using transform::Graph;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> counter;
 
 class GraphDummyOp final : public OperatorBase {
@@ -21,28 +20,22 @@ class GraphDummyOp final : public OperatorBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GraphDummyOp1, GraphDummyOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GraphDummyOp1)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{0, 0}, {1, 1}});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GraphDummyOp2, GraphDummyOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GraphDummyOp2)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{0, 0}, {1, 1}});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GraphDummyOp3, GraphDummyOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GraphDummyOp3)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
@@ -64,7 +57,6 @@ void compare_netdefs(const NetDef& net_a, const NetDef& net_b) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GraphTest, TestGenerateGraphChain) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -89,7 +81,6 @@ TEST(GraphTest, TestGenerateGraphChain) {
   compare_netdefs(retrieved_net, netdef);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GraphTest, TestGenerateGraphChainInPlace) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -115,7 +106,6 @@ TEST(GraphTest, TestGenerateGraphChainInPlace) {
 }
 
 // Diamond Graph
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GraphTest, TestGenerateGraphBranch) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -143,7 +133,6 @@ TEST(GraphTest, TestGenerateGraphBranch) {
 }
 
 // Double Diamond Graph, reused names
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GraphTest, TestReusedInputs) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -179,7 +168,6 @@ TEST(GraphTest, TestReusedInputs) {
   compare_netdefs(retrieved_net, netdef);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GraphTest, TestGetPerimeter) {
   Workspace ws;
   ws.CreateBlob("in");

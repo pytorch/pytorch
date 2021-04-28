@@ -8,9 +8,7 @@
 namespace torch { namespace autograd {
 
 struct PyAnomalyMetadata : public AnomalyMetadata {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-writable-strings)
   static constexpr char* ANOMALY_TRACE_KEY = "traceback_";
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-writable-strings)
   static constexpr char* ANOMALY_PARENT_KEY = "parent_";
 
   PyAnomalyMetadata() {

@@ -9,7 +9,6 @@ namespace {
 
 using transform::Graph;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> counter;
 
 class TransformDummyOp final : public OperatorBase {
@@ -21,28 +20,22 @@ class TransformDummyOp final : public OperatorBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TransformDummyOp1, TransformDummyOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TransformDummyOp1)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{0, 0}, {1, 1}});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TransformDummyOp2, TransformDummyOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TransformDummyOp2)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{0, 0}, {1, 1}});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TransformDummyOp3, TransformDummyOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TransformDummyOp3)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
@@ -139,10 +132,8 @@ class DummyTransform : public Transform {
                                              "TransformDummyOp2"};
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TRANSFORM(TransformDummySwap, DummyTransform)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TransformTest, TestPatternMatch) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -164,7 +155,6 @@ TEST(TransformTest, TestPatternMatch) {
   EXPECT_EQ(matches[1][1], 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TransformTest, TestReplacePattern) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -201,7 +191,6 @@ TEST(TransformTest, TestReplacePattern) {
   EXPECT_EQ(replaced_netdef.op(1).output(0), "out");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TransformTest, TestTransformApply) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -258,10 +247,8 @@ class SortedDummyTransform : public Transform {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TRANSFORM(SortedTransformDummySwap, SortedDummyTransform)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TransformTest, TestPatternMatchTypeSortedOrder) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -320,10 +307,8 @@ class GeneralDummyTransform : public Transform {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TRANSFORM(GeneralTransformDummySwap, GeneralDummyTransform)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TransformTest, TestPatternMatchTypeGeneral) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -346,16 +331,13 @@ class TransformSleepFastOp final : public OperatorBase {
  public:
   using OperatorBase::OperatorBase;
   bool Run(int /* unused */) override {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
     return true;
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TransformSleepFastOp, TransformSleepFastOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TransformSleepFastOp)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
@@ -365,16 +347,13 @@ class TransformSleepSlowOp final : public OperatorBase {
  public:
   using OperatorBase::OperatorBase;
   bool Run(int /* unused */) override {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     return true;
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TransformSleepSlowOp, TransformSleepSlowOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TransformSleepSlowOp)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
@@ -387,7 +366,6 @@ OPERATOR_SCHEMA(TransformSleepSlowOp)
 class TypeSwapTransform : public Transform {
  public:
   // Determine the actual strings through inheriting from derived type.
-  // NOLINTNEXTLINE(modernize-pass-by-value)
   explicit TypeSwapTransform(string old_type, string new_type)
       : old_type(old_type), new_type(new_type) {}
 
@@ -428,7 +406,6 @@ class FastToSlowTransform : public TypeSwapTransform {
       : TypeSwapTransform("TransformSleepFastOp", "TransformSleepSlowOp") {}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TRANSFORM(FastToSlow, FastToSlowTransform);
 
 class SlowToFastTransform : public TypeSwapTransform {
@@ -437,10 +414,8 @@ class SlowToFastTransform : public TypeSwapTransform {
       : TypeSwapTransform("TransformSleepSlowOp", "TransformSleepFastOp") {}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TRANSFORM(SlowToFast, SlowToFastTransform);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TransformTest, TestApplyTransformIfFasterIsFaster) {
   NetDef init_netdef;
   AddOp(&init_netdef, "ConstantFill", {}, {"in"});
@@ -456,12 +431,10 @@ TEST(TransformTest, TestApplyTransformIfFasterIsFaster) {
 
   // Should be still transform normally.
   auto mystery_net =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       ApplyTransformIfFaster("SlowToFast", netdef, init_netdef, 5, 10, 1.01);
   EXPECT_EQ(mystery_net.op(1).type(), "TransformSleepFastOp");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TransformTest, TestApplyTransformIfFasterButSlower) {
   NetDef init_netdef;
   AddOp(&init_netdef, "ConstantFill", {}, {"in"});
@@ -477,7 +450,6 @@ TEST(TransformTest, TestApplyTransformIfFasterButSlower) {
 
   // Should not actually change!
   auto mystery_net =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       ApplyTransformIfFaster("FastToSlow", netdef, init_netdef, 5, 10, 1.01);
   EXPECT_EQ(mystery_net.op(1).type(), "TransformSleepFastOp");
 }

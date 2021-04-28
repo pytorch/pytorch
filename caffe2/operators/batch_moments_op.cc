@@ -65,7 +65,6 @@ bool BatchMomentsGradientOp<float, CPUContext>::ComputeBatchMomentsGradientNCHW(
   for (int i = 0; i < N; ++i) {
     EigenArrayMap<float> dX_arr(dX_ptr, HxW, C);
     dX_arr = ConstEigenArrayMap<float>(X_ptr, HxW, C).rowwise() *
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         dvar_arr.transpose() * 2.0f;
     dX_arr.rowwise() += dmu_arr.transpose();
     X_ptr += stride;
@@ -88,23 +87,18 @@ bool BatchMomentsGradientOp<float, CPUContext>::ComputeBatchMomentsGradientNHWC(
   const float scale = 1.0f / static_cast<float>(N * HxW);
   EigenArrayMap<float> dX_arr(dX, C, N * HxW);
   dX_arr = ConstEigenArrayMap<float>(X, C, N * HxW).colwise() *
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       ConstEigenVectorArrayMap<float>(dvar, C) * 2.0f;
   dX_arr.colwise() += ConstEigenVectorArrayMap<float>(dmu, C);
   math::Scale<float, float, CPUContext>(N * C * HxW, scale, dX, dX, &context_);
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchMoments, BatchMomentsOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BatchMomentsGradient,
     BatchMomentsGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchMoments).NumInputs(1).NumOutputs(2);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchMomentsGradient).NumInputs(3).NumOutputs(1);
 
 namespace {
@@ -123,7 +117,6 @@ class GetBatchMomentsGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchMoments, GetBatchMomentsGradient);
 
 } // namespace caffe2

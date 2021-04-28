@@ -7566,7 +7566,7 @@ dedent """
         def fn(x):
             return type(x)
 
-        with self.assertRaisesRegex(RuntimeError, "value of type _TensorMeta"):
+        with self.assertRaisesRegex(RuntimeError, "value of type type"):
             fn(torch.tensor(.5))
 
     def test_python_call_annotation(self):

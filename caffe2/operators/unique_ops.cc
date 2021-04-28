@@ -41,7 +41,6 @@ bool UniqueOp<CPUContext>::DoRunWithType() {
   order_.resize(N);
   std::iota(order_.begin(), order_.end(), 0);
   std::sort(order_.begin(), order_.end(), [input](const int x, const int y) {
-    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     return input[x] < input[y];
   });
   int K = N;
@@ -63,10 +62,8 @@ bool UniqueOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Unique, UniqueOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Unique)
     .NumInputs(1)
     .NumOutputs(1, 2)
@@ -104,7 +101,6 @@ There's no guarantees on the ordering of the output indices.
       return out;
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Unique);
 
 } // namespace caffe2

@@ -105,7 +105,6 @@ void AsyncTaskFuture::ResetState() {
   err_msg_ = "";
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
 AsyncTaskFuture::~AsyncTaskFuture() {}
 
 } // namespace caffe2

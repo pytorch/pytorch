@@ -11,14 +11,12 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaMatchingTest, VarType) {
   RegisterOperators reg({
       Operator(
           "aten::test_vartype(t[] a, t b) -> (t)",
           [](Stack* stack) {
             c10::List<double> list;
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             double a;
             pop(stack, list, a);
             push(stack, a);
@@ -32,7 +30,6 @@ TEST(SchemaMatchingTest, VarType) {
         return torch.test_vartype(a, 2.0)
     )");
   auto result = m.run_method("test");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_INTERNAL_ASSERT(result.toDouble() == 2.0);
 
   const std::string error_example = R"JIT(
@@ -52,13 +49,11 @@ TEST(SchemaMatchingTest, VarType) {
       err.find("previously matched to type") != std::string::npos);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaMatchingTest, VarType2) {
   RegisterOperators reg({
       Operator(
           "aten::test_vartype2(t a, t[] b) -> (t[])",
           [](Stack* stack) {
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             double a;
             c10::List<double> list;
             pop(stack, a, list);
@@ -73,7 +68,6 @@ TEST(SchemaMatchingTest, VarType2) {
           return torch.test_vartype2(3.0, a)
     )JIT");
   auto result = m.run_method("test");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_INTERNAL_ASSERT(result.toDouble() == 3.0);
 
   static const auto error_exam2 = R"JIT(

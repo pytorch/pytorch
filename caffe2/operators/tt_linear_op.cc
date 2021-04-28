@@ -3,15 +3,12 @@
 namespace caffe2 {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TT, TTLinearOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TTLinearGradient, TTLinearGradientOp<float, CPUContext>);
 
 // The TT-layer serves as a low-rank decomposition of a fully connected layer.
 // The inputs are the same as to an FC layer, but the number of the parameters
 // are greatly reduced.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TT)
     .NumInputs(3)
     .NumOutputs(1)
@@ -62,10 +59,8 @@ low-rank decomposition and the speed of the computation.
         "Output tensor from previous layer with size (M x N), "
         "where M is the batch size and N is the output size.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TTLinearGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_NOT_IMPLEMENTED_YET(TT);
 } // namespace
 } // namespace caffe2

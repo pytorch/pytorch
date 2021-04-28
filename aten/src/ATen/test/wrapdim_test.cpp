@@ -4,14 +4,12 @@
 
 using namespace at;
 void TestSimpleCase(DeprecatedTypeProperties& T) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = randn({2, 3, 4, 5}, T);
   ASSERT_TRUE(a.prod(-4).equal(a.prod(0)));
   ASSERT_TRUE(a.prod(3).equal(a.prod(-1)));
 }
 
 void TestExpressionSpecification(DeprecatedTypeProperties& T) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = randn({2, 3, 4, 5}, T);
   ASSERT_TRUE(a.unsqueeze(-5).equal(a.unsqueeze(0)));
   ASSERT_TRUE(a.unsqueeze(4).equal(a.unsqueeze(-1)));
@@ -34,9 +32,7 @@ void TestScalarVs1Dim1Size(DeprecatedTypeProperties& T) {
   ASSERT_TRUE(a.prod(0).equal(a.prod(-1)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestWrapdim, TestWrapdim) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
   DeprecatedTypeProperties& T = CPU(kFloat);
 

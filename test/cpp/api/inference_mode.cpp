@@ -44,7 +44,6 @@ namespace {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestTLSState) {
   assert_TLS_states(false);
   {
@@ -59,7 +58,6 @@ TEST(InferenceModeTest, TestTLSState) {
   assert_TLS_states(false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorCreation) {
   {
     InferenceMode guard;
@@ -79,7 +77,6 @@ TEST(InferenceModeTest, TestInferenceTensorCreation) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestExistingAutogradSession) {
   torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(true);
   torch::Tensor a = s.clone();
@@ -95,7 +92,6 @@ TEST(InferenceModeTest, TestExistingAutogradSession) {
     "one of the variables needed for gradient computation has been modified by an inplace operation")
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInInferenceModeFunctionalOp) {
   c10::InferenceMode guard;
   for (bool requires_grad : {true, false}) {
@@ -107,7 +103,6 @@ TEST(InferenceModeTest, TestInferenceTensorInInferenceModeFunctionalOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInInferenceModeInplaceOp) {
   c10::InferenceMode guard;
   for (bool requires_grad : {true, false}) {
@@ -119,7 +114,6 @@ TEST(InferenceModeTest, TestInferenceTensorInInferenceModeInplaceOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInInferenceModeViewOp) {
   c10::InferenceMode guard;
   for (bool requires_grad : {true, false}) {
@@ -133,7 +127,6 @@ TEST(InferenceModeTest, TestInferenceTensorInInferenceModeViewOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInNormalModeFunctionalOp) {
   torch::Tensor inference_tensor;
   for (bool requires_grad: {true, false}) {
@@ -152,7 +145,6 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeFunctionalOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInNormalModeInplaceOp) {
   torch::Tensor inference_tensor;
   for (bool requires_grad: {true, false}) {
@@ -165,7 +157,6 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeInplaceOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInferenceTensorInNormalModeViewOp) {
   torch::Tensor inference_tensor;
   for (bool requires_grad: {true, false}) {
@@ -181,7 +172,6 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeViewOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestNormalTensorInplaceOutputInInferenceMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -207,7 +197,6 @@ TEST(InferenceModeTest, TestNormalTensorInplaceOutputInInferenceMode) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestNormalTensorInplaceOutputInNormalMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -235,7 +224,6 @@ TEST(InferenceModeTest, TestNormalTensorInplaceOutputInNormalMode) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestNormalTensorViewOutputInInferenceMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -280,7 +268,6 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInInferenceMode) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestNormalTensorViewOutputInNormalMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -313,7 +300,6 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInNormalMode) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -347,7 +333,6 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestMixInferenceAndNormalTensorInplaceOp) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -373,7 +358,6 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorInplaceOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestMixInferenceAndNormalTensorViewOp) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -397,7 +381,6 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorViewOp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestHandleDirectViewOnRebase) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -416,7 +399,6 @@ TEST(InferenceModeTest, TestHandleDirectViewOnRebase) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestHandleInDirectViewOnRebase) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -436,7 +418,6 @@ TEST(InferenceModeTest, TestHandleInDirectViewOnRebase) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestCreationMetaPropagation) {
   torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(true);
   torch::Tensor b, c;
@@ -454,7 +435,6 @@ TEST(InferenceModeTest, TestCreationMetaPropagation) {
     "A view was created in inference mode and is being modified inplace");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInplaceCopyOnInferenceTensor) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -472,7 +452,6 @@ TEST(InferenceModeTest, TestInplaceCopyOnInferenceTensor) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestSetRequiresGradInNormalMode) {
   torch::Tensor t;
   {
@@ -484,7 +463,6 @@ TEST(InferenceModeTest, TestSetRequiresGradInNormalMode) {
     "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestAccessVersionCounter) {
   torch::Tensor t;
   {
@@ -505,7 +483,6 @@ TEST(InferenceModeTest, TestAccessVersionCounter) {
   ASSERT_EQ(c.unsafeGetTensorImpl()->version_counter().current_version(), v + 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestInplaceUpdateInferenceTensorWithNormalTensor) {
   torch::Tensor s = torch::ones({1, 2, 3});
   torch::Tensor t;
@@ -527,7 +504,6 @@ TEST(InferenceModeTest, TestInplaceUpdateInferenceTensorWithNormalTensor) {
     "Inplace update to inference tensor outside InferenceMode is not allowed");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestComplexViewInInferenceMode) {
   torch::Tensor s = torch::ones({3, 3, 2});
   torch::Tensor t = torch::view_as_complex(s);
@@ -548,7 +524,6 @@ TEST(InferenceModeTest, TestComplexViewInInferenceMode) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestComplexViewInNormalMode) {
   torch::Tensor s;
   {
@@ -561,7 +536,6 @@ TEST(InferenceModeTest, TestComplexViewInNormalMode) {
   ASSERT_TRUE(is_inference_tensor(tmp));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestCustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {
@@ -593,7 +567,6 @@ TEST(InferenceModeTest, TestCustomFunction) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InferenceModeTest, TestLegacyAutoNonVariableTypeModeWarning) {
   bool prev = c10::Warning::get_warnAlways();
   c10::Warning::set_warnAlways(true);

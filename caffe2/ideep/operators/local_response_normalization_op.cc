@@ -21,7 +21,6 @@ class IDEEPLRNOp final : public IDEEPOperator {
     DCHECK_GT(alpha_, 0);
     DCHECK_GT(beta_, 0);
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPLRNOp() override {}
 
   bool RunOnDevice() override {
@@ -38,7 +37,6 @@ class IDEEPLRNOp final : public IDEEPOperator {
   const float alpha_;
   const float beta_;
   const float bias_;
-  // NOLINTNEXTLINE(clang-diagnostic-unused-private-field)
   const int pre_pad_;
 
   INPUT_TAGS(INPUT);
@@ -62,7 +60,6 @@ class IDEEPLRNGradientOp final : public IDEEPOperator {
     DCHECK_GT(alpha_, 0);
     DCHECK_GT(beta_, 0);
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPLRNGradientOp() override {}
 
   bool RunOnDevice() override {
@@ -81,7 +78,6 @@ class IDEEPLRNGradientOp final : public IDEEPOperator {
   const float alpha_;
   const float beta_;
   const float bias_;
-  // NOLINTNEXTLINE(clang-diagnostic-unused-private-field)
   const int pre_pad_;
 
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
@@ -89,9 +85,7 @@ class IDEEPLRNGradientOp final : public IDEEPOperator {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(LRN, IDEEPLRNOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(LRNGradient, IDEEPLRNGradientOp);
 
 } // namespace

@@ -77,11 +77,8 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   void checkForAddToConstantsError(std::stringstream& ss);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   py::object self;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   c10::optional<py::object> rcb;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Value* moduleSelf_ = nullptr;
 };
 

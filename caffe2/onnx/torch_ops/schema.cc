@@ -13,6 +13,5 @@ class PyTorchSchemasRegisterer {
     RegisterPyTorchOperatorSetSchema();
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyTorchSchemasRegisterer registerer{};
 } // namespace

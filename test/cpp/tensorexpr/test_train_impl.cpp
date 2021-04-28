@@ -95,7 +95,6 @@ VTensor* grad(VTensor* y, VTensor* x, VTensor* j) {
     // Every time we "stay left," add the other consumers to q
     // If we find y -- add the whole route to need_grad
     // If we can't find y -- add the whole route to no_grad
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     VTensor* var;
     std::unordered_set<VTensor*> route;
     std::tie(var, route) = q.front();
@@ -194,7 +193,6 @@ VTensor* grad(VTensor* y, VTensor* x, VTensor* j) {
 
 VOp::VOp(
     const std::string& name,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::vector<VTensor*>& inputs_,
     size_t num_outputs,
     VGraph* graph_)
@@ -212,9 +210,7 @@ std::vector<DimArg> get_vars(
     std::vector<std::string> dims,
     const std::map<std::string, torch::jit::tensorexpr::VarHandle>& vbindings) {
   std::vector<DimArg> vars;
-  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto k : dims) {
-    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     vars.emplace_back(vbindings.at(k));
   }
   if (vars.size() == 0) {
@@ -223,7 +219,6 @@ std::vector<DimArg> get_vars(
   return vars;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     add,
     [](const std::vector<Tensor*>& inputs,
@@ -247,7 +242,6 @@ REGISTER_METHOD(
       return {inputs[0]->shape};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     sub,
     [](const std::vector<Tensor*>& inputs,
@@ -271,7 +265,6 @@ REGISTER_METHOD(
       return {inputs[0]->shape};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     neg,
     [](const std::vector<Tensor*>& inputs,
@@ -294,7 +287,6 @@ REGISTER_METHOD(
       return {inputs[0]->shape};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     mul,
     [](const std::vector<Tensor*>& inputs,
@@ -320,7 +312,6 @@ REGISTER_METHOD(
       return {inputs[0]->shape};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     div,
     [](const std::vector<Tensor*>& inputs,
@@ -348,7 +339,6 @@ REGISTER_METHOD(
       return {inputs[0]->shape};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     sum,
     [](const std::vector<Tensor*>& inputs,
@@ -376,7 +366,6 @@ REGISTER_METHOD(
     [](const std::vector<VTensor*>& inputs)
         -> std::vector<std::vector<std::string>> { return {{}}; });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     broadcast,
     [](const std::vector<Tensor*>& inputs,
@@ -429,10 +418,8 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
       std::stringstream ss;
       auto k = unique_name_map.size() + 1;
       while (k) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto n = k % 26;
         ss << "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[n - 1];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         k /= 26;
       }
       auto name = ss.str();
@@ -477,7 +464,6 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
 
   for (const auto& t : graph.vtensors) {
     auto id = reinterpret_cast<size_t>(&t);
-    // NOLINTNEXTLINE(performance-for-range-copy)
     for (auto d : t.shape) {
       if (!vbindings.count(d)) {
         VarHandle D(d, kInt);
@@ -488,7 +474,6 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
     if (!t.op) {
       std::vector<DimArg> vars;
       std::vector<ExprHandle> exprs;
-      // NOLINTNEXTLINE(performance-for-range-copy)
       for (auto k : t.shape) {
         vars.emplace_back(vbindings.at(k));
         exprs.emplace_back(vbindings.at(k));

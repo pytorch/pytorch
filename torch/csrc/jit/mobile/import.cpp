@@ -220,9 +220,7 @@ void BytecodeDeserializer::parseMethods(
     method_i_start = 1;
   }
   TORCH_CHECK(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           model_version <= caffe2::serialize::kProducedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
       "The model version must be between ",
@@ -250,7 +248,6 @@ void BytecodeDeserializer::parseMethods(
         ? at::optional<IValue>{m_tuple[2]}
         : at::nullopt;
 
-    // NOLINTNEXTLINE(modernize-make-unique)
     auto function = std::unique_ptr<mobile::Function>(
         new mobile::Function(c10::QualifiedName(function_name)));
 
@@ -465,7 +462,6 @@ c10::IValue BytecodeDeserializer::readArchive(
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t pickle_size;
   std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename.str());
 
@@ -616,7 +612,6 @@ mobile::Module _load_for_mobile_impl(
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
   auto observer = torch::observerConfig().getModuleObserver();
-  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
@@ -641,7 +636,6 @@ mobile::Module _load_for_mobile_impl(
       observer->onFailLoadModel(
           instance_key,
           error.what(),
-          // NOLINTNEXTLINE(performance-move-const-arg)
           deserializer.deserializeMetadata(std::move(device)));
     }
     TORCH_RETHROW(error);
@@ -662,7 +656,6 @@ mobile::Module _load_for_mobile_impl(
         observer->onFailLoadModel(
             instance_key,
             error.what(),
-            // NOLINTNEXTLINE(performance-move-const-arg)
             deserializer.deserializeMetadata(std::move(device)));
       }
       TORCH_RETHROW(error);
@@ -676,7 +669,6 @@ void _load_extra_only_for_mobile(
     ExtraFilesMap& extra_files) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto observer = torch::observerConfig().getModuleObserver();
-  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);

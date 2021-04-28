@@ -27,7 +27,6 @@ class IDEEPConcatOp final : public IDEEPOperator {
       add_axis_ = 0;
     }
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPConcatOp() override {}
 
   bool RunOnDevice() override {
@@ -61,7 +60,6 @@ class IDEEPConcatOp final : public IDEEPOperator {
       auto* axis_data = axis_info->template mutable_data<int>();
       auto axis_vdata =
         ideep::concat::compute(inputs_itensor, canonical_axis, add_axis_, *output);
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < axis_vdata.size(); i++) {
         axis_data[i] = axis_vdata[i];
       }
@@ -101,7 +99,6 @@ class IDEEPSplitOp final : public IDEEPOperator {
       add_axis_ = 0;
     }
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPSplitOp() override {}
 
   bool RunOnDevice() override {
@@ -170,9 +167,7 @@ class IDEEPSplitOp final : public IDEEPOperator {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Concat, IDEEPConcatOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Split, IDEEPSplitOp);
 
 } // namespace

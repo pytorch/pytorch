@@ -29,16 +29,14 @@
 TorchScript Language Reference
 ==============================
 
-This TorchScript Language reference manual describes the syntax and core semantics of the TorchScript language.
-TorchScript is a statically typed subset of Python language. This document attempts to explain the supported features of
-Python in TorchScript and also how the language diverges from regular Python. Any features of Python not mentioned in
-this reference are not part of TorchScript. TorchScript focuses specifically on the features of Python that are needed to
-represent neural network models in PyTorch.
-
 .. _type_system:
 
-Terminology
+
+Type System
 ~~~~~~~~~~~
+
+Terminology
+^^^^^^^^^^^
 
 This document uses the following terminologies:
 
@@ -48,8 +46,6 @@ This document uses the following terminologies:
 
    * - Pattern
      - Notes
-   * - ``::=``
-     - indicates the given symbol is defined as.
    * - ``" "``
      - represents real keywords and delimiters that are part of the syntax
    * - ``A | B``
@@ -63,10 +59,33 @@ This document uses the following terminologies:
    * - ``A*``
      - indicates a regular expression where term A is repeated zero or more times
 
-Type System
-~~~~~~~~~~~
-TorchScript is a statically typed subset of Python. The largest difference between TorchScript and the full Python language is that TorchScript only supports a small set of types that are needed to express
-neural net models.
+TorchScript Type System Definition
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    TSAllType       ::= TSType | TSModuleType
+    TSType          ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
+
+    TSMetaType      ::= "Any"
+    TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
+
+    TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
+                         TSOptional | TSFuture | TSRRef
+    TSTuple         ::= "Tuple" "[" (TSType ",")* TSType "]"
+    TSNamedTuple    ::= "namedtuple" "(" (TSType ",")* TSType ")"
+    TSList          ::= "List" "[" TSType "]"
+    TSOptional      ::= "Optional" "[" TSType "]"
+    TSFuture        ::= "Future" "[" TSType "]"
+    TSRRef          ::= "RRef" "[" TSType "]"
+    TSDict          ::= "Dict" "[" KeyType "," TSType "]"
+    KeyType         ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
+
+    TSNominalType   ::= TSBuiltinClasses | TSCustomClass | TSEnum
+    TSBuiltinClass  ::= TSTensor | "torch.device" | "torch.stream"|
+                        "torch.dtype" | "torch.nn.ModuleList" |
+                        "torch.nn.ModuleDict" | ...
+    TSTensor        ::= "torch.tensor" and subclasses
 
 TorchScript Types
 ^^^^^^^^^^^^^^^^^
@@ -78,8 +97,8 @@ The TorchScript type system consists of ``TSType`` and ``TSModuleType`` as defin
     TSAllType ::= TSType | TSModuleType
     TSType    ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
 
-``TSType`` represents the majority of TorchScript types that are composable and can be used in TorchScript type annotations.
-``TSType`` refers to any of the following:
+``TSType`` represents the majority of TorchScript types that are composable and can be used in TorchScript type annotation.
+``TSType`` can be further classified into:
 
 * Meta Types, e.g., ``Any``
 * Primitive Types, e.g., ``int``, ``float``, ``str``
@@ -98,7 +117,7 @@ Currently TorchScript defines one meta-type, ``Any``, that represents any TorchS
 ``Any`` Type
 """"""""""""
 
-The ``Any`` type represents any TorchScript type. ``Any`` specifies no type constraints, thus there is no type checking on ``Any``.
+The ``Any`` type literally represents any type. ``Any`` specifies no type constraints, thus there is no type checking on ``Any``.
 As such it can be bound to any Python or TorchScript data types (e.g., int, TorchScript ``tuple``, or an arbitrary Python class that is not scripted).
 
 ::
@@ -108,7 +127,7 @@ As such it can be bound to any Python or TorchScript data types (e.g., int, Torc
 where
 
 * ``Any`` is the Python class name from the typing module, therefore usage of the ``Any`` type requires from ``typing import Any``
-* Since ``Any`` can represent any TorchScript type, the set of operators allowed to operate on values of this type on Any is limited.
+* Since ``Any`` can represent any type, the set of operators allowed to operate on values of this type on Any is limited.
 
 Operators supported for ``Any`` type
 """"""""""""""""""""""""""""""""""""
@@ -124,7 +143,7 @@ Operators supported for ``Any`` type
 
 
 ``Any`` is the least constrained type in the TorchScript type system. In that sense, it is quite similar to
-``Object`` class in Python. However, ``Any`` only supports a subset of the operators and methods that are supported by Object.
+Object class in Python. However, ``Any`` only supports a subset of the operators and methods that are supported by Object.
 
 Design notes
 """"""""""""
@@ -135,7 +154,7 @@ scripting failures. ``Any`` is introduced to describe the type of the data where
 
 **Example**
 
-This example illustrates how ``Any`` can be used to allow the second element of the tuple parameter to be of any type. This is possible
+This example illustrates how ``Any`` can be used to allow the second element of the tuple parameter to be of ``any`` type. This is possible,
 because ``x[1]`` is not involved in any computation that requires knowing its precise type.
 
 .. testcode::
@@ -146,10 +165,10 @@ because ``x[1]`` is not involved in any computation that requires knowing its pr
     from typing import Any
 
     @torch.jit.export
-    def inc_first_element(x: Tuple[int, Any]):
+    def incFirstElement(x: Tuple[int, Any]):
         return (x[0]+1, x[1])
 
-    m = torch.jit.script(inc_first_element)
+    m = torch.jit.script(incFirstElement)
     print(m((1,2.0)))
     print(m((1,(100,200))))
 
@@ -799,34 +818,6 @@ See :meth:`torch.jit.annotate` for more information.
 
 Appendix
 ^^^^^^^^
-
-TorchScript Type System Definition
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-::
-
-    TSAllType       ::= TSType | TSModuleType
-    TSType          ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
-
-    TSMetaType      ::= "Any"
-    TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
-
-    TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
-                         TSOptional | TSFuture | TSRRef
-    TSTuple         ::= "Tuple" "[" (TSType ",")* TSType "]"
-    TSNamedTuple    ::= "namedtuple" "(" (TSType ",")* TSType ")"
-    TSList          ::= "List" "[" TSType "]"
-    TSOptional      ::= "Optional" "[" TSType "]"
-    TSFuture        ::= "Future" "[" TSType "]"
-    TSRRef          ::= "RRef" "[" TSType "]"
-    TSDict          ::= "Dict" "[" KeyType "," TSType "]"
-    KeyType         ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
-
-    TSNominalType   ::= TSBuiltinClasses | TSCustomClass | TSEnum
-    TSBuiltinClass  ::= TSTensor | "torch.device" | "torch.stream"|
-                        "torch.dtype" | "torch.nn.ModuleList" |
-                        "torch.nn.ModuleDict" | ...
-    TSTensor        ::= "torch.tensor" and subclasses
 
 Unsupported Typing Constructs
 """""""""""""""""""""""""""""

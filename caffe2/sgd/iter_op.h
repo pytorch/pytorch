@@ -69,7 +69,6 @@ class AtomicIterOp final : public Operator<Context> {
     auto& mutex = OperatorBase::Input<std::unique_ptr<std::mutex>>(0);
     std::lock_guard<std::mutex> lg(*mutex);
     IncrementIter(OperatorBase::Output<Tensor>(0, CPU));
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     CAFFE_EVENT(stats_, num_iter);
     return true;
   }

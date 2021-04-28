@@ -17,10 +17,8 @@ OutputMinMaxObserver::OutputMinMaxObserver(OperatorBase* op)
 
 // A global table that collects min/max for each tensor name.
 // Useful in case there are multiple copies of the same network.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static map<string, pair<float, float>> min_max_map_;
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
 OutputMinMaxObserver::~OutputMinMaxObserver() {
   /*#pragma omp critical
     {
@@ -154,7 +152,6 @@ OutputMinMaxNetObserver::OutputMinMaxNetObserver(
     NetBase* subject,
     const string& out_file_name,
     int dump_freq,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     string delimiter)
     : NetObserver(subject),
       dump_freq_(dump_freq),
@@ -180,12 +177,10 @@ void OutputMinMaxNetObserver::DumpAndReset_(
     LOG(WARNING) << this << ": can't open " << out_file_name;
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int op_index = 0; op_index < min_max_infos_.size(); ++op_index) {
     OutputMinMaxObserver::OperatorInfo* op_info =
         min_max_infos_[op_index].get();
     if (op_info) {
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < op_info->tensor_infos.size(); ++i) {
         const OutputMinMaxObserver::TensorInfo& tensor_info =
             op_info->tensor_infos[i];
@@ -210,7 +205,6 @@ void OutputMinMaxNetObserver::DumpAndReset_(
   f.close();
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 OutputMinMaxNetObserver::~OutputMinMaxNetObserver() {
   DumpAndReset_(out_file_name_, true);
 
@@ -219,22 +213,17 @@ OutputMinMaxNetObserver::~OutputMinMaxNetObserver() {
 #endif
   {
     ofstream f;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     time_t rawtime;
     time(&rawtime);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     struct tm timeinfo;
     localtime_r(&rawtime, &timeinfo);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
     char buffer[128] = {};
     strftime(buffer, sizeof(buffer), "%Y-%m-%d-%H-%M-%S", &timeinfo);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
     char buffer2[256] = {};
     snprintf(buffer2, sizeof(buffer2), "global_%s.minmax", buffer);
 
     f.open(buffer2);
     int op_index = 0;
-    // NOLINTNEXTLINE(performance-for-range-copy)
     for (auto key_value : min_max_map_) {
       ostringstream ost;
       assert(key_value.second.first <= key_value.second.second);
@@ -270,7 +259,6 @@ void OutputMinMaxNetObserver::Stop() {
   return;
 }
 
-// NOLINTNEXTLINE(modernize-pass-by-value)
 HistogramObserver::HistogramObserver(OperatorBase* op, shared_ptr<Info> info)
     : ObserverBase<OperatorBase>(op), info_(info) {}
 
@@ -333,7 +321,6 @@ OutputColumnMaxHistogramObserver::OutputColumnMaxHistogramObserver(
     OperatorBase* op,
     const std::string& col_max_blob_name,
     int nbins,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     std::shared_ptr<HistogramObserver::Info> info)
     : ObserverBase<OperatorBase>(op),
       col_max_blob_name_(col_max_blob_name),
@@ -385,7 +372,6 @@ void OutputColumnMaxHistogramObserver::Stop() {
       int idx = r * num_columns + col;
       col_max = max(col_max, std::abs(data[idx]));
     }
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (info_->histograms.size() <= col) {
       info_->histograms.emplace_back(nbins_);
       info_->total_histograms.emplace_back(nbins_);
@@ -398,13 +384,11 @@ void OutputColumnMaxHistogramObserver::Stop() {
 
 HistogramNetObserver::HistogramNetObserver(
     NetBase* subject,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     const string& out_file_name,
     int nbins,
     int dump_freq,
     bool mul_nets,
     string op_filter,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     string delimiter)
     : NetObserver(subject),
       dump_freq_(dump_freq),
@@ -467,14 +451,12 @@ void HistogramNetObserver::DumpAndReset_(
     LOG(WARNING) << this << ": can't open " << file_name.str();
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int op_index = 0; op_index < hist_infos_.size(); ++op_index) {
     HistogramObserver::Info* info = hist_infos_[op_index].get();
     if (!info) {
       continue;
     }
 
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < info->histograms.size(); ++i) {
       const Histogram* hist =
           (print_total_min_max ? info->total_histograms : info->histograms)[i]
@@ -515,7 +497,6 @@ void HistogramNetObserver::DumpAndReset_(
   f.close();
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 HistogramNetObserver::~HistogramNetObserver() {
   DumpAndReset_(out_file_name_, false);
 }
@@ -555,13 +536,11 @@ static bool HasDNNLowPEngine_(const OperatorBase& op) {
 
 OutputColumnMaxHistogramNetObserver::OutputColumnMaxHistogramNetObserver(
     NetBase* subject,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::string& out_file_name,
     const std::vector<std::string>& observe_column_max_for_blobs,
     int nbins,
     int dump_freq,
     bool mul_nets,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     string delimiter)
     : NetObserver(subject),
       dump_freq_(dump_freq),
@@ -625,7 +604,6 @@ void OutputColumnMaxHistogramNetObserver::DumpAndReset_(
       if (!info) {
         continue;
       }
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < info->histograms.size(); ++i) {
         const Histogram* hist =
             (print_total_min_max ? info->total_histograms : info->histograms)[i]
@@ -684,7 +662,6 @@ void OutputColumnMaxHistogramNetObserver::Stop() {
   return;
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 OutputColumnMaxHistogramNetObserver::~OutputColumnMaxHistogramNetObserver() {
   DumpAndReset_(out_file_name_, true);
 }
@@ -707,9 +684,7 @@ RegisterQuantizationParamsNetObserver::RegisterQuantizationParamsNetObserver(
     ++nwords_first_line;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   bool new_format = nwords_first_line == 6;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (!new_format && nwords_first_line != 5) {
     LOG(WARNING) << "min_max file " << min_max_file_name
                  << " has an invalid format";
@@ -728,10 +703,8 @@ RegisterQuantizationParamsNetObserver::RegisterQuantizationParamsNetObserver(
   int op_index = 0;
   for (auto* op : subject->GetOperators()) {
     for (int i = 0; i < op->OutputSize(); ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int op_index2, i2;
       string op_type, tensor_name;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float min, max;
 
       if (new_format) {
@@ -743,16 +716,13 @@ RegisterQuantizationParamsNetObserver::RegisterQuantizationParamsNetObserver(
       assert(i2 == i);
       assert(tensor_name == op->debug_def().output(i));
 
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       TensorQuantizationParams qparams;
       if (max > min) {
         unique_ptr<QuantizationFactory> qfactory(GetQuantizationFactoryOf(op));
         qparams = qfactory->ChooseQuantizationParams(min, max, is_weight);
       } else {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         qparams.scale = 0.1f;
         qparams.zero_point = -min / qparams.scale;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         qparams.precision = 8;
       }
 
@@ -798,18 +768,14 @@ RegisterQuantizationParamsWithHistogramNetObserver::
   ist.clear();
 
   bool new_format = true;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int op_index, i, nbins;
   string op_type, tensor_name;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float min, max;
   ist >> op_index >> op_type >> i >> tensor_name >> min >> max >> nbins;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (nwords_first_line != nbins + 7) {
     ist.str(first_line);
     ist.clear();
     ist >> op_index >> i >> tensor_name >> min >> max >> nbins;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (nwords_first_line == nbins + 6) {
       new_format = false;
     } else {
@@ -832,7 +798,6 @@ RegisterQuantizationParamsWithHistogramNetObserver::
   op_index = 0;
   for (auto* op : subject->GetOperators()) {
     for (i = 0; i < op->OutputSize(); ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int op_index2, i2;
 
       if (new_format) {
@@ -856,7 +821,6 @@ RegisterQuantizationParamsWithHistogramNetObserver::
 
       vector<uint64_t> bins;
       for (int j = 0; j < nbins; ++j) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         uint64_t cnt;
         f >> cnt;
         bins.push_back(cnt);
@@ -865,15 +829,12 @@ RegisterQuantizationParamsWithHistogramNetObserver::
       Histogram hist = Histogram(min, max, bins);
 
       LOG(INFO) << "Choosing qparams for " << tensor_name;
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       TensorQuantizationParams qparams;
       if (max > min) {
         unique_ptr<QuantizationFactory> qfactory(GetQuantizationFactoryOf(op));
         qparams = qfactory->ChooseQuantizationParams(hist, is_weight);
       } else {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         qparams.scale = 0.1f;
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         qparams.precision = 8;
         qparams.zero_point =
             (isinf(min / qparams.scale) || isnan(min / qparams.scale))

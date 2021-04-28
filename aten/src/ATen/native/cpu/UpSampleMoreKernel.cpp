@@ -1,4 +1,3 @@
-// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <math.h>
 #include <vector>
 #include <ATen/ATen.h>
@@ -35,9 +34,7 @@ void cpu_upsample_linear_backward(
 
   // treat nbatch and channels as one dimension
   int64_t channels = input_sizes[0] * input_sizes[1];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
   int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
   int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
@@ -54,7 +51,6 @@ void cpu_upsample_linear_backward(
       return grad_input_data + c * input_width + w;
     };
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t iw0, iw1;
     scalar_t w0lambda, w1lambda;
     for (int64_t c = begin; c < end; c++){
@@ -78,7 +74,6 @@ void cpu_upsample_linear_backward(
       return grad_input_data + c * input_height * input_width + h * input_width + w;
     };
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ih0, ih1, iw0, iw1;
     scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
     for (int64_t c = begin; c < end; c++) {
@@ -111,7 +106,6 @@ void cpu_upsample_linear_backward(
           d * input_height * input_width + h * input_width + w;
     };
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t id0, id1, ih0, ih1, iw0, iw1;
     scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
     for (int64_t c = begin; c < end; c++) {
@@ -149,7 +143,6 @@ void cpu_upsample_linear_backward(
   } else {
     // upsample trilinear 3d
     TORCH_INTERNAL_ASSERT(ndim == 5);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size / 8, loop3d);
   }
 
@@ -193,11 +186,8 @@ void upsample_trilinear3d_backward_kernel_impl(
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_linear1d_backward_kernel, &upsample_linear1d_backward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_bilinear2d_backward_kernel, &upsample_bilinear2d_backward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(upsample_trilinear3d_backward_kernel, &upsample_trilinear3d_backward_kernel_impl);
 
 } // namespace native

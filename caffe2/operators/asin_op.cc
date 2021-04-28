@@ -16,7 +16,6 @@ bool AsinGradientFunctor<CPUContext>::Forward(
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
-      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<T> dY_arr(dY, size);
   ConstEigenVectorArrayMap<T> X_arr(X, size);
@@ -24,14 +23,12 @@ bool AsinGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Asin,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         AsinFunctor<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     AsinGradient,
     BinaryElementwiseOp<
@@ -39,7 +36,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         AsinGradientFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Asin)
     .NumInputs(1)
     .NumOutputs(1)
@@ -53,7 +49,6 @@ Calculates the arcsine of the given input tensor, element-wise.
         "output",
         "The arcsine of the input tensor computed element-wise");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AsinGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -74,7 +69,6 @@ class GetAsinGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Asin, GetAsinGradient);
 
 } // namespace caffe2

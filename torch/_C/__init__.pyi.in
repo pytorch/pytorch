@@ -669,11 +669,7 @@ class _ImperativeEngine:
     ...
 
 # Defined in torch/csrc/autograd/python_variable.cpp
-class _TensorMeta(type):
-    pass
-
-# Defined in torch/csrc/autograd/python_variable.cpp
-class _TensorBase(metaclass=_TensorMeta):
+class _TensorBase(object):
     requires_grad: _bool
     shape: Size
     data: Tensor

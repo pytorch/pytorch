@@ -61,7 +61,6 @@ void HardshrinkImpl::pretty_print(std::ostream& stream) const {
 
 HardtanhImpl::HardtanhImpl(const HardtanhOptions& options_)
     : options(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -177,7 +176,6 @@ Tensor Softmax2dImpl::forward(const Tensor& input) {
 // ============================================================================
 
 PReLUImpl::PReLUImpl(const PReLUOptions& options_) : options(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -407,10 +405,8 @@ void ThresholdImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 MultiheadAttentionImpl::MultiheadAttentionImpl(const MultiheadAttentionOptions& options_)
     : Module("torch::nn::MultiheadAttention"), options(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 

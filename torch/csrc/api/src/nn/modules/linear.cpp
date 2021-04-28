@@ -26,7 +26,6 @@ Tensor IdentityImpl::forward(const Tensor& input) {
 // ============================================================================
 
 LinearImpl::LinearImpl(const LinearOptions& options_) : options(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -45,7 +44,6 @@ void LinearImpl::reset() {
 void LinearImpl::reset_parameters() {
   torch::nn::init::kaiming_uniform_(weight, std::sqrt(5)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
   if (bias.defined()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t fan_in, fan_out;
     std::tie(fan_in, fan_out) =
       torch::nn::init::_calculate_fan_in_and_fan_out(weight);
@@ -124,7 +122,6 @@ Tensor UnflattenImpl::forward(const Tensor& input) {
 // ============================================================================
 
 BilinearImpl::BilinearImpl(const BilinearOptions& options_) : options(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 

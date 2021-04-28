@@ -84,7 +84,6 @@ inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* n
 }
 
 inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
-  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto tensor: tensorlist) {
     throw_error_for_complex_autograd(tensor, name);
   }
@@ -104,7 +103,6 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> g
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
-        // NOLINTNEXTLINE(bugprone-use-after-move)
         auto output_nr = grad_fn->add_input_metadata(var);
         impl::rebase_history(var, {std::move(grad_fn), output_nr});
       } else {
@@ -166,7 +164,6 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
     } else {
       TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                   "Non-backward differentiable views must have creation_meta=CreationMeta::DEFAULT");
-      // NOLINTNEXTLINE(performance-move-const-arg)
       return make_variable_non_differentiable_view(base, std::move(tensor), allow_tensor_metadata_change);
     }
   }

@@ -79,7 +79,6 @@ ScriptModuleOutput ScriptModuleBenchmark::runOnce(
   ScriptModuleInput stack = jit::createStackForSchema(
       function.getSchema(),
       std::move(args),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(kwargs),
       model_._ivalue());
   return function(std::move(stack));
@@ -105,7 +104,6 @@ void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs) {
   jit::Stack stack = jit::createStackForSchema(
       model_.get_method("forward").function().getSchema(),
       std::move(args),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(kwargs),
       model_._ivalue());
   inputs_.emplace_back(std::move(stack));

@@ -1,6 +1,5 @@
 #include <sys/mman.h>
 #include <poll.h>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -34,12 +33,9 @@ struct ClientSession {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<struct pollfd> pollfds;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<int, ClientSession> client_sessions;
 // TODO: check if objects have been freed from time to time
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::set<std::string> used_objects;
 
 
@@ -61,11 +57,8 @@ void unregister_fd(int fd) {
 
 
 void print_init_message(const char *message) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t unused;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   unused = write(1, message, strlen(message));
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   unused = write(1, "\n", 1);
 }
 
@@ -88,7 +81,6 @@ void free_used_object(const std::string &name) {
   }
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char *argv[]) {
   setsid();  // Daemonize the process
 
@@ -102,7 +94,6 @@ int main(int argc, char *argv[]) {
     }
     // TODO: better strategy for generating tmp names
     // TODO: retry on collisions - this can easily fail
-    // NOLINTNEXTLINE(modernize-make-unique)
     srv_socket.reset(new ManagerServerSocket(tempfile->name));
     register_fd(srv_socket->socket_fd);
     print_init_message(tempfile->name.c_str());
@@ -116,7 +107,6 @@ int main(int argc, char *argv[]) {
   std::vector<int> to_add;
   std::vector<int> to_remove;
   for (;;) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int nevents;
     if (client_sessions.size() == 0)
       timeout = SHUTDOWN_TIMEOUT;

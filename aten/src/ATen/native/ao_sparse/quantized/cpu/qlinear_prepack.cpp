@@ -27,10 +27,8 @@ void calc_col_offsets_transpose(
     int32_t* B_zero_point,
     int32_t* col_offsets,
     c10::QScheme qtype) {
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < N; ++i) {
     int32_t sum = 0;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t j = 0; j < K; ++j) {
       sum += Bint8[i * K + j];
     }
@@ -134,7 +132,6 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightQnnp::
       weight, bias, out_features_block_size, in_features_block_size);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PackedLinearWeightQnnp::PackedLinearWeightQnnp(
     const at::Tensor& weight,
     const c10::optional<at::Tensor>& bias,
@@ -186,7 +183,6 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
   int8_t* w_data =
       reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
   for (int i = 0; i < wt_numel; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
   }
   bcsr_matrix_ = qnnpack::generateBlockCSRMatrix(

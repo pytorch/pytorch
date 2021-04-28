@@ -53,7 +53,6 @@ Symbol InternedStrings::ns(Symbol sym) {
 #define DEFINE_CASE(ns, s) \
   case static_cast<unique_t>(ns::s): \
     return namespaces::ns;
-    // NOLINTNEXTLINE(bugprone-branch-clone)
     FORALL_NS_SYMBOLS(DEFINE_CASE)
 #undef DEFINE_CASE
     default: {

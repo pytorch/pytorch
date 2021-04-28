@@ -77,11 +77,9 @@ int takePrecedenceOver(
   if (left.size() == 0 || right.size() == 0) {
     return right.size() > left.size();
   }
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < right.size(); i++) {
     // If right.size > left.size and left[0:i] == right[0:i],
     // right take precedence
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (i >= left.size()) {
       return 1;
     }
@@ -284,7 +282,6 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
     // new value is skipped.
     if (precedence == 1) {
       shape_info.setDimType(t);
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < bound_dims.size(); i++) {
         shape.set_dims(i, bound_dims[i]);
       }
@@ -430,7 +427,6 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
        op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
        op.type() == "SparseLengthsSum4BitRowwiseSparse");
 
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   const bool isSparse =
       (op.type() == "SparseLengthsSum4BitRowwiseSparse" ||
        op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
@@ -475,7 +471,6 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
       op.type() == "SparseLengthsSum8BitRowwiseSparse" ||
       op.type() == "SparseLengthsWeightedSum8BitRowwiseSparse") {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     output_dim1 -= 8;
   }
   // If the op is SparseLengthsSumFused4BitRowwise, we need to extract 2 bytes
@@ -558,7 +553,6 @@ void BoundShapeInferencer::InferElementwiseOpInput(const OperatorDef& op) {
 void BoundShapeInferencer::InferConcatInputs(const OperatorDef& op) {
   ArgumentHelper helper(op);
   const auto add_axis = helper.GetSingleArgument<int32_t>("add_axis", 0);
-  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (add_axis) {
     return;
   } else if (op.output_size() == 0 || !shape_info_.count(op.output(0))) {
@@ -738,7 +732,6 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
     dimTypes.push_back(TensorBoundShape_DimType_CONSTANT);
     current_dim_type_ = TensorBoundShape_DimType_BATCH;
     current_max_batch_size_ = spec_.max_batch_size;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     TensorProto::DataType w_data_type;
     if (fp16) {
       w_data_type = TensorProto_DataType_FLOAT;
@@ -786,7 +779,6 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
   }
   std::vector<TensorShape> output_shapes = InferOutput(op, input_shapes);
   CAFFE_ENFORCE_EQ(output_shapes.size(), 1);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   TensorProto::DataType output_data_type;
   if (fp16) {
     output_data_type = TensorProto_DataType_FLOAT;
@@ -875,7 +867,6 @@ void BoundShapeInferencer::InferUnPackRecords(const OperatorDef& op) {
     }
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < output_shapes.size(); i++) {
     const auto& shape = output_shapes[i];
 
@@ -1079,7 +1070,6 @@ void BoundShapeInferencer::InferCommonOp(
       if (target == -1) {
         infered_data_type = TensorProto::UINT8;
       } else {
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         CAFFE_ENFORCE(target < input_shapes.size());
         infered_data_type = input_shapes[target].data_type();
       }
@@ -1092,7 +1082,6 @@ void BoundShapeInferencer::InferCommonOp(
       infered_data_type = TensorProto::FLOAT;
     }
 
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < output_shapes.size(); i++) {
       const auto& shape = output_shapes[i];
       if (shape.unknown_shape()) {
@@ -1128,13 +1117,11 @@ std::shared_ptr<BoundShapeInferencerBase> getBoundShapeInferencer(
   return std::make_shared<BoundShapeInferencer>(spec);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_SHARED_REGISTRY(
     BoundShapeInferencerRegistry,
     BoundShapeInferencerBase,
     const BoundShapeSpec&);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(
     BoundShapeInferencerRegistry,
     C10,

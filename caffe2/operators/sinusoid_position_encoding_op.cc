@@ -1,12 +1,10 @@
 #include "caffe2/operators/sinusoid_position_encoding_op.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SinusoidPositionEncoding,
     SinusoidPositionEncodingOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SinusoidPositionEncoding)
     .NumInputs(1)
     .NumOutputs(1)

@@ -2,16 +2,13 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Int8AveragePool,
     int8::Int8AveragePoolOp<int8::Activation::NONE>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Int8AveragePoolRelu,
     int8::Int8AveragePoolOp<int8::Activation::RELU>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kAveragePoolDoc_int8[] = R"DOC(
 consumes an input blob X and applies average pooling across the
 the blob according to kernel sizes, stride sizes, and pad lengths defined by the
@@ -48,7 +45,6 @@ std::function<void(OpSchema&)> AveragePoolDocGenerator(
   };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8AveragePool)
     .NumInputs(1)
     .NumOutputs(1)
@@ -57,7 +53,6 @@ OPERATOR_SCHEMA(Int8AveragePool)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
     .FillUsing(AveragePoolDocGenerator(""));
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8AveragePoolRelu)
     .NumInputs(1)
     .NumOutputs(1)

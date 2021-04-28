@@ -28,7 +28,6 @@ TORCH_API LoggerBase* setLogger(LoggerBase* logger);
 class NoopLogger : public LoggerBase {
  public:
   void addStatValue(const std::string& stat_name, int64_t val) override {}
-  // NOLINTNEXTLINE(modernize-use-override)
   ~NoopLogger() = default;
 };
 
@@ -43,7 +42,6 @@ class TORCH_API LockingLogger : public LoggerBase {
   virtual int64_t getCounterValue(const std::string& name) const;
   enum class AggregationType { SUM = 0, AVG = 1 };
   void setAggregationType(const std::string& stat_name, AggregationType type);
-  // NOLINTNEXTLINE(modernize-use-override)
   ~LockingLogger() = default;
 
  private:

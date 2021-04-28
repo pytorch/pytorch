@@ -76,7 +76,6 @@ c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
 // for debugging it is helpful to be able to force autodiff subgraphs
 // to be created, to check their correctness, even when the
 // size of the of the subgraph is too small to be profitable.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool autodiff_subgraph_inlining = true;
 void debugSetAutodiffSubgraphInlining(bool state) {
   autodiff_subgraph_inlining = state;
@@ -88,7 +87,6 @@ bool getAutodiffSubgraphInlining() {
 
 // for debugging it is helpful to be able to force fusion groups
 // to be created
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> fusion_group_inlining(true);
 void debugSetFusionGroupInlining(bool state) {
   fusion_group_inlining = state;
@@ -98,7 +96,6 @@ bool getFusionGroupInlining() {
   return fusion_group_inlining;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
 std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();
@@ -498,7 +495,6 @@ Gradient getGradient(const Node* n) {
 }
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_graph_executor_ops({Operator(
     prim::DifferentiableGraph,
     [](const Node* n) -> Operation {
@@ -737,16 +733,13 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   ~GraphExecutorImpl() override = default;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ArgumentSpecCreator arg_spec_creator_;
   // Populated only when optimize is false (and in that case plan_cache will be
   // unused). The compiled version of graph.
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ExecutionPlan fallback;
 
   // Mapping from argument configurations to optimized versions of the graph
   // that are specialized to the spec.
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
 };
 

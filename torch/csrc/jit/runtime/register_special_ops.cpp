@@ -188,7 +188,6 @@ template <bool if_set_requires_grad>
 void createTensorFromList(Stack* stack) {
   // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
   // we use the template arg to distinguish between these two cases
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool requires_grad;
   IValue data;
   IValue dtype;
@@ -243,7 +242,6 @@ void createTensorFromList(Stack* stack) {
   push(stack, std::move(tensor));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
@@ -333,9 +331,7 @@ RegisterOperators reg({
         [](Stack* stack) {
           at::Tensor weight;
           at::Tensor input;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double max_norm;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double norm_type;
           pop(stack, weight, input, max_norm, norm_type);
 
@@ -401,9 +397,7 @@ RegisterOperators reg({
           torch::NoGradGuard no_grad;
 
           at::Tensor tensor;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double a;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double b;
           pop(stack, tensor, a, b);
           push(stack, tensor.uniform_(a, b));
@@ -417,9 +411,7 @@ RegisterOperators reg({
           torch::NoGradGuard no_grad;
 
           at::Tensor tensor;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double mean;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double std;
           pop(stack, tensor, mean, std);
           push(stack, tensor.normal_(mean, std));
@@ -433,7 +425,6 @@ RegisterOperators reg({
           torch::NoGradGuard no_grad;
 
           at::Tensor tensor;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double val;
           pop(stack, tensor, val);
           push(stack, at::fill_(tensor, val));

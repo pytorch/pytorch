@@ -12,14 +12,12 @@ class IDEEPInt8ReluOp final : public IDEEPOperator {
   IDEEPInt8ReluOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws), alpha_(0.0) {
     // Figure out the Relu descriptor.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (operator_def.type().substr(0, 8) == "Int8Relu") {
       alpha_ = 0.0;
     } else {
       LOG(FATAL) << "Unsupported Relu method: " << operator_def.type();
     }
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPInt8ReluOp() override {}
 
   bool RunOnDevice() override {
@@ -39,7 +37,6 @@ class IDEEPInt8ReluOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Relu, DNNLOWP, IDEEPInt8ReluOp);
 
 } // namespace

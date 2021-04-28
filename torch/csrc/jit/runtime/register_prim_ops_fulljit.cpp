@@ -25,7 +25,6 @@ namespace jit {
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg(
     {Operator(
          prim::profile,
@@ -211,7 +210,6 @@ RegisterOperators reg(
      Operator(
          "prim::rangelist(int n) -> int[]",
          [](Stack* stack) {
-           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            int64_t n;
            pop(stack, n);
            c10::List<int64_t> elems;
@@ -227,7 +225,6 @@ RegisterOperators reg(
      Operator(
          "prim::NumToTensor.bool(bool a) -> Tensor",
          [](Stack* stack) {
-           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool b;
            pop(stack, b);
            push(stack, at::scalar_to_tensor(b));
@@ -250,9 +247,7 @@ RegisterOperators reg(
          "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack* stack) {
            at::Tensor self;
-           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool non_blocking;
-           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool copy;
            pop(stack, self, non_blocking, copy);
            c10::optional<c10::Device> device = c10::nullopt;
@@ -408,7 +403,6 @@ RegisterOperators reg(
          [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
            std::vector<int64_t> size;
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            size.reserve(8);
            for (auto i = 0; i < num_inputs; ++i) {
              size =
@@ -545,7 +539,6 @@ RegisterOperators reg(
          [](Stack* stack) {
            at::Tensor a, b;
            pop(stack, a, b);
-           // NOLINTNEXTLINE(bugprone-branch-clone)
            if (!a.defined() && !b.defined()) {
              // undef + undef == undef
              stack->emplace_back(a);
@@ -671,7 +664,6 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase())});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators logging_operators(
     {Operator(
          "prim::AddStatValue(str key, int val) -> ()",
@@ -720,7 +712,6 @@ void hashValue(Stack* stack) {
   push(stack, value.hash());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg2({
     // registered as Any[] so that heterogenous tuples can be called with len()
     Operator(
@@ -867,7 +858,6 @@ RegisterOperators reg2({
               ss << "-";
               i = -i;
             }
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             std::string str = std::bitset<8 * sizeof(i)>(i).to_string();
             str.erase(0, std::min(str.find_first_not_of('0'), str.size() - 1));
             ss << "0b" << str;
@@ -907,10 +897,8 @@ RegisterOperators reg2({
     Operator(
         "aten::modf(float a) -> (float, float)",
         [](Stack* stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double a;
           pop(stack, a);
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double b, c;
           b = modf(a, &c);
           push(stack, b, c);
@@ -919,12 +907,9 @@ RegisterOperators reg2({
     Operator(
         "aten::frexp(float a) -> (float, int)",
         [](Stack* stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double a;
           pop(stack, a);
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double m;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int e;
           m = std::frexp(a, &e);
           push(stack, m, e);
@@ -933,9 +918,7 @@ RegisterOperators reg2({
     Operator(
         "aten::ldexp(float x, int i) -> float",
         [](Stack* stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double a;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int64_t b;
           pop(stack, a, b);
           push(stack, std::ldexp(a, b));
@@ -1189,7 +1172,6 @@ RegisterOperators reg2({
     Operator(
         "aten::divmod.int(int x, int y) -> (int, int)",
         [](Stack* stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int64_t a, b;
           lldiv_t divresult = {};
           pop(stack, a, b);
@@ -1211,14 +1193,12 @@ RegisterOperators reg2({
     Operator(
         "aten::divmod.float(float x, float y) -> (float, float)",
         [](Stack* stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double a, b;
           pop(stack, a, b);
           if (b == 0) {
             throw std::runtime_error("ZeroDivisionError: float divmod()");
           }
           double rem = fmod(a, b);
-          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           if (rem && (a < 0) != (b < 0)) {
             rem += b;
           }
@@ -1421,7 +1401,6 @@ void sort_op(Stack* stack) {
 }
 
 // NB: this must be registered after the other aten::sort operators
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators regSort({
     Operator(
         "aten::sorted.any(t[](a) self) -> (t[])",
@@ -1724,7 +1703,6 @@ void upsample_bilinear_op(Stack* stack) {
 }
 
 // These ops are no longer generated, but remain here for BC
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg3({
     Operator(
         "aten::__interpolate.scale_list(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
@@ -1791,7 +1769,6 @@ std::string get_first(const c10::List<c10::List<std::string>>& strings) {
   return strings.get(0).get(0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto reg4 =
     torch::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor",

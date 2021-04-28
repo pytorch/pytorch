@@ -40,7 +40,6 @@ inline Tensor embedding(const Tensor& input,
 
   if (max_norm != c10::nullopt) {
     input_ = input_.contiguous();
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     _no_grad_embedding_renorm_(weight, input_, *max_norm, norm_type);
   }
   return torch::embedding(weight, input_, *padding_idx, scale_grad_by_freq, sparse);
@@ -108,7 +107,6 @@ inline Tensor embedding_bag(
     TORCH_CHECK(false, "input has to be 1D or 2D Tensor, but got Tensor of dimension ", input_.dim());
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int mode_enum;
   if (c10::get_if<enumtype::kSum>(&mode)) {
     mode_enum = 0;
@@ -123,7 +121,6 @@ inline Tensor embedding_bag(
   }
 
   if (max_norm != c10::nullopt) {
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     _no_grad_embedding_renorm_(weight, input_, *max_norm, norm_type);
   }
 

@@ -2,14 +2,11 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8MaxPool, int8::Int8MaxPoolOp<int8::Activation::NONE>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Int8MaxPoolRelu,
     int8::Int8MaxPoolOp<int8::Activation::RELU>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kMaxPoolDoc_int8[] = R"DOC(
 consumes an input blob X and applies max pooling across the
 the blob according to kernel sizes, stride sizes, and pad lengths defined by the
@@ -46,7 +43,6 @@ std::function<void(OpSchema&)> MaxPoolDocGenerator(
   };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8MaxPool)
     .NumInputs(1)
     .NumOutputs(1)
@@ -55,7 +51,6 @@ OPERATOR_SCHEMA(Int8MaxPool)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
     .FillUsing(MaxPoolDocGenerator(""));
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8MaxPoolRelu)
     .NumInputs(1)
     .NumOutputs(1)

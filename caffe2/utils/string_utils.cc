@@ -75,7 +75,6 @@ int32_t editDistanceHelper(const char* s1,
       swap(current, previous);
       current[0] = i;
 
-      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
       char c2 = s2[str2_offset];
       char prev1 = 0;
       int32_t str1_offset = 0;
@@ -88,7 +87,6 @@ int32_t editDistanceHelper(const char* s1,
         size_t deletion = current[j - 1] + 1;
         size_t substitution = previous[j - 1];
         size_t transposition = insertion;
-        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
         char c1 = s1[str1_offset];
 
         NEXT_UNSAFE(s1, str1_offset, c1);

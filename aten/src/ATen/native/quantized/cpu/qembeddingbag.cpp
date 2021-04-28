@@ -53,7 +53,6 @@ at::Tensor& embedding_lookup_fallback_impl(
   }
 
   int64_t current = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float* per_sample_weights_data;
   if (per_sample_weights_.has_value()) {
     per_sample_weights_data = per_sample_weights_.value().data_ptr<float>();
@@ -65,7 +64,6 @@ at::Tensor& embedding_lookup_fallback_impl(
         "Expect the lengths data to be less than indices size");
 
     for (int i = 0; i < lengths_data[m]; ++i, ++current) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t idx;
       if (!pruned) {
         idx = indices_data[current];
@@ -88,30 +86,22 @@ at::Tensor& embedding_lookup_fallback_impl(
       if (per_sample_weights_.has_value()) {
         weight_val = per_sample_weights_data[current];
       }
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float scale, bias;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (BIT_RATE == 8) {
         const uint8_t* scale_bias =
             weight_data + (idx + 1) * weight_size - 2 * sizeof(float);
         uint32_t scale_val_int32 = 0;
         scale_val_int32 = scale_val_int32 |
           (scale_bias[0]) |
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           (scale_bias[1] << 8) |
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           (scale_bias[2] << 16) |
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           (scale_bias[3] << 24);
         float scale_val = (reinterpret_cast<float*>(&scale_val_int32))[0];
         uint32_t bias_val_int32 = 0;
         bias_val_int32 = bias_val_int32 |
           (scale_bias[4]) |
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           (scale_bias[5] << 8) |
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           (scale_bias[6] << 16) |
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           (scale_bias[7] << 24);
         float bias_val = (reinterpret_cast<float*>(&bias_val_int32))[0];
         scale = weight_val * scale_val;
@@ -122,13 +112,11 @@ at::Tensor& embedding_lookup_fallback_impl(
         uint16_t scale_val_int16 = 0;
         scale_val_int16 = scale_val_int16 |
           (scale_bias[0]) |
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           (scale_bias[1] << 8);
         at::Half scale_val = (reinterpret_cast<at::Half*>(&scale_val_int16))[0];
         uint16_t bias_val_int16 = 0;
         bias_val_int16 = bias_val_int16 |
           (scale_bias[2]) |
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           (scale_bias[3] << 8);
         at::Half bias_val = (reinterpret_cast<at::Half*>(&bias_val_int16))[0];
         scale = weight_val * scale_val;
@@ -805,7 +793,6 @@ class QEmbeddingBag final {
       const c10::optional<Tensor>& per_sample_weights_,
       const c10::optional<Tensor>& compressed_indices_mapping,
       bool include_last_offset) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (bit_rate == 8) {
       return packed_weight->embeddingbag_byte(
           indices,
@@ -841,7 +828,6 @@ class QEmbedding final {
     const auto offsets_size = indices.numel();
     at::Tensor offsets = at::arange(0, offsets_size, indices.scalar_type());
     at::Tensor output;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (bit_rate == 8) {
       return packed_weight->embeddingbag_byte(
           indices,

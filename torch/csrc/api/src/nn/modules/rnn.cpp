@@ -51,7 +51,6 @@ namespace detail {
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(const RNNOptionsBase& options_)
   : options_base(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -89,7 +88,6 @@ void RNNImplBase<Derived>::reset() {
     gate_size = 4 * options_base.hidden_size();
   } else if (c10::get_if<enumtype::kGRU>(&options_base.mode())) {
     gate_size = 3 * options_base.hidden_size();
-  // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
     gate_size = options_base.hidden_size();
   } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
@@ -653,7 +651,6 @@ template <typename Derived>
 RNNCellImplBase<Derived>::RNNCellImplBase(
   const RNNCellOptionsBase& options_)
   : options_base(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 

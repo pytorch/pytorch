@@ -28,7 +28,6 @@ protected:
   //Get current learning rates from the optimizer
   std::vector<double> get_current_lrs() const;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   unsigned step_count_;
 
 private:

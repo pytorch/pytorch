@@ -38,11 +38,9 @@ bool LengthsTopKOp<T, Context>::RunOnDevice() {
     // heap will hold the k_ largest values
     for (int64_t j = 0; j < input_len[i]; ++j) {
       const auto value = X_data[next_index++];
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (p_queue.size() < k_ || value > p_queue.top().first) {
         p_queue.push(std::make_pair(value, j));
       }
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (p_queue.size() > k_) {
         p_queue.pop();
       }
@@ -103,13 +101,10 @@ bool LengthsTopKGradientOp<T, Context>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsTopK, LengthsTopKOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     LengthsTopKGradient,
     LengthsTopKGradientOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsTopK)
     .NumInputs(2)
     .NumOutputs(2)
@@ -140,7 +135,6 @@ be padded by -1.
         "the number of top values to return for each segment, if the number "
         "of values is smaller than k, the values would be padded with 0 and "
         "indices would be padded with -1.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsTopKGradient).NumInputs(3).NumOutputs(1);
 
 namespace {
@@ -158,6 +152,5 @@ class GetLengthsTopKGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(LengthsTopK, GetLengthsTopKGradient);
 } // namespace caffe2

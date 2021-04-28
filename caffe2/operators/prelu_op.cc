@@ -201,7 +201,6 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
 
       for (int i = 0; i < Y.numel(); ++i) {
         if (Xdata[i] <= 0) {
-          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           int c = (i / dim) % C / div_factor;
           dWdata[c] += dYdata[i] * Xdata[i];
         }
@@ -211,7 +210,6 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
         if (Xdata[i] > 0) {
           dXdata[i] = dYdata[i];
         } else {
-          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           int c = (i / dim) % C / div_factor;
           dXdata[i] = Wdata[c] * dYdata[i];
         }
@@ -254,15 +252,12 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PRelu, PReluOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     PReluGradient,
     PReluGradientOp<float, CPUContext>);
 
 // Input: X, Slope, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PRelu)
     .NumInputs(2)
     .NumOutputs(1)
@@ -341,7 +336,6 @@ Y:
     .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(PReluGradient)
     .NumInputs(4)
     .NumOutputs(2)
@@ -363,7 +357,6 @@ class GetPReluGradient : public GradientMakerBase {
         vector<string>{GI(0), GI(1)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(PRelu, GetPReluGradient);
 
 } // namespace caffe2

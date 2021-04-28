@@ -43,7 +43,6 @@ class MapDataset : public BatchDataset<
   }
 
   /// Returns the size of the source dataset.
-  // NOLINTNEXTLINE(bugprone-exception-escape)
   optional<size_t> size() const noexcept override {
     return dataset_.size();
   }

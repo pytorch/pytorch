@@ -31,7 +31,6 @@ class TORCH_API MNIST : public Dataset<MNIST> {
   optional<size_t> size() const override;
 
   /// Returns true if this is the training subset of MNIST.
-  // NOLINTNEXTLINE(bugprone-exception-escape)
   bool is_train() const noexcept;
 
   /// Returns all images stacked into a single tensor.

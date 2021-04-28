@@ -1,5 +1,4 @@
 #pragma once
-// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdint.h>
 #include <typeinfo>
 #include <unordered_set>

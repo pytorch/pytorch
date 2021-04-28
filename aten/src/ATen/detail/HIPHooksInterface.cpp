@@ -17,7 +17,6 @@ const HIPHooksInterface& getHIPHooks() {
     hip_hooks = HIPHooksRegistry()->Create("HIPHooks", HIPHooksArgs{});
     if (!hip_hooks) {
       hip_hooks =
-          // NOLINTNEXTLINE(modernize-make-unique)
           std::unique_ptr<HIPHooksInterface>(new HIPHooksInterface());
     }
   });
@@ -25,7 +24,6 @@ const HIPHooksInterface& getHIPHooks() {
 }
 } // namespace detail
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(HIPHooksRegistry, HIPHooksInterface, HIPHooksArgs)
 
 } // namespace at

@@ -83,14 +83,12 @@ void addr_kernel(TensorIterator &iter,
 
 template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>::type>
 void linalg_vector_norm_kernel_cpu_impl(TensorIterator& iter, Scalar ord) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double ord_val;
   if (ord.isFloatingPoint()) {
      ord_val = ord.to<double>();
   } else {
      TORCH_CHECK(false, "linalg.vector_norm expects ord to be float");
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   acc_t init_val = (ord_val == -INFINITY) ? std::numeric_limits<acc_t>::infinity() : static_cast<acc_t>(0);
   if (iter.numel() == 0) {
     iter.output().fill_((ord_val < 0) ? INFINITY : 0);
@@ -104,7 +102,6 @@ void linalg_vector_norm_kernel_cpu_impl(TensorIterator& iter, Scalar ord) {
     binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t>(), init_val);
   } else if (ord_val == INFINITY) {
     binary_kernel_reduce(iter, AbsMaxOps<scalar_t, acc_t>(), init_val);
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   } else if (ord_val == -INFINITY) {
     binary_kernel_reduce(iter, AbsMinOps<scalar_t, acc_t>(), init_val);
   } else {
@@ -125,9 +122,7 @@ static void linalg_vector_norm_kernel_cpu(TensorIterator& iter, Scalar ord) {
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(addr_stub, &addr_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(linalg_vector_norm_stub, &linalg_vector_norm_kernel_cpu);
 
 }} // namespace at::native

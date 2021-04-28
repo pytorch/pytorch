@@ -88,7 +88,6 @@ class ExpandingArray {
 
  protected:
   /// The backing array.
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::array<T, D> values_;
 };
 

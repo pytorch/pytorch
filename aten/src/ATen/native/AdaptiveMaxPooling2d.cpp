@@ -64,12 +64,10 @@ namespace native {
 namespace {
 
 inline int start_index(int a, int b, int c) {
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return (int)std::floor((float)(a * c) / b);
 }
 
 inline int end_index(int a, int b, int c) {
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return (int)std::ceil((float)((a + 1) * c) / b);
 }
 
@@ -96,7 +94,6 @@ static void adaptive_max_pool2d_single_out_frame(
     for (auto d = start; d < end; d++)
     {
       /* loop over output */
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t oh, ow;
       for(oh = 0; oh < osizeH; oh++)
       {
@@ -191,7 +188,6 @@ static void adaptive_max_pool2d_backward_single_out_frame(
       int64_t *ind_p_d = indices + d*osizeH*osizeW;
 
       /* calculate max points */
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t oh, ow;
       for(oh = 0; oh < osizeH; oh++)
       {
@@ -320,15 +316,10 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cpu)
   int dimW = 2;
   int dimH = 1;
   int64_t sizeB = 1;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int sizeD;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int isizeH;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int isizeW;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int osizeH;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int osizeW;
 
   /* get contiguous gradOutput */

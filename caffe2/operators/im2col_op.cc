@@ -1,9 +1,7 @@
 #include "caffe2/operators/im2col_op.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Im2Col, Im2ColOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Col2Im, Col2ImOp<float, CPUContext>);
 
 class GetIm2ColGradient : public GradientMakerBase {
@@ -16,7 +14,6 @@ class GetIm2ColGradient : public GradientMakerBase {
         std::vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Im2Col, GetIm2ColGradient);
 
 class GetCol2ImGradient : public GradientMakerBase {
@@ -26,10 +23,8 @@ class GetCol2ImGradient : public GradientMakerBase {
         "Im2Col", "", std::vector<string>{GO(0)}, std::vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Col2Im, GetCol2ImGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Im2Col)
     .NumInputs(1)
     .NumOutputs(1)
@@ -104,7 +99,6 @@ OPERATOR_SCHEMA(Im2Col)
         "4-tensor. For NCHW: N x (C x kH x kW) x outH x outW."
         "For NHWC: N x outH x outW x (kH x kW x C");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Col2Im).NumInputs(2).NumOutputs(1);
 
 } // namespace caffe2

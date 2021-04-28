@@ -206,16 +206,11 @@ class SegmentOneHotOp : public Operator<CPUContext> {
     return true;
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchBucketOneHot, BatchBucketOneHotOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchOneHot, BatchOneHotOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(OneHot, OneHotOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SegmentOneHot, SegmentOneHotOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchBucketOneHot)
     .NumInputs(3)
     .NumOutputs(1)
@@ -248,7 +243,6 @@ For example
         "based on the bucketization")
     .TensorInferenceFunction(TensorInferenceForBucketBatchOneHot);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchOneHot)
     .NumInputs(3)
     .NumOutputs(1)
@@ -278,7 +272,6 @@ of one-hot encoding for each column. For example
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForBatchOneHot));
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(OneHot)
     .NumInputs(2)
     .NumOutputs(1)
@@ -346,7 +339,6 @@ one_hots:
         "Scalar with the size of the index. Must be in CPU context")
     .Output(0, "one_hots", "Matrix of size len(indices) x index_size");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SegmentOneHot)
     .NumInputs(3)
     .NumOutputs(1)
@@ -360,13 +352,9 @@ that has the elements in each sequence set to 1.0, and 0.0 everywhere else.
     .Input(2, "index_size_tensor", "Size of the index")
     .Output(0, "one_hots", "Matrix of size len(lengths) x index_size");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(BatchOneHot);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(OneHot);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SegmentOneHot);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(BucketBatchOneHot);
 } // namespace caffe2
 
