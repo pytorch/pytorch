@@ -260,8 +260,8 @@ OwnerRRef::OwnerRRef(
     future_ = FutureFactoryRegistry::getInstance().createFuture(
         c10::DeviceType::CUDA, devices_.value());
   } else {
-    future_ = FutureFactoryRegistry::getInstance().createFuture(
-        c10::DeviceType::CPU);
+    future_ =
+        FutureFactoryRegistry::getInstance().createFuture(c10::DeviceType::CPU);
   }
 
   if (value.has_value()) {

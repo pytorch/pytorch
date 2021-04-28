@@ -582,7 +582,8 @@ FutureFactoryRegistry& FutureFactoryRegistry::getInstance() {
 }
 
 void FutureFactoryRegistry::registerFutureFactory(
-    c10::DeviceType type, future_factory_t factory) {
+    c10::DeviceType type,
+    future_factory_t factory) {
   factories_[static_cast<size_t>(type) & 0xFF] = std::move(factory);
 }
 

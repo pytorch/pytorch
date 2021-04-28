@@ -224,9 +224,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           )")
           .def(
               py::init<
-                    const py::object&,
-                    const py::object&,
-                    optional<std::vector<c10::DeviceIndex>>>(),
+                  const py::object&,
+                  const py::object&,
+                  optional<std::vector<c10::DeviceIndex>>>(),
               py::arg("value"),
               py::arg("type_hint") = py::none(),
               py::arg("devices") = optional<std::vector<c10::DeviceIndex>>())
