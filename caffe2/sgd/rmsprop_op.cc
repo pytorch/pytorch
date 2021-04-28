@@ -32,7 +32,9 @@ void rmsprop_update<CPUContext>(
   EigenVectorArrayMap<float>(ng, N) = nmomVec;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RmsProp, RmsPropOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RmsProp)
     .NumInputs(4)
     .NumOutputs(3)
@@ -48,6 +50,7 @@ Concretely, given inputs (grad, mean_squares, mom, lr), computes:
 
 Returns (grad_o, mean_squares_o, mom_o).
 )DOC");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(RmsProp);
 
 }
