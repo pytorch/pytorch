@@ -1416,77 +1416,8 @@ Example::
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
-      .def_readwrite("world_size", &c10::DDPLoggingData::world_size)
-      .def_readwrite("rank", &c10::DDPLoggingData::rank)
-      .def_readwrite("module_name", &c10::DDPLoggingData::module_name)
-      .def_readwrite("device_ids", &c10::DDPLoggingData::device_ids)
-      .def_readwrite("output_device", &c10::DDPLoggingData::output_device)
-      .def_readwrite(
-          "broadcast_buffers", &c10::DDPLoggingData::broadcast_buffers)
-      .def_readwrite("bucket_cap_mb", &c10::DDPLoggingData::bucket_cap_mb)
-      .def_readwrite(
-          "find_unused_parameters",
-          &c10::DDPLoggingData::find_unused_parameters)
-      .def_readwrite(
-          "gradient_as_bucket_view",
-          &c10::DDPLoggingData::gradient_as_bucket_view)
-      .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name)
-      .def_readwrite("iteration", &c10::DDPLoggingData::iteration)
-      .def_readwrite(
-          "total_parameter_size_bytes",
-          &c10::DDPLoggingData::total_parameter_size_bytes)
-      .def_readwrite(
-          "num_parameter_tensors", &c10::DDPLoggingData::num_parameter_tensors)
-      .def_readwrite("dtypes", &c10::DDPLoggingData::dtypes)
-      .def_readwrite("bucket_sizes", &c10::DDPLoggingData::bucket_sizes)
-      .def_readwrite("master_port", &c10::DDPLoggingData::master_port)
-      .def_readwrite("master_addr", &c10::DDPLoggingData::master_addr)
-      .def_readwrite(
-          "cuda_visible_devices", &c10::DDPLoggingData::cuda_visible_devices)
-      .def_readwrite(
-          "gloo_socket_ifname", &c10::DDPLoggingData::gloo_socket_ifname)
-      .def_readwrite(
-          "gloo_device_transport", &c10::DDPLoggingData::gloo_device_transport)
-      .def_readwrite(
-          "nccl_socket_ifname", &c10::DDPLoggingData::nccl_socket_ifname)
-      .def_readwrite(
-          "nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
-      .def_readwrite(
-          "nccl_async_error_handling",
-          &c10::DDPLoggingData::nccl_async_error_handling)
-      .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
-      .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
-      .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout)
-      .def_readwrite(
-          "unused_parameter_size", &c10::DDPLoggingData::unused_parameter_size)
-      .def_readwrite(
-          "has_rebuilt_buckets", &c10::DDPLoggingData::has_rebuilt_buckets)
-      .def_readwrite(
-          "rebuilt_bucket_sizes", &c10::DDPLoggingData::rebuilt_bucket_sizes)
-      .def_readwrite(
-          "avg_forward_compute_time",
-          &c10::DDPLoggingData::avg_forward_compute_time)
-      .def_readwrite(
-          "avg_backward_compute_time",
-          &c10::DDPLoggingData::avg_backward_compute_time)
-      .def_readwrite(
-          "avg_backward_comm_time",
-          &c10::DDPLoggingData::avg_backward_comm_time)
-      .def_readwrite(
-          "avg_backward_compute_comm_overlap_time",
-          &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time)
-      .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook)
-      .def_readwrite("join_uneven_inputs", &c10::DDPLoggingData::join_uneven_inputs)
-      .def_readwrite(
-          "forward_compute_time", &c10::DDPLoggingData::forward_compute_time)
-      .def_readwrite(
-          "backward_compute_time", &c10::DDPLoggingData::backward_compute_time)
-      .def_readwrite(
-          "backward_comm_time", &c10::DDPLoggingData::backward_comm_time)
-      .def_readwrite(
-          "backward_compute_comm_overlap_time",
-          &c10::DDPLoggingData::backward_compute_comm_overlap_time)
-      .def_readwrite("is_multi_device_module", &c10::DDPLoggingData::is_multi_device_module);
+      .def_readwrite("strs_map", &c10::DDPLoggingData::strs_map)
+      .def_readwrite("ints_map", &c10::DDPLoggingData::ints_map);
 
   module.def(
       "_compute_bucket_assignment_by_size",
