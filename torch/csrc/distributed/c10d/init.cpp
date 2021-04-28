@@ -401,6 +401,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("comm_hook"),
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_set_uneven_input_join",
+          &::c10d::Logger::set_uneven_input_join,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "_set_static_graph",
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
