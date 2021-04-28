@@ -169,6 +169,11 @@ void div_floor_kernel(TensorIteratorBase& iter) {
       using vec_t = Vec256<scalar_t>;
       cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+            if (C10_UNLIKELY(b == 0)) {
+              // Divide by zero: return standard IEEE result
+              return a / b;
+            }
+
             auto mod = std::fmod(a, b);
             auto div = (a - mod) / b;
             if ((mod != 0) && (b < 0) != (mod < 0)) {
@@ -196,7 +201,10 @@ void div_floor_kernel(TensorIteratorBase& iter) {
             auto floordiv = div.floor();
             mask = (div - floordiv) > vec_t(0.5);
             floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
-            return vec_t::blendv(floordiv, zero.copysign(a / b), div == zero);
+            const auto basic_div = a / b;
+            floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
+            floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
+            return floordiv;
           });
     });
   }
