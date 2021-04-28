@@ -47,19 +47,23 @@ c10::IValue InlinedCallStackSerializer::serialize_module_instance_info(
     return c10::IValue();
   }
   const auto& m_val = m.value();
+  std::string module_type_name = m_val.class_type()->name()->qualifiedName();
+  auto module_instance_name = m_val.instance_name();
+  if (m_val.class_type()) {
+    module_type_name = m_val.class_type()->name()->qualifiedName();
+  }
+  auto key_val = module_type_name + module_instance_name;
+  auto m_inst_it = serialized_module_instance_info_.find(key_val);
+  if (m_inst_it != serialized_module_instance_info_.end()) {
+    return m_inst_it->second;
+  }
   std::vector<c10::IValue> elements;
   // Module instance info is serialized as
   // {type name, instance name}
-  // Note that the same module instance will appear in many callstacks.
-  // So it makes sense to cache these and use cached value.
-  // TODO: Add caching for moudle instance info serialization.
-  if (m_val.class_type()) {
-    elements = {
-        m_val.class_type()->name()->qualifiedName(), m_val.instance_name()};
-  } else {
-    elements = {"", m_val.instance_name()};
-  }
-  return c10::ivalue::Tuple::create(std::move(elements));
+  elements = {module_type_name, module_instance_name};
+  serialized_module_instance_info_[key_val] =
+      c10::ivalue::Tuple::create(std::move(elements));
+  return serialized_module_instance_info_[key_val];
 }
 
 std::vector<char> CallStackDebugInfoPickler::pickle(
@@ -111,7 +115,7 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
 
   auto tup_elems = tup->elements();
   TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
-  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCalddStack)}
+  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack)}
   auto module_instance_info =
       deserialize_module_instance_info(tup_elems[0], cu);
   int64_t source_range_tag = tup_elems[1].toInt();
@@ -149,6 +153,11 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
   if (iv.isNone()) {
     return c10::nullopt;
   }
+  auto tup = iv.toTuple();
+  auto it = cached_module_instance_info_.find(tup);
+  if (it != cached_module_instance_info_.end()) {
+    return it->second;
+  }
   auto tup_elems = iv.toTuple()->elements();
   TORCH_CHECK(tup_elems.size() == 2);
   std::string type_name = tup_elems[0].toString()->string();
@@ -166,7 +175,9 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
     type_name = type_name.substr(type_name.find_last_of('.') + 1);
     instance_name = instance_name + "(" + type_name + ")";
   }
-  return ModuleInstanceInfo(type_ptr, instance_name);
+  cached_module_instance_info_[tup] =
+      ModuleInstanceInfo(type_ptr, instance_name);
+  return cached_module_instance_info_[tup];
 }
 
 ska::flat_hash_map<int64_t, DebugInfoPair> CallStackDebugInfoUnpickler::
