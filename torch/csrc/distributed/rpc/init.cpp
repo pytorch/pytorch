@@ -183,7 +183,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   recorded ``CUDAEvent`` objects to block current CUDA streams.
                   Only use this argument when it is necessary for this ``RRef``
                   to perform CUDA stream synchronizations. Note that
-                  ``CUDAEvent`` objects are only recorded once when at ``RRef``
+                  ``CUDAEvent`` objects are only recorded once at ``RRef``
                   construction time. If the ``value`` is later changed
                   in-place, CUDA stream synchronizations need to be performed
                   in application code.
