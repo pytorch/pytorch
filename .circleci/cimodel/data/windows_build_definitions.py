@@ -134,7 +134,7 @@ class VcSpec:
     def render(self):
         return "_".join(self.get_elements())
 
-_VC2019 = VcSpec(2019, ["14", "28", "29333"], hide_version=True)
+_VC2019 = VcSpec(2019)
 
 WORKFLOW_DATA = [
     # VS2019 CUDA-10.1
