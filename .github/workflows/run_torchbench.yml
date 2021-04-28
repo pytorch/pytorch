@@ -19,11 +19,6 @@ jobs:
         uses: actions/checkout@v2
         with:
           path: pytorch
-      - name: Checkout TorchBench
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/benchmark
-          path: benchmark
       - name: Create conda environment
         run: |
           conda create -y -n pr-ci python=3.7
@@ -45,7 +40,7 @@ jobs:
           conda activate pr-ci
           python3 pytorch/.github/scripts/run_torchbench.py \
                   --pytorch-path "${HOME}"/pytorch \
-                  --torchbench-path "${PWD}"/benchmark \
+                  --torchbench-path "${HOME}"/benchmark \
                   --pr-num "$PR_NUM" \
                   --pr-base-sha "$PR_BASE_SHA" \
                   --pr-head-sha "$PR_HEAD_SHA" \
