@@ -16,13 +16,13 @@ void unpack_pivots_cpu_kernel(
 
   auto loop = [&](char** data, const int64_t* strides, int64_t nelems) {
     auto* unpacked_pivots_ptr = data[0];
-    auto* pivots_ptr = data[1];
+    const auto* pivots_ptr = data[1];
 
     for (int64_t elem = 0; elem < nelems; ++elem) {
       // WARNING: torch.lu returns int32 pivots,
       // this behavior could change in the future.
       auto* unpacked_pivots_data = reinterpret_cast<int32_t*>(unpacked_pivots_ptr);
-      auto* pivots_data = reinterpret_cast<int32_t*>(pivots_ptr);
+      auto* pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr);
 
       for (int64_t i = 0; i < dim_size; ++i) {
         std::swap(

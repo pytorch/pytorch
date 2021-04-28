@@ -58,14 +58,14 @@ void _unpack_pivots_internal_kernel(
   auto offset_calculator = make_offset_calculator<2>(iter);
 
   char* unpacked_pivots_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
-  char* __restrict__ pivots_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
+  const char* const __restrict__ pivots_ptr = reinterpret_cast<const char*>(iter.data_ptr(1));
 
   auto loop = [=]C10_DEVICE(int i) {
     auto offsets = offset_calculator.get(i);
 
     auto* unpacked_pivots_data = reinterpret_cast<int32_t*>(
       unpacked_pivots_ptr + offsets[0]);
-    auto* __restrict__ pivots_data = reinterpret_cast<int32_t*>(
+    const auto* const __restrict__ pivots_data = reinterpret_cast<const int32_t*>(
       pivots_ptr + offsets[1]);
 
     // QUESTION: can we mix 64bit offsets with 32bit Iterator indexing?
