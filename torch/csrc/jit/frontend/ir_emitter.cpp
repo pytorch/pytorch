@@ -232,11 +232,16 @@ struct Environment {
         b(b),
         next(std::move(next)) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Function& method;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ResolverPtr resolver;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<std::string, std::function<std::string()>> error_messages;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Block* b;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
@@ -1409,6 +1414,7 @@ struct to_ir {
 
     // if this is an OR, eval second expression if first expr is False
     // If this is an AND, eval second expression if first expr is True
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* new_result;
     c10::optional<RefinementSet> refinements;
     c10::optional<bool> static_if;
@@ -1474,6 +1480,7 @@ struct to_ir {
     return expr_value;
   }
   Value* emitToBool(const SourceRange& loc, Value* v) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* out;
     try {
       auto bool_cast = environment_stack->getSugaredVar("bool", loc);
@@ -1596,7 +1603,9 @@ struct to_ir {
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* tv;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* fv;
 
       {
@@ -1791,6 +1800,7 @@ struct to_ir {
     {
       Block* condition_block = n->addBlock();
       pushFrame(condition_block);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* out;
       if (cond) {
         WithInsertPoint insert(condition_block);
@@ -2078,6 +2088,7 @@ struct to_ir {
       case '^':
         return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
       case TK_LSHIFT:
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
       case TK_RSHIFT:
         return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
@@ -2252,6 +2263,7 @@ struct to_ir {
       // If it's a tensor, just fully evaluate the subscript operation and emit
       // an in-place assignment
       std::vector<Value*> tensorIndices;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* sliced;
       std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
           lhs.range(), sliceable, lhs.subscript_exprs());
@@ -2336,6 +2348,7 @@ struct to_ir {
     // If it's a tensor, copy the RHS data into it
     if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       std::vector<Value*> tensorIndices;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* sliced;
       // Handle multi-dimensional slicing: first emit int/slice indexing
       // TODO: the Python equivalent code has special-cased copy_to
@@ -3328,6 +3341,7 @@ struct to_ir {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* fork_node;
     TypePtr out_type;
 
