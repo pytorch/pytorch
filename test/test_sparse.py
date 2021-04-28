@@ -294,7 +294,7 @@ class TestSparse(TestCase):
             x.requires_grad_(True)
             gradcheck(fn, (x,), check_sparse_nnz=True)
 
-        for value_type in [torch.double]:
+        for value_type in [torch.double, torch.cdouble]:
             i = self.index_tensor([
                 [0, 1, 2, 2],
                 [0, 0, 0, 3],
@@ -414,7 +414,7 @@ class TestSparse(TestCase):
         i[0][0] = 0
         self.assertEqual(torch.empty((3, 0), dtype=dtype, device=device), self.safeToDense(x))
 
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_to_dense_hybrid(self, device, dtype):
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
