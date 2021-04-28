@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchMatMul, BatchMatMulOp<CPUContext>);
 
 vector<TensorShape> TensorInferenceForBatchMatMul(
@@ -15,7 +16,9 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
     const auto ndim = in[0].dims_size();
     CAFFE_ENFORCE_GE(ndim, 2);
     CAFFE_ENFORCE_GE(in[1].dims_size(), 2);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int a_dim0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int b_dim1;
     if (helper.GetSingleArgument<int>("trans_a", 0)) {
       a_dim0 = in[0].dims(ndim - 1);
@@ -57,6 +60,7 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
       ndims_B = 2;
       B_broadcasted = true;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t M, N;
     if (helper.GetSingleArgument<int>("trans_a", 0)) {
       M = dims_A[ndims_A - 1];
@@ -105,6 +109,7 @@ OpSchema::Cost CostInferenceForBatchMatMul(
   uint64_t nElemY = nElemFromDim(Y);
 
   auto ndims_A = A.dims_size();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t K;
   if (helper.GetSingleArgument<int>("trans_a", 0)) {
     K = in[0].dims(ndims_A - 2);
@@ -119,6 +124,7 @@ OpSchema::Cost CostInferenceForBatchMatMul(
   return c;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchMatMul)
     .NumInputs(2)
     .NumOutputs(1)
@@ -161,7 +167,9 @@ class GetBatchMatMulGradient : public GradientMakerBase {
         "Gradient is currently not supported with "
         "broadcast=1 for BatchMatMul.");
 
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool trans_a = 0;
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool trans_b = 0;
 
     if (ArgumentHelper::HasArgument(Def(), "trans_a")) {
@@ -249,6 +257,7 @@ class GetBatchMatMulGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchMatMul, GetBatchMatMulGradient);
 
 } // namespace caffe2

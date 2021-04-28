@@ -1,8 +1,10 @@
 #include <ATen/core/ivalue.h>
+#include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/mobile/backport.h>
-#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/mobile/model_bytecode_version.h>
+#include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 #include <torch/custom_class.h>
 
@@ -21,6 +23,10 @@ using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
+
+namespace mobile {
+class CompilationUnit;
+}
 
 namespace {
 
@@ -137,6 +143,7 @@ std::vector<IValue> get_bytecode_vals(
 
 } // namespace
 
+namespace mobile {
 int64_t _get_model_bytecode_version(std::istream& in) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   return _get_model_bytecode_version(std::move(rai));
@@ -161,6 +168,8 @@ int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
   TORCH_WARN("Fail to get bytecode version.");
   return -1;
 }
+
+} // namespace mobile
 
 } // namespace jit
 } // namespace torch

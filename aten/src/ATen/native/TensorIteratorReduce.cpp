@@ -42,11 +42,13 @@ static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop) {
   buffer_shape.insert(buffer_shape.begin(), max_threads);
   auto buffer = at::empty(buffer_shape, dst.options());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   std::unique_ptr<bool[]> written(new bool[max_threads]);
   std::fill(written.get(), written.get() + max_threads, false);
 
   at::parallel_for(0, iter.numel(), internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
     int thread_num = at::get_thread_num();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     written[thread_num] = true;
     auto slice = buffer[thread_num];
     slice.copy_(dst);
@@ -108,6 +110,7 @@ static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop) {
     if (should_round_columns) {
       // round columns to multiples of 128 bytes if adjacent columns are
       // contiguous in memory.
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       int64_t cols_per_128_bytes = 128 / element_size;
       std::tie(begin, end) = round_columns(iter, dim, cols_per_128_bytes, begin, end);
     }
