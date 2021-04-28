@@ -205,6 +205,7 @@ class FusedNBitRowwiseQuantizedToFloatOp final : public Operator<CPUContext> {
     } else {
       std::vector<float> tmp(output_columns);
 
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t row = 0; row < input_rows; ++row) {
         const std::uint8_t* input_row = input_data + row * input_columns;
         float scale = *reinterpret_cast<const at::Half*>(
