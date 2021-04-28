@@ -204,8 +204,8 @@ class _NodeDesc:
 class _NodeDescGenerator:
     """Generates node descriptors.
 
-    A node descriptor is a combination of an FQDN, a process id, and an
-    auto-incremented integer that uniquely identifies a node in the rendezvous.
+    A node descriptor is a combination of an FQDN, a process id, and an auto-
+    incremented integer that uniquely identifies a node in the rendezvous.
     """
 
     _lock: threading.Lock
@@ -231,8 +231,6 @@ class _NodeDescGenerator:
 class _RendezvousState:
     """Holds the state of a rendezvous.
 
-    A rendezvous is synced across the nodes via a ``RendezvousBackend``.
-
     Attributes:
         round:
             The current round of the rendezvous.
@@ -240,8 +238,8 @@ class _RendezvousState:
             A boolean value indicating whether the current round of the
             rendezvous is complete.
         deadline:
-            The date and time at which the current round of the rendezvous will
-            be considered complete if it is still waiting for nodes to join.
+            The time at which the current round of the rendezvous will be
+            considered complete if it is still waiting for nodes to join.
         closed:
             A boolean value indicating whether the rendezvous is closed.
         participants:
@@ -249,8 +247,8 @@ class _RendezvousState:
         wait_list:
             A set of nodes that are waiting to participate in the next round of
             the rendezvous.
-        last_keep_alives:
-            A dictionary containing each node's last keep-alive time.
+        last_heartbeats:
+            A dictionary containing each node's last heartbeat time.
     """
 
     round: int
@@ -259,7 +257,7 @@ class _RendezvousState:
     closed: bool
     participants: Dict[_NodeDesc, int]
     wait_list: Set[_NodeDesc]
-    last_keep_alives: Dict[_NodeDesc, datetime]
+    last_heartbeats: Dict[_NodeDesc, datetime]
 
     def __init__(self) -> None:
         self.round = 0
@@ -268,7 +266,7 @@ class _RendezvousState:
         self.closed = False
         self.participants = {}
         self.wait_list = set()
-        self.last_keep_alives = {}
+        self.last_heartbeats = {}
 
 
 class DynamicRendezvousHandler(RendezvousHandler):
