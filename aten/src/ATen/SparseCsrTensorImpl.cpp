@@ -64,18 +64,6 @@ void SparseCsrTensorImpl::resize_and_clear_(
   at::native::resize_output(col_indices_, nnz_size);
   at::native::resize_output(values_, nnz_size);
   sizes_and_strides_.set_sizes(size);
-
-  TORCH_CHECK(
-      (crow_indices_.numel() - 1) == size[0],
-      "crow_indices.numel() must be size(0) + 1, but got: ",
-      crow_indices_.numel());
-
-  TORCH_CHECK(
-      col_indices_.size(0) == values_.size(0),
-      "col_indices and values must have equal sizes, but got col_indices.size(0): ",
-      col_indices_.size(0),
-      ", values.size(0): ",
-      values_.size(0));
 }
 
 void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
