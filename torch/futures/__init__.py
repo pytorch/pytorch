@@ -31,6 +31,11 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         ``torch.cuda.is_available()`` returns ``True``). This is needed to
         ensure proper CUDA stream synchronization. The child futures, returned
         by the ``then`` method, will inherit these devices.
+
+        Args:
+            devices(``List[Union[int, str, torch.device]]``, optional): the set
+                of devices on which tensors contained in this future's value are
+                allowed to reside and on which callbacks are allowed to operate.
         """
         if devices is None:
             devices = []
