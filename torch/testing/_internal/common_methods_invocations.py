@@ -3952,6 +3952,8 @@ op_db: List[OpInfo] = [
         variant_test_name="no_rounding_mode",
         aliases=("divide",),
         ref=np.divide,
+        # prevent zero division
+        domain=(1.0, None),
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         supports_out=True,
     ),
@@ -3960,6 +3962,8 @@ op_db: List[OpInfo] = [
         variant_test_name="true_rounding",
         aliases=("divide",),
         ref=np.true_divide,
+        # prevent zero division
+        domain=(1.0, None),
         sample_inputs_func=partial(sample_inputs_binary, rounding_mode=None),
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         supports_out=True,
@@ -5668,6 +5672,32 @@ op_db: List[OpInfo] = [
         aliases=("subtract",),
         ref=np.subtract,
         supports_out=True,
+    ),
+    BinaryUfuncInfo(
+        "true_divide",
+        ref=np.true_divide,
+        # prevent zero division
+        domain=(1.0, None),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=True,
+        supports_autograd=False,
+        skips=(
+            SkipInfo("TestCommon", "test_variant_consistency_jit", dtypes=[torch.float32]),
+        ),
+    ),
+    BinaryUfuncInfo(
+        "floor_divide",
+        # torch.floor_divide is a misnomer and should actually be torch.trunc_divide.
+        # numpy has no builtin reference for trunc divide, but it is easy enough to emulate
+        ref=lambda *args, **kwargs: np.trunc(np.true_divide(*args, **kwargs)),
+        # prevent zero division
+        domain=(1.0, None),
+        dtypes=all_types_and(torch.half, torch.bfloat16),
+        supports_out=True,
+        supports_autograd=False,
+        skips=(
+            SkipInfo("TestCommon", "test_variant_consistency_jit", dtypes=[torch.float32]),
+        ),
     ),
 ]
 
