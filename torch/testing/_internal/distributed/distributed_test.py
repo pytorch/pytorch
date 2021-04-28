@@ -5267,9 +5267,10 @@ class DistributedTest:
 
             class NestedOutputModule(torch.nn.Module):
                 def __init__(self):
+                    super().__init__()
                     self.lin = nn.Linear(100, 1, bias=False)
 
-                def forward(inp, output_type):
+                def forward(self, inp, output_type):
                     if output_type == "tuple":
                         return (
                             self.lin(inp),
@@ -5321,17 +5322,19 @@ class DistributedTest:
             )
             model_static_graph._set_static_graph()
             inp = torch.randn(10, 100)
-            for i in range(6):
-                out = model(inp)
-                loss = get_loss(out)
-                loss.backward()
-                self._model_step(model)
-                out_static = model_static_graph(inp)
-                loss_static = get_loss(out_static)
-                loss_static.backward()
-                self._model_step(model_static_graph)
-                for (p, p_static) in zip(model.parameters(), model_static_graph.parameters()):
-                    self.assertEqual(p, p_static)
-
-            if self.rank == 0:
-                print("Done!")
+            type_mapping = {
+                "list": list, "tuple": tuple, "dict": dict,
+            }
+            for output_type in ["list", "tuple", "dict"]:
+                for i in range(6):
+                    out = model(inp, output_type=output_type)
+                    loss = get_loss(out)
+                    loss.backward()
+                    self._model_step(model)
+                    out_static = model_static_graph(inp, output_type=output_type)
+                    self.assertTrue(isinstance(out_static, type_mapping[output_type]))
+                    loss_static = get_loss(out_static)
+                    loss_static.backward()
+                    self._model_step(model_static_graph)
+                    for (p, p_static) in zip(model.parameters(), model_static_graph.parameters()):
+                        self.assertEqual(p, p_static)
