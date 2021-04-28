@@ -61,7 +61,6 @@ class TORCH_API TensorExprKernel {
     return constants_;
   };
 
-
  private:
   enum ElementType {
     kAllTypes = 0,
