@@ -161,7 +161,7 @@ constexpr int OPTIMAL_TILE_W = 32;
 constexpr int MAX_H_BLOCK = 128;
 
 __host__ int div_roundup(int x, int y) {
-  return lastPow2(1 + (x-1)/y);
+  return 1 + (x-1)/y;
 }
 
 __host__ void flexible_launch_configs(
