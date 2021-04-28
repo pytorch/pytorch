@@ -412,7 +412,7 @@ std::unordered_map<std::string, std::string> SsaRewrite(
     // output. If so add a mapping from it's latest renamed version to its
     // original name.
     std::unordered_map<std::string, std::string> renamed_external_outputs;
-    for (const auto it : blob_versions) {
+    for (const auto& it : blob_versions) {
       if (external_outputs.count(it.first)) {
         renamed_external_outputs.emplace(
             SsaName(it.first, it.second), it.first);

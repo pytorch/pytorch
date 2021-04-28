@@ -381,53 +381,6 @@ std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A) {
     }
     return std::tuple<Tensor, Tensor>(res1, res2);
 }
-std::tuple<Tensor &,Tensor &> _th_geqrf_out(const Tensor & self, Tensor & res1, Tensor & res2) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto res1_ = checked_dense_tensor_unwrap(res1, "res1", 0, "_th_geqrf_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto res2_ = checked_dense_tensor_unwrap(res2, "res2", 0, "_th_geqrf_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_geqrf_out", false, DeviceType::CPU, dispatch_scalar_type);
-            THDoubleTensor_geqrf(res1_, res2_, self_);
-            break;
-        }
-        case ScalarType::Float: {
-            auto res1_ = checked_dense_tensor_unwrap(res1, "res1", 0, "_th_geqrf_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto res2_ = checked_dense_tensor_unwrap(res2, "res2", 0, "_th_geqrf_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_geqrf_out", false, DeviceType::CPU, dispatch_scalar_type);
-            THFloatTensor_geqrf(res1_, res2_, self_);
-            break;
-        }
-        default:
-            AT_ERROR("_th_geqrf_out not supported on CPUType for ", dispatch_scalar_type);
-    }
-    return std::tuple<Tensor &, Tensor &>(res1, res2);
-}
-std::tuple<Tensor,Tensor> _th_geqrf(const Tensor & self) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-    auto res1_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CPU, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
-    auto res1 = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(res1_));
-    auto res2_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CPU, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
-    auto res2 = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(res2_));
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_geqrf", false, DeviceType::CPU, dispatch_scalar_type);
-            THDoubleTensor_geqrf(res1_, res2_, self_);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_geqrf", false, DeviceType::CPU, dispatch_scalar_type);
-            THFloatTensor_geqrf(res1_, res2_, self_);
-            break;
-        }
-        default:
-            AT_ERROR("_th_geqrf not supported on CPUType for ", dispatch_scalar_type);
-    }
-    return std::tuple<Tensor, Tensor>(res1, res2);
-}
 Tensor & _th_ormqr_out(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose, Tensor & result) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
