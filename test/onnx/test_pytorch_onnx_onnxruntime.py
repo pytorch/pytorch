@@ -6990,25 +6990,19 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input: PackedSequence):
                 return self.inner_model(input)
 
-        batch_first = True if packed_sequence == 2 else False
+        batch_first = packed_sequence == 2
 
         if initial_state:
             model = ElmanWithStateModel(layers=layers, bidirect=bidirectional, nonlinearity=nonlinearity,
                                         dropout=dropout, batch_first=batch_first)
-
-            if packed_sequence == 1:
-                model = RnnModelWithPackedSequenceWithState(model, False)
-            if packed_sequence == 2:
-                model = RnnModelWithPackedSequenceWithState(model, True)
+            if packed_sequence:
+                model = RnnModelWithPackedSequenceWithState(model, batch_first)
         else:
             model = ElmanWithStateModel(layers=layers, bidirect=bidirectional,
                                         nonlinearity=nonlinearity, dropout=dropout,
                                         batch_first=batch_first)
-
-            if packed_sequence == 1:
-                model = RnnModelWithPackedSequenceWithoutState(model, False)
-            if packed_sequence == 2:
-                model = RnnModelWithPackedSequenceWithoutState(model, True)
+            if packed_sequence:
+                model = RnnModelWithPackedSequenceWithoutState(model, batch_first)
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
@@ -7039,24 +7033,18 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _lstm_test(self, layers, bidirectional, initial_state,
                    packed_sequence, dropout):
-        batch_first = True if packed_sequence == 2 else False
+        batch_first = packed_sequence == 2
 
-        if packed_sequence == 0:
-            model = LstmFlatteningResultWithoutSeqLength(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
-                                                         bidirectional, dropout, batch_first)
-        else:
+        if packed_sequence:
             model = LstmFlatteningResultWithSeqLength(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
                                                       bidirectional, dropout, batch_first)
             if initial_state:
-                if packed_sequence == 1:
-                    model = RnnModelWithPackedSequenceWithState(model, False)
-                if packed_sequence == 2:
-                    model = RnnModelWithPackedSequenceWithState(model, True)
+                model = RnnModelWithPackedSequenceWithState(model, batch_first)
             else:
-                if packed_sequence == 1:
-                    model = RnnModelWithPackedSequenceWithoutState(model, False)
-                if packed_sequence == 2:
-                    model = RnnModelWithPackedSequenceWithoutState(model, True)
+                model = RnnModelWithPackedSequenceWithoutState(model, batch_first)
+        else:
+            model = LstmFlatteningResultWithoutSeqLength(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
+                                                         bidirectional, dropout, batch_first)
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
@@ -7134,30 +7122,24 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input, hx):
                 return self.inner_model(input, hx)
 
-        batch_first = True if packed_sequence == 2 else False
+        batch_first = packed_sequence == 2
 
-        if packed_sequence == 0:
+        if packed_sequence:
+            if initial_state:
+                model = GRUWithStateModel(layers=layers, bidirect=bidirectional, dropout=dropout,
+                                          batch_first=batch_first)
+                model = RnnModelWithPackedSequenceWithState(model, batch_first)
+            else:
+                model = GRUWithoutStateModel(layers=layers, bidirect=bidirectional, dropout=dropout,
+                                             batch_first=batch_first)
+                model = RnnModelWithPackedSequenceWithoutState(model, batch_first)
+        else:
             if initial_state:
                 model = GRUNoSeqLengthWithStateModel(layers=layers, bidirect=bidirectional,
                                                      dropout=dropout, batch_first=batch_first)
             else:
                 model = GRUNoSeqLengthWithoutStateModel(layers=layers, bidirect=bidirectional,
                                                         dropout=dropout, batch_first=batch_first)
-        else:
-            if initial_state:
-                model = GRUWithStateModel(layers=layers, bidirect=bidirectional, dropout=dropout,
-                                          batch_first=batch_first)
-                if packed_sequence == 1:
-                    model = RnnModelWithPackedSequenceWithState(model, False)
-                if packed_sequence == 2:
-                    model = RnnModelWithPackedSequenceWithState(model, True)
-            else:
-                model = GRUWithoutStateModel(layers=layers, bidirect=bidirectional, dropout=dropout,
-                                             batch_first=batch_first)
-                if packed_sequence == 1:
-                    model = RnnModelWithPackedSequenceWithoutState(model, False)
-                if packed_sequence == 2:
-                    model = RnnModelWithPackedSequenceWithoutState(model, True)
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
