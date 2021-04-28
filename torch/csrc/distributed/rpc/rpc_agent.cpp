@@ -2,7 +2,6 @@
 
 #include <torch/csrc/distributed/rpc/utils.h>
 
-
 namespace torch {
 namespace distributed {
 namespace rpc {
