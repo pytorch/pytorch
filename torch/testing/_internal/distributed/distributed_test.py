@@ -5108,6 +5108,8 @@ class DistributedTest:
             )
 
             inp = torch.randn(10, 10)
+            a_local_grad = None
+            a_dist_grad = None
             for i in range(6):
                 a, b = local_net(inp)
                 a_dist, b_dist = net(inp)
@@ -5118,18 +5120,25 @@ class DistributedTest:
                     loss = t.sum()
                     loss_dist = t_dist.sum()
                 else:
-                    # Model output unused in loss
+                    # Model output unused in loss.
                     loss = b.sum()
                     loss_dist = b_dist.sum()
                 loss.backward()
                 loss_dist.backward()
+                if i == 1:
+                    a_local_grad = local_net.a.weight.grad
+                    a_dist_grad = net.module.a.weight.grad
+                    self.assertEqual(a_local_grad, a_dist_grad)
+                elif i >= 2:
+                    # parameter "a" of both models should be the same and not change
+                    self.assertEqual(net.module.a.weight.grad, a_dist_grad)
+                    self.assertEqual(local_net.a.weight.grad, a_local_grad)
+
                 # Verify grads are the same
                 for (local_param, dist_param) in zip(local_net.parameters(), net.parameters()):
                     local_grad = local_param.grad
                     dist_grad = dist_param.grad
                     self.assertEqual(local_grad, dist_grad)
-
-                print("All grads equal!")
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
@@ -5252,7 +5261,7 @@ class DistributedTest:
             # but can be (nested) tuple, list, dict, etc.
             rank = self.rank
             torch.cuda.set_device(rank)
-
+            # TODO: test with find_unused_parameters and outputs unused in loss.
             class NestedOutputModule(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
