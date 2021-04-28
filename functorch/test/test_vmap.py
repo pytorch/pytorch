@@ -1935,12 +1935,42 @@ class TestVmapOperators(Namespace.TestVmapBase):
     def test_mean_dim(self):
         self._test_mean_sum_dim(torch.mean)
 
+    def _test_sum_mean(self, op):
+        test = self._vmap_test
+        B0, B1 = 5, 7
+
+        # Single vmap, various in_dims / out_dims
+        test(op, [torch.randn([B0])])
+        test(op, [torch.randn([B0, 3])])
+        test(op, [torch.randn([2, 5, B0, 3])], in_dims=2)
+        test(op, [torch.randn([2, 5, B0, 3])], in_dims=2)
+
+        # Doubly nested vmap
+        test(vmap(op), [torch.randn([B0, B1])])
+        test(vmap(op), [torch.randn([B1, 2, 5, B0, 3])])
+        test(vmap(op), [torch.randn([2, 5, B0, B1, 3])], in_dims=2)
+
+    def test_sum(self):
+        self._test_sum_mean(torch.sum)
+
+    def test_mean(self):
+        self._test_sum_mean(torch.mean)
+
     def test_repeat(self):
         test = self._vmap_test
         B0 = 7
         op = Tensor.repeat
         test(lambda x: op(x, (2, 3)), (torch.rand(B0, 1, 1),))
         test(lambda x: op(x, (2, 3)), (torch.rand(1, B0, 1),), in_dims=1)
+
+    def test_slogdet(self):
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        B0 = 7
+        op = torch.linalg.slogdet
+        test(op, (torch.rand(B0, 1, 1),))
+        test(op, (torch.rand(B0, 2, 2),))
+        test(op, (torch.rand(B0, 3, 2, 2),))
+        test(op, (torch.rand(3, 2, 2, B0),), in_dims=3)
 
     def test_reshape(self):
         test = self._vmap_test
