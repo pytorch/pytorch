@@ -1,7 +1,12 @@
 #pragma once
 
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
+
+namespace caffe2 {
+namespace serialize {
+class PyTorchStreamReader;
+} // namespace serialize
+} // namespace caffe2
 
 namespace torch {
 namespace jit {

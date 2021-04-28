@@ -1,3 +1,4 @@
+#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
 namespace torch {
