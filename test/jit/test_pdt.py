@@ -142,7 +142,7 @@ class TestPDT(JitTestCase):
         self.assertEqual(scripted_fn([10, 11, 14]), test_multiple_types([10, 11, 14]))
 
         scripted_fn = torch.jit._script_pdt(test_multiple_type_refinement, example_inputs=[(1,), ("abc", ), (8.9,),
-                                              ([3, 4, 5],), (True, ), ({"a": True}, ), ])
+                                            ([3, 4, 5],), (True, ), ({"a": True}, ), ])
         self.assertEqual(scripted_fn(10), test_multiple_type_refinement(10))
         self.assertEqual(scripted_fn("def"), test_multiple_type_refinement("def"))
         self.assertEqual(scripted_fn(7.89999), test_multiple_type_refinement(7.89999))
