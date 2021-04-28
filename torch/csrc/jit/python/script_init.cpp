@@ -931,6 +931,7 @@ void initJitScriptBindings(PyObject* module) {
            return py::str("ScriptObject");
          }
          return invokeScriptMethodFromPython(
+             // NOLINTNEXTLINE(performance-move-const-arg)
              *method, std::move(args), std::move(kwargs));
        }}};
 
@@ -946,6 +947,7 @@ void initJitScriptBindings(PyObject* module) {
               throw NotImplementedError();
             }
             return invokeScriptMethodFromPython(
+                // NOLINTNEXTLINE(performance-move-const-arg)
                 *method, std::move(args), std::move(kwargs));
           });
     }
@@ -1292,6 +1294,7 @@ void initJitScriptBindings(PyObject* module) {
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             Function& callee = *strongPtr.function_;
             py::object result = invokeScriptFunctionFromPython(
+                // NOLINTNEXTLINE(performance-move-const-arg)
                 callee, tuple_slice(std::move(args), 1), std::move(kwargs));
             return result;
             END_HANDLE_TH_ERRORS_PYBIND
@@ -1384,6 +1387,7 @@ void initJitScriptBindings(PyObject* module) {
             Method& method = py::cast<Method&>(args[0]);
 
             return invokeScriptMethodFromPython(
+                // NOLINTNEXTLINE(performance-move-const-arg)
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
             END_HANDLE_TH_ERRORS_PYBIND
           })
