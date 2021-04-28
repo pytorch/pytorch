@@ -6,9 +6,9 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
-#include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/runtime_bytecode_version.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
@@ -577,7 +577,7 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
 }
 
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
-  int64_t runtime_bytecode_version = _get_runtime_bytecode_version();
+  int64_t runtime_bytecode_version = mobile::_get_runtime_bytecode_version();
   AT_ASSERT(
       runtime_bytecode_version == caffe2::serialize::kProducedBytecodeVersion);
 }
