@@ -31,7 +31,7 @@ struct WorkEntry {
       src = *srcPtr;
     }
     if (dstPtr) {
-      dst = *dstPtr;
+      dst = std::make_shared<std::vector<at::Tensor>>(*dstPtr);
     }
   }
 
@@ -42,7 +42,11 @@ struct WorkEntry {
 
   // For input and output tensors (in-place), we will always use src
   std::vector<at::Tensor> src;
-  std::vector<at::Tensor> dst;
+
+  // We use `dst` for returning resulting vectors in WorkMPI::result, so we need to
+  // keep it alive.
+  std::shared_ptr<std::vector<at::Tensor>> dst;
+
   // src rank returned, for recv only
   int* srcRank = nullptr;
   std::function<void(std::unique_ptr<WorkEntry>&)> run;
@@ -77,6 +81,7 @@ class ProcessGroupMPI : public ProcessGroup {
   class WorkMPI : public ProcessGroup::Work {
    public:
     WorkMPI(
+        const std::shared_ptr<std::vector<at::Tensor>> outputs,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt)
@@ -84,17 +89,23 @@ class ProcessGroupMPI : public ProcessGroup {
               -1,
               OpType::UNKNOWN,
               profilingTitle,
-              inputTensors) {}
+              inputTensors),
+          outputs_(outputs) {}
+
+   virtual std::vector<at::Tensor> result() override;
 
    protected:
     friend class ProcessGroupMPI;
+
+   private:
+    const std::shared_ptr<std::vector<at::Tensor>> outputs_;
   };
 
   class AsyncWork : public ProcessGroup::Work {
    public:
     AsyncWork(
-        at::Tensor tensor,
         MPI_Request request,
+        const std::vector<at::Tensor>* outputs,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
@@ -111,10 +122,12 @@ class ProcessGroupMPI : public ProcessGroup {
 
     void abort() override;
 
+   virtual std::vector<at::Tensor> result() override;
+
    protected:
     void populateException();
 
-    at::Tensor tensor_;
+    const std::vector<at::Tensor>* outputs_;
     MPI_Request request_;
     MPI_Status status_;
   };
