@@ -105,7 +105,9 @@ void SumReduceDimsGradientOp<CPUContext, false, true>::Compute(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReduceFrontMean, SumReduceDimsOp<CPUContext, true, true>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceFrontMeanGradient,
     SumReduceDimsGradientOp<CPUContext, true, true>);
@@ -122,8 +124,10 @@ class GetReduceFrontMeanGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceFrontMean, GetReduceFrontMeanGradient);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceFrontMean)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -195,9 +199,12 @@ Y: [4.3333335    2.1666667     6.]
       REDUCTION_OP_SHAPE_INFERENCE(true)
     })
     .InheritOnnxSchema("ReduceMean");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceFrontMeanGradient).NumInputs(2, 3).NumOutputs(1);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReduceBackMean, SumReduceDimsOp<CPUContext, false, true>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceBackMeanGradient,
     SumReduceDimsGradientOp<CPUContext, false, true>);
@@ -214,8 +221,10 @@ class GetReduceBackMeanGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceBackMean, GetReduceBackMeanGradient);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceBackMean)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -288,6 +297,7 @@ Y: [[3.7777777 4.888889 ]]
       REDUCTION_OP_SHAPE_INFERENCE(false)
     })
     .InheritOnnxSchema("ReduceMean");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceBackMeanGradient).NumInputs(2, 3).NumOutputs(1);
 
 #undef REDUCTION_OP_SHAPE_INFERENCE
