@@ -35,6 +35,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     _NodeDescGenerator,
     _RendezvousCloseOp,
     _RendezvousContext,
+    _RendezvousKeepAliveOp,
     _RendezvousState,
     _RendezvousStateHolder,
     create_handler,
@@ -871,6 +872,34 @@ class TestRendezvousCloseOp(AbstractTestRendezvousOp, TestCase):
 
     def test_marks_rendezvous_closed(self) -> None:
         self._assert_action(_Action.MARK_RENDEZVOUS_CLOSED)
+
+
+class TestRendezvousKeepAliveOp(AbstractTestRendezvousOp, TestCase):
+    def _create_op(self) -> Callable:
+        return _RendezvousKeepAliveOp()
+
+    def test_updates_keep_alive_if_needed(self) -> None:
+        keep_alive_time = self._now - self._keep_alive_interval
+
+        for delta in [timedelta(seconds=0), timedelta(seconds=-1)]:
+            with self.subTest(delta=delta):
+                self._state.last_heartbeats[self._node] = keep_alive_time + delta
+
+                self._assert_action(_Action.KEEP_ALIVE)
+
+    def test_raises_timeout_if_deadlined_exceeded(self) -> None:
+        self._deadline = 0
+
+        self._state.last_heartbeats[self._node] = self._now - self._keep_alive_interval
+
+        self._assert_action(_Action.ERROR_TIMEOUT)
+
+    def test_finishes_if_no_keep_alive_update_is_needed(self) -> None:
+        delta = timedelta(seconds=1)
+
+        self._state.last_heartbeats[self._node] = self._now - self._keep_alive_interval + delta
+
+        self._assert_action(_Action.FINISH)
 
 
 class DummyStore(Store):
