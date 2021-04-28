@@ -359,6 +359,16 @@ class Vec256<double> {
     return map(calc_i0e);
   }
 
+  Vec256<double> _nor() const {
+    return {vec_nor(_vec0, _vec0), vec_nor(_vec1, _vec1)};
+  }
+
+  Vec256<double> isnan() const {
+    auto x = *this;
+    auto ret = (x == x);
+    return ret._nor();
+  }
+
   DEFINE_MEMBER_OP(operator==, double, vec_cmpeq)
   DEFINE_MEMBER_OP(operator!=, double, vec_cmpne)
   DEFINE_MEMBER_OP(operator<, double, vec_cmplt)
