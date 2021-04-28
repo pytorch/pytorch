@@ -3,81 +3,161 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/cuda/cub.cuh>
+#include <ATen/native/cuda/Randperm.cuh>
 
 #include <limits>
 
 namespace at {
 namespace native {
 
+// [Algorithm of randperm]
+//
+// randperm is implemented by sorting an arange tensor of size n with randomly
+// generated keys. When random keys are different from each other, all different
+// permutations have the same probability.
+//
+// However, there is a pitfall here:
+// For better performance, these N random keys are generated independently,
+// and there is no effort to make sure they are different at the time of generation.
+// When two keys are identical, stable sorting algorithms will not permute these two keys.
+// As a result, (0, 1) will appear more often than (1, 0).
+//
+// To overcome this pitfall we first carefully choose the number of bits in these keys,
+// so that the probability of having duplicate keys is under a threshold. Let q be the
+// threshold probability for having non-duplicate keys, then it can be proved that[1]
+// the number of bits required is: ceil(log2(n - (6 n^2 + 1) / (12 log(q))))
+//
+// Then after sort, we lauch a separate kernel that additionally shuffles any islands
+// of values whose keys matched. The algorithm of this kernel is as follows:
+// Each thread reads its key and the keys of its neighbors to tell if it's part of an island.
+// For each island, the first thread in the island sees a key match at index i+1 but not index i-1.
+// This thread considers itself the "island leader". The island leader then reads more indices to
+// the right to figure out how big the island is. Most likely, the island will be very small,
+// just a few values. The island leader then rolls that many RNG, uses them to additionally
+// shuffle values within the island using serial Fisher-Yates, and writes them out.
+//
+// Reference
+// [1] https://osf.io/af2hy/
+
 Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
+  TORCH_CHECK(n <= std::numeric_limits<int>::max(),
+    "randperm of tensors larger than INT_MAX is not supported yet in pytorch");
   check_supported_max_int_with_precision(n, result);
 
   result.resize_({n});
 
-  if (n < 30000) {  // For small inputs, we offload it to CPU instead.
-    auto result_cpu = at::empty({n}, result.options().device(kCPU));
-    randperm_out(result_cpu, n, generator);
-    return result.copy_(result_cpu);
+  auto range = at::arange(n, result.options());
+
+  // shuffled_data points to the underlying data of the output tensor if the tensor is contiguous; otherwise it
+  // points to a new tensor.
+  Tensor shuffled;
+  void *shuffled_data;
+  if (result.is_contiguous()) {
+    shuffled_data = result.data_ptr();
+  } else {
+    shuffled = at::empty(n, result.options());
+    shuffled_data = shuffled.data_ptr();
   }
 
-#if 0
-  // This if condition should never be true because if n >= 30000 and the tensor has a Half type,
-  // check_supported_max_int_with_precision should have reported an error. This snippet is commented out but left here
-  // for the sake of clarity, because Half in thrust is spotty, and we do not want future change unaware of this.
-  if (result.scalar_type() == at::ScalarType::Half) {  // Half in thrust is spotty. Avoid.
-    auto result_float = at::empty({n}, initialTensorOptions().device(Device(DeviceType::CUDA)));
-    return result.copy_(randperm_out_cuda(result_float, n, generator));
-  }
+  auto opt = TensorOptions().device(result.device());
+
+  // See note [Algorithm of randperm]
+  const double log_threshold_12 = std::log(0.9) * 12;
+  double nd = static_cast<double>(n);
+
+#if !defined(_MSC_VER)
+  constexpr bool is_reduced_bits = true;
+  int bits = std::min(64,
+    static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / log_threshold_12))));
+#else
+  // For some unknown reason, randperm_handle_duplicate_keys is causing test failures.
+  // Without this additional permutation kernel, we should sort on as much bits as we can.
+  constexpr bool is_reduced_bits = false;
+  int bits = 64;
 #endif
 
-  // Generate random values for the keys array
-  AT_DISPATCH_ALL_TYPES(
-    result.scalar_type(), "randperm_out_cuda", [&] {
-      TORCH_CHECK(n <= std::numeric_limits<int>::max(),
-        "randperm of tensors larger than INT_MAX is not supported yet in pytorch");
+  if (n == 0) {
+    return result;
+  } else if (bits <= 8) {
+    auto keys = at::empty(result.sizes(), opt.dtype(kByte)).random_(generator);
+    auto keys_tmp = at::empty_like(keys);
+    auto keys_out = keys_tmp.data_ptr<uint8_t>();
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
+      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
+      at::cuda::cub::sort_pairs<uint8_t, scalar_t>(
+        keys.data_ptr<uint8_t>(), keys_out,
+        range.data_ptr<scalar_t>(), shuffled_data_,
+        n, false, 0, bits);
 
-      auto keys = at::empty(result.sizes(), result.options()).random_(generator);
-      auto range = at::arange(n, result.options());
-      auto keys_tmp = at::empty_like(keys);
-
-      // shuffled_data points to the underlying data of the output tensor if the tensor is contiguous; otherwise it
-      // points to a new tensor.
-      Tensor shuffled;
-      scalar_t *shuffled_data;
-      if (result.is_contiguous()) {
-        shuffled_data = result.data_ptr<scalar_t>();
-      } else {
-        shuffled = at::empty(n, result.options());
-        shuffled_data = shuffled.data_ptr<scalar_t>();
+      if (is_reduced_bits) {
+        // This causes failing tests on MSVC for unknown reason.
+        randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
       }
 
-      // Use the sorted order of keys to rearrange the result array
-      size_t temp_storage_bytes = 0;
+    });
+  } else if (bits <= 16) {
+    auto keys = at::empty(result.sizes(), opt.dtype(kShort)).random_(
+      std::numeric_limits<int16_t>::min(), std::numeric_limits<int16_t>::max(), generator);
+    auto keys_tmp = at::empty_like(keys);
+    auto keys_out = keys_tmp.data_ptr<int16_t>();
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
+      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
+      at::cuda::cub::sort_pairs<int16_t, scalar_t>(
+        keys.data_ptr<int16_t>(), keys_out,
+        range.data_ptr<scalar_t>(), shuffled_data_,
+        n, false, 0, bits);
 
-      cub::DeviceRadixSort::SortPairs(
-        nullptr, temp_storage_bytes,
-        keys.data_ptr<scalar_t>(), keys_tmp.data_ptr<scalar_t>(),
-        range.data_ptr<scalar_t>(), shuffled_data, n,
-        0, sizeof(scalar_t) * 8, at::cuda::getCurrentCUDAStream());
-      auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-      auto dataPtr = allocator.allocate(temp_storage_bytes);
-      cub::DeviceRadixSort::SortPairs(
-        dataPtr.get(), temp_storage_bytes,
-        keys.data_ptr<scalar_t>(), keys_tmp.data_ptr<scalar_t>(),
-        range.data_ptr<scalar_t>(), shuffled_data, n,
-        0, sizeof(scalar_t) * 8, at::cuda::getCurrentCUDAStream());
-
-      if (!result.is_contiguous()) {
-        result.copy_(shuffled);
+      if (is_reduced_bits) {
+        // This causes failing tests on MSVC for unknown reason.
+        randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
       }
-    }
-  );
+
+    });
+  } else if (bits <= 32) {
+    auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(
+      std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), generator);
+    auto keys_tmp = at::empty_like(keys);
+    auto keys_out = keys_tmp.data_ptr<int>();
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
+      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
+      at::cuda::cub::sort_pairs<int, scalar_t>(
+        keys.data_ptr<int>(), keys_out,
+        range.data_ptr<scalar_t>(), shuffled_data_,
+        n, false, 0, bits);
+
+      if (is_reduced_bits) {
+        // This causes failing tests on MSVC for unknown reason.
+        randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
+      }
+
+    });
+  } else {
+    auto keys = at::empty(result.sizes(), opt.dtype(kLong)).random_(
+      std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max(), generator);
+    auto keys_tmp = at::empty_like(keys);
+    auto keys_out = keys_tmp.data_ptr<int64_t>();
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
+      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
+      at::cuda::cub::sort_pairs<int64_t, scalar_t>(
+        keys.data_ptr<int64_t>(), keys_out,
+        range.data_ptr<scalar_t>(), shuffled_data_,
+        n, false, 0, bits);
+
+      if (is_reduced_bits) {
+        // This causes failing tests on MSVC for unknown reason.
+        randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
+      }
+
+    });
+  }
+
+  if (!result.is_contiguous()) {
+    result.copy_(shuffled);
+  }
 
   return result;
 }
-
-
 
 }} // namespace at::native
