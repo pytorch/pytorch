@@ -159,11 +159,13 @@ PyObject* THPCppFunction_name(PyObject* self, PyObject *noargs) {
   return THPUtils_packString(fn.name());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef default_methods[] = {
   THP_FUNCTION_DEFAULT_METHODS,
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef default_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
   {nullptr}
@@ -188,6 +190,7 @@ PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
   return &type;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
 
 struct DefaultFunctionType {
@@ -218,6 +221,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata)
   } else {
     auto& fn = *cdata;
     auto it = cpp_function_types.find(std::type_index(typeid(fn)));
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyTypeObject* type;
     if (it == cpp_function_types.end()) {
       type = &default_type.type;
