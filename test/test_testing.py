@@ -791,15 +791,6 @@ class TestAsserts(TestCase):
             yield functools.partial(assert_fn, *inputs)
 
     @onlyCPU
-    def test_complex_support(self, device):
-        actual = torch.ones(1, dtype=torch.float32, device=device)
-        expected = torch.ones(1, dtype=torch.complex64, device=device)
-
-        for fn in self.assert_fns_with_inputs(actual, expected):
-            with self.assertRaises(UsageError):
-                fn(check_dtype=False)
-
-    @onlyCPU
     def test_sparse_support(self, device):
         actual = torch.empty((), device=device)
         expected = torch.sparse_coo_tensor(size=(), device=device)
@@ -968,6 +959,23 @@ class TestAsserts(TestCase):
             torch.testing.assert_close(*inputs, equal_nan=True)
 
     @onlyCPU
+    def test_assert_close_equal_nan_complex(self, device):
+        a = torch.tensor(complex(1, float("NaN")), device=device)
+        b = torch.tensor(complex(float("NaN"), 1), device=device)
+
+        for inputs in self.make_inputs(a, b):
+            with self.assertRaises(AssertionError):
+                torch.testing.assert_close(*inputs, equal_nan=True)
+
+    @onlyCPU
+    def test_assert_close_equal_nan_complex_relaxed(self, device):
+        a = torch.tensor(complex(1, float("NaN")), device=device)
+        b = torch.tensor(complex(float("NaN"), 1), device=device)
+
+        for inputs in self.make_inputs(a, b):
+            torch.testing.assert_close(*inputs, equal_nan="relaxed")
+
+    @onlyCPU
     def test_mismatching_values_msg_mismatches(self, device):
         actual = torch.tensor([1, 2, 3, 4], device=device)
         expected = torch.tensor([1, 2, 5, 6], device=device)
@@ -992,6 +1000,24 @@ class TestAsserts(TestCase):
 
         for fn in self.assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("Greatest relative difference: 0.5 at (0, 1)")):
+                fn()
+
+    @onlyCPU
+    def test_mismatching_values_msg_complex_real(self, device):
+        actual = torch.tensor(complex(0, 1), device=device)
+        expected = torch.tensor(complex(1, 1), device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the real part")):
+                fn()
+
+    @onlyCPU
+    def test_mismatching_values_msg_complex_imag(self, device):
+        actual = torch.tensor(complex(1, 0), device=device)
+        expected = torch.tensor(complex(1, 1), device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the imaginary part")):
                 fn()
 
     @onlyCPU
