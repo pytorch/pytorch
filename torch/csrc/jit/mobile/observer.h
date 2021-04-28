@@ -32,6 +32,7 @@ class MobileDebugInfo : public c10::DebugInfoBase {
     op_idx_ = op_idx;
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default,modernize-use-override)
   virtual ~MobileDebugInfo() {}
 
  private:
