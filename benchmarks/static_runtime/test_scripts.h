@@ -269,3 +269,28 @@ const auto sub_scalar_alpha = R"JIT(
   def forward(self, a: Tensor, b: float, c: int):
       return torch.sub(a, b, alpha=c)
 )JIT";
+
+const std::string layer_norm_with_weights = R"JIT(
+  def forward(self, input: Tensor, normalized_shape: List[int], weight: Tensor, bias: Tensor):
+      return torch.layer_norm(input, normalized_shape, weight, bias, 1e-05, False)
+)JIT";
+
+const std::string layer_norm_without_weights = R"JIT(
+  def forward(self, input: Tensor, normalized_shape: List[int]):
+      return torch.layer_norm(input, normalized_shape, None, None, 1e-05, False)
+)JIT";
+
+const auto norm_3arg = R"JIT(
+  def forward(self, a: Tensor, p: int, dtype: int):
+      return torch.norm(a, p, dtype=dtype)
+)JIT";
+
+const auto norm_4arg = R"JIT(
+  def forward(self, a: Tensor, p: int, dim: List[int], keepdim: bool):
+      return torch.norm(a, p, dim, keepdim)
+)JIT";
+
+const auto norm_5arg = R"JIT(
+  def forward(self, a: Tensor, p: int, dim: List[int], keepdim: bool, dtype: int):
+      return torch.norm(a, p, dim, keepdim, dtype=dtype)
+)JIT";
