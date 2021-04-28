@@ -308,53 +308,99 @@ Tensor matrix_power(const Tensor& self, int64_t n) {
   return at::native::linalg_matrix_power(self, n);
 }
 
-Tensor& linalg_matrix_rank_out(const Tensor& self, optional<double> tol, bool hermitian, Tensor& result) {
-  checkSameDevice("linalg_matrix_rank", result, self);
+// Computes the rank of 'input' and saves the result in-place in 'result'
+// 'hermitian' controls whether SVD or eigendecomposition is used for computing the singular values
+// 'atol' and 'rtol' are the absolute and relative tolerances, respectively.
+// TODO: this function can be made public, see: https://github.com/pytorch/pytorch/issues/54151
+static Tensor& linalg_matrix_rank_out_helper(const Tensor& input, const Tensor& atol, const Tensor& rtol, bool hermitian, Tensor& result) {
+  checkSameDevice("torch.linalg.matrix_rank", result, input);
+  checkSameDevice("torch.linalg.matrix_rank", atol, input, "atol");
+  checkSameDevice("torch.linalg.matrix_rank", rtol, input, "rtol");
   ScalarType output_type = ScalarType::Long;
-  checkLinalgCompatibleDtype("linalg_matrix_rank", result.scalar_type(), output_type);
+  checkLinalgCompatibleDtype("torch.linalg.matrix_rank", result.scalar_type(), output_type);
 
   // Matrices or batch of matrices are allowed
-  TORCH_CHECK(self.dim() >= 2, "linalg_matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", self.sizes());
+  TORCH_CHECK(input.dim() >= 2, "torch.linalg.matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", input.sizes());
+
+  TORCH_CHECK(!at::isComplexType(atol.scalar_type()),
+              "torch.linalg.matrix_rank: atol tensor of complex type is not supported.");
+  TORCH_CHECK(!at::isComplexType(rtol.scalar_type()),
+              "torch.linalg.matrix_rank: rtol tensor of complex type is not supported.");
 
   // matrix_rank assigns a scalar value for each matrix in the batch so
-  // result's shape is equal to self.shape[0:self.ndim-2]
+  // result's shape is equal to input.shape[0:input.ndim-2]
   // for single matrix result_shape = {}
-  auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
+  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
   at::native::resize_output(result, result_shape);
 
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
   // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
-  if (self.numel() == 0) {
+  if (input.numel() == 0) {
     result.fill_(0);
     return result;
   }
 
-  // We compute matrix rank as the number of singular or absolute eigen values above 'tol' threshold
-  Tensor S;
+  // We compute matrix rank as the number of singular or absolute eigen values
+  // that are above max(atol, rtol * max(S)) threshold
+  Tensor S, max_S;
   if (!hermitian) {
     Tensor U, V;
-    // TODO: replace self.svd with linalg_svd
-    std::tie(U, S, V) = self.svd(/*some=*/true, /*compute_uv=*/false);
+    // TODO: replace input.svd with linalg_svd
+    std::tie(U, S, V) = input.svd(/*some=*/true, /*compute_uv=*/false);
+    // singular values are sorted in descending order
+    max_S = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
   } else {
-    S = at::linalg_eigvalsh(self);
+    S = at::linalg_eigvalsh(input);
     S = S.abs();
+    // eigenvalues are sorted in ascending order starting with negative values, we need a maximum value of abs(eigenvalues)
+    max_S = S.amax(/*dim=*/-1, /*keepdim=*/true);
   }
 
-  if (tol.has_value()) {
-    double tol_value = tol.value();
-    at::sum_out(result, S > tol_value, /*dim=*/-1);
-  } else {
-    ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-    double tol_value = _get_epsilon(real_dtype) * std::max(self.size(-1), self.size(-2));
-    Tensor max_S = S.amax(/*dim=*/-1);
-    at::sum_out(result, S > max_S.mul_(tol_value).unsqueeze_(-1), /*dim=*/-1);
-  }
+  Tensor tol = at::max(atol.unsqueeze(-1), rtol * max_S);
+
+  result = at::sum_out(result, S > tol, /*dim=*/-1);
   return result;
 }
 
-Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermitian) {
-  Tensor result = at::empty({0}, self.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_out(result, self, tol, hermitian);
+Tensor& linalg_matrix_rank_out(const Tensor& input, const Tensor& tol, bool hermitian, Tensor& result) {
+  // For NumPy compatibility tol is not scaled with max(singular_value) if the value for tol is provided
+  // It is assumed that the provided value is the absolute tolerance
+  Tensor rtol = at::zeros({}, tol.options());
+  result = linalg_matrix_rank_out_helper(input, tol, rtol, hermitian, result);
+  return result;
+}
+
+Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> tol, bool hermitian, Tensor& result) {
+  double tol_value;
+  Tensor atol, rtol;
+  if (tol.has_value()) {
+    tol_value = tol.value();
+    // For NumPy compatibility tol is not scaled with max(singular_value) if the value for tol is provided
+    // It is assumed that the provided value is the absolute tolerance
+    atol = at::full({}, tol_value, input.options().dtype(ScalarType::Double));
+    rtol = at::zeros({}, input.options().dtype(ScalarType::Double));
+  } else {
+    ScalarType real_dtype = toValueType(input.scalar_type());
+    // This is NumPy compatible default value
+    tol_value = _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
+    // It is assumed that the default tolerance is the relative tolerance
+    atol = at::zeros({}, input.options().dtype(ScalarType::Double));
+    rtol = at::full({}, tol_value, input.options().dtype(ScalarType::Double));
+  }
+
+  result = linalg_matrix_rank_out_helper(input, atol, rtol, hermitian, result);
+  return result;
+}
+
+Tensor linalg_matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
+  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
+  return result;
+}
+
+Tensor linalg_matrix_rank(const Tensor& input, optional<double> tol, bool hermitian) {
+  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
   return result;
 }
 
@@ -1229,17 +1275,35 @@ Tensor& bmm_out_cpu(const Tensor& batch1, const Tensor& batch2, Tensor &result) 
   return result;
 }
 
-Tensor& dot_out(const Tensor& self, const Tensor& tensor, Tensor& result) {
+Tensor& dot_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto output_device = result.device();
+  auto input1_device = self.device();
+  auto input2_device = other.device();
+  // check if the input & output tensors are on the same device.
+  TORCH_CHECK(
+    (output_device == input1_device) && (input1_device == input2_device),
+    "dot: Expected the output and input tensors to be on the "
+    "same device, but got the output tensor on ", output_device,
+    ", the 'input' tensor on ", input1_device, ", and the 'other' tensor on ", input2_device);
   at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-           "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
-  return result.fill_(self.dot(tensor));
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
+  return result.fill_(self.dot(other));
 }
 
 Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto output_device = result.device();
+  auto input1_device = self.device();
+  auto input2_device = other.device();
+  // check if the input & output tensors are on the same device.
+  TORCH_CHECK(
+    (output_device == input1_device) && (input1_device == input2_device),
+    "vdot: Expected the output and input tensors to be on the "
+    "same device, but got the output tensor on ", output_device,
+    ", the 'input' tensor on ", input1_device, ", and the 'other' tensor on ", input2_device);
   at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-           "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
   return result.fill_(self.vdot(other));
 }
 
