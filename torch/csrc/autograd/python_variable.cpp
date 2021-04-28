@@ -809,8 +809,70 @@ static PyMethodDef extra_methods[] = {
   {nullptr}
 };
 
+/* From https://github.com/python/cpython/blob/v3.7.0/Modules/xxsubtype.c
+   If compiled as a shared library instead, some compilers don't allow addresses
+   of Python objects defined in other libraries to be used in static
+   initializers here.  The DEFERRED_ADDRESS macro is used to tag the slots where
+   such addresses appear; the module init function must fill in the tagged slots
+   at runtime.  The argument is for documentation -- the macro ignores it.
+*/
+#define DEFERRED_ADDRESS(ADDR) nullptr
+
+struct THPVariableMeta {
+  PyHeapTypeObject base;
+};
+
+int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
+  if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
+    return -1;
+  }
+  // TODO: put something nontrivial here
+  return 0;
+}
+
+PyTypeObject THPVariableMetaType = {
+  PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
+  "torch._C._TensorMeta",                      /* tp_name */
+  sizeof(THPVariableMeta),                     /* tp_basicsize */
+  0,                                           /* tp_itemsize */
+  nullptr,                                     /* tp_dealloc */
+  0,                                           /* tp_vectorcall_offset */
+  nullptr,                                     /* tp_getattr */
+  nullptr,                                     /* tp_setattr */
+  nullptr,                                     /* tp_reserved */
+  nullptr,                                     /* tp_repr */
+  nullptr,                                     /* tp_as_number */
+  nullptr,                                     /* tp_as_sequence */
+  nullptr,                                     /* tp_as_mapping */
+  nullptr,                                     /* tp_hash  */
+  nullptr,                                     /* tp_call */
+  nullptr,                                     /* tp_str */
+  nullptr,                                     /* tp_getattro */
+  nullptr,                                     /* tp_setattro */
+  nullptr,                                     /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,    /* tp_flags */
+  nullptr,                                     /* tp_doc */
+  nullptr,                                     /* tp_traverse */
+  nullptr,                                     /* tp_clear */
+  nullptr,                                     /* tp_richcompare */
+  0,                                           /* tp_weaklistoffset */
+  nullptr,                                     /* tp_iter */
+  nullptr,                                     /* tp_iternext */
+  nullptr,                                     /* tp_methods */
+  nullptr,                                     /* tp_members */
+  nullptr,                                     /* tp_getset */
+  DEFERRED_ADDRESS(&PyType_Type),              /* tp_base */
+  nullptr,                                     /* tp_dict */
+  nullptr,                                     /* tp_descr_get */
+  nullptr,                                     /* tp_descr_set */
+  0,                                           /* tp_dictoffset */
+  THPVariableMetaType_init,                    /* tp_init */
+  nullptr,                                     /* tp_alloc */
+  nullptr                                      /* tp_new */
+};
+
 PyTypeObject THPVariableType = {
-  PyVarObject_HEAD_INIT(nullptr, 0)
+  PyVarObject_HEAD_INIT(&THPVariableMetaType, 0)
   "torch._C._TensorBase",                      /* tp_name */
   sizeof(THPVariable),                         /* tp_basicsize */
   0,                                           /* tp_itemsize */
@@ -875,6 +937,12 @@ void initTensorImplConversion(PyObject* module) {
 
 bool THPVariable_initModule(PyObject *module)
 {
+  THPVariableMetaType.tp_base = &PyType_Type;
+  if (PyType_Ready(&THPVariableMetaType) < 0)
+    return false;
+  Py_INCREF(&THPVariableMetaType);
+  PyModule_AddObject(module, "_TensorMeta",   (PyObject *)&THPVariableMetaType);
+
   static std::vector<PyMethodDef> methods;
   THPUtils_addPyMethodDefs(methods, torch::autograd::variable_methods);
   THPUtils_addPyMethodDefs(methods, extra_methods);
