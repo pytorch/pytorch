@@ -9,11 +9,13 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 Tokenizer::Tokenizer(const std::vector<char>& delims, char escape)
     : escape_(escape) {
   reset();
   std::memset(delimTable_, 0, sizeof(delimTable_));
   for (const auto i : c10::irange(delims.size())) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     delimTable_[(unsigned char)delims.at(i)] = i + 1;
   }
 }
@@ -36,6 +38,7 @@ void Tokenizer::next(char* start, char* end, TokenizedString& tokenized) {
     *copied = std::move(leftover_);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   char* ch;
   for (ch = start + toBeSkipped_; ch < end; ++ch) {
     if (*ch == escape_) {
@@ -71,6 +74,7 @@ void Tokenizer::next(char* start, char* end, TokenizedString& tokenized) {
   }
   tokenized.lastDelim_ = startDelimId_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   toBeSkipped_ = ch - end;
   if (copied) {
     copied->append(currentStart, end);
@@ -82,6 +86,7 @@ void Tokenizer::next(char* start, char* end, TokenizedString& tokenized) {
 
 FileReader::FileReader(const std::string& path, size_t bufferSize)
     : bufferSize_(bufferSize), buffer_(new char[bufferSize]) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   fd_ = open(path.c_str(), O_RDONLY, 0777);
   if (fd_ < 0) {
     throw std::runtime_error(
