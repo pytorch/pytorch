@@ -980,7 +980,7 @@ class TestSparse(TestCase):
 
     @onlyCPU
     @coalescedonoff
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_mm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [di, dj], dtype, device, coalesced)
@@ -1140,7 +1140,7 @@ class TestSparse(TestCase):
 
     @onlyCPU
     @coalescedonoff
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_saddmm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x = self._gen_sparse(2, nnz, [di, dj], dtype, device, coalesced)[0]
@@ -1170,7 +1170,7 @@ class TestSparse(TestCase):
 
     @onlyCPU
     @coalescedonoff
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_sspaddmm(self, device, dtype, coalesced):
 
         def test_shape(di, dj, dk, nnz):
@@ -1216,7 +1216,7 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
     @coalescedonoff
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_sparse_addmm(self, device, dtype, coalesced):
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
             if alpha_beta is None:
@@ -1225,10 +1225,10 @@ class TestSparse(TestCase):
             else:
                 alpha, beta = alpha_beta
             if broadcast:
-                D1 = torch.randn((), dtype=dtype, device=device).requires_grad_(True)
+                D1 = make_tensor((), dtype=dtype, device=device, requires_grad=True)
             else:
-                D1 = torch.randn(n, p, dtype=dtype, device=device).requires_grad_(True)
-            D2 = torch.randn(m, p, dtype=dtype, device=device).requires_grad_(True)
+                D1 = make_tensor([n, p], dtype=dtype, device=device, requires_grad=True)
+            D2 = make_tensor([m, p], dtype=dtype, device=device, requires_grad=True)
             S = self._gen_sparse(2, nnz, [n, m], dtype, device, coalesced)[0]
             S_dense = S.to_dense().requires_grad_(True)
             S.requires_grad_(True)
