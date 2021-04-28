@@ -387,6 +387,10 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
       std::move(trace));
 }
 
+void addMetadata(const std::string& key, const std::string& value) {
+  libkineto::api().activityProfiler().addMetadata(key, value);
+}
+
 KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
   name_ = activity.name();
   device_index_ = activity.deviceId();
