@@ -49,6 +49,7 @@ class JustTestWithSomeOutput : public JustTest {
  public:
   using JustTest::JustTest;
   bool Run(int /* unused */ /*stream_id*/) override {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     *OperatorBase::Output<int>(0) = 5;
     return true;
   }
@@ -57,22 +58,34 @@ class JustTestWithSomeOutput : public JustTest {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(JustTest).NumInputs(0, 1).NumOutputs(0, 1);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(JustTestCPUOnly).NumInputs(0, 1).NumOutputs(0, 1);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(JustTestWithSomeOutput);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(JustTest, JustTest);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(JustTestCPUOnly, JustTest);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, FOO, JustTestAndNeverConstructs);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, BAR, JustTestAndDoesConstruct);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, BAZ, JustTestAndDoesConstruct);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CUDA_OPERATOR(JustTest, JustTest);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(JustTestWithSomeOutput, JustTestWithSomeOutput);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, DeviceTypeRegistryWorks) {
   EXPECT_EQ(gDeviceTypeRegistry()->count(CPU), 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, RegistryWorks) {
   OperatorDef op_def;
   Workspace ws;
@@ -89,6 +102,7 @@ TEST(OperatorTest, RegistryWorks) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, RegistryWrongDevice) {
   OperatorDef op_def;
   Workspace ws;
@@ -102,6 +116,7 @@ TEST(OperatorTest, RegistryWrongDevice) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, ExceptionWorks) {
   OperatorDef op_def;
   Workspace ws;
@@ -125,6 +140,7 @@ TEST(OperatorTest, ExceptionWorks) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, FallbackIfEngineDoesNotBuild) {
   OperatorDef op_def;
   Workspace ws;
@@ -135,6 +151,7 @@ TEST(OperatorTest, FallbackIfEngineDoesNotBuild) {
   EXPECT_EQ(static_cast<JustTest*>(op.get())->type(), "base");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, MultipleEngineChoices) {
   OperatorDef op_def;
   Workspace ws;
@@ -145,6 +162,7 @@ TEST(OperatorTest, MultipleEngineChoices) {
   EXPECT_EQ(static_cast<JustTest*>(op.get())->type(), "BAR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, CannotUseUninitializedBlob) {
   Workspace ws;
   OperatorDef op_def;
@@ -152,9 +170,11 @@ TEST(OperatorTest, CannotUseUninitializedBlob) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(CreateOperator(op_def, &ws), EnforceNotMet);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, TestParameterAccess) {
   OperatorDef op_def;
   Workspace ws;
@@ -162,6 +182,7 @@ TEST(OperatorTest, TestParameterAccess) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddArgument<float>("arg0", 0.1, &op_def);
   AddArgument<vector<int>>("arg1", vector<int>{1, 2}, &op_def);
   AddArgument<string>("arg2", "argstring", &op_def);
@@ -181,6 +202,7 @@ TEST(OperatorTest, TestParameterAccess) {
   EXPECT_EQ(default2.size(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, CannotAccessParameterWithWrongType) {
   OperatorDef op_def;
   Workspace ws;
@@ -188,14 +210,17 @@ TEST(OperatorTest, CannotAccessParameterWithWrongType) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddArgument<float>("arg0", 0.1f, &op_def);
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
   EXPECT_FLOAT_EQ(op.GetSingleArgument<float>("arg0", 0.0), 0.1);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(op.GetSingleArgument<int>("arg0", 0), EnforceNotMet);
 }
 
 #if GTEST_HAS_DEATH_TEST
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
   OperatorDef op_def;
   Workspace ws;
@@ -203,17 +228,20 @@ TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
   op_def.set_type("JustTest");
   op_def.add_input("input");
   op_def.add_output("output");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddArgument<vector<float>>("arg0", vector<float>{0.1f}, &op_def);
   EXPECT_NE(ws.CreateBlob("input"), nullptr);
   OperatorBase op(op_def, &ws);
   auto args = op.GetRepeatedArgument<float>("arg0");
   EXPECT_EQ(args.size(), 1);
   EXPECT_FLOAT_EQ(args[0], 0.1f);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_DEATH(op.GetRepeatedArgument<int>("arg0"),
                "Argument does not have the right field: expected ints");
 }
 #endif
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, TestDefaultValue) {
   OperatorDef op_def;
   Workspace ws;
@@ -221,6 +249,7 @@ TEST(OperatorTest, TestDefaultValue) {
   EXPECT_FLOAT_EQ(op.GetSingleArgument<float>("arg-nonexisting", 0.5f), 0.5f);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, TestSetUp) {
   Workspace ws;
   OperatorDef op_def;
@@ -234,6 +263,7 @@ TEST(OperatorTest, TestSetUp) {
   EXPECT_TRUE(ws.HasBlob("output"));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, TestSetUpInputOutputCount) {
   Workspace ws;
   OperatorDef op_def;
@@ -246,6 +276,7 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   EXPECT_NE(nullptr, ws.CreateBlob("input2"));
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // JustTest will only accept one single input.
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(CreateOperator(op_def, &ws));
 #endif
 
@@ -254,10 +285,12 @@ TEST(OperatorTest, TestSetUpInputOutputCount) {
   op_def.add_output("output2");
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // JustTest will only produce one single output.
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(CreateOperator(op_def, &ws));
 #endif
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorTest, TestOutputValues) {
   NetDef net_def;
   net_def.set_name("NetForTest");
@@ -290,6 +323,7 @@ NetDef GetNetDefForTest() {
   return net_def;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NetTest, TestScaffoldingSimpleNet) {
   NetDef net_def = GetNetDefForTest();
   net_def.set_type("simple");
@@ -303,6 +337,7 @@ TEST(NetTest, TestScaffoldingSimpleNet) {
   EXPECT_TRUE(net->Run());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NetTest, TestScaffoldingDAGNet) {
   NetDef net_def = GetNetDefForTest();
   net_def.set_type("dag");
@@ -344,14 +379,19 @@ class GetFooGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(FooGradient).NumInputs(1).NumOutputs(1);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(FooGradient, FooGradientOp)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR_WITH_ENGINE(
     FooGradient,
     DUMMY_ENGINE,
     FooGradientDummyEngineOp)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Foo, GetFooGradient);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorGradientRegistryTest, GradientSimple) {
   Argument arg = MakeArgument<int>("arg", 1);
   DeviceOption option;
@@ -391,6 +431,7 @@ TEST(OperatorGradientRegistryTest, GradientSimple) {
       static_cast<JustTest*>(grad_op.get())->type(), "FooGradientDummyEngine");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EnginePrefTest, PerOpEnginePref) {
   OperatorDef op_def;
   Workspace ws;
@@ -406,10 +447,12 @@ TEST(EnginePrefTest, PerOpEnginePref) {
   SetPerOpEnginePref({});
 
   // Invalid operator type
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(
       SetPerOpEnginePref({{CPU, {{"NO_EXIST", {"BAR"}}}}}), EnforceNotMet);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EnginePrefTest, GlobalEnginePref) {
   OperatorDef op_def;
   Workspace ws;
@@ -438,6 +481,7 @@ TEST(EnginePrefTest, GlobalEnginePref) {
   // ASSERT_THROW(SetGlobalEnginePref({{8888, {"FOO"}}}), EnforceNotMet);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePref) {
   OperatorDef op_def;
   Workspace ws;
@@ -456,6 +500,7 @@ TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePref) {
   SetGlobalEnginePref({});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePrefAndOpDef) {
   OperatorDef op_def;
   Workspace ws;
@@ -475,6 +520,7 @@ TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePrefAndOpDef) {
   SetGlobalEnginePref({});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EnginePrefTest, SetOpEnginePref) {
   OperatorDef op_def;
   Workspace ws;
@@ -493,6 +539,7 @@ TEST(EnginePrefTest, SetOpEnginePref) {
   SetGlobalEnginePref({});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EnginePrefTest, SetDefaultEngine) {
   OperatorDef op_def;
   Workspace ws;
@@ -522,12 +569,15 @@ class JustTestWithRequiredArg : public JustTest {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(JustTestWithRequiredArg, JustTestWithRequiredArg);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(JustTestWithRequiredArg)
     .NumInputs(0, 1)
     .NumOutputs(0, 1)
     .Arg("test_arg", "this arg is required", true);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RequiredArg, Basic) {
   OperatorDef op_def;
   Workspace ws;
@@ -562,14 +612,17 @@ class JustTestWithStandardIsTestArg : public JustTest {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     JustTestWithStandardIsTestArg,
     JustTestWithStandardIsTestArg);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(JustTestWithStandardIsTestArg)
     .NumInputs(0, 1)
     .NumOutputs(0, 1)
     .ArgIsTest("this is_test arg is required");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IsTestArg, standard) {
   OperatorDef op_def;
   Workspace ws;
@@ -605,14 +658,17 @@ class JustTestWithNonStandardIsTestArg : public JustTest {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     JustTestWithNonStandardIsTestArg,
     JustTestWithNonStandardIsTestArg);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(JustTestWithNonStandardIsTestArg)
     .NumInputs(0, 1)
     .NumOutputs(0, 1)
     .Arg(OpSchema::Arg_IsTest, "this is_test arg is not required");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IsTestArg, non_standard) {
   OperatorDef op_def;
   Workspace ws;

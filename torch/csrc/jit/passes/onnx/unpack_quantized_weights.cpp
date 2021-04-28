@@ -81,6 +81,7 @@ double getScaleFromInput(Node* input_node) {
   } else if (input_name == "aten::sigmoid") {
     // For the _caffe2::Int8Sigmoid op output scale is 1.0/256
     // And output zero_point is set to 0 (quint8 type).
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return 1.0L / 256;
   }
   // For the ops below the scale is not part of the op signature, so we traverse
@@ -178,7 +179,9 @@ void unpackQuantizedWeightsHelper(
 
     torch::List<int64_t> stride_int, padding_int, dilation_int,
         output_padding_int;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t groups_int;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t transpose_int;
 
     if (itr->second.isTuple()) {
@@ -294,6 +297,7 @@ void unpackQuantizedWeightsHelper(
     // Create caffe2::Int8GivenTensorFill node
     std::ostringstream os;
     for (int64_t i = 0; i < wt_numel; ++i) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       os << static_cast<char>(inp_data[i] + 128);
     }
 

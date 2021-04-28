@@ -48,6 +48,7 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
 template <typename scalar_t, typename cast_scalar_t, typename exp_scalar_t>
 void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scalar_t exp) {
   using Vec = Vec256<scalar_t>;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (exp == 0.5) {
     cpu_kernel_vec(iter,
         [](scalar_t base) -> scalar_t {
@@ -55,6 +56,7 @@ void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scal
         },
         [](Vec base) -> Vec { return base.sqrt(); }
     );
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (exp == 2.0) {
     cpu_kernel_vec(iter,
         [](scalar_t base) -> scalar_t {
@@ -62,6 +64,7 @@ void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scal
         },
         [](Vec base) -> Vec { return base * base; }
     );
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (exp == 3.0) {
     cpu_kernel_vec(iter,
         [](scalar_t base) -> scalar_t {
@@ -69,6 +72,7 @@ void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scal
         },
         [](Vec base) -> Vec { return base * base * base; }
     );
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (exp == -0.5) {
     cpu_kernel_vec(iter,
         [](scalar_t base) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
@@ -83,6 +87,7 @@ void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scal
         },
         [](Vec base) -> Vec { return base.reciprocal(); }
     );
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (exp == -2.0) {
     cpu_kernel_vec(iter,
         [](scalar_t base) -> scalar_t {
@@ -146,7 +151,9 @@ void pow_tensor_scalar_kernel(
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(pow_tensor_scalar_stub, &pow_tensor_scalar_kernel);
 
 }} // namespace at::native

@@ -269,6 +269,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
       TORCH_INTERNAL_ASSERT(self_impl);
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       set_requires_grad(requires_grad, self_impl);
     }
     TORCH_CHECK(

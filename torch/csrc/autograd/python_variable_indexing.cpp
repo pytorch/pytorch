@@ -160,6 +160,7 @@ static inline Variable applySlicing(
           }
           return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
         } else if (PySlice_Check(obj)) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           Py_ssize_t start, stop, step;
           checkUnpackSlice(obj, &start, &stop, &step);
           if (is_tracing) {
@@ -228,6 +229,7 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
     PyErr_Clear();
     return false;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (n >= 32) {
     return false;
   }
@@ -293,6 +295,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     return THPVariable_Wrap(
       at::indexing::get_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}));
   } else if (PySlice_Check(index)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, step;
     checkUnpackSlice(index, &start, &stop, &step);
     if (is_tracing) {
@@ -397,6 +400,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     at::indexing::set_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, value);
     return 0;
   } else if (PySlice_Check(index)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, step;
     checkUnpackSlice(index, &start, &stop, &step);
     if (is_tracing) {

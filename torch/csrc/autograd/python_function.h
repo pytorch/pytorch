@@ -45,6 +45,7 @@ struct PyNode : public Node {
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
 
+  // NOLINTNEXTLINE(modernize-use-override)
   ~PyNode() {
     // Can't use THPObjectPtr as a field in this class; destructor won't take
     // out GIL!  When I forgot to do this by hand
@@ -116,7 +117,9 @@ struct THPFunction {
 };
 
 bool THPFunction_initModule(PyObject *module);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject THPFunctionType;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPFunctionClass;
 
 inline bool THPFunction_Check(PyObject* obj) {

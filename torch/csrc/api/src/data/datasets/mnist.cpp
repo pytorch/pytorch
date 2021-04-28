@@ -31,12 +31,15 @@ bool check_is_little_endian() {
 }
 
 constexpr uint32_t flip_endianness(uint32_t value) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return ((value & 0xffu) << 24u) | ((value & 0xff00u) << 8u) |
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       ((value & 0xff0000u) >> 8u) | ((value & 0xff000000u) >> 24u);
 }
 
 uint32_t read_int32(std::ifstream& stream) {
   static const bool is_little_endian = check_is_little_endian();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t value;
   AT_ASSERT(stream.read(reinterpret_cast<char*>(&value), sizeof value));
   return is_little_endian ? flip_endianness(value) : value;
@@ -76,6 +79,7 @@ Tensor read_images(const std::string& root, bool train) {
   auto tensor =
       torch::empty({count, 1, kImageRows, kImageColumns}, torch::kByte);
   images.read(reinterpret_cast<char*>(tensor.data_ptr()), tensor.numel());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return tensor.to(torch::kFloat32).div_(255);
 }
 
@@ -108,6 +112,7 @@ optional<size_t> MNIST::size() const {
   return images_.size(0);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 bool MNIST::is_train() const noexcept {
   return images_.size(0) == kTrainSize;
 }

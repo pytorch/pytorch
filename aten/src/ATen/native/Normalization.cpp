@@ -16,6 +16,7 @@ static const int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(batch_norm_cpu_inference_contiguous_stub);
 
 namespace {
@@ -427,11 +428,16 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                && ((input.dim() == 2 && input.size(0) <= 131070 && training) // per-activation, training
+                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  || (input.dim() == 2 && input.size(0) <= 262136 && !training) // per-activation, eval
+                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  || (input.dim() >= 3 && input.size(0) <= 880801 && training) // spatial, training
+                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  || (input.dim() >= 3 && input.size(0) <= 65535 && !training)) //spatial, eval
                && detail::getCUDAHooks().compiledWithCuDNN()
+               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
   if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {

@@ -48,6 +48,7 @@ struct T {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Train, TrainBasic) {
   {
     VGraph graph;
@@ -55,6 +56,7 @@ TEST(Train, TrainBasic) {
     auto B = graph.create_tensor({"K"});
     auto C = call("mul", {A, B})[0];
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -66,11 +68,15 @@ TEST(Train, TrainBasic) {
     SimpleIREvaluator cg(
         s, {inputs.at(A), inputs.at(B), bindings.at(C), vbindings.at("K")});
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto N = 1024;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> a_vec(N, 21.0f);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> b_vec(N, 2.0f);
     std::vector<float> c_vec(N, 0.0f);
     cg.call({a_vec.data(), b_vec.data(), c_vec.data(), N});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     assertAllEqual(c_vec, 42.0f);
   }
   {
@@ -84,6 +90,7 @@ TEST(Train, TrainBasic) {
     // dD/dA = 2*(A*B)*B = 2*A*B^2
     auto dA = grad(D, A, ones);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -100,13 +107,17 @@ TEST(Train, TrainBasic) {
          bindings.at(dA),
          vbindings.at("K")});
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto N = 1024;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> a_vec(N, 21.0f);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> b_vec(N, 2.0f);
     std::vector<float> ones_vec(N, 1.0f);
     std::vector<float> da_vec(N, 0.0f);
     cg.call({a_vec.data(), b_vec.data(), ones_vec.data(), da_vec.data(), N});
     // 2*A*B^2
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     assertAllEqual(da_vec, 168.0f);
   }
   // T wrapper
@@ -116,6 +127,7 @@ TEST(Train, TrainBasic) {
     auto B = T(g.create_tensor({"K"}));
     auto C = A + B;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -127,11 +139,15 @@ TEST(Train, TrainBasic) {
     SimpleIREvaluator cg(
         s, {inputs.at(A), inputs.at(B), bindings.at(C), vbindings.at("K")});
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto N = 1024;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> a_vec(N, 21.0f);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> b_vec(N, 2.0f);
     std::vector<float> c_vec(N, 0.0f);
     cg.call({a_vec.data(), b_vec.data(), c_vec.data(), N});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     assertAllEqual(c_vec, 23.0f);
   }
   {
@@ -145,6 +161,7 @@ TEST(Train, TrainBasic) {
     // dD/dA = 2*(A*B)*B = 2*A*B^2
     auto dA = D.grad(A, ones);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -161,13 +178,17 @@ TEST(Train, TrainBasic) {
          bindings.at(dA),
          vbindings.at("K")});
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto N = 1024;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> a_vec(N, 21.0f);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> b_vec(N, 2.0f);
     std::vector<float> ones_vec(N, 1.0f);
     std::vector<float> da_vec(N, 0.0f);
     cg.call({a_vec.data(), b_vec.data(), ones_vec.data(), da_vec.data(), N});
     // 2*A*B^2
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     assertAllEqual(da_vec, 168.0f);
   }
   // division gradient
@@ -180,6 +201,7 @@ TEST(Train, TrainBasic) {
     // d (A^2 / B)^2 / dB = -2 A^4 / B^3
     auto dC = (C * C).grad(B, ones);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -195,19 +217,24 @@ TEST(Train, TrainBasic) {
          inputs.at(ones),
          bindings.at(dC),
          vbindings.at("K")});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto N = 1024;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> a_vec(N, 2.0f);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> b_vec(N, 3.0f);
     std::vector<float> ones_vec(N, 1.0f);
     std::vector<float> dc_vec(N, 0.0f);
     cg.call({a_vec.data(), b_vec.data(), ones_vec.data(), dc_vec.data(), N});
     // -2 A^4 / B^3
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     assertAllEqual(dc_vec, -1.185185185185f);
   }
   {
     VGraph g;
     auto X = T(g, {"K"});
     auto Y = X.sum();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -216,10 +243,13 @@ TEST(Train, TrainBasic) {
     KernelScope kernel_scope;
     std::tie(s, inputs, bindings, vbindings) = to_tensorexpr(g, {Y});
     SimpleIREvaluator cg(s, {inputs.at(X), bindings.at(Y), vbindings.at("K")});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto N = 1024;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> X_vec(N, 2.0f);
     std::vector<float> Y_vec(1, 0.0f);
     cg.call({X_vec.data(), Y_vec.data(), N});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     assertAllEqual(Y_vec, 2048.f);
   }
 
@@ -228,6 +258,7 @@ TEST(Train, TrainBasic) {
     auto X = T(g, {"K"});
     auto Y = X.sum();
     auto Z = Y.broadcast_like(X);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -236,10 +267,13 @@ TEST(Train, TrainBasic) {
     KernelScope kernel_scope;
     std::tie(s, inputs, bindings, vbindings) = to_tensorexpr(g, {Z});
     SimpleIREvaluator cg(s, {inputs.at(X), bindings.at(Z), vbindings.at("K")});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto N = 1024;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> X_vec(N, 2.0f);
     std::vector<float> Z_vec(N, 0.0f);
     cg.call({X_vec.data(), Z_vec.data(), N});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     assertAllEqual(Z_vec, 2048.f);
   }
 
@@ -265,6 +299,7 @@ TEST(Train, TrainBasic) {
     W_grad = W_grad * LR.broadcast_like(W_grad);
     auto new_W = W - W_grad;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
     std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
@@ -294,14 +329,17 @@ TEST(Train, TrainBasic) {
     std::vector<float> X_(N, 0.0f);
 
     // Generate a random target vector
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> W_ref_(N, 3.0f);
     std::generate(W_ref_.begin(), W_ref_.end(), gen);
 
     std::vector<float> W_(N, 0.0f);
     std::vector<float> one_(1, 1.0f);
     std::vector<float> K_(N, 1.0f);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> LR_(1, 0.1f);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (auto i = 0; i < 100; ++i) {
       std::generate(X_.begin(), X_.end(), gen);
       cg.call(

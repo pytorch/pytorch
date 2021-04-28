@@ -52,6 +52,7 @@ struct BenchmarkConfig {
   int num_warmup_iters{1};
   // Number of iterations the benchmark should run with. This number is separate
   // from the warmup iterations
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t num_iters{100};
   // If set autograd profiler will be enabled. I.e. this variable would be created
   // before the main benchmark loop (but after the warmup):
@@ -68,6 +69,7 @@ template <class Input, class Output, class Model>
 class BenchmarkHelper {
 public:
   BenchmarkHelper();
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   explicit BenchmarkHelper(Model model): model_(model), initialized_(true) {}
 
   // This method to be used in benchmark() method

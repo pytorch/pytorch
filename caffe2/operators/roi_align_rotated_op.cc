@@ -50,10 +50,12 @@ void pre_calc_for_bilinear_interpolate(
     for (int pw = 0; pw < pooled_width; pw++) {
       for (int iy = 0; iy < iy_upper; iy++) {
         const T yy = roi_start_h + ph * bin_size_h +
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             static_cast<T>(iy + .5f) * bin_size_h /
                 static_cast<T>(roi_bin_grid_h); // e.g., 0.5, 1.5
         for (int ix = 0; ix < ix_upper; ix++) {
           const T xx = roi_start_w + pw * bin_size_w +
+              // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
               static_cast<T>(ix + .5f) * bin_size_w /
                   static_cast<T>(roi_bin_grid_w);
 
@@ -64,6 +66,7 @@ void pre_calc_for_bilinear_interpolate(
           // deal with: inverse elements are out of feature map boundary
           if (y < -1.0 || y > height || x < -1.0 || x > width) {
             // empty
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
             PreCalc<T> pc;
             pc.pos1 = 0;
             pc.pos2 = 0;
@@ -87,7 +90,9 @@ void pre_calc_for_bilinear_interpolate(
 
           int y_low = (int)y;
           int x_low = (int)x;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int y_high;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           int x_high;
 
           if (y_low >= height - 1) {
@@ -110,6 +115,7 @@ void pre_calc_for_bilinear_interpolate(
           T w1 = hy * hx, w2 = hy * lx, w3 = ly * hx, w4 = ly * lx;
 
           // Save weights and indices
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
           PreCalc<T> pc;
           pc.pos1 = y_low * width + x_low;
           pc.pos2 = y_low * width + x_high;
@@ -156,17 +162,20 @@ void ROIAlignRotatedForward(
     // roi could have 5 or 6 columns
     const T* offset_bottom_rois = bottom_rois + n * roi_cols;
     int roi_batch_ind = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (roi_cols == 6) {
       roi_batch_ind = offset_bottom_rois[0];
       offset_bottom_rois++;
     }
 
     // Do not round
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     T roi_offset = continuous_coordinate ? T(0.5) : 0;
     T roi_center_w = offset_bottom_rois[0] * spatial_scale - roi_offset;
     T roi_center_h = offset_bottom_rois[1] * spatial_scale - roi_offset;
     T roi_width = offset_bottom_rois[2] * spatial_scale;
     T roi_height = offset_bottom_rois[3] * spatial_scale;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     T theta = offset_bottom_rois[4] * M_PI / 180.0;
 
     if (continuous_coordinate) {
@@ -198,7 +207,9 @@ void ROIAlignRotatedForward(
 
     // roi_start_h and roi_start_w are computed wrt the center of RoI (x, y).
     // Appropriate translation needs to be applied after.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     T roi_start_h = -roi_height / 2.0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     T roi_start_w = -roi_width / 2.0;
     pre_calc_for_bilinear_interpolate(
         height,
@@ -363,9 +374,11 @@ C10_EXPORT bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIAlignRotated, RoIAlignRotatedOp<float, CPUContext>);
 
 // Input: X, rois; Output: Y
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIAlignRotated)
     .NumInputs(2)
     .NumOutputs(1)

@@ -27,6 +27,7 @@ void inline flip_cpu_kernel(
   auto sizes_v = in_tensor.sizes().vec();
   auto strides_v = in_tensor.strides().vec();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::parallel_for(0, numel, 1000, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
       int64_t cur_indices = i;
@@ -62,6 +63,7 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
   }
 
   if (in_tensor.is_quantized()) {
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(in_tensor.scalar_type(),
                                         "flip_quantized_cpu", [&] {
       flip_cpu_kernel<scalar_t>(

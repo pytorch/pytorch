@@ -22,11 +22,17 @@ namespace {
 
 namespace at { namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(smooth_l1_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(smooth_l1_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(huber_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(huber_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mse_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mse_backward_stub);
 
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
@@ -274,6 +280,7 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     }
 
     if (full) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto stirling_term = target * at::log(target) - target + 0.5 * at::log(2 * c10::pi<double> * target);
         loss += stirling_term.masked_fill(target <= 1, 0);
     }
@@ -442,6 +449,7 @@ Tensor mse_loss_backward(const Tensor& grad_output, const Tensor& input, const T
 
 Tensor& mse_loss_backward_out(const Tensor& grad_output,
     const Tensor& input, const Tensor& target, int64_t reduction, Tensor& grad_input) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto norm = reduction == Reduction::Mean ? 2. / input.numel() : 2.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)

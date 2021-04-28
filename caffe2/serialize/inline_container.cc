@@ -52,18 +52,21 @@ size_t PyTorchStreamReader::read(uint64_t pos, char* buf, size_t n) {
   return in_->read(pos, buf, n, "reading file");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PyTorchStreamReader::PyTorchStreamReader(const std::string& file_name)
     : ar_(std::make_unique<mz_zip_archive>()),
       in_(std::make_unique<FileAdapter>(file_name)) {
   init();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PyTorchStreamReader::PyTorchStreamReader(std::istream* in)
     : ar_(std::make_unique<mz_zip_archive>()),
       in_(std::make_unique<IStreamAdapter>(in)) {
   init();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PyTorchStreamReader::PyTorchStreamReader(
     std::shared_ptr<ReadAdapterInterface> in)
     : ar_(std::make_unique<mz_zip_archive>()), in_(std::move(in)) {
@@ -80,6 +83,7 @@ void PyTorchStreamReader::init() {
   // check for the old magic number,
   constexpr size_t kMagicValueLength = 8;
   if (size > kMagicValueLength) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     char buf[kMagicValueLength];
     read(0, buf, kMagicValueLength);
     valid("checking magic number");
@@ -114,6 +118,7 @@ void PyTorchStreamReader::init() {
 
   // version check
   at::DataPtr version_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t version_size;
   if (hasRecord(".data/version")) {
     std::tie(version_ptr, version_size) = getRecord(".data/version");
@@ -124,6 +129,7 @@ void PyTorchStreamReader::init() {
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
   version_ = caffe2::stoull(version);
   AT_ASSERTM(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       version_ >= kMinSupportedFileFormatVersion,
       "Attempted to read a PyTorch file with version ",
       c10::to_string(version_),
@@ -131,6 +137,7 @@ void PyTorchStreamReader::init() {
       c10::to_string(kMinSupportedFileFormatVersion),
       ". Your PyTorch script module file is too old. Please re-export it again.");
   AT_ASSERTM(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       version_ <= kMaxSupportedFileFormatVersion,
       "Attempted to read a PyTorch file with version ",
       version_,
@@ -182,6 +189,7 @@ size_t getPadding(
   padding_buf[0] = 'F';
   padding_buf[1] = 'B';
   padding_buf[2] = (uint8_t)padding_size;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   padding_buf[3] = (uint8_t)(padding_size >> 8);
   return padding_size_plus_fbxx;
 }
@@ -208,6 +216,7 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
   std::lock_guard<std::mutex> guard(reader_lock_);
   mz_uint num_files = mz_zip_reader_get_num_files(ar_.get());
   std::vector<std::string> out;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char buf[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
   for (size_t i = 0; i < num_files; i++) {
     mz_zip_reader_get_filename(ar_.get(), i, buf, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE);
@@ -221,6 +230,7 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
           ": ",
           buf);
     }
+    // NOLINTNEXTLINE(modernize-use-emplace)
     out.push_back(buf + archive_name_plus_slash_.size());
   }
   return out;
@@ -252,6 +262,7 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string
 }
 
 static int64_t read_le_16(uint8_t* buf) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return buf[0] + (buf[1] << 8);
 }
 
@@ -260,6 +271,7 @@ size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
   valid("retrieving file meta-data for ", name.c_str());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   uint8_t local_header[MZ_ZIP_LOCAL_DIR_HEADER_SIZE];
   in_->read(
       stat.m_local_header_ofs,
@@ -301,6 +313,7 @@ PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name)
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::function<size_t(const void*, size_t)>& writer_func)
     : archive_name_("archive"),
       writer_func_(writer_func) {
@@ -372,6 +385,7 @@ void PyTorchStreamWriter::writeEndOfFile() {
   // Rewrites version info
   std::string version = c10::to_string(version_);
   version.push_back('\n');
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (version_ >= 0x6L) {
     writeRecord(".data/version", version.c_str(), version.size());
   } else {
@@ -404,6 +418,7 @@ void PyTorchStreamWriter::valid(const char* what, const char* info) {
   }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyTorchStreamWriter::~PyTorchStreamWriter() {
   if (!finalized_) {
     writeEndOfFile();

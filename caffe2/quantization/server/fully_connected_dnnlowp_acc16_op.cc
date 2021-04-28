@@ -4,7 +4,9 @@
 
 #include "fbgemm_pack_op.h"
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_copy_to_32bit_frequency);
 
 namespace caffe2 {
@@ -67,8 +69,10 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
             << nbits_in_non_outlier_;
       }
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (!Wq_acc16_packed_ && nbits_in_non_outlier_ < 8) {
         static int log_occurences = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if (log_occurences < 32) {
           ++log_occurences;
           LOG(WARNING) << "FC DNNLOWP_ACC16 using outlier-aware quantization";
@@ -88,6 +92,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         LOG(INFO) << "copy_to_32bit_frequency " << copy_to_32bit_frequency_;
       }
 
+      // NOLINTNEXTLINE(modernize-make-shared)
       Wq_acc16_packed_.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
           fbgemm::matrix_op_t::Transpose,
           K,
@@ -143,6 +148,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
           this->b_quantized_data_,
           N); // ncols per quant group
 
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (nbits_in_non_outlier_ < 8) {
         DoSpmdmOnInpBuffer<
             typename ReQuantizeOutput<false /* fuse relu */>::outType,
@@ -183,6 +189,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
           this->b_dequantized_data_,
           N); // ncols per quant group
 
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (nbits_in_non_outlier_ < 8) {
         DoSpmdmOnInpBuffer<
             typename ReQuantizeForFloat<false /* fuse relu */>::outType,
@@ -274,11 +281,13 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP_ACC16,
     FullyConnectedDNNLowPAcc16Op);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FC,
     DNNLOWP_ACC16,

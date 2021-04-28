@@ -15,6 +15,7 @@ ERArrXXf BoxesArea(const ERArrXXf& boxes, const bool legacy_plus_one) {
   const auto h = boxes.col(3) - boxes.col(1) + int(legacy_plus_one);
   const ERArrXXf areas = w * h;
   CAFFE_ENFORCE((areas >= 0).all(), "Negative areas founds: ", boxes);
+  // NOLINTNEXTLINE(performance-no-automatic-move)
   return areas;
 }
 
@@ -36,6 +37,7 @@ ERArrXXf MapRoIsToFpnLevels(
   // equivalent to python code
   //   target_lvls = np.floor(lvl0 + np.log2(s / s0 + 1e-6))
   //   target_lvls = np.clip(target_lvls, k_min, k_max)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target_lvls = (lvl0 + (s / s0 + 1e-6).log() / log(2)).floor();
   auto target_lvls_clipped = target_lvls.min(k_max).max(k_min);
   return target_lvls_clipped;
@@ -144,6 +146,7 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
     const auto& roi_in = Input(i);
     proposal_num += roi_in.size(0);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ERArrXXf rois(proposal_num, 5);
   EArrXf scores(proposal_num);
   int len = 0;
@@ -151,7 +154,9 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
     const auto& roi_in = Input(i);
     const int n = roi_in.size(0);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Eigen::Map<const ERArrXXf> roi(roi_in.data<float>(), n, 5);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     rois.block(len, 0, n, 5) = roi;
 
     const auto& score_in = Input(num_rpn_lvls + i);
@@ -182,6 +187,7 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   const int canon_level = roi_canonical_level_;
   auto rois_block = rois.block(0, 1, rois.rows(), 4);
   auto lvls = utils::MapRoIsToFpnLevels(
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       rois_block, lvl_min, lvl_max, canon_scale, canon_level, legacy_plus_one_);
 
   // equivalent to python code
@@ -262,6 +268,7 @@ bool CollectRpnProposalsOp<CPUContext>::RunOnDevice() {
     const auto& roi_in = Input(i);
     proposal_num += roi_in.size(0);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ERArrXXf rois(proposal_num, 5);
   EArrXf scores(proposal_num);
   int len = 0;
@@ -269,7 +276,9 @@ bool CollectRpnProposalsOp<CPUContext>::RunOnDevice() {
     const auto& roi_in = Input(i);
     const int n = roi_in.size(0);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Eigen::Map<const ERArrXXf> roi(roi_in.data<float>(), n, 5);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     rois.block(len, 0, n, 5) = roi;
 
     const auto& score_in = Input(num_rpn_lvls + i);
@@ -313,6 +322,7 @@ bool DistributeFpnProposalsOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE(dim_rois == 4 || dim_rois == 5);
   Eigen::Map<const ERArrXXf> rois_4or5(
       rois_in.data<float>(), num_rois, dim_rois);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ERArrXXf rois = ERArrXXf::Zero(num_rois, 5);
   rois.rightCols(dim_rois) = rois_4or5;
 
@@ -327,6 +337,7 @@ bool DistributeFpnProposalsOp<CPUContext>::RunOnDevice() {
   const int canon_level = roi_canonical_level_;
   auto rois_block = rois.block(0, 1, rois.rows(), 4);
   auto lvls = utils::MapRoIsToFpnLevels(
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       rois_block, lvl_min, lvl_max, canon_scale, canon_level, legacy_plus_one_);
 
   // Create new roi blobs for each FPN level
@@ -381,14 +392,18 @@ bool DistributeFpnProposalsOp<CPUContext>::RunOnDevice() {
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     CollectAndDistributeFpnRpnProposals,
     CollectAndDistributeFpnRpnProposalsOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CollectRpnProposals, CollectRpnProposalsOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     DistributeFpnProposals,
     DistributeFpnProposalsOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CollectAndDistributeFpnRpnProposals)
     .NumInputs(2, INT_MAX)
     .NumOutputs(3, INT_MAX)
@@ -443,26 +458,31 @@ will change.
         "format (image_index, x1, y1, x2, y2). See rpn_rois "
         "documentation from GenerateProposals.")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "rpn_roi_probs_fpn2",
         "RPN objectness probabilities for FPN level 2. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         6,
         "rpn_roi_probs_fpn3",
         "RPN objectness probabilities for FPN level 3. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         7,
         "rpn_roi_probs_fpn4",
         "RPN objectness probabilities for FPN level 4. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         8,
         "rpn_roi_probs_fpn5",
         "RPN objectness probabilities for FPN level 5. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         9,
         "rpn_roi_probs_fpn6",
         "RPN objectness probabilities for FPN level 6. "
@@ -493,14 +513,17 @@ will change.
         "RPN proposals for ROI level 5, "
         "format (image_index, x1, y1, x2, y2)")
     .Output(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "rois_idx_restore",
         "Permutation on the concatenation of all "
         "rois_fpni, i=min...max, such that when applied the RPN RoIs are "
         "restored to their original order in the input blobs.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CollectAndDistributeFpnRpnProposals);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CollectRpnProposals)
     .NumInputs(2, INT_MAX)
     .NumOutputs(1)
@@ -541,26 +564,31 @@ OPERATOR_SCHEMA(CollectRpnProposals)
         "format (image_index, x1, y1, x2, y2). See rpn_rois "
         "documentation from GenerateProposals.")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "rpn_roi_probs_fpn2",
         "RPN objectness probabilities for FPN level 2. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         6,
         "rpn_roi_probs_fpn3",
         "RPN objectness probabilities for FPN level 3. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         7,
         "rpn_roi_probs_fpn4",
         "RPN objectness probabilities for FPN level 4. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         8,
         "rpn_roi_probs_fpn5",
         "RPN objectness probabilities for FPN level 5. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         9,
         "rpn_roi_probs_fpn6",
         "RPN objectness probabilities for FPN level 6. "
@@ -571,8 +599,10 @@ OPERATOR_SCHEMA(CollectRpnProposals)
         "Top proposals limited to rpn_post_nms_topN total, "
         "format (image_index, x1, y1, x2, y2)");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CollectRpnProposals);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DistributeFpnProposals)
     .NumInputs(1)
     .NumOutputs(2, INT_MAX)
@@ -615,6 +645,7 @@ OPERATOR_SCHEMA(DistributeFpnProposals)
         "rois_fpni, i=min...max, such that when applied the RPN RoIs are "
         "restored to their original order in the input blobs.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(DistributeFpnProposals);
 
 } // namespace

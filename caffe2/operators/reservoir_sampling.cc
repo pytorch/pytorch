@@ -34,6 +34,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
 
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->dim(), input.dim());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t i = 1; i < input.dim(); ++i) {
         CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
@@ -103,8 +104,10 @@ class ReservoirSamplingOp final : public Operator<Context> {
     auto output_num =
         std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
     // output_num is >= output_batch_size
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     output->ExtendTo(output_num, 50);
     if (pos_to_object) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       pos_to_object->ExtendTo(output_num, 50);
       // ExtendTo doesn't zero-initialize tensors any more, explicitly clear
       // the memory
@@ -216,12 +219,16 @@ class ReservoirSamplingOp final : public Operator<Context> {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReservoirSampling, ReservoirSamplingOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReservoirSampling)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs({4, 7})
     .NumOutputs({2, 4})
     .NumInputsOutputs([](int in, int out) { return in / 3 == out / 2; })
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .EnforceInplace({{0, 0}, {1, 1}, {5, 2}, {6, 3}})
     .SetDoc(R"DOC(
 Collect `DATA` tensor into `RESERVOIR` of size `num_to_collect`. `DATA` is
@@ -258,11 +265,13 @@ This operator is thread-safe.
         "(Optional, int64) If provided, used for deduplicating object in the "
         "reservoir")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "OBJECT_TO_POS_MAP_IN",
         "(Optional) Auxiliary bookkeeping map. This should be created from "
         " `CreateMap` with keys of type int64 and values of type int32")
     .Input(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         6,
         "POS_TO_OBJECT_IN",
         "(Optional) Tensor of type int64 used for bookkeeping in deduplication")
@@ -271,6 +280,7 @@ This operator is thread-safe.
     .Output(2, "OBJECT_TO_POS_MAP", "(Optional) Same as the input")
     .Output(3, "POS_TO_OBJECT", "(Optional) Same as the input");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ReservoirSampling);
 } // namespace
 } // namespace caffe2

@@ -7,6 +7,7 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(_segment_reduce_stub);
 
 namespace {
@@ -98,9 +99,12 @@ Tensor segment_reduce_kernel(
 
 REGISTER_ARCH_DISPATCH(
     _segment_reduce_stub,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     DEFAULT,
     &_segment_reduce_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
 REGISTER_VSX_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
 

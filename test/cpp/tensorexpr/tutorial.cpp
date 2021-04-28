@@ -71,6 +71,7 @@ int main(int argc, char* argv[]) {
     // also be a 'Mul' or some other expression.
     //
     // Let's construct a simple TE:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Expr* lhs = new IntImm(5);
     Expr* rhs = new Var("x", kInt);
     Expr* mul = new Mul(lhs, rhs);
@@ -97,6 +98,7 @@ int main(int argc, char* argv[]) {
     ExprHandle a = Var::make("a", kInt);
     ExprHandle b = Var::make("b", kFloat);
     ExprHandle c = Var::make("c", kFloat);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle x = ExprHandle(5) * a + b / (sigmoid(c) - 3.0f);
     std::cout << "Tensor expression: " << *x.node() << std::endl;
     // Prints: Tensor expression: float(5 * a) + b / ((sigmoid(c)) - 3.f)
@@ -109,6 +111,7 @@ int main(int argc, char* argv[]) {
     // placeholder similar to Var, but with dimensions info.
     //
     // Let's construct a simple load:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BufHandle A("A", {ExprHandle(64), ExprHandle(32)}, kInt);
     ExprHandle i = Var::make("i", kInt), j = Var::make("j", kInt);
     ExprHandle load = Load::make(A.dtype(), A, {i, j});
@@ -128,8 +131,10 @@ int main(int argc, char* argv[]) {
 
     // First, let's specify the sizes:
     std::vector<const Expr*> dims = {
-        new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
-                                         // and represents an integer constant
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        new IntImm(64),
+        new IntImm(32)}; // IntImm stands for Integer Immediate
+    // and represents an integer constant
 
     // Now we can create a Buf object by providing a name, dimensions, and a
     // data type of the elements:
@@ -172,6 +177,7 @@ int main(int argc, char* argv[]) {
     // dimensions, and a lambda specifying the computation body:
     Tensor* Z = Compute(
         "Z",
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{64, "i"}, {32, "j"}},
         [](const VarHandle& i, const VarHandle& j) { return i / j; });
     std::cout << "Tensor computation: " << *Z << std::endl;
@@ -185,9 +191,11 @@ int main(int argc, char* argv[]) {
 
     // Tensors might access other tensors and external placeholders in their
     // expressions. It can be done like so:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Placeholder P("P", kInt, {64, 32});
     Tensor* R = Compute(
         "R",
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
           return Z->load(i, j) * P.load(i, j);
@@ -221,16 +229,20 @@ int main(int argc, char* argv[]) {
     // the computation (how to compute?).
     //
     // Let's create a simple tensor expression and construct a loop nest for it.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Placeholder A("A", kFloat, {64, 32});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Placeholder B("B", kFloat, {64, 32});
     Tensor* X = Compute(
         "X",
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
           return A.load(i, j) + B.load(i, j);
         });
     Tensor* Y = Compute(
         "Y",
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
           return sigmoid(X->load(i, j));
@@ -254,6 +266,7 @@ int main(int argc, char* argv[]) {
 
     // Creating a loop nest is as quite simple, we just need to specify a list
     // of all and a list of output tensors:
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     LoopNest loopnest(/*outputs=*/{Y}, /*all=*/{X, Y});
 
     // An IR used in LoopNest is based on tensor statements, represented by
@@ -311,9 +324,13 @@ int main(int argc, char* argv[]) {
     // our loop nest now. Let's split the inner loop with a factor of 9, for
     // instance.
     std::vector<For*> loops = loopnest.getLoopStmtsFor(Y);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_outer;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_inner;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_tail;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int split_factor = 9;
     loopnest.splitWithTail(
         loops[1], // loops[0] is the outer loop, loops[1] is inner
@@ -350,10 +367,13 @@ int main(int argc, char* argv[]) {
     // section we would look at how we can bridge that gap.
 
     // Let's start by constructing a simple computation for us to work with:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Placeholder A("A", kInt, {64, 32});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Placeholder B("B", kInt, {64, 32});
     Tensor* X = Compute(
         "X",
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
           return A.load(i, j) + B.load(i, j);
@@ -399,8 +419,11 @@ int main(int argc, char* argv[]) {
     // computation everything is ready.
 
     // Let's now create some inputs and run our computation with them:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<int> data_A(64 * 32, 3); // This will be the input A
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<int> data_B(64 * 32, 5); // This will be the input B
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<int> data_X(64 * 32, 0); // This will be used for the result
 
     // Now let's invoke our codegen to perform the computation on our data. We
@@ -417,8 +440,13 @@ int main(int argc, char* argv[]) {
 
     // Let's print one of the elements from each array to verify that the
     // computation did happen:
-    std::cout << "A[10] = " << data_A[10] << std::endl
-              << "B[10] = " << data_B[10] << std::endl
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    std::cout << "A[10] = " << data_A[10]
+              << std::endl
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              << "B[10] = " << data_B[10]
+              << std::endl
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               << "X[10] = A[10] + B[10] = " << data_X[10] << std::endl;
     // Prints:
     // A[10] = 3

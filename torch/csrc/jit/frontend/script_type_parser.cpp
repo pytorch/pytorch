@@ -183,7 +183,9 @@ c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   TypePtr list_ptr = ListType::create(elem_ptr->second);
 
   const char* len_c = len.c_str();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   char* end;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   size_t len_v = strtoull(len_c, &end, 10);
   if (end != len_c + len.size()) {
     throw ErrorReport(subscript.subscript_exprs().range())

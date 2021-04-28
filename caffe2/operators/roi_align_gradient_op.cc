@@ -101,12 +101,14 @@ void ROIAlignBackwardFeature(
 
     const T* offset_bottom_rois = bottom_rois + n * rois_cols;
     int roi_batch_ind = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (rois_cols == 5) {
       roi_batch_ind = offset_bottom_rois[0];
       offset_bottom_rois++;
     }
 
     // Do not using rounding; this implementation detail is critical
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     T roi_offset = continuous_coordinate ? T(0.5) : 0;
     T roi_start_w = offset_bottom_rois[0] * spatial_scale - roi_offset;
     T roi_start_h = offset_bottom_rois[1] * spatial_scale - roi_offset;
@@ -146,14 +148,17 @@ void ROIAlignBackwardFeature(
 
     for (int iy = 0; iy < roi_bin_grid_h; iy++) {
       const T y = roi_start_h + ph * bin_size_h +
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           static_cast<T>(iy + .5f) * bin_size_h /
               static_cast<T>(roi_bin_grid_h); // e.g., 0.5, 1.5
       for (int ix = 0; ix < roi_bin_grid_w; ix++) {
         const T x = roi_start_w + pw * bin_size_w +
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             static_cast<T>(ix + .5f) * bin_size_w /
                 static_cast<T>(roi_bin_grid_w);
 
         T w1, w2, w3, w4;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int x_low, x_high, y_low, y_high;
 
         bilinear_interpolate_gradient(
@@ -232,10 +237,12 @@ C10_EXPORT bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIAlignGradient, RoIAlignGradientOp<float, CPUContext>);
 
 // Input: X, rois, dY (aka "gradOutput");
 // Output: dX (aka "gradInput")
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIAlignGradient)
     .NumInputs(3)
     .NumOutputs(1)
@@ -259,6 +266,7 @@ class GetRoIAlignGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RoIAlign, GetRoIAlignGradient);
 
 template <typename T>

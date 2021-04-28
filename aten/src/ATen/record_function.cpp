@@ -20,14 +20,18 @@ RecordFunctionHandle next_unique_record_function_handle() {
   return RecordFunctionHandle(unique_rf_id++);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local RecordFunctionTLS rf_tls_;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int64_t> defaultNodeId(-1);
 
 // Enumerates thread ids logically;
 // note: std::this_thread::get_id may return potentially
 // reused thread id
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<uint64_t> next_thread_id_ {0};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local uint64_t current_thread_id_ = 0;
 
 // Low probability constant
@@ -43,6 +47,7 @@ struct CoinflipTLS {
 
 CoinflipTLS::CoinflipTLS()
     : tries_left_(0), genGeo_(std::random_device()()), genZeroOne_(std::random_device()()), distGeo_(kLowProb), distZeroOne_(0.0, 1.0) {}
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local CoinflipTLS coinflip_tls_;
 
 int sample_geometric() {
@@ -73,6 +78,7 @@ class CallbackManager {
     // note: monotonically increasing callbacks_unique_id keeps
     // sorted_tls_callbacks_ sorted
     auto handle = next_unique_callback_handle();
+    // NOLINTNEXTLINE(performance-move-const-arg)
     rf_tls_.sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
   }
@@ -83,6 +89,7 @@ class CallbackManager {
       at::bumpRecordAllFunctions();
     }
     auto handle = next_unique_callback_handle();
+    // NOLINTNEXTLINE(performance-move-const-arg)
     sorted_global_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
   }
@@ -374,11 +381,13 @@ bool hasThreadLocalCallbacks() {
 
 CallbackHandle addThreadLocalCallback(
     RecordFunctionCallback cb) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return manager().addThreadLocalCallback(std::move(cb));
 }
 
 CallbackHandle addGlobalCallback(
     RecordFunctionCallback cb) {
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return manager().addGlobalCallback(std::move(cb));
 }
 
@@ -491,6 +500,7 @@ void RecordFunction::end() {
 namespace {
 // Whether to try to create RecordFunction on each call (>0) or
 // use pre-sampling (=0)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int> global_record_all_functions_ {0};
 }
 

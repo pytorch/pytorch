@@ -40,6 +40,7 @@ using namespace torch::autograd;
 using namespace torch::jit;
 using at::Tensor;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPFunctionClass = nullptr;
 
 #define THPFunction_assert(condition, ...)                                     \
@@ -115,6 +116,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   if (!pyInputs) throw_python_error();
   auto& output_info = py_fn->output_info;
   for (size_t i = 0; i < num_inputs; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject* input;
     if (inputs[i].defined() || !py_fn->materialize_grads) {
       input = THPVariable_Wrap(inputs[i]);
@@ -1015,6 +1017,7 @@ PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
 
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPFunction_properties[] = {
   {"saved_tensors", (getter)THPFunction_saved_tensors, nullptr, nullptr, nullptr},
   {"saved_variables", (getter)THPFunction_saved_variables, nullptr, nullptr, nullptr},
@@ -1029,6 +1032,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPFunction_methods[] = {
   {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
   {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
@@ -1038,12 +1042,14 @@ static struct PyMethodDef THPFunction_methods[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPFunctionType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._FunctionBase",                    /* tp_name */
   sizeof(THPFunction),                         /* tp_basicsize */
   0,                                           /* tp_itemsize */
   (destructor)THPFunction_dealloc,             /* tp_dealloc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */

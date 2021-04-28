@@ -319,10 +319,12 @@ inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
 /// Computes pseudo-inverse
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.pinv
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 inline Tensor pinv(const Tensor& input, double rcond=1e-15, bool hermitian=false) {
   return detail::pinv(input, rcond, hermitian);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 inline Tensor& pinv_out(Tensor& result, const Tensor& input, double rcond=1e-15, bool hermitian=false) {
   return detail::pinv_out(result, input, rcond, hermitian);
 }

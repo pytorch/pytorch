@@ -54,6 +54,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuserTest, TestSimple_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -77,6 +78,7 @@ TEST(FuserTest, TestSimple_CUDA) {
   ASSERT_EQ(max_diff, 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuserTest, TestOne_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -110,6 +112,7 @@ TEST(FuserTest, TestOne_CUDA) {
     // with the "wrong" dimensions, and then use transpose to get an
     // appropriately sized view.
     for (const auto i : c10::irange(graph.inputs().size())) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[ti], dims[tj]);
       inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
@@ -137,6 +140,7 @@ TEST(FuserTest, TestOne_CUDA) {
   testOne(0, 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuserTest, FusedConcat_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -160,7 +164,9 @@ TEST(FuserTest, FusedConcat_CUDA) {
       %3 : Tensor = prim::FusedConcat[dim=2](%0, %2)
       return (%2, %3))IR";
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = at::rand({3, 4, 5}, at::kCUDA);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = at::rand({4, 3, 5}, at::kCUDA).transpose(0, 1);
   const auto o_r = a * b;
 
@@ -182,6 +188,7 @@ TEST(FuserTest, FusedConcat_CUDA) {
   };
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuserTest, FusionAliasing) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -210,6 +217,7 @@ TEST(FuserTest, FusionAliasing) {
       ->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuserTest, KernelCaching) {
 #if defined(FBCODE_CAFFE2)
   return;

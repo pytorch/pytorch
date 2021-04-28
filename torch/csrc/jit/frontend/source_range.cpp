@@ -118,6 +118,7 @@ C10_EXPORT void SourceRange::print_with_context(
   // print out location information
   if (auto flc = file_line_col()) {
     std::string filename;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t line, col;
     std::tie(filename, line, col) = *flc;
     out << "  File \"" << filename << "\", line " << line;

@@ -42,6 +42,7 @@ using namespace torch::autograd;
 
 namespace py = pybind11;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPVariableClass = nullptr;
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -439,6 +440,7 @@ PyObject *THPVariable_get_names(PyObject *self, void *unused)
 
   const auto dimnames = tensor.names();
   for (size_t i = 0; i < size; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject* str;
     if (dimnames[i].type() == at::NameType::WILDCARD) {
       // PyTuple_SET_ITEM steals a reference to the object. When the tuple is
@@ -758,6 +760,7 @@ int THPVariable_set_imag(THPVariable* self, THPVariable *imag, void *unused)
 
 // properties are registered here because we are currently only able to bind them
 // manually. TODO: make declarable in native_functions
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPVariable_properties[] = {
   {"T", (getter)THPVariable_get_T, nullptr, nullptr, nullptr},
   {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
@@ -795,12 +798,14 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyMappingMethods THPVariable_as_mapping = {
   THPVariable_length,
   THPVariable_getitem,
   THPVariable_setitem,
 };
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef extra_methods[] = {
   {"as_subclass", castPyCFunctionWithKeywords(THPVariable_as_subclass),
     METH_VARARGS | METH_KEYWORDS, nullptr},
@@ -824,12 +829,14 @@ struct THPVariableMeta {
 
 int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPVariableMetaType = {
   PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
   "torch._C._TensorMeta",                      /* tp_name */
   sizeof(THPVariableMeta),                     /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
@@ -865,12 +872,14 @@ PyTypeObject THPVariableMetaType = {
   nullptr                                      /* tp_new */
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPVariableType = {
   PyVarObject_HEAD_INIT(&THPVariableMetaType, 0)
   "torch._C._TensorBase",                      /* tp_name */
   sizeof(THPVariable),                         /* tp_basicsize */
   0,                                           /* tp_itemsize */
   (destructor)THPVariable_dealloc,             /* tp_dealloc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
@@ -921,6 +930,7 @@ int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
 
 namespace torch { namespace autograd {
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 extern PyMethodDef variable_methods[];
 extern void initTorchFunctions(PyObject *module);
 
@@ -931,6 +941,7 @@ void initTensorImplConversion(PyObject* module) {
         unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
     TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
+    // NOLINTNEXTLINE(performance-move-const-arg)
     return py::cast(std::move(tensor));
   });
   // set on the module level to avoid mixing pybind and plain CPython extensions

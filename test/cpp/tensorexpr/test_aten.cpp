@@ -14,6 +14,7 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, _cast_Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -42,6 +43,7 @@ TEST(ATen, _cast_Float) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, negInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -70,6 +72,7 @@ TEST(ATen, negInt) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, negFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -98,6 +101,7 @@ TEST(ATen, negFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, addInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -135,6 +139,7 @@ TEST(ATen, addInt) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, addFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -172,6 +177,7 @@ TEST(ATen, addFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, subInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -209,6 +215,7 @@ TEST(ATen, subInt) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, subFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -246,6 +253,7 @@ TEST(ATen, subFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, lerp) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -283,6 +291,7 @@ TEST(ATen, lerp) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, addcmulInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -310,6 +319,7 @@ TEST(ATen, addcmulInt) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     d_v(i) = 5 * i + 3;
   }
 
@@ -325,6 +335,7 @@ TEST(ATen, addcmulInt) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, addcmulFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -352,6 +363,7 @@ TEST(ATen, addcmulFloat) {
     a_v(i) = i;
     b_v(i) = 2 * i + 1;
     c_v(i) = 3 * i + 2;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     d_v(i) = 5 * i + 3;
   }
 
@@ -367,6 +379,7 @@ TEST(ATen, addcmulFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, mulInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -399,6 +412,7 @@ TEST(ATen, mulInt) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, mulFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -431,6 +445,7 @@ TEST(ATen, mulFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, divInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -463,6 +478,7 @@ TEST(ATen, divInt) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, divFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -495,6 +511,7 @@ TEST(ATen, divFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, maxInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -527,6 +544,7 @@ TEST(ATen, maxInt) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, maxFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -559,6 +577,7 @@ TEST(ATen, maxFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, minInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -591,6 +610,7 @@ TEST(ATen, minInt) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, minFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -650,6 +670,7 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, reluInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -665,6 +686,7 @@ TEST(ATen, reluInt) {
   PaddedBuffer<int> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i - 64;
   }
 
@@ -677,6 +699,7 @@ TEST(ATen, reluInt) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, reluFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -694,6 +717,7 @@ TEST(ATen, reluFloat) {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i - 64;
   }
 
@@ -706,6 +730,7 @@ TEST(ATen, reluFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, logFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -721,6 +746,7 @@ TEST(ATen, logFloat) {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i + 10;
   }
 
@@ -733,6 +759,7 @@ TEST(ATen, logFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, fastLogFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -765,6 +792,7 @@ TEST(ATen, fastLogFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, fastTanhFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -797,6 +825,7 @@ TEST(ATen, fastTanhFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, fastSigmoidFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -830,6 +859,7 @@ TEST(ATen, fastSigmoidFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, log10Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -845,6 +875,7 @@ TEST(ATen, log10Float) {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i + 10;
   }
 
@@ -857,6 +888,7 @@ TEST(ATen, log10Float) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, log2Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -872,6 +904,7 @@ TEST(ATen, log2Float) {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a_v(i) = i + 10;
   }
 
@@ -884,6 +917,7 @@ TEST(ATen, log2Float) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, expFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -899,6 +933,7 @@ TEST(ATen, expFloat) {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     a_v(i) = i / 10.0f;
   }
 
@@ -911,6 +946,7 @@ TEST(ATen, expFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, erfFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -926,6 +962,7 @@ TEST(ATen, erfFloat) {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     a_v(i) = i / 10.0f;
   }
 
@@ -938,6 +975,7 @@ TEST(ATen, erfFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, cosFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
@@ -953,6 +991,7 @@ TEST(ATen, cosFloat) {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     a_v(i) = i / 10.0f;
   }
 
@@ -965,6 +1004,7 @@ TEST(ATen, cosFloat) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, eqInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
@@ -991,13 +1031,16 @@ TEST(ATen, eqInt) {
   assertAllEqual(c_buffer, 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, geInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
   Placeholder c(BufHandle("C", {N}, kInt));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> a_buffer(N, 5);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 0);
 
@@ -1017,12 +1060,14 @@ TEST(ATen, geInt) {
   assertAllEqual(c_buffer, 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, gtInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
   Placeholder c(BufHandle("C", {N}, kInt));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> a_buffer(N, 6);
   std::vector<int> b_buffer(N, 3);
   std::vector<int> c_buffer(N, 0);
@@ -1043,13 +1088,16 @@ TEST(ATen, gtInt) {
   assertAllEqual(c_buffer, 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, leInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
   Placeholder c(BufHandle("C", {N}, kInt));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> a_buffer(N, 5);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 0);
 
@@ -1069,13 +1117,16 @@ TEST(ATen, leInt) {
   assertAllEqual(c_buffer, 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATen, ltInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
   Placeholder b(BufHandle("B", {N}, kInt));
   Placeholder c(BufHandle("C", {N}, kInt));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> a_buffer(N, 5);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 1);
 

@@ -13,7 +13,9 @@
 
 using namespace at;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, QuantDequantAPIs) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto num_elements = 10;
   Tensor r = at::ones({num_elements});
   const double scale = 1.0;
@@ -53,6 +55,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
   }
 
   // Check for correct requantization
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double new_scale = 2.0;
   int64_t new_zero_point = 1;
   Tensor reqr = at::quantize_per_tensor(r, new_scale, new_zero_point, kQInt8);
@@ -68,14 +71,18 @@ TEST(TestQTensor, QuantDequantAPIs) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, RoundingMode) {
   // We assume that quantization is defined as:
   //   qx = clamp(zero_point + round(x / scale))
   // If the zero_point is added before rounding, the result will be wrong.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int32_t zero_point = 5;
   std::vector<float> x_values{
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       -5.5, -4.5, -3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5};
   std::vector<uint8_t> qx_expect{
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0, 1, 1, 3, 3, 5, 5, 7, 7, 9, 9, 11}; // scale = 1.0
 
   Tensor x = from_blob(x_values.data(), x_values.size());
@@ -88,6 +95,7 @@ TEST(TestQTensor, RoundingMode) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, Item) {
   Tensor r = at::ones({1});
   const float scale = 1;
@@ -96,10 +104,15 @@ TEST(TestQTensor, Item) {
   ASSERT_EQ(r.item().to<float>(), qr.item().to<float>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, EmptyQuantized) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float scale = 0.5;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int zero_point = 10;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int val = 100;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int numel = 10;
   Tensor q = at::_empty_affine_quantized(
       {numel}, at::device(at::kCPU).dtype(kQUInt8), scale, zero_point);
@@ -117,10 +130,14 @@ TEST(TestQTensor, EmptyQuantized) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, EmptyPerchannelQuantized) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int numel = 10;
   auto scales = rand({numel}).toType(kDouble);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto zero_points = randint(10, {10}).toType(kLong);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int val = 100;
   int ch_axis = 0;
   Tensor q = at::_empty_per_channel_affine_quantized(
@@ -145,9 +162,12 @@ TEST(TestQTensor, EmptyPerchannelQuantized) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, QuantizePerChannel4d) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int C = 64, H = 10, W = 10;
   auto scales = rand({C}).toType(kDouble);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto zero_points = randint(10, {C}).toType(kLong);
   int ch_axis = 1;
   // create 4d tensor where each H x W image is a range(0, H*W)
@@ -167,15 +187,19 @@ TEST(TestQTensor, QuantizePerChannel4d) {
     int64_t zero_point = zero_points[c].item<int64_t>();
     for (int e = 0; e < H * W; ++e, ++i) {
       // downsize qval to 255 if val is greater than max uint8_t value
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions)
       int qval = std::min<int>(zero_point + std::nearbyint(e * inv_scale), 255);
       ASSERT_EQ((int)q_data[i], qval);
     }
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int C = 64, H = 10, W = 10;
   auto scales = rand({C}).toType(kDouble);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto zero_points = randint(10, {C}).toType(kLong);
   int ch_axis = 1;
   // create 4d tensor where each H x W image is a range(0, H*W)
@@ -199,6 +223,7 @@ TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
       float inv_scale = 1.0f / static_cast<float>(scales[c].item<double>());
       int64_t zero_point = zero_points[c].item<int64_t>();
       // downsize qval to 255 if val is greater than max uint8_t value
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions)
       int qval = std::min<int>(zero_point + std::nearbyint(e * inv_scale), 255);
       ASSERT_EQ((int)q_data[i], qval);
     }

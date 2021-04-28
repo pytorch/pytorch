@@ -15,23 +15,31 @@
 #include "fbgemm_pack_op.h"
 #include "im2col_dnnlowp.h"
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_copy_to_32bit_frequency);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(caffe2_dnnlowp_shared_int32_buffer);
 // Thresholds to fallback to 32-bit accumulation when 16-bit accumulation
 // doesn't provide performance benefits.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_double(
     caffe2_dnnlowp_acc16_density_threshold,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     0.05,
     "If density of outlier is higher than this, fallback to 32-bit accumulation");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(
     caffe2_dnnlowp_acc16_m_threshold,
     0,
     "If m is smaller than this, fallback to 32-bit accumulation");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(
     caffe2_dnnlowp_acc16_n_threshold,
     0,
     "If n is smaller than this, fallback to 32-bit accumulation");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(
     caffe2_dnnlowp_acc16_k_threshold,
     0,
@@ -171,6 +179,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
 
   // Separate out outliers
   if (!Wq_outlier_ && this->order_ == StorageOrder::NHWC &&
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       nbits_in_non_outlier_ < 8) {
     CAFFE_ENFORCE(!W_quantized_.empty());
 
@@ -225,6 +234,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
 
       if (!reason.empty()) {
         static int log_occurences = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if (log_occurences < 32) {
           ++log_occurences;
           C10_LOG_FIRST_N(WARNING, 10)
@@ -233,8 +243,10 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
         }
       }
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (nbits_in_non_outlier_ < 8 && this->order_ != StorageOrder::NHWC) {
       static int log_occurences = 0;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (log_occurences < 32) {
         ++log_occurences;
         C10_LOG_FIRST_N(WARNING, 10)
@@ -246,6 +258,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
   }
 
   if (packW && !Wq_acc16_packed_) {
+    // NOLINTNEXTLINE(modernize-make-shared)
     Wq_acc16_packed_.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
         fbgemm::matrix_op_t::Transpose,
         group_ * kernel_dim,
@@ -393,6 +406,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHW() {
             W_quantized_.data() + (M / group_) * group_id * kernel_dim;
 
         static int log_occurences = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if (log_occurences < 32) {
           ++log_occurences;
           C10_LOG_FIRST_N(WARNING, 10)
@@ -405,6 +419,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHW() {
             int32_t int32_sum = 0;
             int16_t int16_sum = 0;
             for (int k = 0; k < kernel_dim; ++k) {
+              // NOLINTNEXTLINE(bugprone-signed-char-misuse)
               int32_t w = W_quantized_group[i * kernel_dim + k];
               int32_t x = col_buffer_private[k * output_image_size + j];
 #ifdef DNNLOWP_ACC16_IN_SLOW_PATH
@@ -471,6 +486,7 @@ static void conv_nhwc_acc16_ref_(
 #endif
         for (int k = 0; k < kernel_dim; ++k) {
           int32_t x = col_buffer[(i * num_groups + group_id) * kernel_dim + k];
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           int32_t w = W[(group_id * (M / num_groups) + j) * kernel_dim + k];
 #ifdef DNNLOWP_ACC16_IN_SLOW_PATH
           if (!overflowed && !underflowed) {
@@ -558,6 +574,7 @@ void ConvDNNLowPAcc16Op<ReluFused>::DispatchFBGEMM_(
       M,
       group_);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (nbits_in_non_outlier_ < 8) {
     DoSpmdmOnInpBuffer<
         typename ReQuantizeOutput<ReluFused>::outType,
@@ -592,6 +609,7 @@ template <bool ReluFused>
 void ConvDNNLowPAcc16Op<ReluFused>::ConvOutlier_(
     const uint8_t* col_buffer,
     vector<int32_t>* Y_int32) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (nbits_in_non_outlier_ < 8) {
     const Tensor& X = InputTensorCPU_(INPUT);
     auto& filter = InputTensorCPU_(FILTER);
@@ -606,6 +624,7 @@ void ConvDNNLowPAcc16Op<ReluFused>::ConvOutlier_(
 #pragma omp parallel
 #endif
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int group_begin, group_end, i_begin, i_end;
       this->PartitionGroupedNHWCConv_(
           &group_begin,
@@ -852,19 +871,23 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Conv,
     DNNLOWP_ACC16,
     ConvDNNLowPAcc16Op<false>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     ConvRelu,
     DNNLOWP_ACC16,
     ConvDNNLowPAcc16Op<true>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Conv,
     DNNLOWP_ACC16,
     ConvDNNLowPAcc16Op<false>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvRelu,
     DNNLOWP_ACC16,

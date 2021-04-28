@@ -59,6 +59,7 @@ const auto& tscores = Input(0);
   Tensor* out_keeps_size = nullptr;
   if (OutputSize() > 4) {
     out_keeps = Output(4);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     out_keeps_size = Output(5);
     out_keeps->Resize(0);
     out_keeps_size->Resize(batch_size, num_classes);
@@ -178,8 +179,11 @@ const auto& tscores = Input(0);
 
     // Write results
     int cur_start_idx = out_scores->size(0);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     out_scores->Extend(total_keep_count, 50);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     out_boxes->Extend(total_keep_count, 50);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     out_classes->Extend(total_keep_count, 50);
 
     int cur_out_idx = 0;
@@ -206,6 +210,7 @@ const auto& tscores = Input(0);
           cur_scores, utils::AsEArrXt(cur_keep), &cur_out_scores);
       utils::GetSubArrayRows(
           cur_boxes, utils::AsEArrXt(cur_keep), &cur_out_boxes);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int k = 0; k < cur_keep.size(); k++) {
         cur_out_classes[k] =
             static_cast<float>(j - !output_classes_include_bg_cls_);
@@ -215,6 +220,7 @@ const auto& tscores = Input(0);
     }
 
     if (out_keeps) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       out_keeps->Extend(total_keep_count, 50);
 
       Eigen::Map<EArrXi> out_keeps_arr(
@@ -250,10 +256,13 @@ const auto& tscores = Input(0);
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BoxWithNMSLimit, BoxWithNMSLimitOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BoxWithNMSLimit)
     .NumInputs(2, 3)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumOutputs(3, 6)
     .SetDoc(R"DOC(
 Apply NMS to each class (except background) and limit the number of
@@ -300,10 +309,12 @@ returned boxes.
         "Output batch splits for scores/boxes after applying NMS")
     .Output(4, "keeps", "Optional filtered indices, size (n)")
     .Output(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "keeps_size",
         "Optional number of filtered indices per class, size (num_classes)");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(BoxWithNMSLimit);
 
 } // namespace

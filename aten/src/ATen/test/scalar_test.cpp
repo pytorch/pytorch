@@ -37,25 +37,33 @@ void test_overflow() {
   ASSERT_EQ(s1.toFloat(), static_cast<float>(M_PI));
   s1.toHalf();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   s1 = Scalar(100000);
   ASSERT_EQ(s1.toFloat(), 100000.0);
   ASSERT_EQ(s1.toInt(), 100000);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(s1.toHalf(), std::runtime_error);
 
   s1 = Scalar(NAN);
   ASSERT_TRUE(std::isnan(s1.toFloat()));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(s1.toInt(), std::runtime_error);
 
   s1 = Scalar(INFINITY);
   ASSERT_TRUE(std::isinf(s1.toFloat()));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(s1.toInt(), std::runtime_error);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalar, TestScalar) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Scalar what = 257;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Scalar bar = 3.0;
   Half h = bar.toHalf();
   Scalar h2 = h;
@@ -65,6 +73,7 @@ TEST(TestScalar, TestScalar) {
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     ASSERT_NO_THROW(gen.set_current_seed(std::random_device()()));
   }
   auto&& C = at::globalContext();
@@ -83,15 +92,20 @@ TEST(TestScalar, TestScalar) {
   ASSERT_EQ(t.strides()[1], 1);
 
   TensorOptions options = dtype(kFloat);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor x = randn({1, 10}, options);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor prev_h = randn({1, 20}, options);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor W_h = randn({20, 20}, options);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor W_x = randn({20, 10}, options);
   Tensor i2h = at::mm(W_x, x.t());
   Tensor h2h = at::mm(W_h, prev_h.t());
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(Tensor{}.item());
 
   test_overflow();
@@ -100,6 +114,7 @@ TEST(TestScalar, TestScalar) {
     auto r = next_h.to(at::Device(kCUDA), kFloat, /*non_blocking=*/ false, /*copy=*/ true);
     ASSERT_TRUE(r.to(at::Device(kCPU), kFloat, /*non_blocking=*/ false, /*copy=*/ true).equal(next_h));
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(randn({10, 10, 2}, options));
 
   // check Scalar.toTensor on Scalars backed by different data types
@@ -111,6 +126,7 @@ TEST(TestScalar, TestScalar) {
     AT_DISPATCH_ALL_TYPES(x.scalar_type(), "foo", [&] {
       scalar_t s = 1;
       std::stringstream ss;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
       ASSERT_NO_THROW(
           ss << "hello, dispatch" << x.toString() << s << "\n");
       auto data = (scalar_t*)x.data_ptr();
@@ -121,6 +137,7 @@ TEST(TestScalar, TestScalar) {
   // test direct C-scalar type conversions
   {
     auto x = ones({1, 2}, options);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     ASSERT_ANY_THROW(x.item<float>());
   }
   auto float_one = ones({}, options);
@@ -129,9 +146,13 @@ TEST(TestScalar, TestScalar) {
   ASSERT_EQ(float_one.item<at::Half>(), 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalar, TestConj) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Scalar int_scalar = 257;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Scalar float_scalar = 3.0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Scalar complex_scalar = c10::complex<double>(2.3, 3.5);
 
   ASSERT_EQ(int_scalar.conj().toInt(), 257);
@@ -139,6 +160,7 @@ TEST(TestScalar, TestConj) {
   ASSERT_EQ(complex_scalar.conj().toComplexDouble(), c10::complex<double>(2.3, -3.5));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalar, TestEqual) {
   ASSERT_FALSE(Scalar(1.0).equal(false));
   ASSERT_FALSE(Scalar(1.0).equal(true));
@@ -159,6 +181,7 @@ TEST(TestScalar, TestEqual) {
   ASSERT_TRUE(Scalar(2).equal(2.0));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalar, TestFormatting) {
   auto format = [] (Scalar a) {
     std::ostringstream str;

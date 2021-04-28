@@ -17,6 +17,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, Params) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
@@ -25,7 +26,9 @@ TEST(LiteTrainerTest, Params) {
       b = 1.0
       return self.foo * x + b
   )");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double learning_rate = 0.1, momentum = 0.1;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int n_epoc = 10;
   // init: y = x + 1;
   // target: y = 2 x + 1
@@ -162,6 +165,7 @@ TEST(MobileTest, SaveLoadParameters) {
 }
 */
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MobileTest, SaveLoadParametersEmpty) {
   Module m("m");
   m.define(R"(
@@ -185,6 +189,7 @@ TEST(MobileTest, SaveLoadParametersEmpty) {
   AT_ASSERT(mobile_params.size() == 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, SGD) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
@@ -193,7 +198,9 @@ TEST(LiteTrainerTest, SGD) {
       b = 1.0
       return self.foo * x + b
   )");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double learning_rate = 0.1, momentum = 0.1;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int n_epoc = 10;
   // init: y = x + 1;
   // target: y = 2 x + 1
@@ -245,9 +252,11 @@ TEST(LiteTrainerTest, SGD) {
 
 namespace {
 struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   explicit DummyDataset(size_t size = 100) : size_(size) {}
 
   int get(size_t index) override {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     return 1 + index;
   }
   torch::optional<size_t> size() const override {
@@ -258,12 +267,15 @@ struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
 };
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteTrainerTest, SequentialSampler) {
   // test that sampler can be used with dataloader
   const int kBatchSize = 10;
   auto data_loader =
       torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
-          DummyDataset(25), kBatchSize);
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          DummyDataset(25),
+          kBatchSize);
   int i = 1;
   for (const auto& batch : *data_loader) {
     for (const auto& example : batch) {

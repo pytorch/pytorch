@@ -23,11 +23,13 @@ struct DefaultArgs : torch::CustomClassHolder {
     return x;
   }
   int64_t scale_add(int64_t add, int64_t scale = 1) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     x = scale * x + add;
     return x;
   }
   int64_t divide(c10::optional<int64_t> factor) {
     if (factor) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       x = x / *factor;
     }
     return x;
@@ -54,6 +56,7 @@ struct Foo : torch::CustomClassHolder {
 };
 
 struct _StaticMethod : torch::CustomClassHolder {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   _StaticMethod() {}
   static int64_t staticMethod(int64_t input) {
     return 2 * input;
@@ -103,6 +106,7 @@ struct LambdaInit : torch::CustomClassHolder {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct NoInit : torch::CustomClassHolder {
   int64_t x;
 };
@@ -122,6 +126,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
       std::vector<std::string> /*inputs*/,
       std::string /*output*/>;
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ElementwiseInterpreter() {}
 
   // Load a list of instructions into the interpreter. As specified above,
@@ -377,6 +382,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def(torch::init<std::vector<int64_t>>())
       .def_pickle(
           [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             return std::vector<int64_t>{1, 3, 3, 7};
           },
           [](std::vector<int64_t> state) { // __setstate__

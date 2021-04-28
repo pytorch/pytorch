@@ -30,6 +30,7 @@ struct TORCH_API EmbeddingOptions {
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   TORCH_ARG(bool, scale_grad_by_freq) = false;
@@ -53,6 +54,7 @@ struct TORCH_API EmbeddingFromPretrainedOptions {
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   TORCH_ARG(bool, scale_grad_by_freq) = false;
@@ -79,6 +81,7 @@ struct TORCH_API EmbeddingFuncOptions {
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   TORCH_ARG(bool, scale_grad_by_freq) = false;
@@ -108,6 +111,7 @@ struct TORCH_API EmbeddingBagOptions {
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   /// Note: this option is not supported when ``mode="kMax"``.
@@ -142,6 +146,7 @@ struct TORCH_API EmbeddingBagFromPretrainedOptions {
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   /// Note: this option is not supported when ``mode="kMax"``.
@@ -181,6 +186,7 @@ struct TORCH_API EmbeddingBagFuncOptions {
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<double>, max_norm) = c10::nullopt;
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``false``.
   /// Note: this option is not supported when ``mode="kMax"``.

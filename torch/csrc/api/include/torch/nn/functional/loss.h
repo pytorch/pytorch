@@ -49,6 +49,7 @@ inline Tensor kl_div(
     const Tensor& target,
     KLDivFuncOptions::reduction_t reduction,
     bool log_target = false) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   torch::Reduction::Reduction reduction_enum;
 
   if (c10::get_if<enumtype::kMean>(&reduction)) {
@@ -309,6 +310,7 @@ inline Tensor cosine_embedding_loss(
 
 inline Tensor _smooth_l1_loss(const Tensor& input, const Tensor& target, double beta = 1.) {
     auto t = torch::abs(input - target);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return torch::where(t < beta, 0.5 * torch::pow(t, 2) / beta, t - 0.5 * beta);
 }
 
