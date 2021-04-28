@@ -18,7 +18,7 @@
 namespace c10 {
 
 #define TORCH_ASSERT_NO_GIL_WITHOUT_PYTHON_DEP() \
-  TORCH_INTERNAL_ASSERT(!c10::impl::check_python_gil())
+  TORCH_INTERNAL_ASSERT(!c10::impl::check_python_gil(), "Holding GIL before a blocking operation!  Please release the GIL before blocking, or see https://github.com/pytorch/pytorch/issues/56297 for how to release the GIL for destructors of objects")
 
 namespace impl {
 

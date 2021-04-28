@@ -111,10 +111,19 @@ struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};
 namespace torch {
 namespace impl {
 
+// Use this function if you have a C++ object that is used from both C++
+// and Python contexts, and you need its GIL to be released when you
+// destruct it in the Python context.
+//
 // This function is a valid shared_ptr destructor and can be used to
 // conveniently allocate a shared_ptr to an object whose destructor will be run
-// without the GIL.  Often, this logic cannot be conveniently placed on the
-// destructor itself because the object has no dependency on Python.
+// without the GIL.  Pass it as the second argument to shared_ptr, e.g.,
+//
+//    shared_ptr<T>(new T(), destroy_without_gil<T>)
+//
+// Attaching the GIL release logic to the holder pointer rather than the
+// actual destructor of T is helpful when T is Python-agnostic and
+// shouldn't refer to the PYthon API.
 //
 // Note there are limitations to the correctness of code that makes use of this.
 // In particular, if a shared_ptr is constructed from C++ code without this
