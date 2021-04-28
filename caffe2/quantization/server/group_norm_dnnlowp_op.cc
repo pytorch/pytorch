@@ -2,6 +2,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T>
 GroupNormDNNLowPOp<T>::GroupNormDNNLowPOp(
     const OperatorDef& operator_def,
@@ -9,6 +10,7 @@ GroupNormDNNLowPOp<T>::GroupNormDNNLowPOp(
     : BaseType(operator_def, ws),
       OP_SINGLE_ARG(bool, OpSchema::Arg_IsTest, is_test_, true),
       OP_SINGLE_ARG(int, "group", group_, 32),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       OP_SINGLE_ARG(float, "epsilon", epsilon_, 1e-5),
       order_(StringToStorageOrder(
           this->template GetSingleArgument<std::string>("order", "NCHW"))),
@@ -104,6 +106,7 @@ void GroupNormDNNLowPOp<T>::QuantizeGammaImpl() {
         gamma_dequantized_data_[i],
         gamma_qparams.zero_point,
         gamma_qparams.scale,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         32);
   }
 }
@@ -128,6 +131,7 @@ void GroupNormDNNLowPOp<T>::QuantizeBeta() {
         CAFFE_ENFORCE_LE(
             std::abs(
                 beta_qparams.scale - X_qparams.scale * gamma_qparams.scale),
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             1e-4);
       }
       CAFFE_ENFORCE_EQ(beta_qparams.zero_point, 0);
@@ -152,6 +156,7 @@ void GroupNormDNNLowPOp<T>::QuantizeBeta() {
             beta_dequantized_data_[i],
             beta_qparams.zero_point,
             beta_qparams.scale,
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             32);
       }
     }
@@ -466,6 +471,7 @@ void GroupNormDNNLowPOp<T>::ComputeQuantizedInvStd(
 #endif
   for (int i = 0; i < N; ++i) {
     rsig_quantized[i] = fbgemm::Quantize<int32_t>(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         rsig[i], rsig_qparams_.zero_point, rsig_qparams_.scale, 32);
   }
 }
@@ -488,6 +494,7 @@ void GroupNormDNNLowPOp<T>::ComputeQuantizedFusedParams(
   internal_qparams_.scale =
       rsig_qparams_.scale * gamma_qparams.scale * X_qparams.scale;
   internal_qparams_.zero_point = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   internal_qparams_.precision = 32;
   const float real_multiplier = 1.0f / rsig_qparams_.scale;
   const auto beta_requantization_params =
@@ -654,15 +661,18 @@ void GroupNormDNNLowPOp<T>::AffineBatchChannelDequantizedNHWC(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     GroupNorm,
     DNNLOWP,
     GroupNormDNNLowPOp<uint8_t>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8GroupNorm,
     DNNLOWP,
     GroupNormDNNLowPOp<uint8_t>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8GroupNorm).NumInputs(3).NumOutputs({1, 3});
 
 } // namespace caffe2
