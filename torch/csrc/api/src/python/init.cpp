@@ -29,9 +29,7 @@ namespace detail {
     }                                                                         \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
 ITEM_TYPE_CASTER(torch::Tensor, Tensor);
-// NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
 ITEM_TYPE_CASTER(std::shared_ptr<torch::nn::Module>, Module);
 } // namespace detail
 } // namespace pybind11

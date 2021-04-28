@@ -415,7 +415,6 @@ struct BailoutBlock {
   std::vector<Instruction> instructions; // ends in a TAIL_CALL
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local InterpreterStateImpl* tls_int_state_ptr_ = nullptr;
 struct TLSCurrentInterpreterGuard {
   TLSCurrentInterpreterGuard(InterpreterStateImpl* state) {
@@ -523,7 +522,6 @@ struct CodeImpl {
     }
     n_inputs = graph_->inputs().size();
     if (emit_instructions) {
-      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       run();
     }
   }
@@ -644,7 +642,6 @@ struct CodeImpl {
       int reg = registerFor(input);
       bool moved = input->uses().size() == ++use_count_[input];
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       OpCode op;
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
@@ -958,7 +955,6 @@ struct CodeImpl {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
       default:
-        // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
         emitOperator(node);
         break;
       case prim::Drop:
@@ -1098,7 +1094,6 @@ struct MobileCodeImpl : CodeImpl {
       std::string function_name,
       size_t remaining_bailout_depth)
       : CodeImpl(graph, function_name, remaining_bailout_depth, false) {
-    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     run();
   }
 
@@ -1252,7 +1247,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
     // unique to every frame with prim::profile across all threads
     c10::optional<size_t> id;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     static std::atomic<size_t> num_frames;
 
     // RecordFunction object associated with this frame
@@ -1566,7 +1560,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
           case TYPECHECK: {
             int num_inputs = inst.N, i = 0;
-            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs && num_inputs > 0);
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
@@ -1864,7 +1857,6 @@ std::vector<StackEntry> currentCallstack() {
   return std::vector<StackEntry>();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<size_t> InterpreterStateImpl::Frame::num_frames;
 
 std::ostream& operator<<(std::ostream& out, const Code& code) {

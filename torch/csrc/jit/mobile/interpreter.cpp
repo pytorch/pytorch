@@ -133,7 +133,6 @@ bool InterpreterState::run(Stack& stack) {
         auto userObj = pop(stack).toObject();
         // Mobile only: since the number of slots is not known, resize the
         // numAttributes before setSlot.
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         while (userObj->type()->numAttributes() <= inst.X) {
           std::stringstream ss;
           ss << userObj->type()->numAttributes();

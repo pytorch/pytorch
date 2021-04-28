@@ -6,7 +6,6 @@
 #include <c10/util/accumulate.h>
 
 
-// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdarg.h>
 #include <cstdlib>
 #include <stdexcept>
@@ -15,7 +14,6 @@
 namespace at {
 
 int _crash_if_asan(int arg) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   volatile char x[3];
   x[arg] = 0;
   return x[0];
@@ -38,7 +36,6 @@ Tensor empty_cpu(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
   bool pin_memory = pinned_memory_or_default(pin_memory_opt);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   c10::Allocator* allocator;
   if (pin_memory) {
     allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();

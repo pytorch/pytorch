@@ -67,7 +67,6 @@ void stack_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(stack_serial_stub, &stack_serial_kernel);
 
 } // namespace native

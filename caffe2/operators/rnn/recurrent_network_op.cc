@@ -5,7 +5,6 @@
 #ifndef CAFFE2_RNN_NO_TEXT_FORMAT
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_rnn_executor,
     true,
@@ -14,9 +13,7 @@ C10_DEFINE_bool(
 namespace caffe2 {
 CAFFE_KNOWN_TYPE(detail::ScratchWorkspaces);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RecurrentNetwork, RecurrentNetworkOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RecurrentNetwork)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2, INT_MAX)
@@ -39,18 +36,14 @@ dynamic_rnn, Theano scan, etc).
 See the usage examples for a flavor of how to use it.
 )DOC");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RecurrentNetworkGradient,
     RecurrentNetworkGradientOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RecurrentNetworkGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     rnn_internal_accumulate_gradient_input,
     AccumulateInputGradientOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(rnn_internal_accumulate_gradient_input)
     .NumInputs(3)
     .NumOutputs(1, INT_MAX)
@@ -60,11 +53,9 @@ OPERATOR_SCHEMA(rnn_internal_accumulate_gradient_input)
 Internal RNN operator.
 )DOC");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     rnn_internal_apply_link,
     RNNApplyLinkOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(rnn_internal_apply_link)
     .NumInputs(2)
     .NumOutputs(2)
@@ -89,7 +80,6 @@ struct GetRecurrentNetworkGradient : public GradientMakerBase {
         argsHelper.GetRepeatedArgument<int32_t>("outputs_with_grads");
     CAFFE_ENFORCE(outputs_with_grads.size() > 0);
     for (auto id : outputs_with_grads) {
-      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       gradientInputs.push_back(GO(id));
     }
 
@@ -118,7 +108,6 @@ struct GetRecurrentNetworkGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RecurrentNetwork, GetRecurrentNetworkGradient);
 
 namespace detail {
@@ -238,7 +227,6 @@ void extractLinks(
       externalArg,
       " ",
       windowArg);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (auto i = 0; i < internal.size(); ++i) {
     detail::Link l;
     l.internal = internal[i];

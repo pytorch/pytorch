@@ -47,7 +47,6 @@ class EnqueueBlobsOp final : public Operator<Context> {
     CAFFE_ENFORCE(InputSize() > 1);
     auto queue = Operator<Context>::Inputs()[0]
                      ->template Get<std::shared_ptr<BlobsQueue>>();
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     CAFFE_ENFORCE(queue && OutputSize() == queue->getNumBlobs());
     return queue->blockingWrite(this->Outputs());
   }
@@ -69,7 +68,6 @@ class DequeueBlobsOp final : public Operator<Context> {
     CAFFE_ENFORCE(InputSize() == 1);
     auto queue =
         OperatorBase::Inputs()[0]->template Get<std::shared_ptr<BlobsQueue>>();
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     CAFFE_ENFORCE(queue && OutputSize() == queue->getNumBlobs());
     return queue->blockingRead(this->Outputs(), timeout_secs_);
   }
@@ -106,7 +104,6 @@ class SafeEnqueueBlobsOp final : public Operator<Context> {
     CAFFE_ENFORCE(queue);
     auto size = queue->getNumBlobs();
     CAFFE_ENFORCE(
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         OutputSize() == size + 1,
         "Expected " + c10::to_string(size + 1) + ", " +
             " got: " + c10::to_string(size));
@@ -142,7 +139,6 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
     if (blobs_.size() != size) {
       blobs_.resize(size);
       blobPtrs_.resize(size);
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int col = 0; col < size; ++col) {
         blobPtrs_.at(col) = &blobs_.at(col);
       }
@@ -233,7 +229,6 @@ class WeightedSampleDequeueBlobsOp final : public Operator<Context> {
     float sum = accumulate(weights.begin(), weights.end(), 0.0f);
     CAFFE_ENFORCE(sum > 0.0f, "Sum of weights must be positive");
     cumProbs_.resize(weights.size());
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < weights.size(); i++) {
       cumProbs_[i] = weights[i] / sum;
       CAFFE_ENFORCE_GE(

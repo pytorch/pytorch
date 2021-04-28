@@ -167,7 +167,6 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
     if (L.cur().kind == ':') {
       L.expect(':');
       const std::string& num = L.expect(TK_NUMBER).text();
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::string::size_type num_len;
       device_idx = c10::stoi(num, &num_len);
     }
@@ -180,7 +179,6 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
 c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   L.expect('=');
   const std::string& num = L.expect(TK_NUMBER).text();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::string::size_type num_len;
   return (bool)c10::stoi(num, &num_len);
 }
@@ -233,7 +231,6 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         L.expect('=');
         parseList('[', ',', ']', [&] {
           const std::string& num = L.expect(TK_NUMBER).text();
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type num_len;
           size_t stride = c10::stoi(num, &num_len);
           strides.push_back(stride);
@@ -258,7 +255,6 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       return;
     }
     const std::string& num = L.expect(TK_NUMBER).text();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
     size_t dim = c10::stoi(num, &num_len);
     dims.emplace_back(dim);

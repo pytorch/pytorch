@@ -169,7 +169,6 @@ void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef
   auto src_names = src.names();
   auto result_dim = result.dim();
   auto src_dim = src_names.size();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_INTERNAL_ASSERT(src_dim - excluded_idxs.size() == result_dim);
 
   // fast path
@@ -254,7 +253,6 @@ std::vector<Dimname> compute_diagonal_outnames(
 // tensors that we contract together. Usually other_dotted_dim is 0
 // and tensor_dotted_dim is the last dim of tensor, but there are some special
 // cases like einsum and tensordot where one can contract arbitrary dims.
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static std::vector<Dimname> compute_dot_product_outnames(
     DimnameList tensor_names,
     int64_t tensor_dotted_dim,
@@ -267,12 +265,10 @@ static std::vector<Dimname> compute_dot_product_outnames(
   std::vector<Dimname> outnames(num_outnames, Dimname::wildcard());
   int64_t index = 0;
   for (size_t j = 0; j < tensor_names.size(); ++j) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (j == tensor_dotted_dim) continue;
     outnames[index++] = tensor_names[j];
   }
   for (size_t j = 0; j < other_names.size(); ++j) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (j == other_dotted_dim) continue;
     outnames[index++] = other_names[j];
   }
@@ -298,7 +294,6 @@ static void check_feature_names_are_distinct(
     ". Please rename the input tensors with `Tensor.rename` to prevent this.");
 }
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static DimnameList batch_dims(DimnameList names) {
   if (names.size() <= 2) {
     return {};
@@ -306,7 +301,6 @@ static DimnameList batch_dims(DimnameList names) {
   return DimnameList(names.begin(), names.end() - 2);
 }
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static DimnameList feature_dims(DimnameList names) {
   if (names.size() <= 2) {
     return names;
@@ -314,7 +308,6 @@ static DimnameList feature_dims(DimnameList names) {
   return DimnameList(names.end() - 2, 2);
 }
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static bool are_distinct(DimnameList batch_dims, DimnameList feature_dims) {
   for (const auto& target : feature_dims) {
     if (target.isWildcard()) {
@@ -373,7 +366,6 @@ static std::vector<Dimname> compute_matmul_outnames(
   const auto result = working_names.toDimnameVec();
 
   check_feature_names_are_distinct(self_names, other_names, result);
-  // NOLINTNEXTLINE(performance-no-automatic-move)
   return result;
 }
 

@@ -38,7 +38,6 @@ int64_t update_from(int64_t from) {
     int64_t from_ = std::abs(from + 1);
     int n = 0;
     while (from_ >>= 1) ++n;
-    // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult)
     from = from_plus_1 + (1LL << (n - std::numeric_limits<scalar_t>::digits + 1));
   }
   return from;
@@ -55,7 +54,6 @@ int64_t update_to(int64_t to) {
     int64_t to_ = std::abs(to - 1);
     int n = 0;
     while (to_ >>= 1) ++n;
-    // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult)
     to = to_minus_1 - (1LL << (n - std::numeric_limits<scalar_t>::digits + 1));
   }
   return to;

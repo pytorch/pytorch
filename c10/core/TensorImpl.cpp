@@ -65,7 +65,6 @@ TensorImpl::TensorImpl(
     // Use std::forward to suppress static analyzer false positive.
     : TensorImpl(std::forward<Storage>(storage), key_set, data_type, storage.device()) {}
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     ImplType type,
     Storage&& storage,

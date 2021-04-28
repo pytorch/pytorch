@@ -16,7 +16,6 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRPrinter, BasicValueTest) {
   KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
@@ -27,16 +26,11 @@ TEST(IRPrinter, BasicValueTest) {
   ASSERT_EQ(ss.str(), "2 + 3");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRPrinter, BasicValueTest02) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(2.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(3.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(4.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle d(5.0f);
   ExprHandle f = (a + b) - (c + d);
 
@@ -45,14 +39,11 @@ TEST(IRPrinter, BasicValueTest02) {
   ASSERT_EQ(ss.str(), "(2.f + 3.f) - (4.f + 5.f)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRPrinter, CastTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kHalf);
   VarHandle y("y", kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle body = ExprHandle(2.f) +
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       (Cast::make(kFloat, x) * ExprHandle(3.f) + ExprHandle(4.f) * y);
 
   std::stringstream ss;
@@ -60,11 +51,9 @@ TEST(IRPrinter, CastTest) {
   ASSERT_EQ(ss.str(), "2.f + (float(x) * 3.f + 4.f * y)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRPrinter, FunctionName) {
   KernelScope kernel_scope;
   int M = 4;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int N = 20;
 
   Tensor* producer = Compute(

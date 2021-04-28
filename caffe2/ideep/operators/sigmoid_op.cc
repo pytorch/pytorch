@@ -12,7 +12,6 @@ class IDEEPSigmoidOp final : public IDEEPOperator {
   IDEEPSigmoidOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws) {
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPSigmoidOp() override {}
 
   bool RunOnDevice() override {
@@ -39,7 +38,6 @@ class IDEEPSigmoidGradientOp final : public IDEEPOperator {
   IDEEPSigmoidGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws) {
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPSigmoidGradientOp() override {}
 
   bool RunOnDevice() override {
@@ -58,9 +56,7 @@ class IDEEPSigmoidGradientOp final : public IDEEPOperator {
   OUTPUT_TAGS(INPUT_GRAD);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Sigmoid, IDEEPSigmoidOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(SigmoidGradient, IDEEPSigmoidGradientOp);
 
 } // namespace

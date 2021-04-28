@@ -11,10 +11,8 @@
     arg->set_##_type(_val);                 \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MobileTest, Convolution) {
   caffe2::NetDef net;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 10; ++i) {
     if (i % 3) {
       caffe2::OperatorDef* def = net.add_op();
@@ -39,7 +37,6 @@ TEST(MobileTest, Convolution) {
   auto nn = caffe2::convertToNNModule(net);
   caffe2::opt::addNNPACK(&nn);
   auto optimized_net = caffe2::convertToCaffe2Proto(nn, net);
-  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto op : optimized_net.op()) {
     if (op.type() == "Conv") {
       assert(op.engine() == "NNPACK");

@@ -1,13 +1,9 @@
 #include "file_store_handler_op.h"
 
-// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <errno.h>
 #include <fcntl.h>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <limits.h>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdio.h>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdlib.h>
 #include <sys/stat.h>
 
@@ -27,15 +23,11 @@
 namespace caffe2 {
 
 static std::string encodeName(const std::string& name) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<uint64_t, 2> out;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   MurmurHash3_x64_128(name.data(), name.size(), 0xcafef00d, out.data());
 
   // Size is 33 to have space for final NUL
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 33> buf;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; i++) {
     snprintf(&buf[i * 2], buf.size() - (i * 2), "%02x", ((char*)out.data())[i]);
   }
@@ -54,7 +46,6 @@ FileStoreHandler::FileStoreHandler(
 #if defined(_MSC_VER)
   auto ret = _mkdir(basePath_.c_str());
 #else
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto ret = mkdir(basePath_.c_str(), 0777);
 #endif // defined(_MSC_VER)
   if (ret == -1) {
@@ -62,7 +53,6 @@ FileStoreHandler::FileStoreHandler(
   }
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
 FileStoreHandler::~FileStoreHandler() {}
 
 std::string FileStoreHandler::realPath(const std::string& path) {
@@ -70,7 +60,6 @@ std::string FileStoreHandler::realPath(const std::string& path) {
   std::array<char, _MAX_PATH> buf;
   auto ret = _fullpath(buf.data(), path.c_str(), buf.size());
 #else
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<char, PATH_MAX> buf;
   auto ret = realpath(path.c_str(), buf.data());
 #endif
@@ -146,7 +135,6 @@ bool FileStoreHandler::deleteKey(const std::string& /* unused */) {
 bool FileStoreHandler::check(const std::vector<std::string>& names) {
   std::vector<std::string> paths;
   for (const auto& name : names) {
-    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     paths.push_back(objectPath(name));
   }
 
@@ -181,7 +169,6 @@ void FileStoreHandler::wait(
           "Wait timeout for name(s): ", c10::Join(" ", names));
     }
     /* sleep override */
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 }

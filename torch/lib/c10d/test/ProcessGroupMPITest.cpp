@@ -196,7 +196,7 @@ void testGather(int iter = 10000) {
         allOutputTensors[i][0][j] = at::zeros({16, 16});
       }
     } else {
-      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>(0);
+      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
     }
   }
 
@@ -247,7 +247,7 @@ void testScatter(int iter = 1) {
         allInputTensors[i][0][j] = at::ones({16, 16}) * rank * i;
       }
     } else {
-      allInputTensors[i] = std::vector<std::vector<at::Tensor>>(0);
+      allInputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
     }
   }
 
@@ -302,7 +302,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
   }
   if (rank == 1) {
     std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-    std::vector<int> srcRanks;
+    std::vector<int> srcRanks(allTensors.size(), -1);
     size_t i = 0;
     for (auto& tensors : allTensors) {
       // Kick off work
@@ -318,11 +318,6 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
       ++i;
     }
     waitWork(pg, works);
-
-    for (const auto& work : works) {
-      srcRanks.push_back(work->sourceRank());
-    }
-
     // Verify outputs
     for (int i = 0; i < iter; ++i) {
       if (recvAnysource && srcRanks[i] != 0) {

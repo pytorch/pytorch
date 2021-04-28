@@ -26,7 +26,6 @@ public:
     }
     Y_scales_ = ConvertScales({scale_});
   }
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPInt8FullyConnectedOp() {}
 
   bool RunOnDevice() override {
@@ -90,7 +89,6 @@ private:
   OUTPUT_TAGS(OUTPUT);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8FC, DNNLOWP, IDEEPInt8FullyConnectedOp);
 
 } // namespace

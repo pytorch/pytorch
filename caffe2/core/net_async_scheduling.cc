@@ -4,7 +4,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AsyncSchedulingNet::AsyncSchedulingNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws)
@@ -131,14 +130,12 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) noexcept {
               const auto& child_device_option =
                   event(child_id).GetDeviceOption();
               pool(child_device_option)
-                  // NOLINTNEXTLINE(modernize-avoid-bind)
                   ->run(std::bind(
                       &AsyncSchedulingNet::pollAndSchedule, this, child_id));
             } else if (!parents_with_callback.empty()) {
               // some parents are blocking us from scheduling a child and they
               // support callbacks
               for (auto parent_id : parents_with_callback) {
-                // NOLINTNEXTLINE(modernize-avoid-bind)
                 event(parent_id).SetCallback(std::bind(
                     &AsyncSchedulingNet::parentCallback, this, parent_id));
               }
@@ -210,7 +207,6 @@ void AsyncSchedulingNet::pollAndSchedule(int task_id) {
   } else {
     const auto& device_option = event(task_id).GetDeviceOption();
     pool(device_option)
-        // NOLINTNEXTLINE(modernize-avoid-bind)
         ->run(std::bind(&AsyncSchedulingNet::pollAndSchedule, this, task_id));
   }
 }
@@ -301,11 +297,9 @@ void AsyncSchedulingNet::CancelAndFinishAsyncTasks() {
 }
 
   AsyncSchedulingNet::~AsyncSchedulingNet() {
-    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Wait();
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   REGISTER_NET(async_scheduling, AsyncSchedulingNet);
 
 } // namespace caffe2

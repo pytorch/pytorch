@@ -4,7 +4,6 @@
 
 namespace at {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TYPED_REGISTRY(
     ContextRegistry,
     at::DeviceType,

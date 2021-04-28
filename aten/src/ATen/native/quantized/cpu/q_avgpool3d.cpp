@@ -15,7 +15,6 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qavg_pool3d_nhwc_stub);
 
 namespace {
@@ -98,7 +97,6 @@ Tensor q_avg_pool3d(
     bool ceil_mode,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int kD, kW, kH, dD, dW, dH, padD, padW, padH;
   std::tie(kW, kH, kD) = get_kernel(kernel_size);
   std::tie(dW, dH, dD) = get_stride(stride, kW, kH, kD);

@@ -17,21 +17,18 @@ bool CbrtGradientFunctor<CPUContext>::Forward(
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
-      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
   EigenVectorMap<T>(dX, size) = ConstEigenVectorArrayMap<T>(dY, size) /
       ConstEigenVectorArrayMap<T>(Y, size).square() / T(3);
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Cbrt,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         CbrtFunctor<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     CbrtGradient,
     BinaryElementwiseOp<
@@ -39,7 +36,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         CbrtGradientFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Cbrt)
     .NumInputs(1)
     .NumOutputs(1)
@@ -51,7 +47,6 @@ OPERATOR_SCHEMA(Cbrt)
         "Y",
         "*(type: Tensor`<float>`)* Output tensor calculated as the cbrt of the input tensor, element-wise.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CbrtGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -73,7 +68,6 @@ class GetCbrtGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Cbrt, GetCbrtGradient);
 
 } // namespace caffe2

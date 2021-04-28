@@ -60,7 +60,6 @@ void apply_triu_tril(Tensor& result, const Tensor& self, bool inplace, int64_t k
   auto self_column_stride = self.stride(-1);
 
   auto result_data = result.data_ptr<scalar_t>();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t result_stride, result_row_stride, result_column_stride;
   if (result_data != self_data) {
     result_stride = (result.dim() > 2 && result.stride(-3) > 0) ? result.stride(-3) : 1;
@@ -93,7 +92,6 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool inplace;
   Tensor self_c;
   std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);
@@ -130,7 +128,6 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool inplace;
   Tensor self_c;
   std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);

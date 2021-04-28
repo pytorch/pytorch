@@ -12,9 +12,7 @@ class IDEEPSpatialBNOp final : public IDEEPOperator {
   IDEEPSpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
         is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.9)) {
     CAFFE_ENFORCE(
         (is_test_ && OutputSize() > OUTPUT)
@@ -23,7 +21,6 @@ class IDEEPSpatialBNOp final : public IDEEPOperator {
     CAFFE_ENFORCE_GE(momentum_, 0);
     CAFFE_ENFORCE_LE(momentum_, 1);
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPSpatialBNOp() override {}
 
   bool RunOnDevice() override {
@@ -42,7 +39,6 @@ class IDEEPSpatialBNOp final : public IDEEPOperator {
       const auto& est_var = Input(EST_VAR);
       auto X_ = X.get_data_type() != idtype::f32 ? X.dequantize() : X;
       ideep::batch_normalization_forward_inference::compute(
-          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           X_, est_mean, est_var, scale, bias, *Y, epsilon_);
     } else {
       auto* saved_mean = Output(SAVED_MEAN);
@@ -51,7 +47,6 @@ class IDEEPSpatialBNOp final : public IDEEPOperator {
       auto* running_var = Output(RUNNING_VAR);
       ideep::batch_normalization_forward_training::compute(
           X, scale, bias, *Y, *saved_mean, *saved_var,
-          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           *running_mean, *running_var, momentum_, epsilon_);
     }
 
@@ -74,12 +69,10 @@ class IDEEPSpatialBNGradientOp final : public IDEEPOperator {
 
   IDEEPSpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)) {
     CAFFE_ENFORCE(InputSize() > SAVED_VAR);
     CAFFE_ENFORCE(OutputSize() > BIAS_GRAD);
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPSpatialBNGradientOp() override {}
 
   bool RunOnDevice() override {
@@ -94,7 +87,6 @@ class IDEEPSpatialBNGradientOp final : public IDEEPOperator {
 
     ideep::batch_normalization_backward::compute(
         X, saved_mean, saved_var, dY, scale,
-        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         *dX, *dscale, *dbias, epsilon_);
 
     return true;
@@ -107,9 +99,7 @@ class IDEEPSpatialBNGradientOp final : public IDEEPOperator {
   OUTPUT_TAGS(INPUT_GRAD, SCALE_GRAD, BIAS_GRAD);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(SpatialBN, IDEEPSpatialBNOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(SpatialBNGradient, IDEEPSpatialBNGradientOp)
 
 }  // namespace

@@ -61,7 +61,6 @@ static inline ScalarType promote_skip_undefined(ScalarType a, ScalarType b) {
 
 
 static inline ScalarType combine_categories(ScalarType higher, ScalarType lower) {
-  // NOLINTNEXTLINE(bugprone-branch-clone)
   if(isComplexType(higher)) {
     return higher;
   }
@@ -126,7 +125,6 @@ ScalarType result_type(TensorList tensors) {
 }
 
 ScalarType result_type(const Tensor &tensor, const Tensor &other) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
   std::vector<Tensor> tensors{std::move(tensor), std::move(other)};
   return native::result_type(tensors);
 }

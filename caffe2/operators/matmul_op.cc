@@ -2,10 +2,8 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(MatMul, MatMulOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MatMul)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -120,13 +118,9 @@ class GetMatMulGradient : public GradientMakerBase {
   vector<OperatorDef> GetGradientDefs() override {
     CAFFE_ENFORCE(def_.input_size() == 2 || def_.input_size() == 3);
 
-    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool axis_a = 1;
-    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool axis_b = 1;
-    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool trans_a = 0;
-    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool trans_b = 0;
 
     if (ArgumentHelper::HasArgument(Def(), "trans_a")) {
@@ -226,7 +220,6 @@ class GetMatMulGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(MatMul, GetMatMulGradient);
 
 } // namespace caffe2

@@ -158,7 +158,6 @@ void percentFormat(Stack& stack, size_t num_inputs) {
       begin = percent_idx + 2; // skip the `%` and the format specifier
       continue;
     }
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     TORCH_CHECK(used_args < args_size, "Too few arguments for format string");
     char key = format_str.at(format_idx);
     IValue arg;
@@ -171,7 +170,6 @@ void percentFormat(Stack& stack, size_t num_inputs) {
     begin = percent_idx + 2;
     ++used_args;
   }
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(used_args == args_size, "Too many arguments for format string");
   drop(stack, num_inputs);
   push(stack, ss.str());

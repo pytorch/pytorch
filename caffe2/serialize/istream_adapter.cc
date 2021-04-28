@@ -33,7 +33,6 @@ void IStreamAdapter::validate(const char* what) const {
   }
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
 IStreamAdapter::~IStreamAdapter() {}
 
 } // namespace serialize

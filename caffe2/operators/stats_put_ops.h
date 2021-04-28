@@ -67,7 +67,6 @@ struct TemplatePutOp : public Operator<CPUContext> {
       int_value = input * magnitude_expand_;
     }
 
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     CAFFE_EVENT(stat_, stat_value, int_value);
 
     return true;

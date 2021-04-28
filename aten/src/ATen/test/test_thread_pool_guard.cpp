@@ -4,7 +4,6 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestThreadPoolGuard, TestThreadPoolGuard) {
   auto threadpool_ptr = caffe2::pthreadpool_();
 

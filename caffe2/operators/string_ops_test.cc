@@ -35,11 +35,9 @@ class StringJoinOpTest : public testing::Test {
   }
 
  protected:
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Workspace ws_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testString1DJoin) {
   std::vector<std::string> input = {"a", "xx", "c"};
 
@@ -48,7 +46,6 @@ TEST_F(StringJoinOpTest, testString1DJoin) {
   tensor->Resize(input.size());
   auto* data = tensor->template mutable_data<std::string>();
   for (const auto i : c10::irange(input.size())) {
-    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     *data++ = input[i];
   }
 
@@ -60,7 +57,6 @@ TEST_F(StringJoinOpTest, testString1DJoin) {
   EXPECT_EQ(outputData[2], "c,");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testString2DJoin) {
   std::vector<std::vector<std::string>> input = {{"aa", "bb", "cc"},
                                                  {"dd", "ee", "ff"}};
@@ -71,7 +67,6 @@ TEST_F(StringJoinOpTest, testString2DJoin) {
   auto* data = tensor->template mutable_data<std::string>();
   for (const auto i : c10::irange(input.size())) {
     for (const auto j : c10::irange(input[0].size())) {
-      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       *data++ = input[i][j];
     }
   }
@@ -83,9 +78,7 @@ TEST_F(StringJoinOpTest, testString2DJoin) {
   EXPECT_EQ(outputData[1], "dd,ee,ff,");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testFloat1DJoin) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> input = {3.90f, 5.234f, 8.12f};
 
   auto blob = std::make_unique<Blob>();
@@ -93,7 +86,6 @@ TEST_F(StringJoinOpTest, testFloat1DJoin) {
   tensor->Resize(input.size());
   auto* data = tensor->template mutable_data<float>();
   for (const auto i : c10::irange(input.size())) {
-    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     *data++ = input[i];
   }
 
@@ -105,11 +97,8 @@ TEST_F(StringJoinOpTest, testFloat1DJoin) {
   EXPECT_EQ(outputData[2], "8.12,");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testFloat2DJoin) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<std::vector<float>> input = {{1.23f, 2.45f, 3.56f},
-                                           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                            {4.67f, 5.90f, 6.32f}};
 
   auto blob = std::make_unique<Blob>();
@@ -118,7 +107,6 @@ TEST_F(StringJoinOpTest, testFloat2DJoin) {
   auto* data = tensor->template mutable_data<float>();
   for (const auto i : c10::irange(input.size())) {
     for (const auto j : c10::irange(input[0].size())) {
-      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
       *data++ = input[i][j];
     }
   }
@@ -130,9 +118,7 @@ TEST_F(StringJoinOpTest, testFloat2DJoin) {
   EXPECT_EQ(outputData[1], "4.67,5.9,6.32,");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(StringJoinOpTest, testLong2DJoin) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<std::vector<int64_t>> input = {{100, 200}, {1000, 2000}};
 
   auto blob = std::make_unique<Blob>();
@@ -141,7 +127,6 @@ TEST_F(StringJoinOpTest, testLong2DJoin) {
   auto* data = tensor->template mutable_data<int64_t>();
   for (const auto i : c10::irange(input.size())) {
     for (const auto j : c10::irange(input[0].size())) {
-      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
       *data++ = input[i][j];
     }
   }

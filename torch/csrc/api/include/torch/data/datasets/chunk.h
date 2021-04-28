@@ -136,7 +136,6 @@ class BatchDataBuffer {
 
     // If we still have data remaining after filling the last pushed batch, add
     // them to the queue too.
-    // NOLINTNEXTLINE(bugprone-infinite-loop)
     while (remaining_size > 0) {
       UnwrappedBatchType current_batch;
 
@@ -250,7 +249,6 @@ struct ChunkDatasetOptions {
   ChunkDatasetOptions(
       size_t preloader_count,
       size_t batch_size,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       size_t cache_size = 2048,
       size_t cross_chunk_shuffle_count = 1)
       : preloader_count_(preloader_count),
@@ -282,7 +280,6 @@ struct ChunkDatasetOptions {
   TORCH_ARG(size_t, batch_size);
 
   /// The capacity of the queue for batch caching.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(size_t, cache_size) = 2048;
 
   // The number of chunks to perfrom cross-chunk shuffling. Default to 1 meaning
@@ -326,20 +323,17 @@ class ChunkDataset final
       ChunkSampler chunk_sampler,
       ExampleSampler example_sampler,
       ChunkDatasetOptions options,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::function<void(UnwrappedBatchType&)> preprocessing_policy =
           std::function<void(UnwrappedBatchType&)>())
       : chunk_reader_(std::move(chunk_reader)),
         chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         options_(std::move(options)),
         preprocessing_policy_(preprocessing_policy),
         quit_worker_(false),
         running_preloaders_(0),
         load_checkpoint_(false) {}
 
-  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~ChunkDataset() {
     // stop batch buffer first.
     if (batch_buffer_) {

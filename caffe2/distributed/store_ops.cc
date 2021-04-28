@@ -21,9 +21,7 @@ bool StoreSetOp::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StoreSet, StoreSetOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StoreSet)
     .NumInputs(2)
     .NumOutputs(0)
@@ -50,9 +48,7 @@ bool StoreGetOp::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StoreGet, StoreGetOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StoreGet)
     .NumInputs(1)
     .NumOutputs(1)
@@ -80,9 +76,7 @@ bool StoreAddOp::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StoreAdd, StoreAddOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StoreAdd)
     .NumInputs(1)
     .NumOutputs(1)
@@ -109,7 +103,6 @@ bool StoreWaitOp::RunOnDevice() {
     std::vector<std::string> blobNames;
     auto* namesPtr = Input(1).data<std::string>();
     for (int i = 0; i < Input(1).size(); ++i) {
-      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       blobNames.push_back(namesPtr[i]);
     }
     handler->wait(blobNames);
@@ -119,9 +112,7 @@ bool StoreWaitOp::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StoreWait, StoreWaitOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StoreWait)
     .NumInputs(1, 2)
     .NumOutputs(0)

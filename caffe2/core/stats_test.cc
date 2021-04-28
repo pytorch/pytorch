@@ -26,7 +26,6 @@ struct MyCaffeClass {
 
  private:
   struct MyStats {
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     CAFFE_STAT_CTOR(MyStats);
     CAFFE_EXPORTED_STAT(num_runs);
     CAFFE_EXPORTED_STAT(num_successes);
@@ -49,15 +48,11 @@ ExportedStatMap filterMap(
 
 #define EXPECT_SUBSET(map, sub) EXPECT_EQ(filterMap((map), (sub)), (sub))
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StatsTest, StatsTestClass) {
   MyCaffeClass a("first");
   MyCaffeClass b("second");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 10; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a.run(10);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     b.run(5);
   }
   EXPECT_SUBSET(
@@ -72,10 +67,8 @@ TEST(StatsTest, StatsTestClass) {
       toMap(StatRegistry::get().publish()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StatsTest, StatsTestDuration) {
   struct TestStats {
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     CAFFE_STAT_CTOR(TestStats);
     CAFFE_STAT(count);
     CAFFE_AVG_EXPORTED_STAT(time_ns);
@@ -95,10 +88,8 @@ TEST(StatsTest, StatsTestDuration) {
   EXPECT_GT(sumIt->second, 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StatsTest, StatsTestSimple) {
   struct TestStats {
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     CAFFE_STAT_CTOR(TestStats);
     CAFFE_STAT(s1);
     CAFFE_STAT(s2);
@@ -126,10 +117,8 @@ TEST(StatsTest, StatsTestSimple) {
       toMap(reg2.publish()), ExportedStatMap({{"i1/s3", 0}, {"i2/s3", 0}}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(StatsTest, StatsTestStatic) {
   struct TestStats {
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     CAFFE_STAT_CTOR(TestStats);
     CAFFE_STATIC_STAT(cpuUsage);
     CAFFE_STATIC_STAT(memUsage);

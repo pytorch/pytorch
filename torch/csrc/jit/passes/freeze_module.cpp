@@ -267,7 +267,6 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::recordMutableAttrs,
                   *this,
@@ -393,7 +392,6 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::inlineInterfaceCalls,
                   *this,
@@ -489,7 +487,6 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::propagateAttributes,
                   *this,
@@ -615,7 +612,6 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::recordReferencedAttrs,
                   *this,
@@ -647,7 +643,6 @@ class AttributePropagator {
       auto attr = module.attr(name);
       auto attrTy = attr.type();
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       bool isMutable;
       if (AliasDb::isMutableType(attrTy)) {
         isMutable = preservedAttrs_.count(attr);

@@ -6,33 +6,23 @@ namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(std::shared_ptr<BlobsQueue>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateBlobsQueue, CreateBlobsQueueOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(EnqueueBlobs, EnqueueBlobsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DequeueBlobs, DequeueBlobsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CloseBlobsQueue, CloseBlobsQueueOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SafeEnqueueBlobs, SafeEnqueueBlobsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SafeDequeueBlobs, SafeDequeueBlobsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     WeightedSampleDequeueBlobs,
     WeightedSampleDequeueBlobsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateBlobsQueue).NumInputs(0).NumOutputs(1);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(EnqueueBlobs)
     .NumInputsOutputs([](int inputs, int outputs) {
       return inputs >= 2 && outputs >= 1 && inputs == outputs + 1;
     })
     .EnforceInplace([](int input, int output) { return input == output + 1; });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DequeueBlobs)
     .NumInputsOutputs([](int inputs, int outputs) {
       return inputs == 1 && outputs >= 1;
@@ -44,10 +34,8 @@ OPERATOR_SCHEMA(DequeueBlobs)
     .Input(0, "queue", "The shared pointer for the BlobsQueue")
     .Output(0, "blob", "The blob to store the dequeued data");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CloseBlobsQueue).NumInputs(1).NumOutputs(0);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SafeEnqueueBlobs)
     .NumInputsOutputs([](int inputs, int outputs) {
       return inputs >= 2 && outputs >= 2 && inputs == outputs;
@@ -62,7 +50,6 @@ data blobs.
 )DOC")
     .Input(0, "queue", "The shared pointer for the BlobsQueue");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SafeDequeueBlobs)
     .NumInputsOutputs([](int inputs, int outputs) {
       return inputs == 1 && outputs >= 2;
@@ -83,7 +70,6 @@ data blobs.
     .Output(0, "blob", "The blob to store the dequeued data")
     .Output(1, "status", "Is set to 0/1 depending on the success of dequeue");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(WeightedSampleDequeueBlobs)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2, INT_MAX)
@@ -101,20 +87,13 @@ data blobs.
         "that will be used to store the index of the table chosen to read the "
         "current batch.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(CreateBlobsQueue);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(EnqueueBlobs);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(DequeueBlobs);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(CloseBlobsQueue);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SafeEnqueueBlobs);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SafeDequeueBlobs);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(WeightedSampleDequeueBlobs);
 
 }

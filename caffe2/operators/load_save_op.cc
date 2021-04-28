@@ -104,7 +104,6 @@ SaveOpImpl::SaveOpImpl(
   if (blob_names_.empty()) {
     std::set<std::string> input_names;
     blob_names_.resize(op->Inputs().size());
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < blob_names_.size(); ++i) {
       std::string name;
       if (strip_prefix_.empty()) {
@@ -185,7 +184,6 @@ bool SaveOpImpl::RunOnDevice() {
   VLOG(0) << "Saving " << inputs.size() << " inputs to " << db_type_ << ": "
           << full_db_name_;
   BlobSerializationOptions default_options;
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < inputs.size(); ++i) {
     SerializeBlob(
         *inputs[i],
@@ -199,19 +197,13 @@ bool SaveOpImpl::RunOnDevice() {
 
 } // namespace internal
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DBExists, DBExistsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Load, LoadOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Save, SaveOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Checkpoint, CheckpointOp<CPUContext>);
 // CPU Operator old name: do NOT use, we may deprecate this later.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Snapshot, CheckpointOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DBExists)
     .NumInputs(0)
     .NumOutputs(1)
@@ -261,7 +253,6 @@ print("exists:", workspace.FetchBlob("exists"))
     .Arg("db_type", "*(type: string)* Type of db to save (options: \"lmdb\", "
     "\"leveldb\", \"minidb\").");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Load)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
@@ -359,7 +350,6 @@ print("Y:", workspace.FetchBlob("Y"))
         "specify which blobs in the db shall be loaded. Must be the same "
         "length as number of output blobs.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Save)
     .NumInputs(1, INT_MAX)
     .NumOutputs(0)
@@ -426,7 +416,6 @@ workspace.RunOperatorOnce(op)
     "be used")
     .Input(0, "X", "*(type: Tensor)* Input tensor(s).");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Checkpoint)
     .NumInputs(1, INT_MAX)
     .NumOutputs(0)
@@ -452,18 +441,12 @@ counter). This is determined whether we need to do checkpointing.
         "(int, default 1) the checkpointing is carried out when "
         "(iter mod every) is zero.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Snapshot);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(Load);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(DBExists);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Save);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Checkpoint);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Snapshot);
 
 }  // namespace caffe2

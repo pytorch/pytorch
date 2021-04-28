@@ -29,9 +29,7 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cat_serial_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(stack_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
@@ -308,7 +306,6 @@ static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_excep
     return false;
   }
   for (const auto i : c10::irange(s1.size())) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (i != dim_except && s1[i] != s2[i]) {
       return false;
     }
@@ -649,7 +646,6 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   auto outnames = namedinference::compute_diagonal_outnames(self, dim1, dim2);
   NoNamesGuard no_names_guard;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t diag_size;
   int64_t storage_offset = self.storage_offset();
   // compute storage offset and size for the diagonal
@@ -833,7 +829,6 @@ Tensor& narrow_copy_dense_cpu_out(
   if (dim < 0) {
     dim = at::maybe_wrap_dim(dim, self_sizes.size());
   } else {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     TORCH_CHECK(dim < self_sizes.size());
   }
 
@@ -858,14 +853,11 @@ Tensor& narrow_copy_dense_cpu_out(
   output_sizes[dim] = length;
   at::native::resize_(output, output_sizes);
 
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t unit = c10::size_from_dim_(dim + 1, self_sizes);
   const int64_t num_blocks = c10::size_to_dim_(dim, self_sizes);
 
   const auto itemsize = self_contig->dtype().itemsize();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   size_t src_nbytes = itemsize * self_contig->numel();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   size_t dst_nbytes = itemsize * output.numel();
 
   size_t src_block_size = unit * self_sizes[dim];
@@ -2220,7 +2212,6 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     auto self_stride_0 = self.stride(0);
     auto self_stride_1 = self.stride(1);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t sz;
     if (dimension >= 0) {
       sz = std::min(self.size(0), self.size(1) - dimension);

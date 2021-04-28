@@ -11,7 +11,6 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) ReflectionPad modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReflectionPadImpl : public torch::nn::Cloneable<Derived> {
  public:
   ReflectionPadImpl(ExpandingArray<D*2> padding)
@@ -42,7 +41,6 @@ class TORCH_API ReflectionPadImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// ReflectionPad1d model(ReflectionPad1dOptions({3, 1}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReflectionPad1dImpl : public ReflectionPadImpl<1, ReflectionPad1dImpl> {
  public:
   using ReflectionPadImpl<1, ReflectionPad1dImpl>::ReflectionPadImpl;
@@ -68,7 +66,6 @@ TORCH_MODULE(ReflectionPad1d);
 /// ```
 /// ReflectionPad2d model(ReflectionPad2dOptions({1, 1, 2, 0}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReflectionPad2dImpl : public ReflectionPadImpl<2, ReflectionPad2dImpl> {
  public:
   using ReflectionPadImpl<2, ReflectionPad2dImpl>::ReflectionPadImpl;
@@ -85,7 +82,6 @@ TORCH_MODULE(ReflectionPad2d);
 
 /// Base class for all (dimension-specialized) ReplicationPad modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReplicationPadImpl : public torch::nn::Cloneable<Derived> {
  public:
   ReplicationPadImpl(ExpandingArray<D*2> padding)
@@ -116,7 +112,6 @@ class TORCH_API ReplicationPadImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// ReplicationPad1d model(ReplicationPad1dOptions({3, 1}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReplicationPad1dImpl : public ReplicationPadImpl<1, ReplicationPad1dImpl> {
  public:
   using ReplicationPadImpl<1, ReplicationPad1dImpl>::ReplicationPadImpl;
@@ -142,7 +137,6 @@ TORCH_MODULE(ReplicationPad1d);
 /// ```
 /// ReplicationPad2d model(ReplicationPad2dOptions({1, 1, 2, 0}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReplicationPad2dImpl : public ReplicationPadImpl<2, ReplicationPad2dImpl> {
  public:
   using ReplicationPadImpl<2, ReplicationPad2dImpl>::ReplicationPadImpl;
@@ -168,7 +162,6 @@ TORCH_MODULE(ReplicationPad2d);
 /// ```
 /// ReplicationPad3d model(ReplicationPad3dOptions({1, 2, 1, 2, 1, 2}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReplicationPad3dImpl : public ReplicationPadImpl<3, ReplicationPad3dImpl> {
  public:
   using ReplicationPadImpl<3, ReplicationPad3dImpl>::ReplicationPadImpl;
@@ -194,7 +187,6 @@ TORCH_MODULE(ReplicationPad3d);
 /// ```
 /// ZeroPad2d model(ZeroPad2dOptions({1, 1, 2, 0}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ZeroPad2dImpl : public Cloneable<ZeroPad2dImpl> {
  public:
   ZeroPad2dImpl(ExpandingArray<4> padding)
@@ -223,7 +215,6 @@ TORCH_MODULE(ZeroPad2d);
 
 /// Base class for all (dimension-specialized) ConstantPad modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConstantPadImpl : public torch::nn::Cloneable<Derived> {
  public:
   ConstantPadImpl(ExpandingArray<D*2> padding, double value)
@@ -254,7 +245,6 @@ class TORCH_API ConstantPadImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// ConstantPad1d model(ConstantPad1dOptions({3, 1}, 3.5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConstantPad1dImpl : public ConstantPadImpl<1, ConstantPad1dImpl> {
  public:
   using ConstantPadImpl<1, ConstantPad1dImpl>::ConstantPadImpl;
@@ -280,7 +270,6 @@ TORCH_MODULE(ConstantPad1d);
 /// ```
 /// ConstantPad2d model(ConstantPad2dOptions({3, 0, 2, 1}, 3.5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConstantPad2dImpl : public ConstantPadImpl<2, ConstantPad2dImpl> {
  public:
   using ConstantPadImpl<2, ConstantPad2dImpl>::ConstantPadImpl;
@@ -306,7 +295,6 @@ TORCH_MODULE(ConstantPad2d);
 /// ```
 /// ConstantPad3d model(ConstantPad3dOptions({1, 2, 1, 2, 1, 2}, 3.5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConstantPad3dImpl : public ConstantPadImpl<3, ConstantPad3dImpl> {
  public:
   using ConstantPadImpl<3, ConstantPad3dImpl>::ConstantPadImpl;
