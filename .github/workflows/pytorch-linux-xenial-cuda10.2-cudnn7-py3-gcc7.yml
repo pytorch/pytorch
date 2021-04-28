@@ -21,6 +21,7 @@ env:
   IN_CI: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 jobs:
   calculate-docker-image:
@@ -41,20 +42,20 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
     steps:
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
-      - name: Checkout PyTorch
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
-          submodules: recursive
       - name: Log in to ECR
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
           rm /tmp/ecr-login.sh
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
+          submodules: recursive
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -82,7 +83,7 @@ jobs:
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Archive artifacts into zip
         run: |
           zip -r artifacts.zip dist/ build/
@@ -107,17 +108,17 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
     steps:
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)/../":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
-      - name: Checkout PyTorch
-        uses: actions/checkout@v2
       - name: Log in to ECR
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
           bash /tmp/ecr-login.sh
           rm /tmp/ecr-login.sh
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -176,6 +177,6 @@ jobs:
         if: always()
         run: |
           # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
