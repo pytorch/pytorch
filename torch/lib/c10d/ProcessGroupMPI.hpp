@@ -101,12 +101,12 @@ class ProcessGroupMPI : public ProcessGroup {
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
-    void finishCompleteFuture(std::exception_ptr eptr = nullptr);
-
    protected:
     friend class ProcessGroupMPI;
 
    private:
+    void finishCompleteFuture(std::exception_ptr eptr = nullptr);
+
     const std::shared_ptr<std::vector<at::Tensor>> outputs_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
   };
