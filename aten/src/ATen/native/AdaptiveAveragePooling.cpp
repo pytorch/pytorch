@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/AdaptivePooling.h>
+#include <ATen/native/xnnpack/Engine.h>
 
 
 namespace at {
@@ -103,6 +104,12 @@ namespace {
     if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
+      #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+      if (xnnpack::use_global_average_pool(input)) {
+        return xnnpack::global_average_pool(input);
+      }
+      #endif
+
       Tensor out = input.mean({-1, -2}, /* keepdim = */ true);
       if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
         // assert ndim == 4, since ndim = 3 doesn't give channels_last
