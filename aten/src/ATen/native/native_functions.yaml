@@ -2794,7 +2794,7 @@
   variants: function
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
-  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  variants: function, method
   dispatch:
     CompositeExplicitAutograd: permute
 
@@ -3322,6 +3322,24 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
+
+- func: hsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: hsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
+
+- func: vsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: vsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
+
+- func: dsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: dsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
   variants: function, method
@@ -4013,6 +4031,9 @@
     SparseCPU, SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
+
+- func: positive(Tensor(a) self) -> Tensor(a)
+  variants: function, method
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
@@ -5722,14 +5743,12 @@
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
-    CPU: geqrf_out
-    CUDA: legacy::cuda::_th_geqrf_out
+    CPU, CUDA: geqrf_out
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   variants: method, function
   dispatch:
-    CPU: geqrf
-    CUDA: legacy::cuda::_th_geqrf
+    CPU, CUDA: geqrf
 
 # orgqr, alias for linalg_householder_product
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
@@ -6162,12 +6181,13 @@
 - func: topk.values(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
     CPU: topk_out_cpu
-    CUDA: legacy::cuda::_th_topk_out
+    CUDA: topk_out_cuda
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   variants: method, function
   dispatch:
-    CPU, CUDA: topk
+    CPU: topk
+    CUDA: topk_cuda
     QuantizedCPU: topk_quantized_cpu
 
 - func: all(Tensor self) -> Tensor
@@ -7462,15 +7482,14 @@
 
 - func: adaptive_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool2d_backward_out_cpu
     CUDA: adaptive_max_pool2d_backward_out_cuda
 
 - func: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool2d_backward_cpu
-    CUDA: adaptive_max_pool2d_backward_cuda
+  structured_delegate: adaptive_max_pool2d_backward.grad_input
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
@@ -7487,15 +7506,14 @@
 
 - func: adaptive_max_pool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool3d_backward_out_cpu
     CUDA: adaptive_max_pool3d_backward_out_cuda
 
 - func: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool3d_backward_cpu
-    CUDA: adaptive_max_pool3d_backward_cuda
+  structured_delegate: adaptive_max_pool3d_backward.grad_input
 
 - func: avg_pool2d.out(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -8901,6 +8919,14 @@
   python_module: linalg
   variants: function
 
+- func: linalg_matrix_rank.tol_tensor(Tensor input, Tensor tol, bool hermitian=False) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_matrix_rank.out_tol_tensor(Tensor input, Tensor tol, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
 - func: linalg_multi_dot(Tensor[] tensors) -> Tensor
   python_module: linalg
 
@@ -8945,4 +8971,4 @@
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False) -> Tensor
   variants: function
   dispatch:
-    CPU: _segment_reduce_cpu
+    CPU, CUDA: segment_reduce_kernel
