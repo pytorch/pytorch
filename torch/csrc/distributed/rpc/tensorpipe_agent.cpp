@@ -519,15 +519,7 @@ TensorPipeAgent::TensorPipeAgent(
       nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       processGroup_(std::move(processGroup)) {
-  // register Future factories
-  FutureFactoryRegistry::getInstance().registerFutureFactory(
-      c10::DeviceType::CPU,
-      [](const std::vector<c10::DeviceIndex>& devices)
-          -> std::shared_ptr<JitFuture> {
-        TORCH_INTERNAL_ASSERT(devices.empty());
-        return std::make_shared<JitFuture>(at::AnyClassType::get());
-      });
-
+  // register Future factories for CUDA
 #ifdef USE_CUDA_NOT_ROCM
   FutureFactoryRegistry::getInstance().registerFutureFactory(
       c10::DeviceType::CUDA,

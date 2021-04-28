@@ -590,6 +590,11 @@ void FutureFactoryRegistry::registerFutureFactory(
 std::shared_ptr<JitFuture> FutureFactoryRegistry::createFuture(
     c10::DeviceType type,
     const std::vector<c10::DeviceIndex>& devices) {
+  TORCH_INTERNAL_ASSERT(
+      factories_[static_cast<size_t>(type) & 0xFF],
+      "Using FutureFactory for device type ",
+      DeviceTypeName(type),
+      " before registration.")
   return factories_[static_cast<size_t>(type) & 0xFF](devices);
 }
 
