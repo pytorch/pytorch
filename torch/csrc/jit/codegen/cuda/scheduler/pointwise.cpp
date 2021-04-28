@@ -44,6 +44,12 @@ bool scheduleFusion(Fusion* fusion) {
       continue;
     }
     TensorView* out_tv = output->as<TensorView>();
+    const auto domain = out_tv->getRootDomain();
+    if (std::any_of(domain.begin(), domain.end(), [](IterDomain* iter_domain) {
+          return iter_domain->extent()->isZeroInt();
+        })) {
+      continue;
+    }
 
     // Split into 128 which will be bockDim.x
     out_tv->split(0, kThreadX);
@@ -57,6 +63,12 @@ bool scheduleFusion(Fusion* fusion) {
       continue;
     }
     TensorView* out_tv = output->as<TensorView>();
+    const auto domain = out_tv->getRootDomain();
+    if (std::any_of(domain.begin(), domain.end(), [](IterDomain* iter_domain) {
+          return iter_domain->extent()->isZeroInt();
+        })) {
+      continue;
+    }
     for (Val* inp : fusion->inputsOf(output)) {
       if (inp->getValType().value() == ValType::TensorView)
         inp->as<TensorView>()->computeAt(out_tv, -1);

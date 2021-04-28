@@ -14501,6 +14501,151 @@ TEST(NVFuserTest, FusionSingleElement_CUDA) {
       &fusion, {cg_output}, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionZeroSizeTensorPW_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = makeConcreteTensor({0});
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, new Double(2.5));
+  fusion.addOutput(tv2);
+
+  auto tv3 = makeConcreteTensor({0});
+  fusion.addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor input0 = at::randn({2}, options);
+  at::Tensor input1 = at::randn({0}, options);
+  at::Tensor cg_output2 = at::empty({2}, options);
+  at::Tensor cg_output3 = at::empty({0}, options);
+
+  scheduleFusion(&fusion, {input0, input1});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({input0, input1}, {cg_output2, cg_output3});
+
+  auto aten_output2 = input0.add(2.5);
+  at::Tensor aten_output3 = at::empty({0}, options);
+
+  testValidate(
+      &fusion,
+      {cg_output2, cg_output3},
+      {input0, input1},
+      {aten_output2, aten_output3},
+      __LINE__,
+      __FILE__);
+}
+
+TEST(NVFuserTest, FusionZeroSizeTensorReduction_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = makeConcreteTensor({0});
+  fusion.addInput(tv1);
+
+  auto tv2 = sum(tv0, {1});
+  fusion.addOutput(tv2);
+
+  auto tv3 = makeConcreteTensor({0});
+  fusion.addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor input0 = at::randn({2, 4}, options);
+  at::Tensor input1 = at::randn({0}, options);
+  at::Tensor cg_output2 = at::empty({2}, options);
+  at::Tensor cg_output3 = at::empty({0}, options);
+
+  auto reduction_tv = tv2;
+  auto outputsOfReduction = DependencyCheck::getAllOutputsOf({reduction_tv});
+  auto tv_entries = ir_utils::filterByType<TensorView>(outputsOfReduction);
+  std::vector<TensorView*> tvOutputsOfReduction(
+      tv_entries.begin(), tv_entries.end());
+  auto reduction_params =
+      getReductionHeuristics(&fusion, {input0, input1}, reduction_tv);
+  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
+  scheduleReduction(
+      &fusion, reduction_params.value(), reduction_tv, tvOutputsOfReduction);
+  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
+
+  auto lparams = reduction_params.value().lparams;
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({input0, input1}, lparams);
+  auto aten_output2 = input0.sum({1});
+  at::Tensor aten_output3 = at::empty({0}, options);
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {input0, input1},
+      {aten_output2, aten_output3},
+      __LINE__,
+      __FILE__,
+      "",
+      lparams);
+}
+
+TEST(NVFuserTest, FusionZeroSizeTensorNormalization_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = makeConcreteTensor({0});
+  fusion.addInput(tv1);
+
+  auto tv2 = sum(tv0, {0});
+  auto tv3 = broadcast(tv2, {true, false});
+  auto tv4 = add(tv0, tv3);
+  fusion.addOutput(tv4);
+
+  auto tv5 = makeConcreteTensor({0});
+  fusion.addOutput(tv5);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor input0 = at::randn({2, 4}, options);
+  at::Tensor input1 = at::randn({0}, options);
+  at::Tensor cg_output2 = at::empty({2, 4}, options);
+  at::Tensor cg_output3 = at::empty({0}, options);
+
+  std::vector<TensorView*> reduction_tensors({tv2});
+  std::vector<TensorView*> other_tensors({tv4});
+
+  auto reduction_params =
+      getNormalizationHeuristics(&fusion, {input0, input1}, reduction_tensors);
+  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
+  scheduleNormalization(
+      &fusion, reduction_params.value(), reduction_tensors, other_tensors);
+
+  auto lparams = reduction_params.value().lparams;
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({input0, input1}, lparams);
+  auto aten_output2 = input0.sum({0}).add(input0);
+  at::Tensor aten_output3 = at::empty({0}, options);
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {input0, input1},
+      {aten_output2, aten_output3},
+      __LINE__,
+      __FILE__,
+      "",
+      lparams);
+}
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
