@@ -634,6 +634,7 @@ void initTensorExprBindings(PyObject* module) {
         }
         return cg;
       });
+  te.def("annotate_input_shapes", &tensorexpr::annotateInputShapes);
 }
 } // namespace jit
 } // namespace torch
