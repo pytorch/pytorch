@@ -94,8 +94,8 @@ class TORCH_API BinaryTensorIteratorBase : public impl::MetaBase {
   ScalarType common_dtype_ = ScalarType::Undefined;
   Device common_device_ = kCPU;
 
-  int64_t numel_;
-  bool needs_to_resize_out_;
+  int64_t numel_ = -1;
+  bool needs_to_resize_out_ = false;
 
   void setup_type_and_device(const TensorIteratorConfig& config);
   constexpr int ntensors() const {
