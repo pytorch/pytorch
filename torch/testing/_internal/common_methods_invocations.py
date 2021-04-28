@@ -187,7 +187,6 @@ class OpInfo(object):
                  check_batched_grad=True,  # check batched grad when doing gradcheck
                  check_batched_gradgrad=True,  # check batched grad grad when doing gradgradcheck
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
-                 gradcheck_atol=1e-5,  # absolute tolerance while comparing analytical and numerical values during gradcheck
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
                                             # function around gradcheck (testing._internal.common_utils.gradcheck)
@@ -244,7 +243,6 @@ class OpInfo(object):
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
-        self.gradcheck_atol = gradcheck_atol
         self.gradcheck_fast_mode = gradcheck_fast_mode
 
         self.supports_sparse = supports_sparse
@@ -1331,16 +1329,16 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
     # Test case for large tensor.
     # We need to make sure that when we perform gradcheck, perturbing input
     # by eps does not change the sorted order
-    valid_sample=False
-    eps = 1e-6  # NOTE: Make sure that if you change this, the eps used by
-                # gradcheck must be updated to be at least this value
+    valid_sample = False
+    # NOTE: Make sure that if you change eps, the eps used by
+    # gradcheck must be updated to be at least this value
+    eps = 1e-6
     while not valid_sample:
         largesample = SampleInput(make_tensor((L**3,), device, dtype,
                                   low=None, high=None,
                                   requires_grad=requires_grad))
         # TODO: Maybe we shouldn't assume sort is correct here
         sorted_input, _ = largesample.input.sort()  # type: ignore[union-attr]
-                                                    # we know that input is tensor
         if (sorted_input.diff() > eps).all():
             valid_sample = True
     samples.append(largesample)
@@ -2978,9 +2976,21 @@ def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_msort(op_info, device, dtype, requires_grad):
     # test large sorting codepath
-    largesample = SampleInput(make_tensor((L**3,), device, dtype,
-                                          low=None, high=None,
-                                          requires_grad=requires_grad))
+    # We need to make sure that when we perform gradcheck, perturbing input
+    # by eps does not change the sorted order
+    valid_sample = False
+    # NOTE: Make sure that if you change eps, the eps used by
+    # gradcheck must be updated to be at least this value
+    eps = 1e-6
+    while not valid_sample:
+        largesample = SampleInput(make_tensor((L**3,), device, dtype,
+                                  low=None, high=None,
+                                  requires_grad=requires_grad))
+        # TODO: Maybe we shouldn't assume sort is correct here
+        sorted_input, _ = largesample.input.sort()  # type: ignore[union-attr]
+        if (sorted_input.diff() > eps).all():
+            valid_sample = True
+
     sample = SampleInput(make_tensor((S, M, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad))
@@ -5215,8 +5225,7 @@ op_db: List[OpInfo] = [
            skips=(
                # sort does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
-           ),
-           gradcheck_atol=1e-2),
+           )),
     OpInfo('put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
