@@ -1828,7 +1828,7 @@ class ShapePropagator {
         if (dim1 == 1 && dim2 == 1) {
           // Dot product
           return tensor_types.at(0)->withDim(0);
-        // NOLINTNEXTLINE(bugprone-branch-clone)
+          // NOLINTNEXTLINE(bugprone-branch-clone)
         } else if (dim1 == 2 && dim2 == 2) {
           // Matrix multiply
           return tensor_types.at(0);
