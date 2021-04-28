@@ -47,7 +47,7 @@ class RendezvousBackend(ABC):
     @abstractmethod
     def set_state(
         self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[Tuple[bytes, Token]]:
+    ) -> Optional[Tuple[bytes, Token, bool]]:
         """Sets the rendezvous state.
 
         The new rendezvous state is set conditionally:
@@ -71,7 +71,8 @@ class RendezvousBackend(ABC):
                 to :py:meth:`get_state` or ``set_state()``.
 
         Returns:
-            A tuple of the serialized rendezvous state and its fencing token.
+            A tuple of the serialized rendezvous state, its fencing token, and
+            a boolean value indicating whether our set attempt succeeded.
 
         Raises:
             RendezvousConnectionError:
