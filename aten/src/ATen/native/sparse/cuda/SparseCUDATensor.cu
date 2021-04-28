@@ -267,7 +267,7 @@ Tensor sparse_mask_helper_cuda(
     auto t_indices_pos_ti =
         getTensorInfo<int64_t, int64_t>(t_indices_pos);
 
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
         r_values.scalar_type(), "sparse_mask_helper_cuda", [&] {
           auto t_values_ti = getTensorInfo<scalar_t, int64_t>(t_values);
           auto r_values_ti =

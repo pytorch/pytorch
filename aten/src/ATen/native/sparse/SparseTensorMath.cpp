@@ -895,7 +895,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   Tensor indices = sparse_._indices();
   Tensor values      = sparse_._values();
 
-  AT_DISPATCH_ALL_TYPES(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
       values.scalar_type(), "addmm_sparse_dense", [&] {
         s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, indices, values, dense);
       }
@@ -1558,7 +1558,7 @@ Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor&
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each one.
   int64_t start_mat_num = indices_dim0_accessor[0];
-  AT_DISPATCH_ALL_TYPES(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
     values.scalar_type(), "bmm_sparse_dense", [&] {
       for (int64_t cur_mat_num = 0;
         (cur_mat_num < num_matrices);
