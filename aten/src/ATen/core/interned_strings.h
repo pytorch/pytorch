@@ -289,6 +289,7 @@ namespace c10 {
   _(aten, fix)                       \
   _(aten, fix_)                      \
   _(aten, to_mkldnn)                 \
+  _(aten, positive)                  \
   _(aten, neg)                       \
   _(aten, neg_)                      \
   _(aten, negative)                  \

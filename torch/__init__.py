@@ -384,6 +384,7 @@ def use_deterministic_algorithms(mode):
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
         * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
+        * :func:`torch.Tensor.index_copy` when called on a CPU tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -413,7 +414,7 @@ def use_deterministic_algorithms(mode):
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
-        * :func:`torch.Tensor.index_copy`
+        * :func:`torch.Tensor.index_copy` when called on a CUDA tensor
         * :func:`torch.Tensor.index_put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
