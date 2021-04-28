@@ -638,9 +638,9 @@ bool checkTypes(
     return true;
   }
 
-  if (is_integral(highType)) {
+  if (c10::isIntegralType(highType, false)) {
     return (typeConstraints & kIntegralTypes) != 0;
-  } else if (is_floating_point(highType)) {
+  } else if (c10::isFloatingType(highType)) {
     return (typeConstraints & kFloatingPointTypes) != 0;
   } else if (highType == ScalarType::Bool) {
     return (typeConstraints & kBoolType) != 0;
@@ -2684,7 +2684,7 @@ Tensor* TensorExprKernel::computeSoftmax(
     return new_indices;
   };
 
-  c10::optional<Dtype> dtype = ToDtype(ScalarType::None);
+  c10::optional<Dtype> dtype = ToDtype(ScalarType::Undefined);
   auto maybe_dtype = v->node()->get(attr::dtype);
   if (maybe_dtype && !maybe_dtype->isNone()) {
     dtype = ToDtype(static_cast<ScalarType>(maybe_dtype->toInt()));
@@ -2939,7 +2939,6 @@ void TensorExprKernel::compile() {
   nInputs_ = graph_->inputs().size();
   genInputDebugNames();
   for (auto const& input : graph_->inputs()) {
-    inputTypes_.push_back(input->type());
     if (Tensor* t = bindInput(input)) {
       block->append_stmt(t->stmt());
     }

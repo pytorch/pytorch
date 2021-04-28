@@ -548,13 +548,10 @@ void initTensorExprBindings(PyObject* module) {
         std::vector<ArgValue> argInputs;
         for (auto inp : inputs) {
           if (py::isinstance<Placeholder>(inp)) {
-            // std::cout << "placeholder" << std::endl;
             argInputs.push_back(py::cast<Placeholder>(inp).handle());
           } else if (py::isinstance<BufHandle>(inp)) {
-            // std::cout << "bufhandle" << std::endl;
             argInputs.push_back(py::cast<BufHandle>(inp));
           } else if (py::isinstance<VarHandle>(inp)) {
-            // std::cout << "varhandle" << std::endl;
             argInputs.push_back(py::cast<VarHandle>(inp));
           } else if (py::isinstance<py::float_>(inp)) {
             argInputs.push_back(py::cast<double>(inp));
