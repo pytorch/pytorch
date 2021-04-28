@@ -3,7 +3,7 @@ import torch.fx
 import torch.fx as fx
 import operator
 from typing import Any, Callable, Dict, Tuple, Optional
-from torch.fx.node import Argument, Target, Node
+from torch.fx.node import Argument, Target, Node, map_aggregate
 from torch.fx.operator_schemas import normalize_module, normalize_function, create_type_hint
 
 from torch.fx import Transformer, Proxy
@@ -36,12 +36,13 @@ class NormalizeArgs(Transformer):
         args, kwargs = self.fetch_args_kwargs_from_env(n)
 
         def get_type(arg):
-            if isinstance(arg, fx.Proxy):
-                old_meta = self.node_map[arg].meta
-                return old_meta['type'] if 'type' in old_meta else None
-            return create_type_hint(arg)
+            if isinstance(arg, fx.Node):
+                return n.meta['type'] if 'type' in n.meta else None
+            return type(arg)
 
-        arg_types = tuple([get_type(arg) for arg in args])
+        arg_types = map_aggregate(n.args, get_type)
+        assert(isinstance(arg_types, tuple))
+        arg_types = tuple([create_type_hint(i) for i in arg_types])
         kwarg_types = {k: get_type(v) for k, v in kwargs.items()}
         if n.op == 'call_function':
             out = self.call_function(n.target, args, kwargs, arg_types, kwarg_types)
