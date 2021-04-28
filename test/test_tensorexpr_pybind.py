@@ -118,12 +118,9 @@ graph(%a.1 : Float(requires_grad=0, device=cpu),
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_shape_prop(self):
-        def f(a, b, c):
-            return a + b + c
         device, size = 'cpu', (4, 4)
         x = torch.rand(size, device=device)
         y = torch.rand(size, device=device)
-        z = torch.rand(size, device=device)
 
         graph_str = """
 graph(%a : Tensor, %b : Tensor):
@@ -155,7 +152,7 @@ graph(%a : Tensor, %b : Tensor):
 
         res = kernel.run((x, y))
         correct = torch.mul(x, y)
-        np.testing.assert_allclose(res.numpy(), correct.numpy(), atol=2e-3)
+        np.testing.assert_allclose(res.numpy(), correct.numpy(), atol=1e-5)
 
 if __name__ == '__main__':
     run_tests()
