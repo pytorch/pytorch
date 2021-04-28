@@ -1911,23 +1911,36 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1, 1),))
         test(vmap(op), (torch.rand(B1, 1, B0),), in_dims=2)
 
-    def test_sum_dim(self):
+    def _test_mean_sum_dim(self, op):
         test = self._vmap_test
         B0, B1 = 5, 7
 
         # Single vmap, various in_dims / out_dims
-        test(lambda x: x.sum(0), [torch.randn([B0])])
-        test(lambda x: x.sum(-1), [torch.randn([B0])])
-        test(lambda x: x.sum(0), [torch.randn([B0, 3])])
-        test(lambda x: x.sum(-1), [torch.randn([2, 5, B0, 3])], in_dims=2)
-        test(lambda x: x.sum(2), [torch.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
+        test(lambda x: op(x, 0), [torch.randn([B0])])
+        test(lambda x: op(x, -1), [torch.randn([B0])])
+        test(lambda x: op(x, 0), [torch.randn([B0, 3])])
+        test(lambda x: op(x, -1), [torch.randn([2, 5, B0, 3])], in_dims=2)
+        test(lambda x: op(x, 2), [torch.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
 
         # Doubly nested vmap
-        test(vmap(lambda x: x.sum(0)), [torch.randn([B0, B1])])
-        test(vmap(lambda x: x.sum(-1)), [torch.randn([B0, B1])])
-        test(vmap(lambda x: x.sum(-2)), [torch.randn([B1, 2, 5, B0, 3])], in_dims=2)
-        test(vmap(lambda x: x.sum(2), in_dims=2), [torch.randn([2, 5, B0, B1, 3])],
+        test(vmap(lambda x: op(x, 0)), [torch.randn([B0, B1])])
+        test(vmap(lambda x: op(x, -1)), [torch.randn([B0, B1])])
+        test(vmap(lambda x: op(x, -2)), [torch.randn([B1, 2, 5, B0, 3])], in_dims=2)
+        test(vmap(lambda x: op(x, 2), in_dims=2), [torch.randn([2, 5, B0, B1, 3])],
              in_dims=2, out_dims=2)
+
+    def test_sum_dim(self):
+        self._test_mean_sum_dim(torch.sum)
+
+    def test_mean_dim(self):
+        self._test_mean_sum_dim(torch.mean)
+
+    def test_repeat(self):
+        test = self._vmap_test
+        B0 = 7
+        op = Tensor.repeat
+        test(lambda x: op(x, (2, 3)), (torch.rand(B0, 1, 1),))
+        test(lambda x: op(x, (2, 3)), (torch.rand(1, B0, 1),), in_dims=1)
 
     def test_reshape(self):
         test = self._vmap_test

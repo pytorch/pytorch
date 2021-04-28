@@ -1,0 +1,113 @@
+#include <functorch/csrc/BatchRulesHelper.h>
+
+namespace at { namespace functorch {
+
+template <typename F, F Func, typename... ExtraArgs>
+std::tuple<Tensor,optional<int64_t>> basic_unary_batch_rule(
+    const Tensor& tensor, optional<int64_t> batch_dim, ExtraArgs... extra_args) {
+  return {Func(tensor, std::forward<ExtraArgs>(extra_args)...), batch_dim};
+}
+
+static void handleScalarTypePromotion(Tensor& logical_scalar_tensor, Tensor& second) {
+  auto result_type = at::native::result_type(logical_scalar_tensor[0], second);
+  if (logical_scalar_tensor.scalar_type() != result_type) {
+    logical_scalar_tensor = logical_scalar_tensor.to(result_type);
+  }
+  if (second.scalar_type() != result_type) {
+    second = second.to(result_type);
+  }
+}
+
+static Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, int64_t logical_rank) {
+  if (!has_bdim) {
+    return tensor;
+  }
+  auto tensor_logical_rank = rankWithoutBatchDim(tensor, has_bdim);
+  if (tensor_logical_rank >= logical_rank) {
+    return tensor;
+  }
+  VmapDimVector new_sizes(tensor.sizes().begin(), tensor.sizes().end());
+  for (int64_t i = 0; i < logical_rank - tensor_logical_rank; i++) {
+    new_sizes.insert(new_sizes.begin() + 1, 1);
+  }
+  return tensor.view(new_sizes);
+}
+
+template <typename F, F Func, typename... ExtraArgs>
+std::tuple<Tensor,optional<int64_t>> binary_pointwise_batch_rule(
+    const Tensor& tensor, optional<int64_t> tensor_batch_dim,
+    const Tensor& other, optional<int64_t> other_batch_dim,
+    ExtraArgs... extra_args) {
+  // compute max logical rank
+  auto tensor_logical_rank = rankWithoutBatchDim(tensor, tensor_batch_dim);
+  auto other_logical_rank = rankWithoutBatchDim(other, other_batch_dim);
+  auto max_logical_rank = std::max(tensor_logical_rank, other_logical_rank);
+
+  auto tensor_ = moveBatchDimToFront(tensor, tensor_batch_dim);
+  auto other_ = moveBatchDimToFront(other, other_batch_dim);
+
+  // In the (0D, ND) case, type promotion semantics are different :/
+  auto tensor_is_logical_scalar = (tensor_logical_rank == 0 && tensor_batch_dim.has_value());
+  auto other_is_logical_scalar = (other_logical_rank == 0 && other_batch_dim.has_value());
+  if (tensor_is_logical_scalar && !other_is_logical_scalar) {
+    handleScalarTypePromotion(tensor_, other_);
+  }
+  if (other_is_logical_scalar && !tensor_is_logical_scalar) {
+    handleScalarTypePromotion(other_, tensor_);
+  }
+
+  // If the dimensions aren't aligned, we need to line them up.
+  // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
+  // Note that only tensors that have a batch dim need to be modified.
+  // Tensor[B, 2, 3, 5] + Tensor[5] -> no changes needed
+  tensor_ = maybePadToLogicalRank(tensor_, tensor_batch_dim, max_logical_rank);
+  other_ = maybePadToLogicalRank(other_, other_batch_dim, max_logical_rank);
+
+  auto result = Func(tensor_, other_, std::forward<ExtraArgs>(extra_args)...);
+  auto result_batch_dim = tensor_batch_dim.has_value() || other_batch_dim.has_value()
+    ? optional<int64_t>{0} : nullopt;
+  return { std::move(result), std::move(result_batch_dim) };
+}
+
+std::tuple<Tensor,optional<int64_t>> pow_scalar_tensor_batch_rule(
+    const Scalar& other,
+    const Tensor& tensor, optional<int64_t> tensor_batch_dim) {
+  return { at::pow(other, tensor), tensor_batch_dim };
+}
+
+TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+  using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, const Scalar&);
+  using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
+  using TensorScalarType = Tensor (*)(const Tensor&, const Scalar&);
+
+#define BINARY_POINTWISE_BATCH_RULE_SCALAR(op) \
+  binary_pointwise_batch_rule<TensorTensorScalarType, &op, const Scalar&>
+#define BINARY_POINTWISE_WITH_SCALAR(op) \
+  VMAP_SUPPORT(#op".Tensor", BINARY_POINTWISE_BATCH_RULE_SCALAR(at::op));
+
+#define BINARY_POINTWISE_BATCH_RULE(op) binary_pointwise_batch_rule<TensorTensorType, &op>
+#define BINARY_POINTWISE(op) VMAP_SUPPORT(#op".Tensor", BINARY_POINTWISE_BATCH_RULE(at::op));
+
+  BINARY_POINTWISE_WITH_SCALAR(add);
+  BINARY_POINTWISE_WITH_SCALAR(sub);
+  BINARY_POINTWISE_WITH_SCALAR(rsub);
+  BINARY_POINTWISE(mul);
+  BINARY_POINTWISE(div);
+  VMAP_SUPPORT("tanh_backward", BINARY_POINTWISE_BATCH_RULE(at::tanh_backward));
+
+  // at::pow has three out-of-place overloads
+#define POW_BATCH_RULE binary_pointwise_batch_rule<TensorTensorType, &at::pow>
+  VMAP_SUPPORT("pow.Tensor_Tensor", POW_BATCH_RULE);
+#undef POW_BATCH_RULE
+#define POW_BATCH_RULE basic_unary_batch_rule<TensorScalarType, &at::pow, const Scalar&>
+  VMAP_SUPPORT("pow.Tensor_Scalar", POW_BATCH_RULE);
+#undef POW_BATCH_RULE
+  VMAP_SUPPORT("pow.Scalar", pow_scalar_tensor_batch_rule);
+
+#undef BINARY_POINTWISE_BATCH_RULE_SCALAR
+#undef BINARY_POINTWISE_BATCH_RULE
+#undef BINARY_POINTWISE_WITH_SCALAR
+#undef BINARY_POINTWISE
+}
+
+}}
