@@ -1187,5 +1187,33 @@ TEST_F(Kernel, ConstantTensorsNonContiguous) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
+TEST_F(Kernel, GetAsm) {
+  const auto graph_string = R"IR(
+        graph(%x : Float(16, 16, strides=[16, 1], device=cpu)):
+          %none : NoneType = prim::Constant()
+          %dtype : int = prim::Constant[value=6]()
+          %c0 : int = prim::Constant[value=0]()
+          %c256 : int = prim::Constant[value=256]()
+          %c16 : int = prim::Constant[value=16]()
+          %y_flat : Tensor = aten::arange(%c0, %c256, %dtype, %none, %none, %none)
+          %sizes : int[] = prim::ListConstruct(%c16, %c16)
+          %y_t : Tensor = aten::view(%y_flat, %sizes)
+          %y : Tensor = aten::t(%y_t)
+          %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
+          return (%z))IR";
+  KernelScope kernel_scope;
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  // IRParser doesn't support tensor constants, so we generate several aten
+  // calls to produce non-contiguos constant tensor and then const-prop it
+  ConstantPropagation(graph);
+
+  TensorExprKernel k(graph);
+  auto llvm_ir_str = k.getCodeText();
+  std::cerr << llvm_ir_str;
+  auto asm_str = k.getCodeText("asm");
+  std::cerr << "ASM:\n" << asm_str;
+}
+
 } // namespace jit
 } // namespace torch
