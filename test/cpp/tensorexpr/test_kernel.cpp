@@ -623,8 +623,11 @@ std::string dtypeConstant(ScalarType scalar_type) {
 
 at::Tensor iotaTensor(IntArrayRef sizes, const at::TensorOptions& options) {
   int64_t numel = std::accumulate(
+      sizes.begin(),
+      sizes.end(),
+      1,
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
-      sizes.begin(), sizes.end(), 1, std::multiplies<int64_t>());
+      std::multiplies<int64_t>());
   std::vector<float> values(numel);
   std::iota(values.begin(), values.end(), 0);
   auto a = at::tensor(values, options);
