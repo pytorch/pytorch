@@ -162,28 +162,28 @@ class TestGradients(TestCase):
     def _gradgrad_test_helper(self, device, dtype, op, variant):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
-    def _skip_helper(self, op, dtype):
+    def _skip_helper(self, op, device, dtype):
         if not op.supports_autograd:
             self.skipTest("Skipped! autograd not supported.")
-        if not op.supports_complex_autograd and dtype.is_complex:
+        if not op.supports_complex_autograd(torch.device(device).type) and dtype.is_complex:
             self.skipTest("Skipped! Complex autograd not supported.")
 
     # Tests that gradients are computed correctly
     @_gradcheck_ops(op_db)
     def test_fn_grad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
+        self._skip_helper(op, device, dtype)
         self._grad_test_helper(device, dtype, op, op.get_op())
 
     # Method grad (and gradgrad, see below) tests are disabled since they're
     #   costly and redundant with function grad (and gradgad) tests
     # @_gradcheck_ops(op_db)
     # def test_method_grad(self, device, dtype, op):
-    #     self._skip_helper(op, dtype)
+    #     self._skip_helper(op, device, dtype)
     #     self._grad_test_helper(device, dtype, op, op.get_method())
 
     @_gradcheck_ops(op_db)
     def test_inplace_grad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
+        self._skip_helper(op, device, dtype)
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
@@ -191,7 +191,7 @@ class TestGradients(TestCase):
     # Test that gradients of gradients are computed correctly
     @_gradcheck_ops(op_db)
     def test_fn_gradgrad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
+        self._skip_helper(op, device, dtype)
         if not op.supports_gradgrad:
             self.skipTest("Skipped! Operation does not support gradgrad")
         self._gradgrad_test_helper(device, dtype, op, op.get_op())
@@ -199,7 +199,7 @@ class TestGradients(TestCase):
     # Test that gradients of gradients are properly raising
     @_gradcheck_ops(op_db)
     def test_fn_fail_gradgrad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
+        self._skip_helper(op, device, dtype)
         if op.supports_gradgrad:
             self.skipTest("Skipped! Operation does support gradgrad")
 
@@ -211,12 +211,12 @@ class TestGradients(TestCase):
     #   costly and redundant with function gradgrad (and grad) tests
     # @_gradcheck_ops(op_db)
     # def test_method_gradgrad(self, device, dtype, op):
-    #     self._skip_helper(op, dtype)
+    #     self._skip_helper(op, device, dtype)
     #     self._gradgrad_test_helper(device, dtype, op, op.get_method())
 
     @_gradcheck_ops(op_db)
     def test_inplace_gradgrad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
+        self._skip_helper(op, device, dtype)
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
@@ -263,7 +263,7 @@ class TestCommon(JitCommonTestCase):
         variants = tuple(filter(None, variants))
 
         _requires_grad = (op.supports_autograd and
-                          (dtype.is_floating_point or op.supports_complex_autograd))
+                          (dtype.is_floating_point or op.supports_complex_autograd(torch.device(device).type)))
 
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
 
@@ -290,7 +290,7 @@ class TestCommon(JitCommonTestCase):
                 # TODO: update to handle checking grads of all tensor inputs as
                 #   derived from each tensor output
                 if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
-                        and (dtype.is_floating_point or op.supports_complex_autograd)):
+                        and (dtype.is_floating_point or op.supports_complex_autograd(torch.device(device).type))):
                     expected_forward.sum().backward()
                     expected_grad = tensor.grad
 
@@ -360,7 +360,8 @@ class TestCommon(JitCommonTestCase):
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @_variant_ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
-        _requires_grad = op.supports_autograd and (dtype.is_floating_point or op.supports_complex_autograd)
+        _requires_grad = op.supports_autograd and (dtype.is_floating_point or
+                                                   op.supports_complex_autograd(torch.device(device).type))
         # TODO: fix this
         if _requires_grad and not op.supports_gradgrad:
             self.skipTest("skipped! This test does not handle ops that don't support gragrad properly")
