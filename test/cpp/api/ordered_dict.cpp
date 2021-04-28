@@ -6,6 +6,7 @@
 template <typename T>
 using OrderedDict = torch::OrderedDict<std::string, T>;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, IsEmptyAfterDefaultConstruction) {
   OrderedDict<int> dict;
   ASSERT_EQ(dict.key_description(), "Key");
@@ -13,6 +14,7 @@ TEST(OrderedDictTest, IsEmptyAfterDefaultConstruction) {
   ASSERT_EQ(dict.size(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, InsertAddsElementsWhenTheyAreYetNotPresent) {
   OrderedDict<int> dict;
   dict.insert("a", 1);
@@ -20,6 +22,7 @@ TEST(OrderedDictTest, InsertAddsElementsWhenTheyAreYetNotPresent) {
   ASSERT_EQ(dict.size(), 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, GetReturnsValuesWhenTheyArePresent) {
   OrderedDict<int> dict;
   dict.insert("a", 1);
@@ -28,6 +31,7 @@ TEST(OrderedDictTest, GetReturnsValuesWhenTheyArePresent) {
   ASSERT_EQ(dict["b"], 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, GetThrowsWhenPassedKeysThatAreNotPresent) {
   OrderedDict<int> dict;
   dict.insert("a", 1);
@@ -36,6 +40,7 @@ TEST(OrderedDictTest, GetThrowsWhenPassedKeysThatAreNotPresent) {
   ASSERT_THROWS_WITH(dict[""], "Key '' is not defined");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, CanInitializeFromList) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_EQ(dict.size(), 2);
@@ -43,34 +48,40 @@ TEST(OrderedDictTest, CanInitializeFromList) {
   ASSERT_EQ(dict["b"], 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, InsertThrowsWhenPassedElementsThatArePresent) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_THROWS_WITH(dict.insert("a", 1), "Key 'a' already defined");
   ASSERT_THROWS_WITH(dict.insert("b", 1), "Key 'b' already defined");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, FrontReturnsTheFirstItem) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_EQ(dict.front().key(), "a");
   ASSERT_EQ(dict.front().value(), 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, FrontThrowsWhenEmpty) {
   OrderedDict<int> dict;
   ASSERT_THROWS_WITH(dict.front(), "Called front() on an empty OrderedDict");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, BackReturnsTheLastItem) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_EQ(dict.back().key(), "b");
   ASSERT_EQ(dict.back().value(), 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, BackThrowsWhenEmpty) {
   OrderedDict<int> dict;
   ASSERT_THROWS_WITH(dict.back(), "Called back() on an empty OrderedDict");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, FindReturnsPointersToValuesWhenPresent) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_NE(dict.find("a"), nullptr);
@@ -79,18 +90,21 @@ TEST(OrderedDictTest, FindReturnsPointersToValuesWhenPresent) {
   ASSERT_EQ(*dict.find("b"), 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, FindReturnsNullPointersWhenPasesdKeysThatAreNotPresent) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_EQ(dict.find("bar"), nullptr);
   ASSERT_EQ(dict.find(""), nullptr);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, SubscriptOperatorThrowsWhenPassedKeysThatAreNotPresent) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_EQ(dict["a"], 1);
   ASSERT_EQ(dict["b"], 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     OrderedDictTest,
     SubscriptOperatorReturnsItemsPositionallyWhenPassedIntegers) {
@@ -101,12 +115,14 @@ TEST(
   ASSERT_EQ(dict[1].value(), 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, SubscriptOperatorsThrowswhenPassedKeysThatAreNotPresent) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_THROWS_WITH(dict["foo"], "Key 'foo' is not defined");
   ASSERT_THROWS_WITH(dict[""], "Key '' is not defined");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, UpdateInsertsAllItemsFromAnotherOrderedDict) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   OrderedDict<int> dict2 = {{"c", 3}};
@@ -117,12 +133,14 @@ TEST(OrderedDictTest, UpdateInsertsAllItemsFromAnotherOrderedDict) {
   ASSERT_NE(dict2.find("c"), nullptr);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, UpdateAlsoChecksForDuplicates) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   OrderedDict<int> dict2 = {{"a", 1}};
   ASSERT_THROWS_WITH(dict2.update(dict), "Key 'a' already defined");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, CanIterateItems) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   auto iterator = dict.begin();
@@ -137,6 +155,7 @@ TEST(OrderedDictTest, CanIterateItems) {
   ASSERT_EQ(iterator, dict.end());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, EraseWorks) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}, {"c", 3}};
   dict.erase("b");
@@ -151,6 +170,7 @@ TEST(OrderedDictTest, EraseWorks) {
   ASSERT_TRUE(dict.is_empty());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, ClearMakesTheDictEmpty) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_FALSE(dict.is_empty());
@@ -158,6 +178,7 @@ TEST(OrderedDictTest, ClearMakesTheDictEmpty) {
   ASSERT_TRUE(dict.is_empty());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, CanCopyConstruct) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   OrderedDict<int> copy = dict;
@@ -166,6 +187,7 @@ TEST(OrderedDictTest, CanCopyConstruct) {
   ASSERT_EQ(*copy[1], 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, CanCopyAssign) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   OrderedDict<int> copy = {{"c", 1}};
@@ -177,6 +199,7 @@ TEST(OrderedDictTest, CanCopyAssign) {
   ASSERT_EQ(copy.find("c"), nullptr);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, CanMoveConstruct) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   OrderedDict<int> copy = std::move(dict);
@@ -185,6 +208,7 @@ TEST(OrderedDictTest, CanMoveConstruct) {
   ASSERT_EQ(*copy[1], 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, CanMoveAssign) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   OrderedDict<int> copy = {{"c", 1}};
@@ -196,6 +220,7 @@ TEST(OrderedDictTest, CanMoveAssign) {
   ASSERT_EQ(copy.find("c"), nullptr);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, CanInsertWithBraces) {
   OrderedDict<std::pair<int, int>> dict;
   dict.insert("a", {1, 2});
@@ -204,6 +229,7 @@ TEST(OrderedDictTest, CanInsertWithBraces) {
   ASSERT_EQ(dict["a"].second, 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, ErrorMessagesIncludeTheKeyDescription) {
   OrderedDict<int> dict("Penguin");
   ASSERT_EQ(dict.key_description(), "Penguin");
@@ -213,16 +239,19 @@ TEST(OrderedDictTest, ErrorMessagesIncludeTheKeyDescription) {
   ASSERT_THROWS_WITH(dict.insert("a", 1), "Penguin 'a' already defined");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, KeysReturnsAllKeys) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_EQ(dict.keys(), std::vector<std::string>({"a", "b"}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, ValuesReturnsAllValues) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_EQ(dict.values(), std::vector<int>({1, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedDictTest, ItemsReturnsAllItems) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   std::vector<OrderedDict<int>::Item> items = dict.items();
