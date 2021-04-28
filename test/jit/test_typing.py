@@ -73,11 +73,17 @@ class TestTyping(JitTestCase):
         self.checkScript(test_dict_tensor_key, (dict_a, inp1))
         self.checkScript(test_dict_tensor_key, (dict_a, inp2))
 
-    def test_dict_types(self):
-        with self.assertRaisesRegex(RuntimeError, "single type"):
-            @torch.jit.script
-            def foo():
-                new_item = {'score': [1.0], 'ys': [1, 2, 3]}
+    def test_dict_value_type_refinement_defaults_to_Any(self):
+        def fn(x):
+            d = {"foo": torch.tensor(2),
+                 "bar": {"23": torch.tensor(3)}}
+            d["baz"] = x
+            t = d["foo"]
+            if isinstance(t, torch.Tensor):
+                d["bar"] = torch.add(t, t)
+            return d
+
+        self.checkScript(fn, (torch.rand(2, 3),))
 
     def test_dict_invalid_annotations(self):
         # Check for invalid value type annotation

@@ -3675,24 +3675,25 @@ struct to_ir {
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
 
-        auto checkTypeOfValues = [](const TypePtr& type,
-                                    const char* what,
-                                    const std::vector<Value*>& values,
-                                    TreeList trees) {
-          for (size_t i = 0, N = values.size(); i < N; ++i) {
-            std::stringstream ss;
-            if (!values[i]->type()->isSubtypeOfExt(type, &ss)) {
-              throw ErrorReport(trees[i])
-                  << "Dict " << what
-                  << " must contain only a single type, expected: "
-                  << type->repr_str() << " but found "
-                  << values[i]->type()->repr_str() << " instead.\n"
-                  << ss.str();
-            }
+        for (size_t i = 0, N = values.size(); i < N; ++i) {
+          std::stringstream ss;
+          if (!keys[i]->type()->isSubtypeOfExt(key_type, &ss) &&
+              !key_type->isSubtypeOfExt(keys[i]->type(), &ss)) {
+            throw ErrorReport(trees[i])
+                << "Dict keys must contain "
+                << "only a single type, expected: " << key_type->repr_str()
+                << " but found " << keys[i]->type()->repr_str() << " instead.\n"
+                << ss.str();
           }
-        };
-        checkTypeOfValues(key_type, "keys", keys, key_trees);
-        checkTypeOfValues(value_type, "values", values, value_trees);
+        }
+
+        for (size_t i = 0, N = values.size(); i < N; ++i) {
+          std::stringstream ss;
+          if (!values[i]->type()->isSubtypeOfExt(value_type, &ss) &&
+              !value_type->isSubtypeOfExt(values[i]->type(), &ss)) {
+            value_type = AnyType::get();
+          }
+        }
 
         return graph
             ->insertNode(graph->createDict(key_type, value_type, keys, values))
