@@ -2767,19 +2767,6 @@ def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
-def sample_inputs_floor_divide(op_info, device, dtype, requires_grad, **kwargs):
-    lhs = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
-    rhs = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
-    # Avoid integer divide by 0
-    if not (dtype.is_floating_point or dtype.is_complex):
-        rhs[rhs == 0] = 1
-
-    return [
-        SampleInput(lhs, args=(rhs,)),
-        SampleInput(lhs, args=(rhs[0],)),
-        SampleInput(lhs, args=(3.14,)),
-    ]
-
 
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -4154,16 +4141,21 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    supports_autograd=False,
                    safe_casts_outputs=True),
-    OpInfo('floor_divide',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_floor_divide,
-           decorators=[_wrap_warn_once("floor_divide is deprecated, and will be removed")],
-           skips=(
-               # `test_duplicate_method_tests` doesn't raise any warning, as it doesn't actually
-               # call the operator.
-               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
-           supports_autograd=False,
-           ),
+    BinaryUfuncInfo(
+        "floor_divide",
+        # torch.floor_divide is a misnomer and should actually be named torch.trunc_divide.
+        # numpy has no builtin reference for trunc divide, but it is easy enough to emulate
+        ref=lambda *args, **kwargs: np.trunc(np.true_divide(*args, **kwargs)),
+        # prevent zero division
+        domain=(1.0, None),
+        decorators=[_wrap_warn_once("floor_divide is deprecated, and will be removed")],
+        dtypes=all_types_and(torch.half, torch.bfloat16),
+        supports_out=True,
+        supports_autograd=False,
+        skips=(
+            SkipInfo("TestCommon", "test_variant_consistency_jit", dtypes=[torch.float32]),
+        ),
+    ),
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,
                    ref=np.frexp,
@@ -5679,20 +5671,6 @@ op_db: List[OpInfo] = [
         # prevent zero division
         domain=(1.0, None),
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-        supports_out=True,
-        supports_autograd=False,
-        skips=(
-            SkipInfo("TestCommon", "test_variant_consistency_jit", dtypes=[torch.float32]),
-        ),
-    ),
-    BinaryUfuncInfo(
-        "floor_divide",
-        # torch.floor_divide is a misnomer and should actually be torch.trunc_divide.
-        # numpy has no builtin reference for trunc divide, but it is easy enough to emulate
-        ref=lambda *args, **kwargs: np.trunc(np.true_divide(*args, **kwargs)),
-        # prevent zero division
-        domain=(1.0, None),
-        dtypes=all_types_and(torch.half, torch.bfloat16),
         supports_out=True,
         supports_autograd=False,
         skips=(
