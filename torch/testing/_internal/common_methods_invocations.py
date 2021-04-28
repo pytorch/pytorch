@@ -427,11 +427,11 @@ def sample_inputs_binary(op_info, device, dtype, requires_grad, **kwargs):
         if isinstance(shape_2_or_scalar, tuple):
             # shape
             arg = make_tensor(shape_2_or_scalar, device, dtype, low=low, high=high, requires_grad=requires_grad)
-            broadcasts_input = shape_1 != shape_2_or_scalar
+            broadcasts_input = shape_1 != torch.broadcast_shapes(shape_1, shape_2_or_scalar)
         else:
             # scalar
             arg = shape_2_or_scalar
-            broadcasts_input = True
+            broadcasts_input = False
 
         sample_inputs.append(
             SampleInput(
@@ -471,7 +471,7 @@ class BinaryUfuncInfo(OpInfo):
         supports_inplace_autograd=False,
         **kwargs
     ):
-        super(BinaryUfuncInfo, self).__init__(
+        super().__init__(
             name,
             dtypes=dtypes,
             assert_autodiffed=assert_autodiffed,
@@ -3958,21 +3958,43 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo(
         "div",
         variant_test_name="true_rounding",
-        aliases=("true_divide",),
+        aliases=("divide",),
         ref=np.true_divide,
         sample_inputs_func=partial(sample_inputs_binary, rounding_mode=None),
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         supports_out=True,
+        skips=(
+            SkipInfo("TestCommon", "test_variant_consistency_jit", dtypes=[torch.float32, torch.complex64]),
+        )
     ),
     BinaryUfuncInfo(
         "div",
-        variant_test_name="floor_rounding",
-        aliases=("floor_divide",),
-        ref=np.floor_divide,
+        variant_test_name="trunc_rounding",
+        aliases=("divide",),
+        # numpy has no builtin reference for trunc divide, but it is easy enough to emulate
+        ref=lambda *args, **kwargs: np.trunc(np.true_divide(*args, **kwargs)),
+        # prevent zero division
         domain=(1.0, None),
         sample_inputs_func=partial(sample_inputs_binary, rounding_mode="floor"),
         dtypes=all_types_and(torch.half, torch.bfloat16),
         supports_out=True,
+        skips=(
+            SkipInfo("TestCommon", "test_variant_consistency_jit", dtypes=[torch.float32]),
+        )
+    ),
+    BinaryUfuncInfo(
+        "div",
+        variant_test_name="floor_rounding",
+        aliases=("divide",),
+        ref=np.floor_divide,
+        # prevent zero division
+        domain=(1.0, None),
+        sample_inputs_func=partial(sample_inputs_binary, rounding_mode="floor"),
+        dtypes=all_types_and(torch.half, torch.bfloat16),
+        supports_out=True,
+        skips=(
+            SkipInfo("TestCommon", "test_variant_consistency_jit", dtypes=[torch.float32]),
+        )
     ),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
