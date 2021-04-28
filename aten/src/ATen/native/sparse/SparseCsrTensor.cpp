@@ -108,7 +108,17 @@ Tensor sparse_csr_tensor(
   if (col_indices.numel() > 0) {
     size[0] = crow_indices.numel() - 1;
     Tensor max_col_indices = std::get<0>(col_indices.max(0, false));
-    size[1] = *max_col_indices.data_ptr<int64_t>() + 1;
+
+    AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
+      auto crow_indices_accessor = crow_indices.accessor<index_t, 1>();
+      TORCH_CHECK(
+          crow_indices_accessor[crow_indices.numel() - 1] <= col_indices.numel(),
+          "last value of crow_indices should be less than length of col_indices.");
+      TORCH_CHECK(
+          crow_indices_accessor[0] == 0, "0th value of crow_indices must be 0.");
+
+      size[1] = *max_col_indices.data_ptr<index_t>() + 1;
+    });
   } else {
     size[0] = 0;
     size[1] = 0;

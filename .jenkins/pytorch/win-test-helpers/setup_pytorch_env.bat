@@ -43,7 +43,8 @@ pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" p
 
 :: TODO: All sharded configs run coverage. We should change that to be only one config, but right now we will just
 :: install coverage everywhere. Tracked: https://github.com/pytorch/pytorch/issues/56264
-python -mpip install coverage
+python -mpip install coverage==5.5
+python -mpip install -e tools/coverage_plugins_package
 
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
 
