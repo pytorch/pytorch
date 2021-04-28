@@ -59,13 +59,15 @@ def _iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]],
 
 
 def _iter_tensor(x_tensor):
-    # (Only used for slow gradcheck) Returns an generator that yields at each iter:
+    # (Only used for slow gradcheck) Returns a generator that yields the following
+    # elements at each iteration:
     #  1) a tensor: the same tensor is returned across all iterations. The tensor
-    #     is not the same as the original - it is prepared so that it can be
-    #     modified in-place. Depending on whether the input tensor is strided,
-    #     sparse, or dense, the returned tensor may or may not share storage with
-    #     the original.
-    #  2) index into the tensor in dictionary order
+    #     is not the same as the original x_tensor as given as input - it is
+    #     prepared so that it can be modified in-place. Depending on whether the
+    #     input tensor is strided, sparse, or dense, the returned tensor may or may
+    #     not share storage with x_tensor.
+    #  2) a tuple of indices that can be used with advanced indexing (yielded in
+    #     dictionary order)
     #  3) flattened index that will be used to index into the Jacobian tensor
     #
     # For a tensor t with size (2, 2), _iter_tensor yields:
@@ -109,9 +111,10 @@ def _iter_tensor(x_tensor):
 
 
 def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3) -> List[Tuple[torch.Tensor, ...]]:
-    """Computes the numerical Jacobian of `fn` at the provided input and with
-    respect to `target`, if provided. Returns M * N Jacobians where M is the number
-    of input tensors that require grad and N is the number of differentiable outputs
+    """Computes the numerical Jacobian of `fn(inputs)` with respect to `target`. If
+    not specified, targets are the input. Returns M * N Jacobians where N is the
+    number of tensors in target that require grad and N is the number of non-integral
+    outputs.
 
     Args:
         fn: the function to compute the jacobian for
@@ -193,7 +196,7 @@ def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
     return tuple(compute(a, b) for (a, b) in zip(outa, outb))
 
 
-def _compute_jvps_wrt_specific_input(jvp_fn, delta, input_is_complex) -> List[torch.Tensor]:
+def _compute_numerical_jvps_wrt_specific_input(jvp_fn, delta, input_is_complex) -> List[torch.Tensor]:
     # Computing the jacobian only works for pure real or pure imaginary delta
     # For details on the algorithm used here, refer:
     # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
@@ -227,7 +230,7 @@ def _combine_jacobian_cols(jacobians_cols: Dict[int, List[torch.Tensor]], output
     return jacobians
 
 
-def _prepped_input(input: torch.Tensor, maybe_perturbed_input: Optional[torch.Tensor],
+def _prepare_input(input: torch.Tensor, maybe_perturbed_input: Optional[torch.Tensor],
                    fast_mode=False) -> torch.Tensor:
     # Prepares the inputs to be passed into the function while including the new
     # modified input.
@@ -275,11 +278,11 @@ def get_numerical_jacobian_wrt_specific_input(fn, input_idx, inputs, outputs, ep
     input = inputs[input_idx] if input is None else input
     assert input.requires_grad
     for x, idx, d_idx in _iter_tensor(input):
-        wrapped_fn = _with_prepped_inputs(fn, inputs, input_idx, x)
+        wrapped_fn = _with_prepare_inputs(fn, inputs, input_idx, x)
         input_to_perturb = x[idx]
         nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape, idx=idx, eps=eps)
-        jvp_fn = _get_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn)
-        jacobian_cols[d_idx] = _compute_jvps_wrt_specific_input(jvp_fn, eps, x.is_complex())
+        jvp_fn = _get_numerical_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn)
+        jacobian_cols[d_idx] = _compute_numerical_jvps_wrt_specific_input(jvp_fn, eps, x.is_complex())
     return _combine_jacobian_cols(jacobian_cols, outputs, input, input.numel())
 
 
@@ -299,16 +302,16 @@ def _get_input_to_perturb(input):
     return input_to_perturb
 
 
-def _with_prepped_inputs(fn, inputs, input_idx, input_to_perturb, fast_mode=False):
+def _with_prepare_inputs(fn, inputs, input_idx, input_to_perturb, fast_mode=False):
     # Wraps `fn` so that its inputs are already supplied
     def wrapped_fn():
-        inp = tuple(_prepped_input(a, input_to_perturb if i == input_idx else None, fast_mode)
+        inp = tuple(_prepare_input(a, input_to_perturb if i == input_idx else None, fast_mode)
                     if is_tensor_like(a) else a for i, a in enumerate(_as_tuple(inputs)))
         return tuple(a.clone() for a in _as_tuple(fn(*inp)))
     return wrapped_fn
 
 
-def _get_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn):
+def _get_numerical_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn):
     # Wraps jvp_fn so that certain arguments are already supplied
     def jvp_fn(delta):
         return _compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, eps, nbhd_checks_fn)
@@ -333,23 +336,23 @@ def _mul_tensor_or_tuple(u, k):
         return k * u
 
 
-def _get_jvp_wrt_specific_input(fn, input_idx, inputs, outputs, u, eps) -> List[torch.Tensor]:
+def _get_numerical_jvp_wrt_specific_input(fn, input_idx, inputs, outputs, u, eps) -> List[torch.Tensor]:
     input = inputs[input_idx]
     input_to_perturb = _get_input_to_perturb(input)
-    wrapped_fn = _with_prepped_inputs(fn, inputs, input_idx, input_to_perturb, True)
+    wrapped_fn = _with_prepare_inputs(fn, inputs, input_idx, input_to_perturb, True)
     nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape, eps=eps)
-    jvp_fn = _get_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn)
+    jvp_fn = _get_numerical_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn)
     u = _reshape_tensor_or_tuple(u, input_to_perturb.shape)
     u = _mul_tensor_or_tuple(u, eps)
-    return _compute_jvps_wrt_specific_input(jvp_fn, u, input.is_complex())
+    return _compute_numerical_jvps_wrt_specific_input(jvp_fn, u, input.is_complex())
 
 
 def _get_numerical_vJu(fn, inputs, inp_indices, outputs, all_u, all_v, eps):
     reduced_jacobians: List[List[torch.Tensor]] = []
     for i, (inp_idx, u) in enumerate(zip(inp_indices, all_u)):
-        jvps = _get_jvp_wrt_specific_input(fn, inp_idx, inputs, outputs, u, eps)
+        all_Ju = _get_numerical_jvp_wrt_specific_input(fn, inp_idx, inputs, outputs, u, eps)
         jacobian_scalars: List[torch.Tensor] = []
-        for v, Ju in zip(all_v, jvps):
+        for v, Ju in zip(all_v, all_Ju):
             jacobian_scalars.append(_dot_with_type_promotion(v, Ju))
         reduced_jacobians.append(jacobian_scalars)
     return reduced_jacobians
@@ -420,8 +423,8 @@ def _check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad
                                    retain_graph=True, allow_unused=True)
     # Compute everything twice to check for nondeterminism (which we call reentrancy)
     if fast_mode:
-        vjps1 = _get_vjps_wrt_specific_output(vjp_fn, output.clone(), v)
-        vjps2 = _get_vjps_wrt_specific_output(vjp_fn, output.clone(), v)
+        vjps1 = _get_analytical_vjps_wrt_specific_output(vjp_fn, output.clone(), v)
+        vjps2 = _get_analytical_vjps_wrt_specific_output(vjp_fn, output.clone(), v)
     else:
         vjps1 = _compute_analytical_jacobian_rows(vjp_fn, output.clone())
         vjps2 = _compute_analytical_jacobian_rows(vjp_fn, output.clone())
@@ -447,10 +450,10 @@ def _check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad
 def _get_analytical_vJu(inputs, outputs, nondet_tol, check_grad_dtypes, all_v, all_u):
     reduced_jacobians: List[List[torch.Tensor]] = []
     for output, v in zip(outputs, all_v):
-        vjps = _check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad_dtypes,
+        all_vJ = _check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad_dtypes,
                                                      fast_mode=True, v=v)
         jacobian_scalars: List[torch.Tensor] = []
-        for vJ, u in zip(vjps, all_u):
+        for vJ, u in zip(all_vJ, all_u):
             vJ = vJ.T.squeeze(0)
             if vJ.is_complex():  # C -> R
                 tv = torch.view_as_real(vJ)
@@ -458,7 +461,7 @@ def _get_analytical_vJu(inputs, outputs, nondet_tol, check_grad_dtypes, all_v, a
                 ti = tv.select(-1, 1)
                 jacobian_scalars.append(tr.dot(u[0]) + 1j * ti.dot(u[1]))
             else:  # R -> R
-                jacobian_scalars.append(_dot_with_type_promotion(vJ, u))
+                jacobian_scalars.append(vJ.dot(u))
         reduced_jacobians.append(jacobian_scalars)
     return reduced_jacobians
 
@@ -522,7 +525,7 @@ def _compute_analytical_jacobian_rows(vjp_fn, sample_output) -> List[List[Option
     return jacobians_rows
 
 
-def _get_vjps_wrt_specific_output(vjp_fn, sample_output, v) -> List[List[Optional[torch.Tensor]]]:
+def _get_analytical_vjps_wrt_specific_output(vjp_fn, sample_output, v) -> List[List[Optional[torch.Tensor]]]:
     vjps: List[List[Optional[torch.Tensor]]] = []
     grad_inputs = vjp_fn(v.reshape(sample_output.shape))
     for vjp in grad_inputs:
@@ -587,7 +590,7 @@ def _check_no_differentiable_outputs(func, inputs, func_out, eps) -> bool:
 def _check_no_differentiable_outputs_fast(func, func_out, all_inputs, inputs_indices,
                                           all_u, eps, nondet_tol):
     for inp_idx, u in zip(inputs_indices, all_u):
-        jvps = _get_jvp_wrt_specific_input(func, inp_idx, all_inputs, _as_tuple(func_out), u, eps)
+        jvps = _get_numerical_jvp_wrt_specific_input(func, inp_idx, all_inputs, _as_tuple(func_out), u, eps)
         for jvp in jvps:
             if jvp.numel() == 0:
                 continue
@@ -862,7 +865,8 @@ def _to_real_dtype(dtype):
 
 def _vec_from_tensor(x, generator, downcast_complex=False):
     # Create a random vector with the same number of elements as x and the same
-    # dtype/device.
+    # dtype/device. If x is complex and downcast_complex is False, we create a
+    # complex tensor with only real component.
     if x.layout == torch.sparse_coo:
         # For sparse, create a random sparse vec with random values in the same
         # indices. Make sure size is set so that it isn't inferred to be smaller.
