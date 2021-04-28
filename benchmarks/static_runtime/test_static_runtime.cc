@@ -240,10 +240,13 @@ TEST(StaticRuntime, IndividualOps_pow) {
 TEST(StaticRuntime, IndividualOps_to) {
   auto test_to = [](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
     auto a = at::randn({2, 3});
+    auto other = at::randn({2, 3}, b);
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
+    std::vector<IValue> args2{a, other, c, d, e};
     testStaticRuntime(to_script_0, args0);
     testStaticRuntime(to_script_1, args1);
+    testStaticRuntime(to_script_2, args2);
   };
 
   test_to(at::ScalarType::Float, true, true, c10::MemoryFormat::Contiguous);
