@@ -13,23 +13,24 @@ class LoadFilesFromDiskIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     args:
         datapipe: Iterable datapipe that provides pathnames
         mode: An optional string that specifies the mode in which
-            the file is opened. Default 't' refers to text stream
-            and 'b' refers to binary stream.
+            the file is opened by `open()`. It defaults to 'b' which
+            means open for reading in binary mode. Another option is
+            't' for text mode
         length: a nominal length of the datapipe
     """
 
     def __init__(
             self,
             datapipe : Iterable[str],
-            mode: str = 't',
+            mode: str = 'b',
             length : int = -1):
         super().__init__()
         self.datapipe: Iterable = datapipe
         self.mode: str = mode
-        if self.mode not in ('b', 't', 'rb', 'rt'):
+        if self.mode not in ('b', 't', 'rb', 'rt', 'r'):
             raise ValueError("Invalid mode {}".format(mode))
         # TODO: enforce typing for each instance based on mode, otherwise
-        #       `argument_validation` with this DataPipe can potentially break
+        #       `argument_validation` with this DataPipe may be potentially broken
         self.length: int = length
 
     # Remove annotation due to 'IOBase' is a general type and true type
