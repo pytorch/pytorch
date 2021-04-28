@@ -547,13 +547,14 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                        const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
-        return std::make_unique<ProcessGroupAgent>(
+        return std::shared_ptr<ProcessGroupAgent>(new ProcessGroupAgent(
             store,
             std::move(workerName),
             pg,
             numSendRecvThreads,
             rpcTimeout,
-            std::make_unique<RequestCallbackImpl>());
+            std::make_unique<RequestCallbackImpl>()),
+          impl::destroy_without_gil<ProcessGroupAgent>);
       }))
       .def(
           "get_worker_info",
@@ -640,14 +641,15 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                       int worldSize,
                       c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
                       TensorPipeRpcBackendOptions opts) {
-            return std::make_shared<TensorPipeAgent>(
+            return std::shared_ptr<TensorPipeAgent>(new TensorPipeAgent(
                 store,
                 std::move(selfName),
                 selfId,
                 worldSize,
                 std::move(processGroup),
                 std::move(opts),
-                std::make_unique<RequestCallbackImpl>());
+                std::make_unique<RequestCallbackImpl>()),
+              impl::destroy_without_gil<TensorPipeAgent>);
           }),
           py::arg("store"),
           py::arg("name"),
