@@ -37,6 +37,41 @@ static Tensor get_device_pointers(const Tensor& input) {
 }
 
 template <typename scalar_t>
+void apply_geqrf_batched(const Tensor& input, const Tensor& tau, int64_t m64, int64_t n64) {
+// AMD ROCm backend is implemented via rewriting all CUDA calls to HIP
+// rocBLAS does not implement BLAS-like extensions of cuBLAS, they're in rocSOLVER
+// rocSOLVER is currently not used in ATen, therefore we raise an error in this case
+#ifndef CUDART_VERSION
+  TORCH_CHECK(false, "geqrf: Batched version is supported only with cuBLAS backend.")
+#else
+  auto batch_size = cuda_int_cast(batchCount(input), "batch_size");
+  auto m = cuda_int_cast(m64, "m");
+  auto n = cuda_int_cast(n64, "n");
+  auto lda = std::max<int>(1, m);
+
+  // cuBLAS batched geqrf requires input to be the device array of pointers to device single matrices
+  Tensor input_ptr_array = get_device_pointers<scalar_t>(input);
+  Tensor tau_ptr_array = get_device_pointers<scalar_t>(tau.unsqueeze(-1));
+  auto input_ptr_array_data = reinterpret_cast<scalar_t**>(input_ptr_array.data_ptr());
+  auto tau_ptr_array_data = reinterpret_cast<scalar_t**>(tau_ptr_array.data_ptr());
+
+  int info;
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  at::cuda::blas::geqrfBatched(handle, m, n, input_ptr_array_data, lda, tau_ptr_array_data, &info, batch_size);
+
+  // info only indicates wrong arguments to geqrfBatched call
+  // info is a host variable, we can check it without device synchronization
+  TORCH_INTERNAL_ASSERT(info == 0);
+#endif
+}
+
+void geqrf_batched_cublas(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_batched_cuda", [&]{
+    apply_geqrf_batched<scalar_t>(input, tau, m, n);
+  });
+}
+
+template <typename scalar_t>
 static void apply_triangular_solve(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   cublasOperation_t trans = transpose ? CUBLAS_OP_T : CUBLAS_OP_N;
@@ -607,6 +642,110 @@ Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, boo
   return result;
 }
 
+
+/*
+  The geqrf function computes the QR decomposition of a m x n matrix A.
+
+  Args:
+  * `A` - [in] Tensor with matrices for QR decomposition,
+          [out] Tensor containing R in the upper triangle of A
+          and elementary reflectors below the main diagonal of A
+  * `tau` - Tensor containing the magnitudes of the elementary reflectors
+  * `m` - The number of rows of `input` to consider
+  * `n` - The number of columns of `input` to consider (actual sizes of `input` could be larger)
+
+  For further details, please see the cuSOLVER documentation for GEQRF.
+*/
+template <typename scalar_t>
+static void apply_geqrf(const Tensor& A, const Tensor& tau, int64_t m, int64_t n) {
+  int64_t lda = std::max<int64_t>(1, m);
+  int64_t batch_size = batchCount(A);
+
+  auto A_stride = matrixStride(A);
+  auto tau_stride = tau.size(-1);
+
+  auto A_data = A.data_ptr<scalar_t>();
+  auto tau_data = tau.data_ptr<scalar_t>();
+
+  auto infos = at::zeros({1}, A.options().dtype(at::kInt));
+  auto infos_data = infos.data_ptr<int>();
+
+  // get the optimal work size and allocate workspace tensor
+#ifdef USE_CUSOLVER_64_BIT
+  size_t worksize_device; // workspaceInBytesOnDevice
+  size_t worksize_host; // workspaceInBytesOnHost
+  cusolverDnParams_t params = NULL; // use default algorithm (currently it's the only option)
+  at::cuda::solver::xgeqrf_bufferSize<scalar_t>(
+      at::cuda::getCurrentCUDASolverDnHandle(),
+      params,
+      m,
+      n,
+      A_data,
+      lda,
+      tau_data,
+      &worksize_device,
+      &worksize_host);
+#else
+  int lwork;
+  int m_32 = cuda_int_cast(m, "m");
+  int n_32 = cuda_int_cast(n, "n");
+  int lda_32 = cuda_int_cast(lda, "lda");
+  at::cuda::solver::geqrf_bufferSize<scalar_t>(
+      at::cuda::getCurrentCUDASolverDnHandle(), m_32, n_32, A_data, lda_32, &lwork);
+#endif // USE_CUSOLVER_64_BIT
+
+  for (decltype(batch_size) i = 0; i < batch_size; i++) {
+    scalar_t* A_working_ptr = &A_data[i * A_stride];
+    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+#ifdef USE_CUSOLVER_64_BIT
+    // allocate workspace storage on device and host
+    auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
+    auto work_device_data = device_allocator.allocate(worksize_device);
+    auto& host_allocator = *at::getCPUAllocator();
+    auto work_host_data = host_allocator.allocate(worksize_host);
+    at::cuda::solver::xgeqrf<scalar_t>(
+        handle,
+        params,
+        m,
+        n,
+        A_working_ptr,
+        lda,
+        tau_working_ptr,
+        static_cast<scalar_t*>(work_device_data.get()),
+        worksize_device,
+        static_cast<scalar_t*>(work_host_data.get()),
+        worksize_host,
+        infos_data);
+#else
+    // allocate workspace storage on device
+    auto& allocator = *at::cuda::getCUDADeviceAllocator();
+    auto work_data = allocator.allocate(sizeof(scalar_t) * std::max<int>(1, lwork));
+    at::cuda::solver::geqrf<scalar_t>(
+        handle,
+        m_32,
+        n_32,
+        A_working_ptr,
+        lda_32,
+        tau_working_ptr,
+        static_cast<scalar_t*>(work_data.get()),
+        lwork,
+        infos_data);
+#endif // USE_CUSOLVER_64_BIT
+  }
+
+  // info from geqrf only reports if the i-th parameter is wrong, not about the matrix singularity
+  // so we don't need to check it all the time
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.item().toInt() == 0);
+}
+
+// This is a type dispatching helper function for 'apply_geqrf'
+void geqrf_cusolver(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_cuda", [&]{
+    apply_geqrf<scalar_t>(input, tau, m, n);
+  });
+}
 
 /*
   The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
