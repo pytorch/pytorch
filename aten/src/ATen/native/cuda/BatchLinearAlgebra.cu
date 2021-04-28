@@ -1702,37 +1702,7 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
 //     here. Batched cholesky is dispatched to magma.
 //     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
 //     See https://github.com/pytorch/pytorch/issues/53879.
-Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
-  auto info_shape = IntArrayRef(
-      self.sizes().cbegin(), self.sizes().cend() - 2); // self.shape[:-2]
-
-  // 'self' is cloned here because legacy cholesky doesn't do the clone before
-  Tensor self_working_copy = cloneBatchedColumnMajor(self);
-  Tensor info = at::empty({info_shape}, self.options().dtype(kInt));
-
-#ifdef USE_CUSOLVER
-  if (batchCount(self) == 1 || !use_magma_) {
-    cholesky_helper_cusolver(self_working_copy, upper, info);
-  } else {
-    cholesky_helper_magma(self_working_copy, upper, info);
-  }
-#else
-  cholesky_helper_magma(self_working_copy, upper, info);
-#endif
-
-  if (self.dim() > 2) {
-    batchCheckErrors(info, "cholesky_cuda");
-  } else {
-    singleCheckErrors(info.item<int64_t>(), "cholesky_cuda");
-  }
-  return self_working_copy;
-}
-
-// The same MAGMA/cuSOLVER dispatch logic is used here as in _cholesky_helper_cuda
-// This function is for cholesky_stub that is used for linalg_cholesky_ex
-// while _cholesky_helper_cuda is used for legacy torch.cholesky
-void cholesky_kernel(const Tensor& input, const Tensor& info) {
-  bool upper = false;
+static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
 #ifdef USE_CUSOLVER
   if (batchCount(input) == 1 || !use_magma_) {
     cholesky_helper_cusolver(input, upper, info);

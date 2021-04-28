@@ -21,18 +21,19 @@ namespace {
               [out] Cholesky decomposition result
   * `info` -  [out] Tensor filled with LAPACK error codes,
                     positive values indicate that the matrix is not positive definite.
+  * `upper` - controls whether the upper (true) or lower (false) triangular portion of `input` is used
 
   For further details, please see the LAPACK documentation for POTRF.
 */
 template <typename scalar_t>
-void apply_cholesky(const Tensor& input, const Tensor& info) {
+void apply_cholesky(const Tensor& input, const Tensor& info, bool upper) {
 #ifndef USE_LAPACK
   TORCH_CHECK(
       false,
       "Calling torch.linalg.cholesky on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  char uplo = 'L';
+  char uplo = upper ? 'U' : 'L';
   auto input_data = input.data_ptr<scalar_t>();
   auto info_data = info.data_ptr<int>();
   auto input_matrix_stride = matrixStride(input);
@@ -49,9 +50,9 @@ void apply_cholesky(const Tensor& input, const Tensor& info) {
 }
 
 // This is a type dispatching helper function for 'apply_cholesky'
-void cholesky_kernel(const Tensor& input, const Tensor& infos) {
+void cholesky_kernel(const Tensor& input, const Tensor& infos, bool upper) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cpu", [&]{
-    apply_cholesky<scalar_t>(input, infos);
+    apply_cholesky<scalar_t>(input, infos, upper);
   });
 }
 

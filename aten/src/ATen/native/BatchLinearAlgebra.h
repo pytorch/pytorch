@@ -37,7 +37,7 @@ void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, sc
 
 #endif
 
-using cholesky_fn = void (*)(const Tensor& /*input*/, const Tensor& /*info*/);
+using cholesky_fn = void (*)(const Tensor& /*input*/, const Tensor& /*info*/, bool /*upper*/);
 DECLARE_DISPATCH(cholesky_fn, cholesky_stub);
 
 using cholesky_inverse_fn = Tensor& (*)(Tensor& /*result*/, Tensor& /*infos*/, bool /*upper*/);

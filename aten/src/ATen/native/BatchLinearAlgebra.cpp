@@ -1269,44 +1269,7 @@ Tensor& cholesky_solve_out(const Tensor& self, const Tensor& A, bool upper, Tens
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template<typename scalar_t>
-static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
-  AT_ERROR("cholesky: LAPACK library not found in compilation");
-#else
-  char uplo = upper ? 'U' : 'L';
-
-  auto self_data = self.data_ptr<scalar_t>();
-  auto self_matrix_stride = matrixStride(self);
-  auto batch_size = batchCount(self);
-  auto n = self.size(-2);
-  auto lda = std::max<int64_t>(1, n);
-
-  int info;
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    lapackCholesky<scalar_t>(uplo, n, self_working_ptr, lda, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
-  }
-#endif
-}
-
-Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
-  std::vector<int64_t> infos(batchCount(self), 0);
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cpu", [&]{
-    apply_cholesky<scalar_t>(self_working_copy, upper, infos);
-  });
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "cholesky_cpu");
-  } else {
-    singleCheckErrors(infos[0], "cholesky_cpu");
-  }
-  return self_working_copy;
-}
+DEFINE_DISPATCH(cholesky_stub);
 
 Tensor cholesky(const Tensor &self, bool upper) {
   if (self.numel() == 0) {
@@ -1314,7 +1277,20 @@ Tensor cholesky(const Tensor &self, bool upper) {
   }
   squareCheckInputs(self);
 
-  auto raw_cholesky_output = at::_cholesky_helper(self, upper);
+  auto raw_cholesky_output = cloneBatchedColumnMajor(self);
+  auto info_shape = IntArrayRef(
+      self.sizes().cbegin(), self.sizes().cend() - 2); // self.shape[:-2]
+  auto info = at::empty({info_shape}, self.options().dtype(kInt));
+
+  // fill the raw_cholesky_output with the result
+  cholesky_stub(self.device().type(), raw_cholesky_output, info, upper);
+
+  if (self.dim() > 2) {
+    batchCheckErrors(info, "cholesky");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "cholesky");
+  }
+
   if (upper) {
     return raw_cholesky_output.triu_();
   } else {
@@ -1330,8 +1306,6 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
   result.copy_(result_tmp);
   return result;
 }
-
-DEFINE_DISPATCH(cholesky_stub);
 
 void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const Tensor& info) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
@@ -1367,7 +1341,7 @@ void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const T
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.sizes().equals(expected_info_shape));
   info.fill_(0);
 
-  cholesky_stub(result.device().type(), result, info);
+  cholesky_stub(result.device().type(), result, info, /*upper=*/false);
 
   result.tril_();
 }
