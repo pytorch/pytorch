@@ -102,7 +102,7 @@ ShapeInfoMap BackendTransformerBase::ssaRewriteAndMapNames(
   // the parent workspace has the mapped blob names. If the blobs don't exist
   // (usually such blobs are input tensor names), we exclude them from mapping.
   std::vector<std::string> exclude_mapping;
-  for (const auto kv : input_mapping_) {
+  for (const auto& kv : input_mapping_) {
     if (!ws->HasBlob(kv.second)) {
       exclude_mapping.emplace_back(kv.first);
     }
