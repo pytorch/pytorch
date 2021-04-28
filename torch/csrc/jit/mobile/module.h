@@ -52,12 +52,14 @@ class CompilationUnit {
 class TORCH_API Module {
  public:
   Module(
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       c10::intrusive_ptr<c10::ivalue::Object> object,
       std::shared_ptr<CompilationUnit> cu)
       : object_(object),
         metadata_(std::unordered_map<std::string, std::string>()),
         cu_(std::move(cu)) {}
   Module(
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       c10::intrusive_ptr<c10::ivalue::Object> object,
       std::unordered_map<std::string, std::string> metadata,
       std::shared_ptr<CompilationUnit> cu)
