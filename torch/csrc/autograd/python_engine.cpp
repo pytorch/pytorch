@@ -49,6 +49,10 @@ Engine& PythonEngine::get_python_engine() {
   return engine;
 }
 
+PythonEngine::~PythonEngine() {
+  Engine::stop();
+}
+
 #if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
 #define IS_PYTHON_3_9_PLUS
 #endif

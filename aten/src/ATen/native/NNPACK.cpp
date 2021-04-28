@@ -146,7 +146,8 @@ Tensor _nnpack_spatial_convolution(
     const IntArrayRef padding,
     const IntArrayRef stride) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   at::Tensor output = at::empty(
       conv_output_size(input.sizes(), weight.sizes(), padding, stride),
