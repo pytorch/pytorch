@@ -350,10 +350,10 @@ def einsum(*args):
     .. note::
 
         As of PyTorch 1.9 :func:`torch.einsum` also supports the sublist format (see examples below). In this format,
-        subscripts for an operand are specified by a sublist (list of integers in the range [0, 52)). The input in this
-        format is each input operand followed by its sublist and optionally, an extra sublist at the end for the
-        output subscripts, e.g.`torch.einsum(op1, sublist1, op2, sublist2, ..., [subslist_out])`. Python's `Ellipsis`
-        object may also be provided in a sublist to enable broadcasting as described in the Equation section above.
+        subscripts for each operand are specified by a "sublist" of integers in the range [0, 52). These sublists
+        follow their operands, and an extra sublist can appear at the end of the input to specify the output's
+        subscripts.", e.g.`torch.einsum(op1, sublist1, op2, sublist2, ..., [subslist_out])`. Python's `Ellipsis` object
+        may be provided in a sublist to enable broadcasting as described in the Equation section above.
 
     Args:
         equation (string): The subscripts for the Einstein summation.
@@ -392,6 +392,17 @@ def einsum(*args):
                 [[ 2.8153,  1.8787, -4.3839, -1.2112],
                 [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
+        # with sublist format and ellipsis
+        >>> torch.einsum(As, [..., 0, 1], Bs, [..., 1, 2], [..., 0, 2])
+        tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
+                [-1.6706, -0.8097, -0.8025, -2.1183]],
+
+                [[ 4.2239,  0.3107, -0.5756, -0.2354],
+                [-1.4558, -0.3460,  1.5087, -0.8530]],
+
+                [[ 2.8153,  1.8787, -4.3839, -1.2112],
+                [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+
         # batch permute
         >>> A = torch.randn(2, 3, 4, 5)
         >>> torch.einsum('...ij->...ji', A).shape
@@ -404,10 +415,6 @@ def einsum(*args):
         >>> torch.einsum('bn,anm,bm->ba', l, A, r)
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
-
-        # sublist format
-        >>> torch.einsum(A, [Ellipsis, 0], l, [1, Ellipsis], [Ellipsis]).shape
-        torch.Size([3, 5])
     """
     if len(args) < 2:
         raise ValueError('einsum(): must specify the equation string and at least one operand, '
