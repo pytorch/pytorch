@@ -239,6 +239,9 @@ TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 TORCH_API void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
+
+TORCH_API void addMetadata(
+    const std::string& key, const std::string& value);
 #endif // USE_KINETO
 
 } // namespace profiler

@@ -2652,6 +2652,13 @@ polygamma_(n) -> Tensor
 In-place version of :meth:`~Tensor.polygamma`
 """)
 
+add_docstr_all('positive',
+               r"""
+positive() -> Tensor
+
+See :func:`torch.positive`
+""")
+
 add_docstr_all('pow',
                r"""
 pow(exponent) -> Tensor
