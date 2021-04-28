@@ -1642,9 +1642,6 @@ Python Builtin Functions Support
    * - ``filter()``
      - None
      -
-   * - ``filter()``
-     - None
-     -
    * - ``float()``
      - Partial
      - Doesn't honor ``__index__`` override
