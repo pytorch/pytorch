@@ -328,6 +328,7 @@ class MemoryPlanner {
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class ProcessedNode {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
   ProcessedNode(
       Node* n,
