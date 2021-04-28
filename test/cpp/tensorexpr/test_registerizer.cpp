@@ -715,8 +715,11 @@ TEST(Registerizer, RegisterizerNoLoads) {
   Stmt* stmt = Block::make(
       {Store::make(a, {0}, 0),
        For::make(
+           x,
+           0,
            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           x, 0, 10, Block::make({Store::make(a, {0}, Add::make(x, 1))}))});
+           10,
+           Block::make({Store::make(a, {0}, Add::make(x, 1))}))});
 
   /*
    * A[0] = 0;
@@ -1524,8 +1527,10 @@ TEST(Registerizer, RegisterizerCondCondition) {
        Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
            CompareSelect::make(
+               Load::make(a, {x}),
                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               Load::make(a, {x}), 5, CompareSelectOperation::kLT),
+               5,
+               CompareSelectOperation::kLT),
            Store::make(c, {x}, Add::make(Load::make(c, {x}), 1)),
            nullptr)});
 
@@ -1878,8 +1883,10 @@ TEST(Registerizer, RegisterizerIfThenElseCondition) {
            {x},
            IfThenElse::make(
                CompareSelect::make(
+                   Load::make(a, {x}),
                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                   Load::make(a, {x}), 5, CompareSelectOperation::kLT),
+                   5,
+                   CompareSelectOperation::kLT),
                Load::make(b, {0}),
                Load::make(c, {0})))});
 
@@ -1927,8 +1934,10 @@ TEST(Registerizer, RegisterizerIfThenElseConditionUnhidden) {
       {x},
       IfThenElse::make(
           CompareSelect::make(
+              Load::make(a, {x}),
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              Load::make(a, {x}), 5, CompareSelectOperation::kLT),
+              5,
+              CompareSelectOperation::kLT),
           Add::make(Load::make(a, {x}), 1),
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           Add::make(Load::make(a, {x}), 10)))});
@@ -2032,8 +2041,10 @@ TEST(Registerizer, RegisterizerCondIfThenElse) {
       CompareSelect::make(
           IfThenElse::make(
               CompareSelect::make(
+                  Load::make(a, {x}),
                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                  Load::make(a, {x}), 5, CompareSelectOperation::kLT),
+                  5,
+                  CompareSelectOperation::kLT),
               Load::make(a, {x}),
               Load::make(b, {x})),
           x,
@@ -2299,13 +2310,19 @@ TEST(Registerizer, RegisterizerPartialInside) {
   Stmt* stmt = Block::make(
       {Store::make(a, {0}, 2),
        For::make(
+           x1,
+           0,
            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           x1, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), x1))),
+           10,
+           Store::make(a, {0}, Add::make(Load::make(a, {0}), x1))),
        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        For::make(x2, 1, 10, Store::make(a, {x2}, Load::make(a, {x2 - 1}))),
        For::make(
+           x3,
+           0,
            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           x3, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), x3)))});
+           10,
+           Store::make(a, {0}, Add::make(Load::make(a, {0}), x3)))});
 
   /*
    * A[0] = 2;
@@ -2371,16 +2388,22 @@ TEST(Registerizer, RegisterizerPartialCondition) {
   Stmt* stmt = Block::make(
       {Store::make(a, {0}, 2),
        For::make(
+           x,
+           0,
            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           x, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), x))),
+           10,
+           Store::make(a, {0}, Add::make(Load::make(a, {0}), x))),
        Cond::make(
            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            Store::make(a, {x}, Load::make(a, {x - 1})),
            nullptr),
        For::make(
+           x,
+           0,
            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-           x, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), x)))});
+           10,
+           Store::make(a, {0}, Add::make(Load::make(a, {0}), x)))});
 
   /*
    * A[0] = 2;
@@ -3429,15 +3452,21 @@ TEST(Registerizer, RegisterizerTwoConditionalLoops) {
            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            For::make(
+               x,
+               0,
                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               x, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
+               10,
+               Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
            nullptr),
        Cond::make(
            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kGT),
            For::make(
+               x,
+               0,
                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               x, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
+               10,
+               Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
            nullptr)});
 
   /*
@@ -3506,8 +3535,11 @@ TEST(Registerizer, RegisterizerTwoConditionalLoopsCut) {
            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kLT),
            For::make(
+               x,
+               0,
                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               x, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
+               10,
+               Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
            nullptr),
        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        For::make(x, 0, 10, Store::make(a, {x}, 1)),
@@ -3515,8 +3547,11 @@ TEST(Registerizer, RegisterizerTwoConditionalLoopsCut) {
            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            CompareSelect::make(x, 5, CompareSelectOperation::kGT),
            For::make(
+               x,
+               0,
                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               x, 0, 10, Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
+               10,
+               Store::make(a, {0}, Add::make(Load::make(a, {0}), 1))),
            nullptr)});
 
   /*

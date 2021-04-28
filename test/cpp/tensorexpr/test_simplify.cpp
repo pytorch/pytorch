@@ -1934,7 +1934,10 @@ TEST(Simplify, SimplifyNestedMax) {
     // Max(5, Max(x, Max(y, Max(z, 8)))) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        5, Max::make(x, Max::make(y, Max::make(z, 8, true), true), true), true);
+        5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(x, Max::make(y, Max::make(z, 8, true), true), true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1949,7 +1952,10 @@ TEST(Simplify, SimplifyNestedMax) {
     // Max(8, Max(Max(y, Max(z, 5)), x)) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        8, Max::make(Max::make(y, Max::make(z, 5, true), true), x, true), true);
+        8,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(Max::make(y, Max::make(z, 5, true), true), x, true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1964,7 +1970,10 @@ TEST(Simplify, SimplifyNestedMax) {
     // Max(5, Max(Max(Max(z, 8), y), x)) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        5, Max::make(Max::make(Max::make(z, 8, true), y, true), x, true), true);
+        5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(Max::make(Max::make(z, 8, true), y, true), x, true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1979,7 +1988,10 @@ TEST(Simplify, SimplifyNestedMax) {
     // Max(Max(x, Max(y, Max(5, z))), 8) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Max::make(x, Max::make(y, Max::make(5, z, true), true), true), 8, true);
+        Max::make(x, Max::make(y, Max::make(5, z, true), true), true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        8,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -1994,7 +2006,10 @@ TEST(Simplify, SimplifyNestedMax) {
     // Max(Max(Max(y, Max(8, z)), x), 5) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Max::make(Max::make(y, Max::make(z, 8, true), true), x, true), 5, true);
+        Max::make(Max::make(y, Max::make(z, 8, true), true), x, true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -2009,7 +2024,10 @@ TEST(Simplify, SimplifyNestedMax) {
     // Max(Max(Max(Max(5, z), y), x), 8) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Max::make(Max::make(Max::make(z, 5, true), y, true), x, true), 8, true);
+        Max::make(Max::make(Max::make(z, 5, true), y, true), x, true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        8,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -2049,7 +2067,10 @@ TEST(Simplify, SimplifyNestedMax) {
     // Max(8, Max(Max(x, 5), Max(y, z))) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        8, Max::make(Max::make(x, 5, true), Max::make(y, z, true), true), true);
+        8,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Max::make(Max::make(x, 5, true), Max::make(y, z, true), true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -2064,7 +2085,10 @@ TEST(Simplify, SimplifyNestedMax) {
     // Max(Max(Max(x, 5), Max(y, z)), 8) => Max(Max(Max(x, 8), y), z)
     ExprHandle body = Max::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Max::make(Max::make(x, 5, true), Max::make(y, z, true), true), 8, true);
+        Max::make(Max::make(x, 5, true), Max::make(y, z, true), true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        8,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Max, simplified.node(), max1);
@@ -2253,7 +2277,10 @@ TEST(Simplify, SimplifyNestedMin) {
     // Min(5, Min(x, Min(y, Min(z, 8)))) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        5, Min::make(x, Min::make(y, Min::make(z, 8, true), true), true), true);
+        5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(x, Min::make(y, Min::make(z, 8, true), true), true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2268,7 +2295,10 @@ TEST(Simplify, SimplifyNestedMin) {
     // Min(5, Min(Min(y, Min(z, 8)), x)) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        5, Min::make(Min::make(y, Min::make(z, 8, true), true), x, true), true);
+        5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(Min::make(y, Min::make(z, 8, true), true), x, true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2283,7 +2313,10 @@ TEST(Simplify, SimplifyNestedMin) {
     // Min(5, Min(Min(Min(z, 8), y), x)) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        5, Min::make(Min::make(Min::make(z, 8, true), y, true), x, true), true);
+        5,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(Min::make(Min::make(z, 8, true), y, true), x, true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2298,7 +2331,10 @@ TEST(Simplify, SimplifyNestedMin) {
     // Min(Min(x, Min(y, Min(8, z))), 5) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Min::make(x, Min::make(y, Min::make(8, z, true), true), true), 5, true);
+        Min::make(x, Min::make(y, Min::make(8, z, true), true), true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2313,7 +2349,10 @@ TEST(Simplify, SimplifyNestedMin) {
     // Min(Min(Min(y, Min(8, z)), x), 5) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Min::make(Min::make(y, Min::make(z, 8, true), true), x, true), 5, true);
+        Min::make(Min::make(y, Min::make(z, 8, true), true), x, true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2328,7 +2367,10 @@ TEST(Simplify, SimplifyNestedMin) {
     // Min(Min(Min(Min(8, z), y), x), 5) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Min::make(Min::make(Min::make(z, 8, true), y, true), x, true), 5, true);
+        Min::make(Min::make(Min::make(z, 8, true), y, true), x, true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        5,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2368,7 +2410,10 @@ TEST(Simplify, SimplifyNestedMin) {
     // Min(8, Min(Min(x, 5), Min(y, z))) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        8, Min::make(Min::make(x, 5, true), Min::make(y, z, true), true), true);
+        8,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        Min::make(Min::make(x, 5, true), Min::make(y, z, true), true),
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -2383,7 +2428,10 @@ TEST(Simplify, SimplifyNestedMin) {
     // Min(Min(Min(x, 5), Min(y, z)), 8) => Min(Min(Min(x, 5), y), z)
     ExprHandle body = Min::make(
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        Min::make(Min::make(x, 5, true), Min::make(y, z, true), true), 8, true);
+        Min::make(Min::make(x, 5, true), Min::make(y, z, true), true),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        8,
+        true);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Min, simplified.node(), min1);
@@ -4128,8 +4176,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
+                Load::make(c, {0}),
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                Load::make(c, {0}), 10, CompareSelectOperation::kLT),
+                10,
+                CompareSelectOperation::kLT),
             Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
@@ -4146,8 +4196,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
+                Load::make(b, {0}),
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                Load::make(b, {0}), 10, CompareSelectOperation::kLT),
+                10,
+                CompareSelectOperation::kLT),
             Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
@@ -4165,8 +4217,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
+                Load::make(a, {0}),
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                Load::make(a, {0}), 10, CompareSelectOperation::kLT),
+                10,
+                CompareSelectOperation::kLT),
             Store::make(c, {0}, Load::make(a, {i})),
             nullptr));
 
@@ -4205,8 +4259,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
+                Load::make(a, {0}),
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                Load::make(a, {0}), 10, CompareSelectOperation::kLT),
+                10,
+                CompareSelectOperation::kLT),
             Cond::make(
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 CompareSelect::make(j, 10, CompareSelectOperation::kEQ),
@@ -4231,8 +4287,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
+                Load::make(a, {0}),
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                Load::make(a, {0}), 10, CompareSelectOperation::kLT),
+                10,
+                CompareSelectOperation::kLT),
             Cond::make(
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 CompareSelect::make(i, 10, CompareSelectOperation::kEQ),
@@ -4276,8 +4334,10 @@ TEST(Simplify, SimplifyReorderForCond) {
         4,
         Cond::make(
             CompareSelect::make(
+                Load::make(c, {0}),
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                Load::make(c, {0}), 10, CompareSelectOperation::kLT),
+                10,
+                CompareSelectOperation::kLT),
             Store::make(c, {1}, Load::make(a, {i})),
             nullptr));
 
