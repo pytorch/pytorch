@@ -989,6 +989,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",
+    "aten/src/ATen/native/xnnpack/AveragePooling.cpp",
     "aten/src/ATen/native/xnnpack/Init.cpp",
     "aten/src/ATen/native/xnnpack/Linear.cpp",
     "aten/src/ATen/native/xnnpack/MaxPooling.cpp",
