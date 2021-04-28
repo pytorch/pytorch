@@ -2,7 +2,9 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ZeroGradient, ZeroGradientOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ZeroGradient)
     .NumInputs(1)
     .NumOutputs(0)
@@ -23,6 +25,7 @@ struct GetZeroGradientOpGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ZeroGradient, GetZeroGradientOpGradient);
 
 } // namespace caffe2
