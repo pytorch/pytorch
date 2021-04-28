@@ -98,7 +98,7 @@ class TORCH_API BinaryTensorIteratorBase : public impl::MetaBase {
   bool needs_to_resize_out_ = false;
 
   void setup_type_and_device(const TensorIteratorConfig& config);
-  constexpr int ntensors() const {
+  int ntensors() const {
     return 3;
   }
 
