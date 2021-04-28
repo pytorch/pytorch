@@ -32,10 +32,10 @@ DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
     if (alt_name) {
       handle = dlopen(alt_name, RTLD_LOCAL | RTLD_NOW);
       if (!handle) {
-        AT_ERROR("Error in dlopen or dlsym for ", name, "and ", alt_name);
+        AT_ERROR("Error in dlopen for library ", name, "and ", alt_name);
       }
     } else {
-      AT_ERROR("Error in dlopen or dlsym: ", dlerror());
+      AT_ERROR("Error in dlopen: ", dlerror());
     }
   }
 }
