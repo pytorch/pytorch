@@ -28,14 +28,6 @@ const char* toString(DispatchKey t) {
       return "Vulkan";
     case DispatchKey::Metal:
       return "Metal";
-    case DispatchKey::MKLDNN:
-      return "MKLDNN";
-    case DispatchKey::OpenGL:
-      return "OpenGL";
-    case DispatchKey::OpenCL:
-      return "OpenCL";
-    case DispatchKey::IDEEP:
-      return "IDEEP";
     case DispatchKey::QuantizedCPU:
       return "QuantizedCPU";
     case DispatchKey::QuantizedCUDA:
@@ -125,6 +117,25 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
+
+    // Note [Out-of-tree vmap+grad prototype]
+    // The following keys are used in the implementation of the out-of-tree
+    // composable functions transforms (vmap+grad) prototype that lives at
+    // https://github.com/zou3519/functorch
+    // We plan on eventually upstreaming the prototype into core, at which
+    // point it will have a different design that should use fewer keys.
+    case DispatchKey::FuncTorchPython:
+      return "FuncTorchPython";
+    case DispatchKey::FuncTorchDynamicLayerBackMode:
+      return "FuncTorchDynamicLayerBackMode";
+    case DispatchKey::FuncTorchDynamicLayerFrontMode:
+      return "FuncTorchDynamicLayerFrontMode";
+    case DispatchKey::FuncTorchGradWrapper:
+      return "FuncTorchGradWrapper";
+    case DispatchKey::FuncTorchVmapMode:
+      return "FuncTorchVmapMode";
+    case DispatchKey::FuncTorchBatched:
+      return "FuncTorchBatched";
 
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
