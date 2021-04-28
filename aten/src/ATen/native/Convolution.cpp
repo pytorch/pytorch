@@ -141,12 +141,13 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-#if defined(__ARM_NEON__) && !defined(C10_IOS)
+#if defined(__ARM_NEON__)
   // Currently only 3x3 depthwise convolutions on tensors of float are supported.
   return (input.ndimension() == 4) &&
          (input.size(1) == groups) &&
          (weight.ndimension() == 4 ) &&
          (weight.size(0) % input.size(1) == 0) &&
+         (weight.size(1) == 1) &&
          (weight.size(2) == 3) &&
          (weight.size(3) == 3) &&
          (input.device().is_cpu()) &&
@@ -160,6 +161,11 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
              (bias.scalar_type() == at::kFloat))) &&
          !is_strided() &&
          !is_dilated() &&
+         // 3x3 depthwith convolutions implementation is inference only
+         !(GradMode::is_enabled() &&
+                 (input.requires_grad() ||
+                  weight.requires_grad() ||
+                 (bias.defined() && bias.requires_grad()))) &&
          !transposed;
 #else
   return false;
@@ -427,7 +433,7 @@ auto ConvParams::use_cudnn_depthwise(
                          input.scalar_type() == kHalf && // only for FP16
                          weight.scalar_type() == kHalf &&
                          is_depthwise(input, weight) &&
-                         input.ndimension() == 4 &&
+                         input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
                          weight.size(2) == weight.size(3) && // only square kernels
                          input.size(2) >= 7 && // min width/height 7
                          !is_dilated() && // no dilation supported
@@ -554,7 +560,8 @@ at::Tensor conv1d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {0}, groups);
@@ -564,7 +571,8 @@ at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0}}, groups);
@@ -574,7 +582,8 @@ at::Tensor conv3d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0, 0}}, groups);
@@ -650,7 +659,8 @@ Tensor _convolution_mode(
     IntArrayRef stride, std::string padding, IntArrayRef dilation,
     int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   if (padding == "same") {
     return at::native::convolution_same(
@@ -691,7 +701,8 @@ at::Tensor conv_transpose1d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
@@ -701,7 +712,8 @@ at::Tensor conv_transpose2d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
@@ -711,7 +723,8 @@ at::Tensor conv_transpose3d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
@@ -722,7 +735,8 @@ at::Tensor convolution(
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   auto& ctx = at::globalContext();
   // See Note [Enabling Deterministic Operations]
@@ -737,7 +751,8 @@ at::Tensor convolution_overrideable(
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_overrideable not implemented. You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
 }
@@ -748,7 +763,8 @@ at::Tensor _convolution(
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias_r = c10::value_or_else(bias_r_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_r_maybe_owned = at::borrow_from_optional_tensor(bias_r_opt);
+  const Tensor& bias_r = *bias_r_maybe_owned;
 
 
   const bool input_is_mkldnn = input_r.is_mkldnn();
@@ -813,8 +829,10 @@ at::Tensor _convolution(
     weight = view4d(weight);
   }
 
-  at::MemoryFormat cudnn_memory_format = cudnn_conv_use_channels_last(input, weight) ?
-      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  at::MemoryFormat cudnn_memory_format = at::MemoryFormat::Contiguous;
+  if (cudnn_conv_use_channels_last(input, weight)) {
+    cudnn_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  }
 
   Tensor output;
   if (params.is_depthwise(input, weight)) {
@@ -971,7 +989,8 @@ at::Tensor _convolution(
     bool benchmark, bool deterministic, bool cudnn_enabled)
 {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias_r = c10::value_or_else(bias_r_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_r_maybe_owned = at::borrow_from_optional_tensor(bias_r_opt);
+  const Tensor& bias_r = *bias_r_maybe_owned;
 
   return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN());
 }
@@ -983,7 +1002,8 @@ at::Tensor _convolution_nogroup(
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
 
   ConvParams params;
@@ -1074,7 +1094,8 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
     bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32,
     std::array<bool, 3> output_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& ggI = c10::value_or_else(ggI_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> ggI_maybe_owned = at::borrow_from_optional_tensor(ggI_opt);
+  const Tensor& ggI = *ggI_maybe_owned;
   const Tensor& ggW_r = c10::value_or_else(ggW_r_opt, [] {return Tensor();});
   const Tensor& ggb = c10::value_or_else(ggb_opt, [] {return Tensor();});
 

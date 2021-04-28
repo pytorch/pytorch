@@ -1,5 +1,5 @@
-import cimodel.data.simple.util.branch_filters
 import cimodel.lib.miniutils as miniutils
+from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN
 from cimodel.data.simple.util.versions import CudaVersion
 
 
@@ -11,14 +11,16 @@ class WindowsJob:
         cuda_version,
         force_on_cpu=False,
         multi_gpu=False,
-        master_only_pred=lambda job: job.vscode_spec.year != 2019,
+        master_only=False,
+        nightly_only=False
     ):
         self.test_index = test_index
         self.vscode_spec = vscode_spec
         self.cuda_version = cuda_version
         self.force_on_cpu = force_on_cpu
         self.multi_gpu = multi_gpu
-        self.master_only_pred = master_only_pred
+        self.master_only = master_only
+        self.nightly_only = nightly_only
 
     def gen_tree(self):
 
@@ -79,10 +81,14 @@ class WindowsJob:
                 "requires": prerequisite_jobs,
             }
 
-        if self.master_only_pred(self):
+        if self.master_only:
             props_dict[
                 "filters"
-            ] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
+            ] = gen_filter_dict()
+        elif self.nightly_only:
+            props_dict[
+                "filters"
+            ] = gen_filter_dict(branches_list=["nightly"], tags_list=RC_PATTERN)
 
         name_parts = base_name_parts + cpu_forcing_name_parts + [numbered_phase]
 
@@ -128,12 +134,6 @@ class VcSpec:
     def render(self):
         return "_".join(self.get_elements())
 
-def FalsePred(_):
-    return False
-
-def TruePred(_):
-    return True
-
 _VC2019 = VcSpec(2019, ["14", "28", "29333"], hide_version=True)
 
 WORKFLOW_DATA = [
@@ -141,16 +141,16 @@ WORKFLOW_DATA = [
     WindowsJob(None, _VC2019, CudaVersion(10, 1)),
     WindowsJob(1, _VC2019, CudaVersion(10, 1)),
     WindowsJob(2, _VC2019, CudaVersion(10, 1)),
-    WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(10, 1), multi_gpu=True),
+    WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(10, 1), multi_gpu=True, nightly_only=True),
     # VS2019 CUDA-11.1
     WindowsJob(None, _VC2019, CudaVersion(11, 1)),
-    WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),
-    WindowsJob(2, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),
+    WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only=True),
+    WindowsJob(2, _VC2019, CudaVersion(11, 1), master_only=True),
     # VS2019 CPU-only
     WindowsJob(None, _VC2019, None),
-    WindowsJob(1, _VC2019, None, master_only_pred=TruePred),
-    WindowsJob(2, _VC2019, None, master_only_pred=TruePred),
-    WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
+    WindowsJob(1, _VC2019, None, master_only=True),
+    WindowsJob(2, _VC2019, None, master_only=True),
+    WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only=True),
 ]
 
 

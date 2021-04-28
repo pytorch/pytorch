@@ -137,7 +137,6 @@ _(aten, _tanh) \
 _(aten, _tanh_forward) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
 _(aten, _th_std) \
@@ -298,6 +297,7 @@ _(aten, dim) \
 _(aten, dist) \
 _(aten, dot) \
 _(aten, dropout) \
+_(aten, dsplit) \
 _(aten, dstack) \
 _(aten, eig) \
 _(aten, einsum) \
@@ -371,6 +371,7 @@ _(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
+_(aten, hsplit) \
 _(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0) \
@@ -403,6 +404,7 @@ _(aten, is_same_size) \
 _(aten, is_set_to) \
 _(aten, is_signed) \
 _(aten, is_sparse) \
+_(aten, is_sparse_csr) \
 _(aten, isclose) \
 _(aten, isreal) \
 _(aten, istft) \
@@ -436,7 +438,6 @@ _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
 _(aten, logdet) \
-_(aten, logit) \
 _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, xlogy) \
@@ -621,7 +622,6 @@ _(aten, segment_reduce) \
 _(aten, select) \
 _(aten, selu) \
 _(aten, set) \
-_(aten, sigmoid) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
@@ -677,6 +677,7 @@ _(aten, take) \
 _(aten, take_along_dim) \
 _(aten, tan) \
 _(aten, tanh) \
+_(aten, tanh_) \
 _(aten, tensor) \
 _(aten, tensordot) \
 _(aten, tensor_split) \
@@ -749,6 +750,7 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
+_(aten, vsplit) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \

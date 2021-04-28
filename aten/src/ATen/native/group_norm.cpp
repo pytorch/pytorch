@@ -25,7 +25,8 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     int64_t group,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& gamma = c10::value_or_else(gamma_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> gamma_maybe_owned = at::borrow_from_optional_tensor(gamma_opt);
+  const Tensor& gamma = *gamma_maybe_owned;
   const Tensor& beta = c10::value_or_else(beta_opt, [] {return Tensor();});
 
   Tensor Y = at::native::empty_like(
@@ -53,7 +54,8 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     int64_t group,
     std::array<bool, 3> grad_input_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& gamma = c10::value_or_else(gamma_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> gamma_maybe_owned = at::borrow_from_optional_tensor(gamma_opt);
+  const Tensor& gamma = *gamma_maybe_owned;
 
   Tensor dX;
   Tensor dgamma;
@@ -108,7 +110,8 @@ Tensor group_norm(
     double eps,
     bool /* cudnn_enabled, deprecated */) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   const int64_t N = input.size(0);
@@ -162,7 +165,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     int64_t group,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   auto input_shape = input.sizes();

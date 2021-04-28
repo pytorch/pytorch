@@ -292,7 +292,8 @@ void CudaPrinter::visit(const Intrinsics* v) {
   if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
     func_name = func_name + "f";
   }
-  if (v->op_type() == IntrinsicsOp::kAbs && !is_integral(returnType)) {
+  if (v->op_type() == IntrinsicsOp::kAbs &&
+      !c10::isIntegralType(returnType, true)) {
     // since kAbs's func_name is `abs`, prefix `f` for floating point
     func_name = "f" + func_name;
   }
@@ -470,7 +471,7 @@ void CudaPrinter::visit(const AtomicAdd* v) {
 }
 
 void CudaPrinter::visit(const Max* v) {
-  if (is_integral(v->dtype().scalar_type())) {
+  if (v->dtype().is_integral()) {
     os() << "max(";
   } else {
     os() << "maximum(";
@@ -482,7 +483,7 @@ void CudaPrinter::visit(const Max* v) {
 }
 
 void CudaPrinter::visit(const Min* v) {
-  if (is_integral(v->dtype().scalar_type())) {
+  if (v->dtype().is_integral()) {
     os() << "min(";
   } else {
     os() << "minimum(";
@@ -887,7 +888,6 @@ static std::ostream& operator<<(
 
 #ifdef USE_ROCM
 static const char* device_resource_string = R"(
-#include <hip/hip_runtime.h>
 #define POS_INFINITY INFINITY
 #define NEG_INFINITY -INFINITY
 
@@ -930,17 +930,26 @@ void CudaCodeGen::Initialize() {
   metavar_rewriter_ =
       std::make_unique<GPUMetaVarRewriter>(cuda_analysis_.get());
 
+  // Check whether the statement uses the Half type, if so add the
+  // half_support_literal.
+  Stmt* stmt_v = stmt();
+  HalfChecker halfChecker(buffer_args());
+  stmt_v->accept(&halfChecker);
+
+#if __HIP_PLATFORM_HCC__
+#if ROCM_VERSION < 40200
+  os() << "#include <hip/hip_runtime.h>" << std::endl;
+  if (halfChecker.hasHalf()) {
+    os() << "#include <hip/hip_fp16.h>" << std::endl;
+  }
+#endif
+#endif
   os() << device_resource_string << shared_resource_string;
 
   if (has_random_) {
     os() << philox_random_string << std::endl;
   }
 
-  // Check whether the statement uses the Half type, if so add the
-  // half_support_literal.
-  Stmt* stmt_v = stmt();
-  HalfChecker halfChecker(buffer_args());
-  stmt_v->accept(&halfChecker);
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
@@ -1203,7 +1212,10 @@ void CudaCodeGen::CompileToNVRTC(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
 #ifdef __HIP_PLATFORM_HCC__
-  std::vector<const char*> args = {};
+  std::vector<const char*> args = {"--std=c++14"};
+#if ROCM_VERSION >= 40200
+  args.push_back("-hip-pch");
+#endif
 #else
   const std::string compute = std::string("--gpu-architecture=") +
 #if CUDA_VERSION >= 11010

@@ -133,6 +133,81 @@ void potrfBatched<c10::complex<float>>(CUDASOLVER_POTRF_BATCHED_ARGTYPES(c10::co
 template<>
 void potrfBatched<c10::complex<double>>(CUDASOLVER_POTRF_BATCHED_ARGTYPES(c10::complex<double>));
 
+#define CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(scalar_t) \
+  cusolverDnHandle_t handle, int m, int n, scalar_t *A, int lda, int *lwork
+
+template <class scalar_t>
+void geqrf_bufferSize(CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(scalar_t)) {
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::geqrf_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
+}
+template <>
+void geqrf_bufferSize<float>(CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(float));
+template <>
+void geqrf_bufferSize<double>(CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(double));
+template <>
+void geqrf_bufferSize<c10::complex<float>>(
+    CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(c10::complex<float>));
+template <>
+void geqrf_bufferSize<c10::complex<double>>(
+    CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(c10::complex<double>));
+
+#define CUDASOLVER_GEQRF_ARGTYPES(scalar_t)                      \
+  cusolverDnHandle_t handle, int m, int n, scalar_t *A, int lda, \
+      scalar_t *tau, scalar_t *work, int lwork, int *devInfo
+
+template <class scalar_t>
+void geqrf(CUDASOLVER_GEQRF_ARGTYPES(scalar_t)) {
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::geqrf: not implemented for ",
+      typeid(scalar_t).name());
+}
+template <>
+void geqrf<float>(CUDASOLVER_GEQRF_ARGTYPES(float));
+template <>
+void geqrf<double>(CUDASOLVER_GEQRF_ARGTYPES(double));
+template <>
+void geqrf<c10::complex<float>>(CUDASOLVER_GEQRF_ARGTYPES(c10::complex<float>));
+template <>
+void geqrf<c10::complex<double>>(
+    CUDASOLVER_GEQRF_ARGTYPES(c10::complex<double>));
+
+#define CUDASOLVER_POTRS_ARGTYPES(Dtype)  \
+    cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, const Dtype *A, int lda, Dtype *B, int ldb, int *devInfo
+
+template<class Dtype>
+void potrs(CUDASOLVER_POTRS_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potrs: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void potrs<float>(CUDASOLVER_POTRS_ARGTYPES(float));
+template<>
+void potrs<double>(CUDASOLVER_POTRS_ARGTYPES(double));
+template<>
+void potrs<c10::complex<float>>(CUDASOLVER_POTRS_ARGTYPES(c10::complex<float>));
+template<>
+void potrs<c10::complex<double>>(CUDASOLVER_POTRS_ARGTYPES(c10::complex<double>));
+
+
+#define CUDASOLVER_POTRS_BATCHED_ARGTYPES(Dtype)  \
+    cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, Dtype *Aarray[], int lda, Dtype *Barray[], int ldb, int *info, int batchSize
+
+template<class Dtype>
+void potrsBatched(CUDASOLVER_POTRS_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potrsBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void potrsBatched<float>(CUDASOLVER_POTRS_BATCHED_ARGTYPES(float));
+template<>
+void potrsBatched<double>(CUDASOLVER_POTRS_BATCHED_ARGTYPES(double));
+template<>
+void potrsBatched<c10::complex<float>>(CUDASOLVER_POTRS_BATCHED_ARGTYPES(c10::complex<float>));
+template<>
+void potrsBatched<c10::complex<double>>(CUDASOLVER_POTRS_BATCHED_ARGTYPES(c10::complex<double>));
+
 
 #define CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES(Dtype)                        \
   cusolverDnHandle_t handle, int m, int n, int k, const Dtype *A, int lda, \
@@ -194,6 +269,10 @@ void xpotrf(
     cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, cudaDataType dataTypeA, void *A,
     int64_t lda, cudaDataType computeType, void *bufferOnDevice, size_t workspaceInBytesOnDevice, void *bufferOnHost, size_t workspaceInBytesOnHost,
     int *info);
+
+void xpotrs(
+    cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, int64_t nrhs, cudaDataType dataTypeA, const void *A,
+    int64_t lda, cudaDataType dataTypeB, void *B, int64_t ldb, int *info);
 
 #endif // USE_CUSOLVER_64_BIT
 
@@ -348,6 +427,55 @@ void syevjBatched<c10::complex<double>, double>(
     CUDASOLVER_SYEVJ_BATCHED_ARGTYPES(c10::complex<double>, double));
 
 #ifdef USE_CUSOLVER_64_BIT
+
+#define CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(scalar_t)                       \
+  cusolverDnHandle_t handle, cusolverDnParams_t params, int64_t m, int64_t n, \
+      const scalar_t *A, int64_t lda, const scalar_t *tau,                    \
+      size_t *workspaceInBytesOnDevice, size_t *workspaceInBytesOnHost
+
+template <class scalar_t>
+void xgeqrf_bufferSize(CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(scalar_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::xgeqrf_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void xgeqrf_bufferSize<float>(CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(float));
+template <>
+void xgeqrf_bufferSize<double>(CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(double));
+template <>
+void xgeqrf_bufferSize<c10::complex<float>>(
+    CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(c10::complex<float>));
+template <>
+void xgeqrf_bufferSize<c10::complex<double>>(
+    CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(c10::complex<double>));
+
+#define CUDASOLVER_XGEQRF_ARGTYPES(scalar_t)                                  \
+  cusolverDnHandle_t handle, cusolverDnParams_t params, int64_t m, int64_t n, \
+      scalar_t *A, int64_t lda, scalar_t *tau, scalar_t *bufferOnDevice,      \
+      size_t workspaceInBytesOnDevice, scalar_t *bufferOnHost,                \
+      size_t workspaceInBytesOnHost, int *info
+
+template <class scalar_t>
+void xgeqrf(CUDASOLVER_XGEQRF_ARGTYPES(scalar_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::xgeqrf: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void xgeqrf<float>(CUDASOLVER_XGEQRF_ARGTYPES(float));
+template <>
+void xgeqrf<double>(CUDASOLVER_XGEQRF_ARGTYPES(double));
+template <>
+void xgeqrf<c10::complex<float>>(
+    CUDASOLVER_XGEQRF_ARGTYPES(c10::complex<float>));
+template <>
+void xgeqrf<c10::complex<double>>(
+    CUDASOLVER_XGEQRF_ARGTYPES(c10::complex<double>));
 
 #define CUDASOLVER_XSYEVD_BUFFERSIZE_ARGTYPES(scalar_t, value_t) \
   cusolverDnHandle_t handle, cusolverDnParams_t params,          \
