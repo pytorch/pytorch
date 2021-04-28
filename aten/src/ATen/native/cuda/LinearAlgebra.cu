@@ -277,37 +277,23 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
 
 Tensor& mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   result.resize_({ self.size(0), mat2.size(1) });
-  return addmm_out_cuda_impl(result, result, self, mat2, 0, 1);
+  {
+    at::NoNamesGuard guard;
+    addmm_out_cuda_impl(result, result, self, mat2, 0, 1);
+  }
+  auto names = at::namedinference::propagate_names_for_mm(self, mat2);
+  at::namedinference::propagate_names_if_nonempty(result, names);
+  return result;
 }
 
 Tensor mm_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({ self.size(0), mat2.size(1) }, self.options());
-  return addmm_out_cuda_impl(result, result, self, mat2, 0, 1);
+  return mm_out_cuda(self, mat2, result);
 }
 
-Tensor& addmm_out_cuda(const Tensor &self,
-                        const Tensor &mat1, const Tensor &mat2,
-                        const Scalar& beta, const Scalar& alpha, Tensor &out) {
-  {
-    at::NoNamesGuard guard;
-    Tensor& result = addmm_out_cuda_impl(out, self, mat1, mat2, beta, alpha);
-  }
-  at::namedinference::propagate_names_for_addmm(out, mat1, mat2, self);
-  return out;
-}
-
-Tensor addmm_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
-                  const Scalar& beta, const Scalar& alpha) {
-  TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
-  Tensor out = at::empty({mat1.sizes()[0], mat2.sizes()[1]}, self.options());
-  addmm_out_cuda(self, mat1, mat2, beta, alpha, out);
-  return out;
-}
-
-Tensor& addmm__cuda(Tensor& self, const Tensor& mat1, const Tensor& mat2,
-                    const Scalar& beta, const Scalar& alpha) {
-  addmm_out_cuda(self, mat1, mat2, beta, alpha, self);
-  return self;
+TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor &result) {
+  at::NoNamesGuard guard;
+  addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha);
 }
 
 Tensor& baddbmm_out_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {

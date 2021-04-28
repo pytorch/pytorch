@@ -7,6 +7,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/layer_norm.h>
