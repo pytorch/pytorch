@@ -615,6 +615,11 @@ class SyncBatchNorm(_BatchNorm):
         - Input: :math:`(N, C, +)`
         - Output: :math:`(N, C, +)` (same shape as input)
 
+    .. note::
+        Synchronization of batchnorm statistics occurs only while training, i.e.
+        synchronization is disabled when ``model.eval()`` is set or if
+        ``self.training`` is otherwise ``False``.
+
     Examples::
 
         >>> # With Learnable Parameters
@@ -719,7 +724,8 @@ class SyncBatchNorm(_BatchNorm):
             self.running_var if not self.training or self.track_running_stats else None
         )
 
-        need_sync = bn_training
+        # Don't sync batchnorm stats in inference mode (model.eval()).
+        need_sync = (bn_training and self.training)
         if need_sync:
             process_group = torch.distributed.group.WORLD
             if self.process_group:
