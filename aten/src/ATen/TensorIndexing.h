@@ -108,6 +108,7 @@ struct TORCH_API TensorIndex final {
   TensorIndex(c10::nullopt_t) : type_(TensorIndexType::None) {}
 
   // Case 2: "..." / `at::indexing::Ellipsis`
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(at::indexing::EllipsisIndexType) : type_(TensorIndexType::Ellipsis) {}
   TensorIndex(const char *str) : TensorIndex(at::indexing::Ellipsis) {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
@@ -125,6 +126,7 @@ struct TORCH_API TensorIndex final {
   // Case 4: Boolean value
   template <class T,
             class = typename std::enable_if<std::is_same<bool, T>::value>::type >
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(T boolean) : boolean_(boolean), type_(TensorIndexType::Boolean) {}
 
   // Case 5: Slice represented in `at::indexing::Slice` form
