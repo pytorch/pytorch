@@ -67,6 +67,18 @@ std::tuple<Tensor, Tensor, Tensor, int64_t, int64_t> _prepare_layer_norm_inputs(
 
 } // namespace
 
+void layer_norm_cpu_out(
+    at::Tensor& out,
+    at::Tensor& mean,
+    at::Tensor& rstd,
+    const at::Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& gamma,
+    const Tensor& beta,
+    double eps,
+    int64_t M,
+    int64_t N);
+
 using forward_fn = void (*)(
     const Tensor& /* X */,
     const Tensor& /* gamma */,
