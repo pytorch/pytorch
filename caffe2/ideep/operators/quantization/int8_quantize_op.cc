@@ -26,6 +26,7 @@ class IDEEPInt8QuantizeOp final : public IDEEPOperator {
     Y_data_type_ = zero_point_ == 0 ? idtype::u8 : idtype::s8;
     Y_scales_ = ConvertScales({scale_});
   }
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPInt8QuantizeOp() {}
 
   bool RunOnDevice() override {
@@ -55,6 +56,7 @@ class IDEEPInt8QuantizeOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Quantize, DNNLOWP, IDEEPInt8QuantizeOp);
 
 } // namespace
