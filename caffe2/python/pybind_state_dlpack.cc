@@ -16,14 +16,23 @@ const DLDeviceType* CaffeToDLDeviceType(int device_type) {
 
 const DLDataType* CaffeToDLType(const TypeMeta meta) {
   static std::map<TypeIdentifier, DLDataType> dl_type_map{
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {TypeMeta::Id<int8_t>(), DLDataType{0, 8, 1}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {TypeMeta::Id<int16_t>(), DLDataType{0, 16, 1}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {TypeMeta::Id<int32_t>(), DLDataType{0, 32, 1}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {TypeMeta::Id<int64_t>(), DLDataType{0, 64, 1}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {TypeMeta::Id<uint8_t>(), DLDataType{1, 8, 1}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {TypeMeta::Id<uint16_t>(), DLDataType{1, 16, 1}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {TypeMeta::Id<at::Half>(), DLDataType{2, 16, 1}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {TypeMeta::Id<float>(), DLDataType{2, 32, 1}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {TypeMeta::Id<double>(), DLDataType{2, 64, 1}},
   };
   const auto it = dl_type_map.find(meta.id());
@@ -38,20 +47,29 @@ const TypeMeta DLTypeToCaffe(const DLDataType& dl_type) {
     static std::map<int, std::map<int, TypeMeta>> dl_caffe_type_map{
         {0,
          std::map<int, TypeMeta>{
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              {8, TypeMeta::Make<int8_t>()},
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              {16, TypeMeta::Make<int16_t>()},
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              {32, TypeMeta::Make<int32_t>()},
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              {64, TypeMeta::Make<int64_t>()},
          }},
         {1,
          std::map<int, TypeMeta>{
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              {8, TypeMeta::Make<uint8_t>()},
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              {16, TypeMeta::Make<uint16_t>()},
          }},
         {2,
          std::map<int, TypeMeta>{
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              {16, TypeMeta::Make<at::Half>()},
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              {32, TypeMeta::Make<float>()},
+             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
              {64, TypeMeta::Make<double>()},
          }},
     };
