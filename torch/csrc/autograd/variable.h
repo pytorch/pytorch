@@ -532,8 +532,15 @@ private:
   c10::optional<ViewInfo> forward_info_;
 
   // Optimization to reduce the number of ViewInfo we create.
-  // In the (very common) case where backward_info_ == forward_info_
-  // we only populate backward_info_ and set shared_view_info_ = true
+  // In the (very common) case where backward_info_ == forward_info_, we only
+  // populate backward_info_ (that should be used as both the forward and backward
+  // view information) and set shared_view_info_ = true.
+  // Invariants:
+  //   - If shared_view_info_ is false, there is no special constraints on
+  //     backward_info_ and forward_info_
+  //   - If shared_view_info_ is true, we must have:
+  //      - backward_info_.has_value() == true
+  //      - forward_info_.has_value() == false
   bool shared_view_info_;
 
   /// The two following fields are extra information that we track to ensure that
