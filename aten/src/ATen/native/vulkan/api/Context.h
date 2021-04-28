@@ -76,12 +76,9 @@ class Context final {
     public:
       bool initted;
       api::Shader::Layout::Descriptor layout_descriptor;
-      //VkDescriptorSet descriptor_set;
       api::Shader::Layout::Factory::Handle set_layout;
       api::Pipeline::Layout::Factory::Handle pipe_layout;
       api::Shader::Factory::Handle shader_module;
-      //api::Shader::WorkGroup local_work_group;
-      //api::Pipeline::Factory::Handle pipe;
 
       explicit OpCache(const GPU& gpu);
       OpCache(const OpCache&) = delete;
@@ -115,7 +112,6 @@ class Context final {
       Command::Buffer& command_buffer,
       const Context::OpCache& opcache,
       const Shader::WorkGroup& global_work_group,
-      const VkDescriptorSet vk_descriptor_set,
       Arguments&&... arguments);
 };
 
@@ -229,21 +225,18 @@ inline void Context::dispatch(
     Command::Buffer& command_buffer,
     const Context::OpCache& opcache,
     const Shader::WorkGroup& global_work_group,
-    const VkDescriptorSet vk_descriptor_set,
     Arguments&&... arguments) {
   // Forward declaration
   Descriptor::Set dispatch_prologue(
       Command::Buffer&,
       const OpCache& opcache,
-      const Shader::WorkGroup& global_work_group,
-      const VkDescriptorSet vk_descriptor_set);
+      const Shader::WorkGroup& global_work_group);
 
   // Factor out template parameter independent code to minimize code bloat.
   Descriptor::Set descriptor_set = dispatch_prologue(
       command_buffer,
       opcache,
-      global_work_group,
-      vk_descriptor_set);
+      global_work_group);
 
   detail::bind(
       descriptor_set,

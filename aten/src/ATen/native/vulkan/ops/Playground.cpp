@@ -73,7 +73,6 @@ void PlaygroundOpContext::fill_image(const api::Resource::Buffer& buffer, api::R
         cmd_buffer,
         context->get_playground_cache(),
         {3*3*4, 1, 1},
-        descriptor_set,
         buffer.object);
 
     cmd_buffer.end();
@@ -99,14 +98,6 @@ PlaygroundOpContext::PlaygroundOpContext(const Tensor& test)
     initted(false) {
   api::Resource::Pool& resource_pool = persistent()->pool;
   in_buffer = get_buffer(&resource_pool, 3, 3, 4);
-
-  api::Descriptor::Pool& descriptor_pool = persistent()->descriptor_pool;
-  const api::Shader::Layout::Object shader_layout =
-  {
-    api::context()->get_playground_cache().set_layout.get(),
-    api::context()->get_playground_cache().layout_descriptor.signature,
-  };
-  descriptor_set = descriptor_pool.allocate_single(shader_layout);
 }
 
 PlaygroundOpContext PlaygroundOpContext::create(const Tensor& test) {

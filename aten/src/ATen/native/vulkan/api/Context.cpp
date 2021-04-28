@@ -233,8 +233,7 @@ Descriptor::Set dispatch_prologue(
 Descriptor::Set dispatch_prologue(
     Command::Buffer& command_buffer,
     const Context::OpCache& opcache,
-    const Shader::WorkGroup& global_work_group,
-    const VkDescriptorSet vk_descriptor_set) {
+    const Shader::WorkGroup& global_work_group) {
   Context* const context = api::context();
   const GPU gpu = context->gpu();
   Descriptor& descriptor = context->descriptor();
@@ -247,15 +246,6 @@ Descriptor::Set dispatch_prologue(
     opcache.layout_descriptor.signature,
   };
 
-  /*
-  const api::Pipeline::Object pipe_obj = {
-    opcache.pipe.get(),
-    opcache.pipe_layout.get(),
-    opcache.local_work_group,
-  };
-
-  command_buffer.bind(pipe_obj);
-  */
   Shader::WorkGroup local_group_size = {4, 4, 4};
 
   if (global_work_group.data[2u] == 1) {
@@ -278,13 +268,7 @@ Descriptor::Set dispatch_prologue(
         local_group_size,
       }));
 
-
-  return Descriptor::Set(
-      descriptor.pool.device_,
-      vk_descriptor_set,
-      shader_layout.signature);
-
-  //return descriptor.pool.allocate(shader_layout);
+  return descriptor.pool.allocate(shader_layout);
 }
 
 void dispatch_epilogue(

@@ -33,7 +33,6 @@ class PlaygroundOpContext final : public torch::jit::CustomClassHolder {
     Tensor test;
   } unpacked_;
 
-  VkDescriptorSet descriptor_set;
   api::Command::Buffer cmd_buffer;
   api::Resource::Buffer in_buffer;
   bool initted = false;
