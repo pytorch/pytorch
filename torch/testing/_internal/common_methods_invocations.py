@@ -2823,14 +2823,14 @@ def sample_inputs_mvlgamma(op_info, device, dtype, requires_grad, **kwargs):
 # Since `mvlgamma` has multiple entries,
 # there are multiple common skips for the additional
 # entries. Following function is a helper to that end.
-def mvlgamma_skips(skip_redundant=False):
+def skips_mvlgamma(skip_redundant=False):
     skips = (
         # outside domain values are hard error for mvlgamma op.
         SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
     )
     if not skip_redundant:
         # Redundant tests
-        skips = skips + (
+        skips = skips + (  # type: ignore[assignment]
             SkipInfo('TestGradients'),
             SkipInfo('TestOpInfo'),
             SkipInfo('TestCommon'),
@@ -4532,27 +4532,27 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_mode,),
     MvlGammaInfo(variant_test_name='mvlgamma_p_1',
                  domain=(1e-4, float('inf')),
-                 skips=mvlgamma_skips(),
+                 skips=skips_mvlgamma(),
                  sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_2',
                  domain=(0.6, float('inf')),
-                 skips=mvlgamma_skips(skip_redundant=True),
+                 skips=skips_mvlgamma(skip_redundant=True),
                  sample_kwargs=lambda device, dtype, input: ({'p': 2}, {'d': 2})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_3',
                  domain=(1.1, float('inf')),
-                 skips=mvlgamma_skips(skip_redundant=True) + (
+                 skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
                  ),
                  sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_4',
                  domain=(1.6, float('inf')),
-                 skips=mvlgamma_skips(skip_redundant=True) + (
+                 skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
                  ),
                  sample_kwargs=lambda device, dtype, input: ({'p': 4}, {'d': 4})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_5',
                  domain=(2.1, float('inf')),
-                 skips=mvlgamma_skips(skip_redundant=True) + (
+                 skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
                  ),
                  sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
