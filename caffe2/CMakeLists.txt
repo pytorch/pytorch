@@ -770,6 +770,15 @@ if(HAVE_SOVERSION)
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
+
+if(CMAKE_COMPILER_IS_GNUCXX AND BUILD_LIBTORCH_CPU_WITH_DEBUG)
+  # To enable debug fission we need to build libtorch_cpu with debug info on,
+  # but this increases link time and peak memory usage if we use the
+  # REL_WITH_DEB_INFO env var since that enables it for everything, but it's
+  # only really necessary for libtorch_cpu.
+  target_compile_options(torch_cpu PRIVATE "-g")
+endif()
+
 if(USE_LLVM AND LLVM_FOUND)
   llvm_map_components_to_libnames(LLVM_LINK_LIBS
     support core analysis executionengine instcombine
