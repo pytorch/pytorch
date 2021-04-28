@@ -325,26 +325,24 @@ TEST(ExternalCall, UnaryFloat) {
       std::string,
       std::vector<ExprHandle>>;
   std::vector<Test> tests = {};
-  tests.push_back(Test{
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {1, 64, 8, 9},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {1, 64, 5, 7},
-      [](at::Tensor x) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        return at::adaptive_avg_pool2d(x, {5, 7});
-      },
-      "nnc_aten_adaptive_avg_pool2d",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      toExprHandleVec({5, 7})});
-  tests.push_back(Test{
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {100, 200},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      {100},
-      [](at::Tensor x) { return at::mean(x, {1}); },
-      "nnc_aten_mean",
-      toExprHandleVec({1})});
+  tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                       {1, 64, 8, 9},
+                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                       {1, 64, 5, 7},
+                       [](at::Tensor x) {
+                         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                         return at::adaptive_avg_pool2d(x, {5, 7});
+                       },
+                       "nnc_aten_adaptive_avg_pool2d",
+                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                       toExprHandleVec({5, 7})});
+  tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                       {100, 200},
+                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                       {100},
+                       [](at::Tensor x) { return at::mean(x, {1}); },
+                       "nnc_aten_mean",
+                       toExprHandleVec({1})});
   for (auto curTest : tests) {
     std::vector<int64_t> aShape, resShape;
     TensorFunc torchFunc;
@@ -519,13 +517,19 @@ TEST(ExternalCall, Inlining) {
 
   Tensor* A = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{8, "i"}, {8, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return FloatImm::make(5.0f);
       });
   Tensor* B = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{8, "i"}, {8, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return FloatImm::make(4.0f);
       });
