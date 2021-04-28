@@ -11,6 +11,7 @@ using namespace torch::test;
 
 struct ModuleDictTest : torch::test::SeedingFixture {};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, ConstructsFromList) {
   struct M : Module {
     explicit M(int value_) : value(value_) {}
@@ -26,6 +27,7 @@ TEST_F(ModuleDictTest, ConstructsFromList) {
   ASSERT_EQ(dict->size(), 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, ConstructsFromordereddict) {
   struct M : Module {
     explicit M(int value_) : value(value_) {}
@@ -41,6 +43,7 @@ TEST_F(ModuleDictTest, ConstructsFromordereddict) {
   ASSERT_EQ(dict->size(), 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, UpdatePopClearContains) {
   struct M : Module {
     explicit M(int value_) : value(value_) {}
@@ -81,6 +84,7 @@ TEST_F(ModuleDictTest, UpdatePopClearContains) {
   ASSERT_EQ(dict->size(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, UpdateExist) {
   struct M : Module {
     explicit M(int value_) : value(value_) {}
@@ -120,6 +124,7 @@ TEST_F(ModuleDictTest, UpdateExist) {
   ASSERT_EQ(dict->at<M>("module_4").value, 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, Keys) {
   struct M : Module {
     explicit M(int value_) : value(value_) {}
@@ -127,8 +132,10 @@ TEST_F(ModuleDictTest, Keys) {
   };
 
   torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"linear", Linear(10, 3).ptr()},
     {"conv", Conv2d(1, 2, 3).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"dropout", Dropout(0.5).ptr()},
   };
   ModuleDict dict(ordereddict);
@@ -142,6 +149,7 @@ TEST_F(ModuleDictTest, Keys) {
   ASSERT_TRUE(dict["dropout"]->as<Dropout>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, Values) {
   struct M : Module {
     explicit M(int value_) : value(value_) {}
@@ -166,22 +174,30 @@ TEST_F(ModuleDictTest, Values) {
       }));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, SanityCheckForHoldingStandardModules) {
   torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"linear", Linear(10, 3).ptr()},
     {"conv", Conv2d(1, 2, 3).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"dropout", Dropout(0.5).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"batch", BatchNorm2d(5).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"embedding", Embedding(4, 10).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"lstm", LSTM(4, 5).ptr()}
   };
   ModuleDict dict(ordereddict);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, HasReferenceSemantics) {
   torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"linear1", Linear(2, 3).ptr()},
     {"linear2", Linear(3, 4).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"linear3", Linear(4, 5).ptr()},
   };
   ModuleDict first(ordereddict);
@@ -235,18 +251,23 @@ void iscloneable_helper(torch::Device device) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, IsCloneable) {
   iscloneable_helper(torch::kCPU);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, IsCloneable_CUDA) {
   iscloneable_helper({torch::kCUDA, 0});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, RegistersElementsAsSubmodules) {
   torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict1 = {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"linear", Linear(10, 3).ptr()},
     {"conv", Conv2d(1, 2, 3).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"test", Dropout(0.5).ptr()},
   };
   ModuleDict dict(ordereddict1);
@@ -258,7 +279,9 @@ TEST_F(ModuleDictTest, RegistersElementsAsSubmodules) {
 
   // Update Existing
   torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict2 = {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"lstm", LSTM(4, 5).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"test", BatchNorm2d(5).ptr()}
   };
   dict->update(ordereddict2);
@@ -271,6 +294,7 @@ TEST_F(ModuleDictTest, RegistersElementsAsSubmodules) {
   ASSERT_TRUE(modules[3]->as<LSTM>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, CloneToDevice_CUDA) {
   torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"linear", Linear(2, 3).ptr()},
@@ -289,13 +313,19 @@ TEST_F(ModuleDictTest, CloneToDevice_CUDA) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleDictTest, PrettyPrintModuleDict) {
   torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"linear", Linear(10, 3).ptr()},
     {"conv", Conv2d(1, 2, 3).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"dropout", Dropout(0.5).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"batch", BatchNorm2d(5).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"embedding", Embedding(4, 10).ptr()},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {"lstm", LSTM(4, 5).ptr()}
   };
   ModuleDict dict(ordereddict);
