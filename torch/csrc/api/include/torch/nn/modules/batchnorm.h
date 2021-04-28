@@ -201,6 +201,7 @@ TORCH_MODULE(BatchNorm2d);
 /// ```
 /// BatchNorm3d model(BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
  protected:
   // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)

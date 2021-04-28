@@ -68,6 +68,7 @@ class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
       typename... Args,
       typename = torch::enable_if_t<(sizeof...(Args) > 0)>>
   explicit FunctionalImpl(SomeFunction original_function, Args&&... args)
+      // NOLINTNEXTLINE(modernize-avoid-bind)
       : function_(std::bind(
             original_function,
             /*input=*/std::placeholders::_1,

@@ -18,6 +18,7 @@ namespace nn {
 /// A placeholder identity operator that is argument-insensitive.
 /// See https://pytorch.org/docs/master/generated/torch.nn.Identity.html to learn
 /// about the exact behavior of this module.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
  public:
   void reset() override;
@@ -96,6 +97,7 @@ TORCH_MODULE(Linear);
 /// ```
 /// Flatten model(FlattenOptions().start_dim(2).end_dim(4));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FlattenImpl : public Cloneable<FlattenImpl> {
  public:
   explicit FlattenImpl(const FlattenOptions& options_ = {});

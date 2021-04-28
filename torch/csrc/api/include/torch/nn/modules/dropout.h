@@ -115,6 +115,7 @@ TORCH_MODULE(Dropout2d);
 /// ```
 /// Dropout3d model(Dropout3dOptions().p(0.42).inplace(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Dropout3dImpl : public detail::_DropoutNd<Dropout3dImpl> {
 public:
   using detail::_DropoutNd<Dropout3dImpl>::_DropoutNd;
@@ -145,6 +146,7 @@ TORCH_MODULE(Dropout3d);
 /// ```
 /// AlphaDropout model(AlphaDropoutOptions(0.2).inplace(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AlphaDropoutImpl
     : public detail::_DropoutNd<AlphaDropoutImpl> {
  public:
@@ -172,6 +174,7 @@ TORCH_MODULE(AlphaDropout);
 /// ```
 /// FeatureAlphaDropout model(FeatureAlphaDropoutOptions(0.2).inplace(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FeatureAlphaDropoutImpl
     : public detail::_DropoutNd<FeatureAlphaDropoutImpl> {
  public:
