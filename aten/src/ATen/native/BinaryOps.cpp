@@ -7,6 +7,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/BinaryTensorIterator.h>
 
 #include <torch/library.h>
 
@@ -16,8 +17,17 @@ namespace meta {
 TORCH_META_FUNC2(add, Tensor) (
   const Tensor& self, const Tensor& other, const Scalar& alpha
 ) {
-  build_borrowing_binary_op(maybe_get_output(), self, other);
-  native::alpha_check(dtype(), alpha);
+  setup(
+      self,
+      other,
+      maybe_get_output(),
+      TensorIteratorConfig()
+          .set_check_mem_overlap(true)
+          .allow_cpu_scalars(true)
+          .promote_inputs_to_common_dtype(true)
+          .cast_common_dtype_to_outputs(true)
+          .enforce_safe_casting_to_output(true));
+  native::alpha_check(common_dtype(), alpha);
 }
 
 TORCH_META_FUNC2(sub, Tensor) (
@@ -113,7 +123,7 @@ DEFINE_DISPATCH(xlogy_stub);
 TORCH_IMPL_FUNC(add_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
 ) {
-  add_stub(device_type(), *this, alpha);
+  add_stub(common_device().type(), *this, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
 }
 

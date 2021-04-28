@@ -343,7 +343,7 @@
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
-  structured_inherits: TensorIteratorBase
+  structured_inherits: BinaryTensorIteratorBase
   dispatch:
     CPU, CUDA: add_out
     SparseCPU: add_out_sparse_cpu

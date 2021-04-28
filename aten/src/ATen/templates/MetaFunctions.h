@@ -2,8 +2,9 @@
 
 // ${generated_comment}
 
-#include <ATen/TensorMeta.h>
+#include <ATen/BinaryTensorIterator.h>
 #include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
 
 namespace at {
 
