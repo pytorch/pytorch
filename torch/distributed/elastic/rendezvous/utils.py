@@ -179,7 +179,7 @@ class _PeriodicTimer:
         kwargs: Dict[str, Any]
         stop_event: Event
 
-    _name: str
+    _name: Optional[str]
     _thread: Optional[Thread]
     _finalizer: Optional[weakref.finalize]
 
