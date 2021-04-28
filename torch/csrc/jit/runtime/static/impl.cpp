@@ -38,7 +38,7 @@ void OptimizeGraph(
 #ifdef FBCODE_CAFFE2
   if (opts.enable_out_variant) {
     ReplaceWithCopy(graph);
-    FuseSigridTransformsListUnpack(graph);
+    FuseListUnpack(graph);
   }
 #endif
   ConstantPropagation(graph);

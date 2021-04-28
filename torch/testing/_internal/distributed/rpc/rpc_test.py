@@ -5748,6 +5748,49 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def test_rref_forward_synchronization4(self):
         self._test_rref_forward_synchronization("cuda:1", "cuda:1")
 
+    def _test_owner_rref_forward_synchronization(self, local_device, remote_device):
+        if self.rank == 0:
+            options = self.rpc_backend_options
+            options.set_device_map("w0", {local_device: remote_device})
+            rpc.init_rpc(
+                "w0",
+                rank=0,
+                world_size=1,
+                rpc_backend_options=options
+            )
+
+            model = rpc.remote(
+                "w0", torch.nn.Linear, (2048, 20000)
+            ).remote().to(remote_device)
+            for _ in range(30):
+                data = torch.rand(2048, 2048).to(local_device)
+                output = model.rpc_sync().forward(data)
+                # FIXME: remove this when RRef ctor can record CUDA events
+                torch.cuda.current_stream(local_device).synchronize()
+                # to_here() internally calls localValue as the caller is
+                # the owner of the RRef.
+                v0 = rpc.RRef(output).remote().sum().to_here().item()
+                v1 = output.sum().item()
+                self.assertEqual(v0, v1)
+
+            rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_owner_rref_forward_synchronization1(self):
+        self._test_owner_rref_forward_synchronization("cuda:0", "cuda:0")
+
+    @skip_if_lt_x_gpu(2)
+    def test_owner_rref_forward_synchronization2(self):
+        self._test_owner_rref_forward_synchronization("cuda:0", "cuda:1")
+
+    @skip_if_lt_x_gpu(2)
+    def test_owner_rref_forward_synchronization3(self):
+        self._test_owner_rref_forward_synchronization("cuda:1", "cuda:0")
+
+    @skip_if_lt_x_gpu(2)
+    def test_owner_rref_forward_synchronization4(self):
+        self._test_owner_rref_forward_synchronization("cuda:1", "cuda:1")
+
     @skip_if_lt_x_gpu(1)
     def test_devices_option_mismatch(self):
         with self.assertRaisesRegex(
