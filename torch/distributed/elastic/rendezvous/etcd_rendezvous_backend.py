@@ -109,7 +109,10 @@ class EtcdRendezvousBackend(RendezvousBackend):
         def get_state():
             result = self.get_state()
             if result is not None:
-                return *result, False
+                tmp = *result, False
+                # Python 3.6 does not support tuple unpacking in return
+                # statements.
+                return tmp
             return None
 
         if token:
@@ -135,7 +138,8 @@ class EtcdRendezvousBackend(RendezvousBackend):
         if result is None:
             return get_state()
 
-        return *self._decode_state(result), True
+        tmp = *self._decode_state(result), True
+        return tmp
 
     def _decode_state(self, result: EtcdResult) -> Tuple[bytes, Token]:
         base64_state = result.value.encode()
