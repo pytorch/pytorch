@@ -1237,7 +1237,7 @@ class TestBinaryUfuncs(TestCase):
             numpy_inputs = [to_numpy(t) for t in torch_inputs]
 
             torch_output = op(*torch_inputs, **sample.kwargs).cpu()
-            numpy_output = torch.as_tensor(op.ref(*numpy_inputs), dtype=torch_output.dtype)
+            numpy_output = torch.as_tensor(op.ref(*numpy_inputs, **sample.kwargs), dtype=torch_output.dtype)
 
             self.assertEqual(torch_output, numpy_output)
 

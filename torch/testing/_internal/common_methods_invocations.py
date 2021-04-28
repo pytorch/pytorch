@@ -3477,6 +3477,15 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         supports_out=True,
     ),
+    BinaryUfuncInfo(
+        "add",
+        variant_test_name="with_alpha",
+        # numpy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
+        ref=lambda input, other, *, alpha: np.add(input, alpha * other),
+        sample_inputs_func=partial(sample_inputs_binary, alpha=2),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=True,
+    ),
     OpInfo('addmm',
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
            # alpha=beta=1 is tested in the following opinfo, because that special case will
@@ -3948,7 +3957,7 @@ op_db: List[OpInfo] = [
         "div",
         variant_test_name="true_rounding",
         aliases=("divide",),
-        ref=np.true_divide,
+        ref=lambda input, other, **kwargs: np.true_divide(input, other),
         # prevent zero division
         domain=(1.0, None),
         sample_inputs_func=partial(sample_inputs_binary, rounding_mode=None),
@@ -3963,7 +3972,7 @@ op_db: List[OpInfo] = [
         variant_test_name="trunc_rounding",
         aliases=("divide",),
         # numpy has no builtin reference for trunc divide, but it is easy enough to emulate
-        ref=lambda *args, **kwargs: np.trunc(np.true_divide(*args, **kwargs)),
+        ref=lambda input, other, **kwargs: np.trunc(np.true_divide(input, other)),
         # prevent zero division
         domain=(1.0, None),
         sample_inputs_func=partial(sample_inputs_binary, rounding_mode="floor"),
@@ -3977,7 +3986,7 @@ op_db: List[OpInfo] = [
         "div",
         variant_test_name="floor_rounding",
         aliases=("divide",),
-        ref=np.floor_divide,
+        ref=lambda input, other, **kwargs: np.floor_divide(input, other),
         # prevent zero division
         domain=(1.0, None),
         sample_inputs_func=partial(sample_inputs_binary, rounding_mode="floor"),
@@ -5663,6 +5672,15 @@ op_db: List[OpInfo] = [
         "sub",
         aliases=("subtract",),
         ref=np.subtract,
+        supports_out=True,
+    ),
+    BinaryUfuncInfo(
+        "sub",
+        aliases=("subtract",),
+        variant_test_name="with_alpha",
+        # numpy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
+        ref=lambda input, other, *, alpha: np.subtract(input, alpha * other),
+        sample_inputs_func=partial(sample_inputs_binary, alpha=2),
         supports_out=True,
     ),
     BinaryUfuncInfo(
