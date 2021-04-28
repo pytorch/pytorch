@@ -123,6 +123,7 @@ class TORCH_API Pickler {
   Pickler(std::function<void(const char*, size_t)> writer)
       : Pickler(std::move(writer), nullptr, nullptr, nullptr) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Pickler(
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table,
