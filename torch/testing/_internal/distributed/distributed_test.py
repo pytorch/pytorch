@@ -1298,6 +1298,8 @@ class DistributedTest:
         def test_broadcast_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_if_small_worldsize
@@ -1319,6 +1321,8 @@ class DistributedTest:
         def test_nccl_high_priority_stream(self):
             group, _, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
 
             new_port = str(MASTER_PORT + 1)
             os.environ['MASTER_PORT'] = new_port
@@ -1373,6 +1377,8 @@ class DistributedTest:
         def test_reduce_sum_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_reduce_helper(
                 group,
                 group_id,
@@ -1537,6 +1543,8 @@ class DistributedTest:
         def test_reduce_sum_cuda_twice(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_reduce_twice_helper(
                 group,
                 group_id,
@@ -2933,6 +2941,8 @@ class DistributedTest:
         def test_reduce_multigpu(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_reduce_multigpu_helper(
                 group,
                 group_id,
@@ -2976,6 +2986,8 @@ class DistributedTest:
         def test_all_gather_multigpu(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU)
 
         @unittest.skipIf(BACKEND != "nccl", "Only Nccl backend supports allgather multigpu")
@@ -2983,6 +2995,8 @@ class DistributedTest:
         def test_all_gather_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU, dtype=torch.cfloat)
 
         def _model_step(self, model):
