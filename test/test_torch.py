@@ -5084,11 +5084,25 @@ else:
         with self.assertRaises(IndexError):
             a.index_copy_(1, idx, c)
 
+    @onlyCPU
+    def test_index_copy_deterministic(self, device):
+        m = 6
+        n = 3
+        x = torch.zeros(m, n, device=device)
+        elems = 20000
+        src = torch.rand(elems, n, device=device)
+        index = torch.randint(m, (elems,), device=device)
+        with DeterministicGuard(True):
+            y0 = torch.index_copy(x, 0, index, src)
+            for _ in range(10):
+                y = torch.index_copy(x, 0, index, src)
+                self.assertEqual(y, y0, atol=0, rtol=0)
+
     # Ensures that index_copy throws nondeterministic alerts in the correct cases
-    @onlyOnCPUAndCUDA
+    @onlyCUDA
     @dtypes(torch.double)
     def test_nondeterministic_alert_index_copy(self, device, dtype):
-        @expectedAlertNondeterministic('index_copy')
+        @expectedAlertNondeterministic('index_copy_cuda', 'cuda')
         def test_func(slf, device, call_type):
             S = 10
             a = torch.randn(S, device=device)
@@ -6772,6 +6786,36 @@ else:
             self.assertEqual(sample_indices.dim(), 1, msg="wrong number of dimensions")
             self.assertEqual(prob_dist.dim(), 1, msg="wrong number of prob_dist dimensions")
             self.assertEqual(sample_indices.size(0), n_sample, msg="wrong number of samples")
+
+        # CUDA misalignment issue (#46702)
+        n_row, n_col = 2, 3
+        prob_dist = make_prob_dist([n_row, n_col], True)
+        n_sample = 1
+        sample_indices = torch.multinomial(prob_dist, n_sample, True)
+        self.assertEqual(sample_indices.dim(), 2, msg="wrong number of dimensions")
+        self.assertEqual(sample_indices.size(1), n_sample, msg="wrong number of samples")
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half)
+    def test_multinomial_deterministic(self, device, dtype):
+        gen = torch.Generator(device=device)
+
+        trials = 5
+        seed = 0
+        prob_dist = torch.rand(10000, 1000, device=device, dtype=dtype)
+        n_sample = 1
+
+        for i in range(trials):
+            gen.manual_seed(seed)
+            samples_1 = torch.multinomial(prob_dist, n_sample, True, generator=gen)
+
+            gen.manual_seed(seed)
+            samples_2 = torch.multinomial(prob_dist, n_sample, True, generator=gen)
+
+            self.assertEqual(samples_1, samples_2)
+            self.assertEqual(samples_1.dim(), 2, msg="wrong number of dimensions")
+            self.assertEqual(samples_1.size(1), n_sample, msg="wrong number of samples")
+
 
     @slowTest
     @dtypes(torch.float)

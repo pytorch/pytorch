@@ -10,7 +10,8 @@
 namespace at {
 
 // Thread local state contains values that are preserved across
-// thread boundaries (e.g. at::launch/JIT fork, autograd, at::parallel_for)
+// thread boundaries (e.g. at::launch/JIT fork, autograd).
+// Note at::parallel_for doesn't preserve TLS across thread boundaries.
 class TORCH_API ThreadLocalState {
  public:
   // Saves the thread local variables' values and
