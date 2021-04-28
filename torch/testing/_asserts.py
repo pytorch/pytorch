@@ -216,15 +216,15 @@ def _check_values_equal(
         msg = "Tensors are not equal!\n\n"
         if trace.total_elements == 1:
             msg += (
-                f"Absolute difference: {trace.max_abs_diff}\n"
-                f"Relative difference: {trace.max_rel_diff}"
+                f"Absolute difference: {trace.max_abs_diff:.2e}\n"
+                f"Relative difference: {trace.max_rel_diff:.2e}"
             )
         else:
             msg += (
                 f"Mismatched elements: {trace.total_mismatches} / {trace.total_elements} "
                 f"({trace.mismatch_ratio:.1%})\n"
-                f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx}\n"
-                f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx}"
+                f"Greatest absolute difference: {trace.max_abs_diff:.2e} at {trace.max_abs_diff_idx}\n"
+                f"Greatest relative difference: {trace.max_rel_diff:.2e} at {trace.max_rel_diff_idx}"
             )
     elif callable(msg):
         msg = msg(actual, expected, trace)
@@ -265,17 +265,17 @@ def _check_values_close(
         msg = "Tensors are not close!\n\n"
         if trace.total_elements == 1:
             msg += (
-                f"Absolute difference: {trace.max_abs_diff} (up to {atol} allowed)\n"
-                f"Relative difference: {trace.max_rel_diff} (up to {rtol} allowed)"
+                f"Absolute difference: {trace.max_abs_diff:.2e} (up to {atol:.2e} allowed)\n"
+                f"Relative difference: {trace.max_rel_diff:.2e} (up to {rtol:.2e} allowed)"
             )
         else:
             msg += (
                 f"Mismatched elements: {trace.total_mismatches} / {trace.total_elements} "
                 f"({trace.mismatch_ratio:.1%})\n"
-                f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx} "
-                f"(up to {atol} allowed)\n"
-                f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx} "
-                f"(up to {rtol} allowed)"
+                f"Greatest absolute difference: {trace.max_abs_diff:.2e} at {trace.max_abs_diff_idx} "
+                f"(up to {atol:.2e} allowed)\n"
+                f"Greatest relative difference: {trace.max_rel_diff:.2e} at {trace.max_rel_diff_idx} "
+                f"(up to {rtol:.2e} allowed)"
             )
     elif callable(msg):
         msg = msg(actual, expected, trace)
