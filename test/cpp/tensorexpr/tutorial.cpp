@@ -132,8 +132,9 @@ int main(int argc, char* argv[]) {
     // First, let's specify the sizes:
     std::vector<const Expr*> dims = {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
-                                         // and represents an integer constant
+        new IntImm(64),
+        new IntImm(32)}; // IntImm stands for Integer Immediate
+                         // and represents an integer constant
 
     // Now we can create a Buf object by providing a name, dimensions, and a
     // data type of the elements:
@@ -440,9 +441,11 @@ int main(int argc, char* argv[]) {
     // Let's print one of the elements from each array to verify that the
     // computation did happen:
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    std::cout << "A[10] = " << data_A[10] << std::endl
+    std::cout << "A[10] = " << data_A[10]
+              << std::endl
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              << "B[10] = " << data_B[10] << std::endl
+              << "B[10] = " << data_B[10]
+              << std::endl
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               << "X[10] = A[10] + B[10] = " << data_X[10] << std::endl;
     // Prints:
