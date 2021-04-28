@@ -348,7 +348,7 @@
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
   real: at::real(grad)
-  imag: at::imag(grad)
+  imag: "grad.is_conj() ? at::imag(grad.resolve_conj()) : at::imag(grad)"
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
   abs, angle: polar_backward(grad, result)
@@ -356,7 +356,10 @@
 - name: _conj(Tensor(a) self) -> Tensor(a)
   self: grad.conj()
 
-- name: _resolve_conj(Tensor(a) self) -> Tensor(a)
+- name: resolve_conj(Tensor(a) self) -> Tensor(a)
+  self: grad
+
+- name: resolve_conj_(Tensor(a!) self) -> Tensor(a!)
   self: grad
 
 - name: conj_physical(Tensor self) -> Tensor
@@ -624,7 +627,7 @@
   values: grad.index(indices)
 
 - name: index_select(Tensor self, int dim, Tensor index) -> Tensor
-  self: index_select_backward(grad, self.sizes(), dim, index)
+  self: "self.is_conj() ? index_select_backward(grad.conj(), self.sizes(), dim, index) : index_select_backward(grad, self.sizes(), dim, index)"
   index: non_differentiable
 
 - name: inverse(Tensor self) -> Tensor
@@ -743,7 +746,7 @@
   mask: non_differentiable
 
 - name: masked_select(Tensor self, Tensor mask) -> Tensor
-  self: masked_select_backward(grad, self, mask)
+  self: "self.is_conj() ? masked_select_backward(grad.conj(), self, mask) : masked_select_backward(grad, self, mask)"
   mask: non_differentiable
 
 - name: matrix_exp(Tensor self) -> Tensor

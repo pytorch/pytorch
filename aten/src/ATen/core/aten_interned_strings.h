@@ -238,8 +238,9 @@ _(aten, combinations) \
 _(aten, _conj) \
 _(aten, conj) \
 _(aten, conj_physical) \
+_(aten, conj_physical_) \
 _(aten, resolve_conj) \
-_(aten, _resolve_conj) \
+_(aten, resolve_conj_) \
 _(aten, complex) \
 _(aten, copysign) \
 _(aten, polar) \

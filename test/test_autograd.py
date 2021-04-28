@@ -5555,8 +5555,13 @@ def add_test(
                         # compare grads to inplace grads
                         inplace_name = name + '_'
                         # can't broadcast inplace to left hand side
+                        # complex in-place tests need to skipped since we provide conjugated inputs
+                        # and then zero the grad later. Since the conjugate operation is recorded by the autograd
+                        # when conj is called and not when it is resolved, the tests below would fail.
+                        # We should probably disallow people from zeroing the grad when conj bit is set.
                         skip_inplace = ('broadcast_lhs' in test_name or
-                                        'broadcast_all' in test_name)
+                                        'broadcast_all' in test_name or
+                                        'complex' in test_name)
                         if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
@@ -5586,6 +5591,7 @@ def add_test(
                                 if i.grad is not None:
                                     with torch.no_grad():
                                         i.grad.zero_()
+
                             for i_o, o in zip(inplace_output_variable, output_variable):
                                 if dtype.is_complex:
                                     grad = randn_like(i_o).to(torch.cdouble)
@@ -5707,6 +5713,19 @@ class TestAutogradComplex(TestCase):
         torch.select(z1, z1.dim() - 2, 0).sum().backward()
 
         self.assertEqual(z.grad, z1.grad)
+
+    def test_resolve_conj(self):
+        def func1(x):
+            y = x.clone().conj()
+            return y.resolve_conj_()
+
+        def func2(x):
+            y = x.conj()
+            return y.resolve_conj()
+
+        z = torch.randn(10, dtype=torch.cdouble, requires_grad=True)
+        gradcheck(func1, [z])
+        gradcheck(func2, [z])
 
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):
