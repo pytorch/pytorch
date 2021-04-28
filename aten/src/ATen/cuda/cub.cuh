@@ -121,7 +121,6 @@ static inline void sort_pairs(
 
 template<typename InputIteratorT, typename OutputIteratorT>
 void exclusive_sum(InputIteratorT input, OutputIteratorT output, int64_t n) {
-  auto allocator = c10::cuda::CUDACachingAllocator::get();
   CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::ExclusiveSum,
     input, output, n, c10::cuda::getCurrentCUDAStream());
 }
