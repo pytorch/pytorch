@@ -73,7 +73,6 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
     const std::vector<DebugInfoPair>& source_callstacks,
     const std::string& root_scope_string,
     const std::string& top_module_type_name) {
-  std::string stack_trace;
   std::vector<StackEntry> stack_entries;
   std::string module_info =
       root_scope_string + "(" + top_module_type_name + ")";
@@ -84,9 +83,9 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
     module_info += debug_info_pair.second;
   }
   std::ostringstream ss;
+  ss << "Module hierarchy:" << module_info << "\n";
   format_stack_trace(ss, stack_entries);
-  stack_trace = "Module hierarchy:" + module_info + "\n" + ss.str();
-  return {std::move(stack_trace), std::move(module_info)};
+  return {ss.str(), std::move(module_info)};
 }
 
 } // namespace
