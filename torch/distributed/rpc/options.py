@@ -156,8 +156,8 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             for k, v in device_index_map.items():
                 if k in curr_device_maps[to] and v != curr_device_maps[to][k]:
                     raise ValueError(
-                        "`set_device_map` only supports 1-to-1 mapping, trying "
-                        f"to map {k} to {v} and {curr_device_maps[to][k]}")
+                        "`set_device_map` only supports 1-to-1 mapping, trying"
+                        f" to map {k} to {v} and {curr_device_maps[to][k]}")
 
         super()._set_device_map(to, device_index_map)
 
