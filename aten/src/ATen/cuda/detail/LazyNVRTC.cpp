@@ -59,9 +59,9 @@ at::DynamicLibrary& getNVRTCLibrary() {
   } else {
     lib_version = std::to_string(major);
   }
-  static auto libname = std::string("libnvrtc.so.") + lib_version;
+  auto libname = std::string("libnvrtc.so.") + lib_version;
 #ifdef NVRTC_SHORTHASH
-  static auto alt_libname = std::string("libnvrtc-") + C10_STRINGIZE(NVRTC_SHORTHASH) + ".so." + lib_version;
+  auto alt_libname = std::string("libnvrtc-") + C10_STRINGIZE(NVRTC_SHORTHASH) + ".so." + lib_version;
 #else
   std::string alt_libname;
 #endif
