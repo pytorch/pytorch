@@ -728,8 +728,6 @@ def configure_extension_build():
             # https://bugs.llvm.org/show_bug.cgi?id=21629
             '-Wno-missing-braces',
         ]
-        if check_env_flag('WERROR'):
-            extra_compile_args.append('-Werror')
 
     library_dirs.append(lib_path)
 
