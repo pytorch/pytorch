@@ -47,7 +47,7 @@ bool PrefixStore::deleteKey(const std::string& key) {
 }
 
 void PrefixStore::watchKey(const std::string& key, WatchKeyCallback callback) {
-  return store_->watchKey(joinKey(key), callback);
+  return store_->watchKey(joinKey(key), std::move(callback));
 }
 
 int64_t PrefixStore::getNumKeys() {

@@ -182,7 +182,7 @@ class TCPStore : public Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout);
 
-  std::mutex watchKeyMutex;
+  std::mutex watchKeyMutex_;
   bool isServer_;
   int storeSocket_ = -1;
   int listenSocket_ = -1;

@@ -727,7 +727,7 @@ bool TCPStore::deleteKey(const std::string& key) {
 
 void TCPStore::watchKey(const std::string& key, WatchKeyCallback callback) {
   // Only allow one thread to perform watchKey() at a time
-  const std::lock_guard<std::mutex> watchKeyLock(watchKeyMutex);
+  const std::lock_guard<std::mutex> watchKeyLock(watchKeyMutex_);
 
   // Register callback with TCPStoreMasterDaemon to call TCPStoreWorkerDaemon on
   // key change
