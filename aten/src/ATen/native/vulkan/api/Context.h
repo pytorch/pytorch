@@ -28,9 +28,9 @@ class Context final {
  public:
   explicit Context(const Adapter& adapter);
   Context(const Context&) = delete;
-  Context(Context&&) = default;
+  Context(Context&&) = delete;
   Context& operator=(const Context&) = delete;
-  Context& operator=(Context&&) = default;
+  Context& operator=(Context&&) = delete;
   ~Context();
 
   GPU gpu();
@@ -70,6 +70,54 @@ class Context final {
   Pipeline pipeline_;
   Descriptor descriptor_;
   Resource resource_;
+
+ public:
+  class OpCache {
+    public:
+      bool initted;
+      api::Shader::Layout::Descriptor layout_descriptor;
+      //VkDescriptorSet descriptor_set;
+      api::Shader::Layout::Factory::Handle set_layout;
+      api::Pipeline::Layout::Factory::Handle pipe_layout;
+      api::Shader::Factory::Handle shader_module;
+      api::Shader::WorkGroup local_work_group;
+      api::Pipeline::Factory::Handle pipe;
+
+      explicit OpCache(const GPU& gpu);
+      OpCache(const OpCache&) = delete;
+      OpCache& operator=(const OpCache&) = delete;
+      OpCache(OpCache&&) = delete;
+      OpCache& operator=(OpCache&&) = delete;
+      ~OpCache() = default;
+  };
+
+  OpCache playground_cache;
+  OpCache& get_playground_cache();
+
+  OpCache conv2d_dw_cache;
+  OpCache& get_conv2d_dw_cache();
+
+  OpCache conv2d_pw_cache;
+  OpCache& get_conv2d_pw_cache();
+
+  OpCache conv2d_cache;
+  OpCache& get_conv2d_cache();
+
+  OpCache upsample_cache;
+  OpCache& get_upsample_cache();
+
+  void fill_cache(
+      OpCache& cache,
+      const Shader::Descriptor& shader_descriptor,
+      const api::Shader::WorkGroup local_work_group);
+
+  template<typename... Arguments>
+  void dispatch(
+      Command::Buffer& command_buffer,
+      const Context::OpCache& opcache,
+      const Shader::WorkGroup& global_work_group,
+      const VkDescriptorSet vk_descriptor_set,
+      Arguments&&... arguments);
 };
 
 bool available();
@@ -156,6 +204,43 @@ inline void Context::dispatch(
       shader_layout_signature,
       shader_descriptor,
       local_work_group_size);
+
+  detail::bind(
+      descriptor_set,
+      std::index_sequence_for<Arguments...>{},
+      std::forward<Arguments>(arguments)...);
+
+  // Forward declaration
+  void dispatch_epilogue(
+      Command::Buffer&,
+      const Descriptor::Set&,
+      const Shader::WorkGroup&);
+
+  // Factor out template parameter independent code to minimize code bloat.
+  dispatch_epilogue(
+      command_buffer,
+      descriptor_set,
+      global_work_group);
+}
+
+template<typename... Arguments>
+inline void Context::dispatch(
+    Command::Buffer& command_buffer,
+    const Context::OpCache& opcache,
+    const Shader::WorkGroup& global_work_group,
+    const VkDescriptorSet vk_descriptor_set,
+    Arguments&&... arguments) {
+  // Forward declaration
+  Descriptor::Set dispatch_prologue(
+      Command::Buffer&,
+      const OpCache& opcache,
+      const VkDescriptorSet vk_descriptor_set);
+
+  // Factor out template parameter independent code to minimize code bloat.
+  Descriptor::Set descriptor_set = dispatch_prologue(
+      command_buffer,
+      opcache,
+      vk_descriptor_set);
 
   detail::bind(
       descriptor_set,

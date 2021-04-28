@@ -98,6 +98,7 @@ struct Shader final {
       ~Cache() = default;
 
       Object retrieve(const Descriptor& descriptor);
+      auto generate(const Descriptor& descriptor);
       void purge();
 
      private:
@@ -216,6 +217,11 @@ inline Shader::Layout::Object Shader::Layout::Cache::retrieve(
     cache_.retrieve(descriptor),
     descriptor.signature,
   };
+}
+
+inline auto Shader::Layout::Cache::generate(
+    const Descriptor& descriptor) {
+  return cache_.generate(descriptor);
 }
 
 inline bool operator==(

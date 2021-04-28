@@ -10,7 +10,8 @@ namespace {
 
 VkCommandPool create_command_pool(
     const VkDevice device,
-    const uint32_t queue_family_index) {
+    const uint32_t queue_family_index,
+    const bool persistent) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device,
       "Invalid Vulkan device!");
@@ -18,7 +19,7 @@ VkCommandPool create_command_pool(
   const VkCommandPoolCreateInfo command_pool_create_info{
     VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
     nullptr,
-    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+    persistent ? VK_COMMAND_POOL_CREATE_TRANSIENT_BIT : VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
     queue_family_index,
   };
 
@@ -105,6 +106,9 @@ void Command::Buffer::Buffer::begin() {
     nullptr,
   };
 
+  VK_CHECK(vkResetCommandBuffer(
+      command_buffer_,
+      0u));
   VK_CHECK(vkBeginCommandBuffer(
       command_buffer_,
       &command_buffer_begin_info));
@@ -112,6 +116,17 @@ void Command::Buffer::Buffer::begin() {
   // Reset
   bound_.reset();
   barriers_.reset();
+}
+
+void Command::Buffer::Buffer::reset() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffer_,
+      "This command buffer is in an invalid state! "
+      "Potential reason: This command buffer is moved from.");
+
+  VK_CHECK(vkResetCommandBuffer(
+      command_buffer_,
+      0u));
 }
 
 void Command::Buffer::Buffer::end() {
@@ -311,6 +326,10 @@ void Command::Buffer::invalidate() {
   command_buffer_ = VK_NULL_HANDLE;
 }
 
+bool Command::Buffer::valid() {
+  return command_buffer_ == VK_NULL_HANDLE;
+}
+
 inline void Command::Buffer::Bound::reset() {
   pipeline = {};
   descriptor_set = VK_NULL_HANDLE;
@@ -329,7 +348,10 @@ inline void Command::Buffer::Barrier::reset() {
 Command::Pool::Pool(const GPU& gpu)
   : device_(gpu.device),
     command_pool_(
-        create_command_pool(gpu.device, gpu.adapter->compute_queue_family_index),
+        create_command_pool(gpu.device, gpu.adapter->compute_queue_family_index, false),
+        VK_DELETER(CommandPool)(device_)),
+    persistent_pool_(
+        create_command_pool(gpu.device, gpu.adapter->compute_queue_family_index, true),
         VK_DELETER(CommandPool)(device_)),
     buffer_{} {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -346,6 +368,7 @@ Command::Pool::Pool(const GPU& gpu)
 Command::Pool::Pool(Pool&& pool)
   : device_(std::move(pool.device_)),
     command_pool_(std::move(pool.command_pool_)),
+    persistent_pool_(std::move(pool.persistent_pool_)),
     buffer_(std::move(pool.buffer_)),
     stream_(std::move(pool.stream_)) {
   pool.invalidate();
@@ -355,6 +378,7 @@ Command::Pool& Command::Pool::operator=(Pool&& pool) {
   if (&pool != this) {
     device_ = std::move(pool.device_);
     command_pool_ = std::move(pool.command_pool_);
+    persistent_pool_ = std::move(pool.persistent_pool_);
     buffer_ = std::move(pool.buffer_);
     stream_ = std::move(pool.stream_);
 
@@ -368,6 +392,9 @@ Command::Pool::~Pool() {
   try {
     if (device_ && command_pool_) {
       purge();
+    }
+    if (device_ && persistent_pool_) {
+      purge_persistent();
     }
   }
   catch (const std::exception& e) {
@@ -403,6 +430,22 @@ Command::Buffer Command::Pool::allocate() {
   return Buffer(buffer_.pool[buffer_.in_use++]);
 }
 
+Command::Buffer Command::Pool::allocate_persistent() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && persistent_pool_,
+      "This command pool is in an invalid state! "
+      "Potential reason: This command pool is moved from.");
+
+  VkCommandBuffer cmd_buffer;
+  allocate_command_buffers(
+      device_,
+      persistent_pool_.get(),
+      &cmd_buffer,
+      1u);
+
+  return Buffer(cmd_buffer);
+}
+
 Command::Buffer& Command::Pool::stream() {
   if (!stream_.buffer) {
     stream_.buffer = allocate();
@@ -411,6 +454,11 @@ Command::Buffer& Command::Pool::stream() {
   }
 
   return stream_.buffer;
+}
+
+Command::Buffer& Command::Pool::stream_persistent() {
+  Command::Buffer buffer = allocate_persistent();
+  return buffer;
 }
 
 void Command::Pool::purge() {
@@ -425,7 +473,23 @@ void Command::Pool::purge() {
       "submitted to the queue for execution prior to reclaiming pool memory.");
 
   buffer_.in_use = 0u;
+  if (stream_.buffer)
+    stream_.buffer.invalidate();
   VK_CHECK(vkResetCommandPool(device_, command_pool_.get(), 0u));
+}
+
+void Command::Pool::purge_persistent() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && command_pool_,
+      "This command pool is in an invalid state! "
+      "Potential reason: This command pool is moved from.");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !stream_.buffer,
+      "Pending command buffer detected.  Make sure all command buffers are "
+      "submitted to the queue for execution prior to reclaiming pool memory.");
+
+  VK_CHECK(vkResetCommandPool(device_, persistent_pool_.get(), 0u));
 }
 
 void Command::Pool::submit(

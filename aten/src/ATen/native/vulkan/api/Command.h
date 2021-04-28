@@ -34,6 +34,7 @@ struct Command final {
     VkCommandBuffer handle() const;
 
     void begin();
+    void reset();
     void end();
 
     void barrier(const Pipeline::Barrier& barrier);
@@ -42,13 +43,15 @@ struct Command final {
     void copy(Resource::Buffer::Object source, Resource::Buffer::Object destination);
     void dispatch(const Shader::WorkGroup& global_work_group);
 
+    bool valid();
+
    private:
     friend class Pool;
 
     void barrier();
     void invalidate();
 
-   private:
+   public:
     VkCommandBuffer command_buffer_;
 
     struct Bound final {
@@ -87,8 +90,11 @@ struct Command final {
     ~Pool();
 
     Buffer allocate();
+    Buffer allocate_persistent();
     Buffer& stream();
+    Buffer& stream_persistent();
     void purge();
+    void purge_persistent();
 
     void submit(
         VkQueue queue,
@@ -102,11 +108,12 @@ struct Command final {
     struct Configuration final {
       static constexpr uint32_t kQuantum = 4u;
       static constexpr uint32_t kReserve = 16u;
-      static constexpr uint32_t kSubmit = 10u;
+      static constexpr uint32_t kSubmit = 32u;
     };
 
     VkDevice device_;
     Handle<VkCommandPool, VK_DELETER(CommandPool)> command_pool_;
+    Handle<VkCommandPool, VK_DELETER(CommandPool)> persistent_pool_;
 
     struct {
       std::vector<VkCommandBuffer> pool;

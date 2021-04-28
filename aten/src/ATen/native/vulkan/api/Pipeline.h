@@ -170,6 +170,7 @@ struct Pipeline final {
     ~Cache() = default;
 
     Object retrieve(const Descriptor& descriptor);
+    auto generate(const Descriptor& descriptor);
     void purge();
 
    private:
@@ -240,6 +241,11 @@ inline Pipeline::Object Pipeline::Cache::retrieve(
     descriptor.pipeline_layout,
     descriptor.local_work_group,
   };
+}
+
+inline auto Pipeline::Cache::generate(
+    const Descriptor& descriptor) {
+  return cache_.generate(descriptor);
 }
 
 } // namespace api

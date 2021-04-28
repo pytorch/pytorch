@@ -392,6 +392,28 @@ Descriptor::Set Descriptor::Pool::allocate(
       shader_layout.signature);
 }
 
+VkDescriptorSet Descriptor::Pool::allocate_single(
+    const Shader::Layout::Object& shader_layout) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && descriptor_pool_,
+      "This descriptor pool is in an invalid state! "
+      "Potential reason: This descriptor pool is moved from.");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      shader_layout,
+      "Invalid Vulkan shader layout!");
+
+  VkDescriptorSet descriptor_set{};
+  allocate_descriptor_sets(
+      device_,
+      descriptor_pool_.get(),
+      shader_layout.handle,
+      &descriptor_set,
+      1);
+
+  return descriptor_set;
+}
+
 void Descriptor::Pool::purge() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && descriptor_pool_,

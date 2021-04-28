@@ -109,7 +109,12 @@ Context::Context(const Adapter& adapter)
       shader_(gpu()),
       pipeline_(gpu()),
       descriptor_(gpu()),
-      resource_(gpu()) {
+      resource_(gpu()),
+      playground_cache(gpu()),
+      conv2d_dw_cache(gpu()),
+      conv2d_pw_cache(gpu()),
+      conv2d_cache(gpu()),
+      upsample_cache(gpu()) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");
@@ -209,6 +214,38 @@ Descriptor::Set dispatch_prologue(
   return descriptor.pool.allocate(shader_layout);
 }
 
+Descriptor::Set dispatch_prologue(
+    Command::Buffer& command_buffer,
+    const Context::OpCache& opcache,
+    const VkDescriptorSet vk_descriptor_set) {
+  Context* const context = api::context();
+  const GPU gpu = context->gpu();
+  Descriptor& descriptor = context->descriptor();
+  Pipeline& pipeline = context->pipeline();
+  Shader& shader = context->shader();
+
+  const api::Shader::Layout::Object shader_layout =
+  {
+    opcache.set_layout.get(),
+    opcache.layout_descriptor.signature,
+  };
+
+  const api::Pipeline::Object pipe_obj = {
+    opcache.pipe.get(),
+    opcache.pipe_layout.get(),
+    opcache.local_work_group,
+  };
+
+  command_buffer.bind(pipe_obj);
+
+  return Descriptor::Set(
+      descriptor.pool.device_,
+      vk_descriptor_set,
+      shader_layout.signature);
+
+  //return descriptor.pool.allocate(shader_layout);
+}
+
 void dispatch_epilogue(
     Command::Buffer& command_buffer,
     const Descriptor::Set& descriptor_set,
@@ -217,6 +254,125 @@ void dispatch_epilogue(
   command_buffer.dispatch(global_work_group);
 }
 
+Context::OpCache::OpCache(const GPU& gpu):
+  initted(false),
+  set_layout{VK_NULL_HANDLE, VK_DELETER(DescriptorSetLayout)(gpu.device)},
+  pipe_layout{VK_NULL_HANDLE, VK_DELETER(PipelineLayout)(gpu.device)},
+  shader_module{VK_NULL_HANDLE, VK_DELETER(ShaderModule)(gpu.device)},
+  pipe{VK_NULL_HANDLE, VK_DELETER(Pipeline)(gpu.device)} {
+}
+
+void Context::fill_cache(
+    Context::OpCache& opcache,
+    const Shader::Descriptor& shader_descriptor,
+    const api::Shader::WorkGroup local_work_group) {
+
+  //api::Descriptor::Pool& descriptor_pool = persistent()->descriptor_pool;
+
+  opcache.set_layout = shader_.layout.cache.generate(opcache.layout_descriptor);
+  opcache.pipe_layout = pipeline_.layout.cache.generate({opcache.set_layout.get()});
+  opcache.shader_module = shader_.cache.generate(shader_descriptor);
+  opcache.local_work_group = local_work_group;
+
+  opcache.pipe = pipeline_.cache.generate(
+    {
+      opcache.pipe_layout.get(),
+      opcache.shader_module.get(),
+      opcache.local_work_group,
+    }
+  );
+
+  const api::Shader::Layout::Object shader_layout =
+  {
+    opcache.set_layout.get(),
+    opcache.layout_descriptor.signature,
+  };
+
+  opcache.initted = true;
+
+  //descriptor_set = descriptor_pool.allocate_single(shader_layout);
+
+  //api::Resource::Pool& resource_pool = persistent()->resource_pool;
+}
+
+Context::OpCache& Context::get_playground_cache() {
+  if (playground_cache.initted) {
+    return playground_cache;
+  }
+  playground_cache.layout_descriptor = {
+    {
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+    }
+  };
+  fill_cache(playground_cache, VK_KERNEL(playground), {64,1,1});
+  return playground_cache;
+}
+
+Context::OpCache& Context::get_conv2d_dw_cache() {
+  if (conv2d_dw_cache.initted) {
+    return conv2d_dw_cache;
+  }
+  conv2d_dw_cache.layout_descriptor = {
+    {
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+    }
+  };
+  fill_cache(conv2d_dw_cache, VK_KERNEL(conv2d_dw), {4,4,4});
+  return conv2d_dw_cache;
+}
+
+Context::OpCache& Context::get_conv2d_pw_cache() {
+  if (conv2d_pw_cache.initted) {
+    return conv2d_pw_cache;
+  }
+  conv2d_pw_cache.layout_descriptor = {
+    {
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+    }
+  };
+  fill_cache(conv2d_pw_cache, VK_KERNEL(conv2d_pw), {4,4,4});
+  return conv2d_pw_cache;
+}
+
+Context::OpCache& Context::get_conv2d_cache() {
+  if (conv2d_cache.initted) {
+    return conv2d_cache;
+  }
+  conv2d_cache.layout_descriptor = {
+    {
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+    }
+  };
+  fill_cache(conv2d_cache, VK_KERNEL(conv2d), {4,4,4});
+  return conv2d_cache;
+}
+
+Context::OpCache& Context::get_upsample_cache() {
+  if (upsample_cache.initted) {
+    return upsample_cache;
+  }
+  upsample_cache.layout_descriptor = {
+    {
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+    },
+  };
+  fill_cache(upsample_cache, VK_KERNEL(upsample_nearest2d), {4,4,4});
+  return upsample_cache;
+}
 } // namespace api
 } // namespace vulkan
 } // namespace native

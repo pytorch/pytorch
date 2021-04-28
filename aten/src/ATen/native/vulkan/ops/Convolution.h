@@ -87,6 +87,8 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
   } unpacked_;
 
   Conv2dMethod method_;
+
+  VkDescriptorSet descriptor_set;
 };
 
 Tensor conv2d_clamp_run(

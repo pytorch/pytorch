@@ -13,6 +13,9 @@ Persistent* persistent() {
           api::Resource::Pool{
             api::context()->gpu(),
           },
+          api::Descriptor::Pool {
+            api::context()->gpu(),
+          },
         };
       }
       catch (const std::exception& e) {

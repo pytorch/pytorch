@@ -592,6 +592,7 @@ bool usable(const Tensor& input) {
 
 void conv2d_dw(
     api::Context* const context,
+    const VkDescriptorSet descriptor_set,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -646,16 +647,9 @@ void conv2d_dw(
 
     context->dispatch(
         command_buffer,
-        {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
-        VK_KERNEL(conv2d_dw),
+        context->get_conv2d_dw_cache(),
         v_output.extents(),
-        context->gpu().adapter->local_work_group_size(),
+        descriptor_set,
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -686,6 +680,7 @@ void conv2d_dw(
 
 void conv2d_pw(
     api::Context* const context,
+    const VkDescriptorSet descriptor_set,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -728,16 +723,9 @@ void conv2d_pw(
 
     context->dispatch(
         command_buffer,
-        {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
-        VK_KERNEL(conv2d_pw),
+        context->get_conv2d_pw_cache(),
         v_output.extents(),
-        context->gpu().adapter->local_work_group_size(),
+        descriptor_set,
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -768,6 +756,7 @@ void conv2d_pw(
 
 void conv2d(
     api::Context* const context,
+    const VkDescriptorSet descriptor_set,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -828,16 +817,9 @@ void conv2d(
 
     context->dispatch(
         command_buffer,
-        {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
-        VK_KERNEL(conv2d),
+        context->get_conv2d_cache(),
         v_output.extents(),
-        context->gpu().adapter->local_work_group_size(),
+        descriptor_set,
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -868,6 +850,7 @@ void conv2d(
 
 void conv2d_winograd_2_3(
     api::Context* const context,
+    const VkDescriptorSet descriptor_set,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -989,6 +972,7 @@ void conv2d_winograd_2_3(
 
 void conv2d_old(
     api::Context* const context,
+    const VkDescriptorSet descriptor_set,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -1150,6 +1134,29 @@ Conv2dOpContext::Conv2dOpContext(
       output_max,
     },
     method_(method) {
+  api::Descriptor::Pool& descriptor_pool = persistent()->descriptor_pool;
+  const api::Shader::Layout::Object shader_layout = {
+    api::context()->get_conv2d_cache().set_layout.get(),
+    api::context()->get_conv2d_cache().layout_descriptor.signature,
+  };
+
+  /*
+  switch(method_) {
+    case Conv2dDepthwise:
+      shader_layout = {
+        api::context()->get_conv2d_dw_cache().set_layout.get(),
+        api::context()->get_conv2d_dw_cache().layout_descriptor.signature,
+      };
+      break;
+    case Conv2dPointwise:
+      shader_layout =  {
+        api::context()->get_conv2d_pw_cache().set_layout.get(),
+        api::context()->get_conv2d_pw_cache().layout_descriptor.signature,
+      };
+      break;
+  */
+
+  descriptor_set = descriptor_pool.allocate_single(shader_layout);
 }
 
 Conv2dOpContext Conv2dOpContext::create(
@@ -1235,6 +1242,7 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
   {
     void (*conv_func) (
       api::Context* const,
+      const VkDescriptorSet,
       vTensor&,
       const vTensor&,
       const vTensor&,
@@ -1266,6 +1274,7 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
     }
     conv_func(
       context,
+      descriptor_set,
       v_output,
       v_input,
       packed_.v_weight,
