@@ -76,7 +76,7 @@ def _export_operator_list(module: LiteScriptModule):
     # TODO fix mypy here
     return torch._C._export_operator_list(module._c)  # type: ignore[attr-defined]
 
-def _get_runtime_bytecode_version():
+def _get_runtime_bytecode_version() -> int:
     r"""
     Args: No arguments
 
