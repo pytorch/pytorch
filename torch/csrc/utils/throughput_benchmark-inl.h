@@ -60,6 +60,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
 
   for (auto thread_id = 0; thread_id < config.num_calling_threads;
        ++thread_id) {
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     callers.emplace_back([&, thread_id]() {
       // We use conditional variable as a barrier to make sure each thread
       // performs required warmeup iterations before we start measuring
