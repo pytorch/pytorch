@@ -172,6 +172,18 @@ class LoadOp final : public Operator<Context> {
     if (allow_incomplete_) {
       VLOG(1) << "Loaded " << total_loaded_blobs << " blobs out of "
               << OutputSize() << " blobs from db(s).";
+      for (const auto& output_index : output_indices_) {
+        if (!blob_states.count(output_index.first)) {
+          const auto& blobName = output_index.first;
+          const auto* blob = ws_->GetBlob(output_index.first);
+          if (blob == nullptr || blob->GetRaw() == nullptr){
+            // If blob was not loaded in this op and
+            // it did not exist in the workspace before,
+            // remove it.
+            ws_->RemoveBlob(blobName);
+          }
+        }
+      }
     } else {
       for (const string& output_name : this->debug_def().output()) {
         if (blob_states.count(output_name) == 0) {

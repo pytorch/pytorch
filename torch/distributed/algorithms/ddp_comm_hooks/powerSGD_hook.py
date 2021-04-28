@@ -57,7 +57,7 @@ def _should_compress(
     uncompressed_el_count is the uncompressed element count, i.e. ``num_rows`` * ``num_cols``; and,
 
     compress_el_count is the element count after compression, i.e. (``num_rows`` + ``num_cols``) * ``matrix_approximation_rank``.
-    """  # noqa
+    """  # noqa: B950
     uncompressed_size = num_rows * num_cols
     compressed_size = (num_rows + num_cols) * matrix_approximation_rank
     return (
@@ -111,7 +111,7 @@ class PowerSGDState(object):
         If error feedback or warm-up is enabled, the minimum value of ``start_powerSGD_iter`` allowed in DDP is 2.
         This is because there is another internal optimization that rebuilds buckets at iteration 1 in DDP,
         and this can conflict with any tensor memorized before the rebuild process.
-    """  # noqa
+    """  # noqa: B950
 
     __slots__ = [
         "process_group",
@@ -244,7 +244,7 @@ class PowerSGDState(object):
         numel_before_compression is the total number of elements before compression was applied; and,
 
         numel_after_compression is the total number of elements after compression was applied.
-        """  # noqa
+        """  # noqa: B950
         compress_rate = (
             self.total_numel_before_compression / self.total_numel_after_compression
             if self.total_numel_after_compression > 0
@@ -314,7 +314,7 @@ def powerSGD_hook(
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1,
                                   start_powerSGD_iter=10, min_compression_rate=0.5)
         >>> ddp_model.register_comm_hook(state, powerSGD_hook)
-    """  # noqa
+    """  # noqa: B950
     process_group = state.process_group
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = group_to_use.size()
@@ -588,7 +588,7 @@ def batched_powerSGD_hook(
     Example::
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1)
         >>> ddp_model.register_comm_hook(state, batched_powerSGD_hook)
-    """  # noqa
+    """  # noqa: B950
     process_group = state.process_group
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = group_to_use.size()
