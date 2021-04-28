@@ -12,20 +12,28 @@ import socket
 from datetime import datetime, timedelta
 from typing import Callable, Optional, Tuple, cast
 from unittest import TestCase
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, call, patch
 
 from torch.distributed import Store
-from torch.distributed.elastic.rendezvous import RendezvousParameters, RendezvousStateError
+from torch.distributed.elastic.rendezvous import (
+    RendezvousClosedError,
+    RendezvousParameters,
+    RendezvousStateError,
+    RendezvousTimeoutError,
+)
 from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     DynamicRendezvousHandler,
     RendezvousBackend,
     RendezvousSettings,
     RendezvousTimeout,
     Token,
+    _Action,
     _BackendRendezvousStateHolder,
+    _DistributedRendezvousOpExecutor,
     _NodeDesc,
     _NodeDescGenerator,
     _RendezvousState,
+    _RendezvousStateHolder,
     create_handler,
 )
 
@@ -447,6 +455,341 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
             r"^The rendezvous state is corrupt. See inner exception for details.$",
         ):
             state_holder.sync()
+
+
+class FakeRendezvousStateHolder(_RendezvousStateHolder):
+    _state: _RendezvousState
+    _dirty: Optional[bool]
+
+    def __init__(self) -> None:
+        self._state = _RendezvousState()
+        self._dirty = None
+
+    @property
+    def state(self) -> _RendezvousState:
+        return self._state
+
+    @state.setter
+    def state(self, value) -> None:
+        self._state = value
+
+    def sync(self) -> Optional[bool]:
+        self._dirty, dirty = None, self._dirty
+
+        return dirty
+
+    def mark_dirty(self) -> None:
+        self._dirty = True
+
+
+class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
+    def setUp(self) -> None:
+        self._node = _NodeDesc("this_node", 1, 1)
+
+        self._state_holder = FakeRendezvousStateHolder()
+
+        mock_sync = MagicMock(wraps=self._state_holder.sync)
+        mock_mark = MagicMock(wraps=self._state_holder.mark_dirty)
+
+        self._mock_state_holder = Mock()
+        self._mock_state_holder.sync = mock_sync
+        self._mock_state_holder.mark = mock_mark
+
+        setattr(self._state_holder, "sync", mock_sync)  # noqa: B010
+        setattr(self._state_holder, "mark_dirty", mock_mark)  # noqa: B010
+
+        self._state = self._state_holder.state
+
+        self._min_nodes = 1
+        self._max_nodes = 1
+
+        self._timeout = RendezvousTimeout()
+
+        self._now = datetime(2000, 1, 1, hour=0, minute=0)
+
+        self._datetime_patch = patch(
+            "torch.distributed.elastic.rendezvous.dynamic_rendezvous.datetime"
+        )
+
+        mock_datetime = self._datetime_patch.start()
+        mock_datetime.utcnow.return_value = self._now
+
+    def tearDown(self) -> None:
+        self._datetime_patch.stop()
+
+    def _create_settings(self) -> RendezvousSettings:
+        return RendezvousSettings(
+            run_id="dummy_run_id",
+            min_nodes=self._min_nodes,
+            max_nodes=self._max_nodes,
+            timeout=self._timeout,
+            keep_alive_interval=timedelta(seconds=30),
+            keep_alive_max_attempt=3,
+        )
+
+    def _create_op_executor(
+        self, settings: Optional[RendezvousSettings] = None
+    ) -> _DistributedRendezvousOpExecutor:
+        self._state_holder.state = self._state
+
+        if settings is None:
+            settings = self._create_settings()
+
+        return _DistributedRendezvousOpExecutor(self._node, self._state_holder, settings)
+
+    def _run_action(self, action: _Action) -> None:
+        op_executor = self._create_op_executor()
+
+        op = MagicMock(side_effect=[action, _Action.FINISH])
+
+        op_executor.run(op, deadline=1)
+
+    def _assert_action(self, action: _Action, expected_state: _RendezvousState) -> None:
+        self._run_action(action)
+
+        self.assert_state_equal(self._state, expected_state)
+
+        self.assertListEqual(
+            self._mock_state_holder.mock_calls, [call.sync(), call.mark(), call.sync()]
+        )
+
+    def test_run_passes_expected_context_and_deadline_to_state_handler(self) -> None:
+        settings = self._create_settings()
+
+        op_executor = self._create_op_executor(settings)
+
+        op = MagicMock(return_value=_Action.FINISH)
+
+        op_executor.run(op, deadline=3)
+
+        ctx, deadline = op.call_args[0]  # args
+
+        self.assertIs(ctx.node, self._node)
+        self.assertIs(ctx.state, self._state)
+        self.assertIs(ctx.settings, settings)
+
+        self.assertEqual(deadline, 3)
+
+    def test_run_keeps_alive(self) -> None:
+        expected_state = _RendezvousState()
+
+        expected_state.last_heartbeats[self._node] = self._now
+
+        self._assert_action(_Action.KEEP_ALIVE, expected_state)
+
+    def test_run_adds_to_participants(self) -> None:
+        expected_state = _RendezvousState()
+
+        expected_state.participants[self._node] = 0
+
+        expected_state.last_heartbeats[self._node] = self._now
+
+        self._min_nodes = 2
+        self._max_nodes = 2
+
+        self._assert_action(_Action.ADD_TO_PARTICIPANTS, expected_state)
+
+    def test_run_adds_to_participants_if_node_was_in_waitlist(self) -> None:
+        self._state.wait_list.add(self._node)
+
+        expected_state = _RendezvousState()
+
+        expected_state.participants[self._node] = 0
+
+        expected_state.last_heartbeats[self._node] = self._now
+
+        self._min_nodes = 2
+        self._max_nodes = 2
+
+        self._assert_action(_Action.ADD_TO_PARTICIPANTS, expected_state)
+
+    def _add_participants(
+        self, num_participants: int, state: _RendezvousState, ranked: bool = False
+    ) -> None:
+        for i in range(num_participants):
+            if ranked:
+                node = _NodeDesc(f"dummy{i}", 1, 1)
+                rank = i
+            else:
+                node = _NodeDesc(f"dummy{num_participants - i - 1}", 1, 1)  # Add in reverse.
+                rank = 0
+
+            state.participants[node] = rank
+
+            state.last_heartbeats[node] = self._now
+
+    def test_run_adds_to_participants_and_starts_last_call_if_min_nodes_is_reached(self) -> None:
+        for num_participants in range(3):
+            self._state = _RendezvousState()
+
+            self._add_participants(num_participants, self._state)
+
+            self._state.wait_list.add(self._node)
+
+            expected_state = _RendezvousState()
+
+            self._add_participants(num_participants, expected_state)
+
+            expected_state.participants[self._node] = 0
+
+            expected_state.last_heartbeats[self._node] = self._now
+
+            expected_state.deadline = self._now + self._timeout.last_call
+
+            with self.subTest(num_participants=num_participants):
+                self._min_nodes = num_participants + 1
+                self._max_nodes = num_participants + 2
+
+                self._assert_action(_Action.ADD_TO_PARTICIPANTS, expected_state)
+
+                self._mock_state_holder.reset_mock()
+
+    def test_run_adds_to_participants_and_completes_rendezvous_if_max_nodes_is_reached(
+        self,
+    ) -> None:
+        for min_max_nodes_equal in [False, True]:
+            for num_participants in range(3):
+                rank = num_participants
+
+                self._state = _RendezvousState()
+
+                self._add_participants(num_participants, self._state)
+
+                self._state.wait_list.add(self._node)
+
+                self._state.deadline = self._now + self._timeout.last_call
+
+                expected_state = _RendezvousState()
+
+                self._add_participants(num_participants, expected_state, ranked=True)
+
+                expected_state.participants[self._node] = rank
+
+                expected_state.last_heartbeats[self._node] = self._now
+
+                expected_state.complete = True
+                expected_state.deadline = None
+
+                with self.subTest(num_participants=num_participants):
+                    self._min_nodes = num_participants + 1 if min_max_nodes_equal else 0
+                    self._max_nodes = num_participants + 1
+
+                    self._assert_action(_Action.ADD_TO_PARTICIPANTS, expected_state)
+
+                    self._mock_state_holder.reset_mock()
+
+    def test_run_adds_to_waitlist(self) -> None:
+        expected_state = _RendezvousState()
+
+        expected_state.wait_list.add(self._node)
+
+        expected_state.last_heartbeats[self._node] = self._now
+
+        self._assert_action(_Action.ADD_TO_WAIT_LIST, expected_state)
+
+    def test_run_removes_from_participants(self) -> None:
+        for complete, last_call_deadline in [(False, self._now), (True, None)]:
+            self._state = _RendezvousState()
+
+            self._add_participants(2, self._state)
+
+            self._state.participants[self._node] = 0
+
+            self._state.last_heartbeats[self._node] = self._now
+
+            self._state.complete = complete
+            self._state.deadline = last_call_deadline
+
+            self._state.round = 1
+
+            expected_state = _RendezvousState()
+
+            self._add_participants(2, expected_state)
+
+            expected_state.complete = complete
+            expected_state.deadline = last_call_deadline
+
+            expected_state.round = 1
+
+            with self.subTest(complete=complete):
+                self._assert_action(_Action.REMOVE_FROM_PARTICIPANTS, expected_state)
+
+                self._mock_state_holder.reset_mock()
+
+    def test_run_removes_from_participants_and_moves_to_next_round_if_node_is_last_participant(
+        self,
+    ) -> None:
+        self._state.participants[self._node] = 0
+
+        self._state.last_heartbeats[self._node] = self._now
+
+        self._state.complete = True
+
+        self._state.round = 1
+
+        expected_state = _RendezvousState()
+
+        expected_state.complete = False
+
+        expected_state.round = 2
+
+        self._assert_action(_Action.REMOVE_FROM_PARTICIPANTS, expected_state)
+
+    def test_run_removes_from_participants_and_clears_last_call_if_rendezvous_has_less_than_min_nodes(
+        self,
+    ) -> None:
+        self._add_participants(2, self._state)
+
+        self._state.participants[self._node] = 0
+
+        self._state.last_heartbeats[self._node] = self._now
+
+        self._state.deadline = self._now
+
+        expected_state = _RendezvousState()
+
+        self._add_participants(2, expected_state)
+
+        self._min_nodes = 3
+        self._max_nodes = 4
+
+        self._assert_action(_Action.REMOVE_FROM_PARTICIPANTS, expected_state)
+
+    def test_run_removes_from_waitlist(self) -> None:
+        self._state.wait_list.add(self._node)
+
+        self._state.last_heartbeats[self._node] = self._now
+
+        expected_state = _RendezvousState()
+
+        self._assert_action(_Action.REMOVE_FROM_WAIT_LIST, expected_state)
+
+    def test_run_marks_rendezvous_closed(self) -> None:
+        expected_state = _RendezvousState()
+
+        expected_state.closed = True
+
+        self._assert_action(_Action.MARK_RENDEZVOUS_CLOSED, expected_state)
+
+    def test_run_raises_error_if_rendezvous_is_closed(self) -> None:
+        with self.assertRaises(RendezvousClosedError):
+            self._run_action(_Action.ERROR_CLOSED)
+
+        self.assertListEqual(self._mock_state_holder.mock_calls, [call.sync()])
+
+    def test_run_raises_error_if_operation_timed_out(self) -> None:
+        with self.assertRaises(RendezvousTimeoutError):
+            self._run_action(_Action.ERROR_TIMEOUT)
+
+        self.assertListEqual(self._mock_state_holder.mock_calls, [call.sync()])
+
+    def test_run_delays_execution_if_sync_requested(self) -> None:
+        with patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay") as mock_delay:
+            self._run_action(_Action.SYNC)
+
+            mock_delay.assert_called_once_with(seconds=1)
+
+        self.assertListEqual(self._mock_state_holder.mock_calls, [call.sync(), call.sync()])
 
 
 class DummyStore(Store):

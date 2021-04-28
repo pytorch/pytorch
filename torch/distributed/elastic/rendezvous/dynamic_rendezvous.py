@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import logging
 import os
 import pickle
 import socket
@@ -17,7 +18,18 @@ from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 from torch.distributed import Store
 
-from .api import RendezvousHandler, RendezvousParameters, RendezvousStateError
+from .api import (
+    RendezvousClosedError,
+    RendezvousHandler,
+    RendezvousParameters,
+    RendezvousStateError,
+    RendezvousTimeoutError,
+)
+
+from .utils import _delay
+
+
+log = logging.getLogger(__name__)
 
 
 Token = Any
@@ -478,6 +490,197 @@ class _RendezvousOpExecutor(ABC):
                 The time, in seconds, at which the operation will be considered
                 timed-out.
         """
+
+
+class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
+    """Executes rendezvous operations using a shared state.
+
+    Args:
+        node:
+            The node descriptor associated with the current rendezvous handler
+            instance.
+        state_holder:
+            The ``RendezvousStateHolder`` to use to sync the rendezvous state
+            with other nodes.
+        settings:
+            The rendezvous settings.
+    """
+
+    _node: _NodeDesc
+    _state: _RendezvousState
+    _state_holder: _RendezvousStateHolder
+    _settings: RendezvousSettings
+
+    def __init__(
+        self,
+        node: _NodeDesc,
+        state_holder: _RendezvousStateHolder,
+        settings: RendezvousSettings,
+    ) -> None:
+        self._node = node
+        self._state_holder = state_holder
+        self._settings = settings
+
+    def run(
+        self, state_handler: Callable[[_RendezvousContext, float], _Action], deadline: float
+    ) -> None:
+        """See base class."""
+        action = None
+
+        while action != _Action.FINISH:
+            # Reads or writes the latest rendezvous state shared by all nodes in
+            # the rendezvous. Note that our local changes might get overridden
+            # by another node if that node synced its changes before us.
+            has_set = self._state_holder.sync()
+            if has_set is not None:
+                if has_set:
+                    log.debug(
+                        f"The node '{self._node}' has successfully synced its local changes with "
+                        f"other nodes in the rendezvous '{self._settings.run_id}'."
+                    )
+                else:
+                    log.debug(
+                        f"The node '{self._node}' has a stale state and failed to sync its local "
+                        f"changes with other nodes in the rendezvous '{self._settings.run_id}'."
+                    )
+
+            self._state = self._state_holder.state
+
+            ctx = _RendezvousContext(self._node, self._state, self._settings)
+
+            # Determine the next action to take based on the current state of
+            # the rendezvous.
+            action = state_handler(ctx, deadline)
+
+            if action == _Action.FINISH:
+                continue
+
+            if action == _Action.ERROR_CLOSED:
+                raise RendezvousClosedError()
+
+            if action == _Action.ERROR_TIMEOUT:
+                raise RendezvousTimeoutError()
+
+            if action == _Action.SYNC:
+                # Delay the execution by one second to avoid overloading the
+                # backend if we are asked to poll for state changes.
+                _delay(seconds=1)
+            else:
+                if action == _Action.KEEP_ALIVE:
+                    self._keep_alive()
+                elif action == _Action.ADD_TO_PARTICIPANTS:
+                    self._add_to_participants()
+                elif action == _Action.ADD_TO_WAIT_LIST:
+                    self._add_to_wait_list()
+                elif action == _Action.REMOVE_FROM_PARTICIPANTS:
+                    self._remove_from_participants()
+                elif action == _Action.REMOVE_FROM_WAIT_LIST:
+                    self._remove_from_wait_list()
+                elif action == _Action.MARK_RENDEZVOUS_COMPLETE:
+                    self._mark_rendezvous_complete()
+                elif action == _Action.MARK_RENDEZVOUS_CLOSED:
+                    self._mark_rendezvous_closed()
+
+                # Attempt to sync our changes back to other nodes.
+                self._state_holder.mark_dirty()
+
+    def _keep_alive(self) -> None:
+        log.debug(
+            f"The node '{self._node}' updated its keep-alive heartbeat time for the rendezvous "
+            f"'{self._settings.run_id}'. Pending sync."
+        )
+
+        self._state.last_heartbeats[self._node] = datetime.utcnow()
+
+    def _add_to_participants(self) -> None:
+        log.debug(
+            f"The node '{self._node}' added itself to the participants of round "
+            f"{self._state.round} of the rendezvous '{self._settings.run_id}'. Pending sync."
+        )
+
+        state = self._state
+
+        try:
+            state.wait_list.remove(self._node)
+        except KeyError:
+            pass
+
+        # The ranks of the participants will be set once the rendezvous is
+        # complete.
+        state.participants[self._node] = 0
+
+        self._keep_alive()
+
+        if len(state.participants) == self._settings.min_nodes:
+            state.deadline = datetime.utcnow() + self._settings.timeout.last_call
+
+        if len(state.participants) == self._settings.max_nodes:
+            self._mark_rendezvous_complete()
+
+    def _add_to_wait_list(self) -> None:
+        log.debug(
+            f"The '{self._node}' added itself to the wait list of round {self._state.round + 1} "
+            f"of the rendezvous '{self._settings.run_id}'. Pending sync."
+        )
+
+        self._state.wait_list.add(self._node)
+
+        self._keep_alive()
+
+    def _remove_from_participants(self) -> None:
+        log.debug(
+            f"The node '{self._node}' removed itself from the participants of round "
+            f"{self._state.round} of the rendezvous '{self._settings.run_id}'. Pending sync."
+        )
+
+        state = self._state
+
+        del state.participants[self._node]
+
+        del state.last_heartbeats[self._node]
+
+        if state.complete:
+            # If we do not have any participants left, move to the next round.
+            if not state.participants:
+                state.complete = False
+
+                state.round += 1
+        else:
+            if len(state.participants) < self._settings.min_nodes:
+                state.deadline = None
+
+    def _remove_from_wait_list(self) -> None:
+        log.debug(
+            f"The node '{self._node}' removed itself from the wait list of round "
+            f"{self._state.round + 1} of the rendezvous '{self._settings.run_id}'. Pending sync."
+        )
+
+        self._state.wait_list.remove(self._node)
+
+        del self._state.last_heartbeats[self._node]
+
+    def _mark_rendezvous_complete(self) -> None:
+        log.debug(
+            f"The node '{self._node}' marked round {self._state.round} of the rendezvous "
+            f"'{self._settings.run_id}' as complete. Pending sync."
+        )
+
+        state = self._state
+
+        state.complete = True
+        state.deadline = None
+
+        # Assign the ranks.
+        for rank, node in enumerate(sorted(state.participants)):
+            state.participants[node] = rank
+
+    def _mark_rendezvous_closed(self) -> None:
+        log.debug(
+            f"The node '{self._node}' marked the rendezvous '{self._settings.run_id}' as closed. "
+            "Pending sync."
+        )
+
+        self._state.closed = True
 
 
 class DynamicRendezvousHandler(RendezvousHandler):
