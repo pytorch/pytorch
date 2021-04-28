@@ -188,28 +188,32 @@ using MultiTestGuard = InlineMultiStreamGuard<TestGuardImpl>;
 TEST(InlineMultiStreamGuard, Constructor) {
   TestGuardImpl::resetStreams();
   {
-    MultiTestGuard g({});
+    std::vector<Stream> streams;
+    MultiTestGuard g(streams);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
   }
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
   {
-    MultiTestGuard g({stream(0, 2)});
+    std::vector<Stream> streams = {stream(0, 2)};
+    MultiTestGuard g(streams);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 2);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
   }
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
   {
-    MultiTestGuard g({stream(1, 3)});
+    std::vector<Stream> streams = {stream(1, 3)};
+    MultiTestGuard g(streams);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 3);
   }
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
   {
-    MultiTestGuard g({stream(0, 2), stream(1, 3)});
+    std::vector<Stream> streams = {stream(0, 2), stream(1, 3)};
+    MultiTestGuard g(streams);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 2);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 3);
   }
