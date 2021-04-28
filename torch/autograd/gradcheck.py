@@ -340,9 +340,9 @@ def get_jvp_wrt_specific_input(fn, input_idx, inputs, outputs, u, eps) -> List[t
 def get_fast_numerical_jacobians(fn, inputs, inp_indices, outputs, all_u, all_v, eps):
     reduced_jacobians: List[List[torch.Tensor]] = []
     for i, (inp_idx, u) in enumerate(zip(inp_indices, all_u)):
-        jacobian_cols = get_jvp_wrt_specific_input(fn, inp_idx, inputs, outputs, u, eps)
+        all_Ju = get_jvp_wrt_specific_input(fn, inp_idx, inputs, outputs, u, eps)
         jacobian_scalars: List[torch.Tensor] = []
-        for v, Ju in zip(all_v, jacobian_cols):
+        for v, Ju in zip(all_v, all_Ju):
             jacobian_scalars.append(dot_with_type_promotion(v, Ju))
         reduced_jacobians.append(jacobian_scalars)
     return reduced_jacobians
@@ -433,10 +433,10 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad_
 def get_fast_analytical_jacobians(inputs, outputs, nondet_tol, check_grad_dtypes, all_v, all_u_dense):
     reduced_jacobians: List[List[torch.Tensor]] = []
     for output, v in zip(outputs, all_v):
-        jacobian_cols = check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad_dtypes,
+        all_vJ = check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad_dtypes,
                                                              fast_mode=True, v=v)
         jacobian_scalars: List[torch.Tensor] = []
-        for vJ, u in zip(jacobian_cols, all_u_dense):
+        for vJ, u in zip(all_vJ, all_u_dense):
             vJ = vJ.T.squeeze(0)
             if vJ.is_complex():  # C -> R
                 tv = torch.view_as_real(vJ)
@@ -444,7 +444,7 @@ def get_fast_analytical_jacobians(inputs, outputs, nondet_tol, check_grad_dtypes
                 ti = tv.select(-1, 1)
                 jacobian_scalars.append(tr.dot(u[0]) + 1j * ti.dot(u[1]))
             else:  # R -> R
-                jacobian_scalars.append(dot_with_type_promotion(vJ, u))
+                jacobian_scalars.append(vJ.dot(u))
         reduced_jacobians.append(jacobian_scalars)
     return reduced_jacobians
 
