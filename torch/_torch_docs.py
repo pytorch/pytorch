@@ -6036,7 +6036,7 @@ The shapes of :attr:`input` and :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    \text{out}_i = \text{input}_i \times \text{other}_i
+    \text{{out}}_i = \text{{input}}_i \times \text{{other}}_i
 """.format(**common_args) + r"""
 
 Args:
