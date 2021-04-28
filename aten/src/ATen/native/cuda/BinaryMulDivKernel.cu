@@ -126,6 +126,10 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
       using accscalar_t = at::acc_type<scalar_t, true>;
       auto b = iter.scalar_value<accscalar_t>(2);
+      if (C10_UNLIKELY(b == 0)) {
+        return div_true_kernel_cuda(iter);
+      }
+
       auto inv_b = accscalar_t(1.0) / b;
       iter.remove_operand(2);
       gpu_kernel(iter, [b, inv_b] GPU_LAMBDA (scalar_t a) -> scalar_t {
@@ -150,6 +154,10 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
+        if (C10_UNLIKELY(b == 0)) {
+          return a / b;
+        }
+
         auto mod = std::fmod(a, b);
         auto div = (a - mod) / b;
         if ((mod != 0) && (b < 0) != (mod < 0)) {
