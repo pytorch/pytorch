@@ -2,8 +2,10 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Transpose, TransposeOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Transpose)
     .NumInputs(1)
     .NumOutputs(1)
@@ -28,9 +30,11 @@ OPERATOR_SCHEMA(Transpose)
 
         CAFFE_ENFORCE(valid_axes, "Axes argument passed in had invalid values");
         CAFFE_ENFORCE(
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             axes.size() == tensor_size,
             "Axes argument passed in had the incorrect size");
 
+        // NOLINTNEXTLINE(modernize-loop-convert)
         for (auto axis = axes.begin(); axis != axes.end(); ++axis) {
           out[0].add_dims(in[0].dims().Get(*axis));
         }
@@ -115,6 +119,7 @@ class GetTransposeGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Transpose, GetTransposeGradient);
 
 } // namespace caffe2
