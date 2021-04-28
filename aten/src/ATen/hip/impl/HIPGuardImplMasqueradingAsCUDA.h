@@ -306,4 +306,26 @@ private:
   c10::impl::InlineOptionalStreamGuard<HIPGuardImplMasqueradingAsCUDA> guard_;
 };
 
+struct HIPMultiStreamGuardMasqueradingAsCUDA {
+  explicit HIPMultiStreamGuardMasqueradingAsCUDA(ArrayRef<HIPStreamMasqueradingAsCUDA> streams)
+    : guard_(unwrapStreams(streams)) {}
+
+  HIPMultiStreamGuardMasqueradingAsCUDA(const HIPMultiStreamGuardMasqueradingAsCUDA&) = delete;
+  HIPMultiStreamGuardMasqueradingAsCUDA& operator=(const HIPMultiStreamGuardMasqueradingAsCUDA&) = delete;
+  HIPMultiStreamGuardMasqueradingAsCUDA(HIPMultiStreamGuardMasqueradingAsCUDA&& other) = delete;
+  HIPMultiStreamGuardMasqueradingAsCUDA& operator=(HIPMultiStreamGuardMasqueradingAsCUDA&& other) = delete;
+
+private:
+  c10::impl::InlineMultiStreamGuard<impl::HIPGuardImplMasqueradingAsCUDA> guard_;
+
+  static std::vector<Stream> unwrapStreams(ArrayRef<HIPStreamMasqueradingAsCUDA> hipStreams) {
+    std::vector<Stream> streams;
+    streams.reserve(hipStreams.size());
+    for (const HIPStreamMasqueradingAsCUDA& hipStream : hipStreams) {
+      streams.push_back(hipStream);
+    }
+    return streams;
+  }
+};
+
 }} // namespace c10::hip
