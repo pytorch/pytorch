@@ -272,7 +272,7 @@ vTensor::Image allocate_image(
   verify(options);
 
   return pool->image({
-      VK_IMAGE_TYPE_3D,
+      extents.depth == 1 ? VK_IMAGE_TYPE_2D : VK_IMAGE_TYPE_3D,
       vk_format(options.dtype()),
       extents,
       // Usage
@@ -287,7 +287,7 @@ vTensor::Image allocate_image(
       },
       // View
       {
-        VK_IMAGE_VIEW_TYPE_3D,
+        extents.depth == 1 ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_3D,
         vk_format(options.dtype()),
       },
       // Sampler
