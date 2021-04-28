@@ -441,7 +441,8 @@ Tensor slow_conv_dilated2d_cpu(
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<2>(
@@ -546,7 +547,8 @@ Tensor slow_conv_dilated3d_cpu(
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<3>(

@@ -406,8 +406,8 @@ SparseTensor clone_sparse(
  * reshaping methods
  ******************************************************************************/
 
-SparseTensor& sparse_resize_(
-    SparseTensor& self,
+const SparseTensor& sparse_resize_(
+    const SparseTensor& self,
     ArrayRef<int64_t> size,
     int64_t sparse_dim,
     int64_t dense_dim) {
@@ -415,8 +415,8 @@ SparseTensor& sparse_resize_(
   return self;
 }
 
-SparseTensor& sparse_resize_and_clear_(
-    SparseTensor& self,
+const SparseTensor& sparse_resize_and_clear_(
+    const SparseTensor& self,
     ArrayRef<int64_t> size,
     int64_t sparse_dim,
     int64_t dense_dim) {
@@ -434,7 +434,7 @@ bool _is_same_size_as_sparse(
 } // namespace
 
 // Invoked from native/Resize.cpp (no dynamic dispatch necessary)
-SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
+const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
     sparse_resize_(self, src.sizes(), src.sparse_dim(), src.dense_dim());
   }

@@ -61,7 +61,9 @@ struct JITTimePoint {
 };
 
 TORCH_API JITTimePoint timePoint();
-TORCH_API void recordDurationSince(const std::string& name, JITTimePoint tp);
+TORCH_API void recordDurationSince(
+    const std::string& name,
+    const JITTimePoint& tp);
 
 namespace runtime_counters {
 constexpr const char* GRAPH_EXECUTORS_CONSTRUCTED =

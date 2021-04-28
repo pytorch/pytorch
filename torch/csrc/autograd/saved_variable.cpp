@@ -140,8 +140,10 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
 }
 
 const char* ERR_BACKWARD_TWICE =
-    "Trying to backward through the graph a second time, but the saved intermediate "
-    "results have already been freed. Specify retain_graph=True when calling "
-    ".backward() or autograd.grad() the first time.";
+    "Trying to backward through the graph a second time (or directly access saved "
+    "variables after they have already been freed). Saved intermediate values "
+    "of the graph are freed when you call .backward() or autograd.grad(). Specify "
+    "retain_graph=True if you need to backward through the graph a second time or "
+    "if you need to access saved variables after calling backward.";
 
 }} // namespace torch::autograd

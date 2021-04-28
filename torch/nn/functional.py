@@ -2072,9 +2072,10 @@ def embedding_bag(
         include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
             The last element is the size of the input, or the ending index position of the last bag (sequence).
 
-        padding_idx (int, optional): If given, indicates which indices in :attr:`input` represent padding. When
-                                     a :attr:`padding_idx` is encountered in :attr:`input` during a reduction,
-                                     it is skipped. This allows each bag to be a different logical size.
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
+                                     gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
+                                     during training, i.e. it remains as a fixed "pad". Note that the embedding
+                                     vector at :attr:`padding_idx` is excluded from the reduction.
 
     Shape:
         - :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
@@ -2263,6 +2264,15 @@ def batch_norm(
     )
 
 
+def _verify_spatial_size(size: List[int]) -> None:
+    # Verify that there is > 1 spatial element for instance norm calculation.
+    size_prods = 1
+    for i in range(2, len(size)):
+        size_prods *= size[i]
+    if size_prods == 1:
+        raise ValueError("Expected more than 1 spatial element when training, got input size {}".format(size))
+
+
 def instance_norm(
     input: Tensor,
     running_mean: Optional[Tensor] = None,
@@ -2292,7 +2302,8 @@ def instance_norm(
             momentum=momentum,
             eps=eps,
         )
-    _verify_batch_size(input.size())
+    if use_input_stats:
+        _verify_spatial_size(input.size())
     return torch.instance_norm(
         input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, torch.backends.cudnn.enabled
     )
@@ -2562,7 +2573,14 @@ def poisson_nll_loss(
     return ret
 
 
-def gaussian_nll_loss(input, target, var, *, full=False, eps=1e-6, reduction='mean'):
+def gaussian_nll_loss(
+    input: Tensor,
+    target: Tensor,
+    var: Tensor,
+    full: bool = False,
+    eps: float = 1e-6,
+    reduction: str = "mean",
+) -> Tensor:
     r"""Gaussian negative log likelihood loss.
 
     See :class:`~torch.nn.GaussianNLLLoss` for details.
@@ -2572,31 +2590,47 @@ def gaussian_nll_loss(input, target, var, *, full=False, eps=1e-6, reduction='me
         target: sample from the Gaussian distribution.
         var: tensor of positive variance(s), one for each of the expectations
             in the input (heteroscedastic), or a single one (homoscedastic).
-        full: ``True``/``False`` (bool), include the constant term in the loss
-            calculation. Default: ``False``.
-        eps: value added to var, for stability. Default: 1e-6.
-        reduction: specifies the reduction to apply to the output:
-            `'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+        full (bool, optional): include the constant term in the loss calculation. Default: ``False``.
+        eps (float, optional): value added to var, for stability. Default: 1e-6.
+        reduction (string, optional): specifies the reduction to apply to the output:
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output is the average of all batch member losses,
             ``'sum'``: the output is the sum of all batch member losses.
             Default: ``'mean'``.
     """
-    if not torch.jit.is_scripting():
-        tens_ops = (input, target, var)
-        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
-            return handle_torch_function(
-                gaussian_nll_loss, tens_ops, input, target, var, full=full, eps=eps, reduction=reduction)
+    if has_torch_function_variadic(input, target, var):
+        return handle_torch_function(
+            gaussian_nll_loss,
+            (input, target, var),
+            input,
+            target,
+            var,
+            full=full,
+            eps=eps,
+            reduction=reduction,
+        )
 
-    # Inputs and targets much have same shape
-    input = input.view(input.size(0), -1)
-    target = target.view(target.size(0), -1)
-    if input.size() != target.size():
-        raise ValueError("input and target must have same size")
+    # Check var size
+    # If var.size == input.size, the case is heteroscedastic and no further checks are needed.
+    # Otherwise:
+    if var.size() != input.size():
 
-    # Second dim of var must match that of input or be equal to 1
-    var = var.view(input.size(0), -1)
-    if var.size(1) != input.size(1) and var.size(1) != 1:
-        raise ValueError("var is of incorrect size")
+        # If var is one dimension short of input, but the sizes match otherwise, then this is a homoscedastic case.
+        # e.g. input.size = (10, 2, 3), var.size = (10, 2)
+        # -> unsqueeze var so that var.shape = (10, 2, 1)
+        # this is done so that broadcasting can happen in the loss calculation
+        if input.size()[:-1] == var.size():
+            var = torch.unsqueeze(var, -1)
+
+        # This checks if the sizes match up to the final dimension, and the final dimension of var is of size 1.
+        # This is also a homoscedastic case.
+        # e.g. input.size = (10, 2, 3), var.size = (10, 2, 1)
+        elif input.size()[:-1] == var.size()[:-1] and var.size(-1) == 1:  # Heteroscedastic case
+            pass
+
+        # If none of the above pass, then the size of var is incorrect.
+        else:
+            raise ValueError("var is of incorrect size")
 
     # Check validity of reduction mode
     if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
@@ -2611,15 +2645,11 @@ def gaussian_nll_loss(input, target, var, *, full=False, eps=1e-6, reduction='me
     with torch.no_grad():
         var.clamp_(min=eps)
 
-    # Calculate loss (without constant)
-    loss = 0.5 * (torch.log(var) + (input - target)**2 / var).view(input.size(0), -1).sum(dim=1)
-
-    # Add constant to loss term if required
+    # Calculate the loss
+    loss = 0.5 * (torch.log(var) + (input - target)**2 / var)
     if full:
-        D = input.size(1)
-        loss = loss + 0.5 * D * math.log(2 * math.pi)
+        loss += 0.5 * math.log(2 * math.pi)
 
-    # Apply reduction
     if reduction == 'mean':
         return loss.mean()
     elif reduction == 'sum':
