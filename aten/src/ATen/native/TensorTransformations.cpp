@@ -100,16 +100,15 @@ void flip_cpu_kernel(TensorIterator& iter) {
 
 Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
   auto input = self;
+  const int64_t total_dims = input.dim();
+  auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
 
   std::vector<int64_t> flip_dims;
-  for(int64_t dim: dims) {
-      if(dim < 0) {
-        dim = input.ndimension() + dim;
+  for(int64_t i = 0; i < total_dims; i++) {
+      if(flip_dims_b[i]) {
+        flip_dims.push_back(i);
       }
-      flip_dims.push_back(dim);
   }
-
-  std::sort(flip_dims.begin(), flip_dims.end());
 
   auto shape = input.sizes().vec();
   auto strides = input.strides().vec();
