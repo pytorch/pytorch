@@ -141,7 +141,7 @@ class _DDPSink(Function):
                 ctx.reducer.prepare_for_backward([])
         if ctx.state_dict['static_graph']:
             Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
-        return None, None, *grad_outputs
+        return (None, None, *grad_outputs)
 
 class DistributedDataParallel(Module):
     r"""Implements distributed data parallelism that is based on
