@@ -9,9 +9,10 @@ import copy
 import os
 import pickle
 import socket
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple, cast
-from unittest import TestCase, mock
+from datetime import datetime, timedelta
+from typing import Callable, Optional, Tuple, cast
+from unittest import TestCase
+from unittest.mock import MagicMock, Mock, patch
 
 from torch.distributed import Store
 from torch.distributed.elastic.rendezvous import RendezvousParameters, RendezvousStateError
@@ -21,12 +22,22 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     RendezvousSettings,
     RendezvousTimeout,
     Token,
+    _BackendRendezvousStateHolder,
     _NodeDesc,
     _NodeDescGenerator,
     _RendezvousState,
-    _RendezvousStateHolderImpl,
     create_handler,
 )
+
+
+class CustomAssertMixin:
+    assertDictEqual: Callable
+
+    def assert_state_equal(self, actual: _RendezvousState, expected: _RendezvousState) -> None:
+        self.assertDictEqual(vars(actual), vars(expected))
+
+    def assert_state_empty(self, actual: _RendezvousState) -> None:
+        self.assertDictEqual(vars(actual), vars(_RendezvousState()))
 
 
 class RendezvousTimeoutTest(TestCase):
@@ -35,11 +46,13 @@ class RendezvousTimeoutTest(TestCase):
             timedelta(seconds=50),
             timedelta(seconds=60),
             timedelta(seconds=70),
+            timedelta(seconds=80),
         )
 
         self.assertEqual(timeout.join, timedelta(seconds=50))
         self.assertEqual(timeout.last_call, timedelta(seconds=60))
         self.assertEqual(timeout.close, timedelta(seconds=70))
+        self.assertEqual(timeout.heartbeat, timedelta(seconds=80))
 
     def test_init_initializes_timeout_if_no_timeout_is_specified(self) -> None:
         timeout = RendezvousTimeout()
@@ -47,6 +60,7 @@ class RendezvousTimeoutTest(TestCase):
         self.assertEqual(timeout.join, timedelta(seconds=600))
         self.assertEqual(timeout.last_call, timedelta(seconds=30))
         self.assertEqual(timeout.close, timedelta(seconds=30))
+        self.assertEqual(timeout.heartbeat, timedelta(seconds=5))
 
     def test_init_raises_error_if_timeout_is_not_positive(self) -> None:
         join_timeouts = [timedelta(seconds=0), timedelta(seconds=-1)]
@@ -117,8 +131,8 @@ class RendezvousStateTest(TestCase):
 
                     state.wait_list.add(node_waiting)
 
-                    state.last_keep_alives[node_running] = datetime.utcnow()
-                    state.last_keep_alives[node_waiting] = datetime.utcnow()
+                    state.last_heartbeats[node_running] = datetime.utcnow()
+                    state.last_heartbeats[node_waiting] = datetime.utcnow()
 
                 bits = pickle.dumps(state)
 
@@ -127,27 +141,19 @@ class RendezvousStateTest(TestCase):
                 self.assertLessEqual(len(base64_bits), max_byte_size)
 
 
-class MockRendezvousBackend(RendezvousBackend):
+class FakeRendezvousBackend(RendezvousBackend):
     _state: Optional[bytes]
     _token: int
-
-    get_state_call_count: int
-    set_state_call_count: int
 
     def __init__(self) -> None:
         self._state = None
         self._token = 0
 
-        self.get_state_call_count = 0
-        self.set_state_call_count = 0
-
     @property
     def name(self) -> str:
-        return "mock_backend"
+        return "fake_backend"
 
     def get_state(self) -> Optional[Tuple[bytes, Token]]:
-        self.get_state_call_count += 1
-
         if self._token == 0:
             return None
 
@@ -155,9 +161,7 @@ class MockRendezvousBackend(RendezvousBackend):
 
     def set_state(
         self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[Tuple[bytes, Token]]:
-        self.set_state_call_count += 1
-
+    ) -> Optional[Tuple[bytes, Token, bool]]:
         if token is None:
             token = 0
 
@@ -165,27 +169,37 @@ class MockRendezvousBackend(RendezvousBackend):
             self._state = state
             self._token += 1
 
-        return self._state, self._token  # type: ignore[return-value]
+            has_set = True
+        else:
+            has_set = False
+
+        return self._state, self._token, has_set  # type: ignore[return-value]
+
+    def get_state_internal(self) -> _RendezvousState:
+        return pickle.loads(cast(bytes, self._state))
 
     def set_state_internal(self, state: _RendezvousState) -> None:
         self._state = pickle.dumps(state)
         self._token += 1
 
-    def get_state_internal(self) -> _RendezvousState:
-        return pickle.loads(cast(bytes, self._state))
-
     def corrupt_state(self) -> None:
         self._state = b"corrupt_state"
         self._token += 1
 
-    def reset_call_count(self) -> None:
-        self.get_state_call_count = 0
-        self.set_state_call_count = 0
 
-
-class RendezvousStateHolderTest(TestCase):
+class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
     def setUp(self) -> None:
-        self._backend = MockRendezvousBackend()
+        self._backend = FakeRendezvousBackend()
+
+        mock_get_state = MagicMock(wraps=self._backend.get_state)
+        mock_set_state = MagicMock(wraps=self._backend.set_state)
+
+        self._mock_backend = Mock()
+        self._mock_backend.get_state = mock_get_state
+        self._mock_backend.set_state = mock_set_state
+
+        setattr(self._backend, "get_state", mock_get_state)  # noqa: B010
+        setattr(self._backend, "set_state", mock_set_state)  # noqa: B010
 
         self._settings = RendezvousSettings(
             run_id="dummy_run_id",
@@ -198,9 +212,9 @@ class RendezvousStateHolderTest(TestCase):
 
         self._cache_duration = 0
 
-        self._now = datetime(2000, 1, 1, hour=0, minute=0, tzinfo=timezone.utc)
+        self._now = datetime(2000, 1, 1, hour=0, minute=0)
 
-        self._datetime_patch = mock.patch(
+        self._datetime_patch = patch(
             "torch.distributed.elastic.rendezvous.dynamic_rendezvous.datetime"
         )
 
@@ -210,19 +224,7 @@ class RendezvousStateHolderTest(TestCase):
     def tearDown(self) -> None:
         self._datetime_patch.stop()
 
-    def _assert_state_equal(self, actual: _RendezvousState, expected: _RendezvousState) -> None:
-        self.assertEqual(actual.round, expected.round)
-        self.assertEqual(actual.complete, expected.complete)
-        self.assertEqual(actual.deadline, expected.deadline)
-        self.assertEqual(actual.closed, expected.closed)
-        self.assertEqual(actual.participants, expected.participants)
-        self.assertEqual(actual.wait_list, expected.wait_list)
-        self.assertEqual(actual.last_keep_alives, expected.last_keep_alives)
-
-    def _assert_state_empty(self, actual: _RendezvousState) -> None:
-        self._assert_state_equal(actual, _RendezvousState())
-
-    def _create_dummy_state(self) -> _RendezvousState:
+    def _create_state(self) -> _RendezvousState:
         state = _RendezvousState()
         state.round = 999
         state.complete = True
@@ -237,7 +239,7 @@ class RendezvousStateHolderTest(TestCase):
             _NodeDesc("dummy4", 1, 1),
             _NodeDesc("dummy5", 1, 1),
         }
-        state.last_keep_alives = {
+        state.last_heartbeats = {
             _NodeDesc("dummy1", 1, 1): self._now,
             _NodeDesc("dummy2", 1, 1): self._now - timedelta(seconds=15),
             _NodeDesc("dummy3", 1, 1): self._now - timedelta(seconds=30),
@@ -247,35 +249,32 @@ class RendezvousStateHolderTest(TestCase):
 
         return state
 
-    def _create_state_holder(self) -> _RendezvousStateHolderImpl:
-        return _RendezvousStateHolderImpl(self._backend, self._settings, self._cache_duration)
+    def _create_state_holder(self) -> _BackendRendezvousStateHolder:
+        return _BackendRendezvousStateHolder(self._backend, self._settings, self._cache_duration)
 
     def test_init_initializes_state_holder(self) -> None:
         state_holder = self._create_state_holder()
 
-        self.assertIs(state_holder.backend, self._backend)
-        self.assertIs(state_holder.settings, self._settings)
-        self.assertEqual(state_holder.cache_duration, self._cache_duration)
+        self.assert_state_empty(state_holder.state)
 
-        self._assert_state_empty(state_holder.state)
-
-        self.assertEqual(self._backend.get_state_call_count, 0)
-        self.assertEqual(self._backend.set_state_call_count, 0)
+        self._mock_backend.assert_not_called()
 
     def test_sync_gets_empty_state_if_backend_state_does_not_exist(self) -> None:
         state_holder = self._create_state_holder()
 
-        state_holder.sync()
+        has_set = state_holder.sync()
 
-        self._assert_state_empty(state_holder.state)
+        self.assertIsNone(has_set)
 
-        self.assertEqual(self._backend.get_state_call_count, 1)
-        self.assertEqual(self._backend.set_state_call_count, 0)
+        self.assert_state_empty(state_holder.state)
+
+        self.assertEqual(self._mock_backend.get_state.call_count, 1)
+        self.assertEqual(self._mock_backend.set_state.call_count, 0)
 
     def test_sync_gets_backend_state_if_local_state_is_clean(self) -> None:
-        expected_state = self._create_dummy_state()
-
         state_holder = self._create_state_holder()
+
+        expected_state = self._create_state()
 
         for attempt in range(1, 4):
             with self.subTest(attempt=attempt):
@@ -283,19 +282,21 @@ class RendezvousStateHolderTest(TestCase):
 
                 self._backend.set_state_internal(expected_state)
 
-                state_holder.sync()
+                has_set = state_holder.sync()
 
-                self._assert_state_equal(state_holder.state, expected_state)
+                self.assertIsNone(has_set)
 
-                self.assertEqual(self._backend.get_state_call_count, 1)
-                self.assertEqual(self._backend.set_state_call_count, 0)
+                self.assert_state_equal(state_holder.state, expected_state)
 
-                self._backend.reset_call_count()
+                self.assertEqual(self._mock_backend.get_state.call_count, 1)
+                self.assertEqual(self._mock_backend.set_state.call_count, 0)
+
+                self._mock_backend.reset_mock()
 
     def test_sync_gets_backend_state_if_local_state_is_old_and_dirty(self) -> None:
-        expected_state = self._create_dummy_state()
-
         state_holder = self._create_state_holder()
+
+        expected_state = self._create_state()
 
         for attempt in range(1, 4):
             with self.subTest(attempt=attempt):
@@ -303,14 +304,17 @@ class RendezvousStateHolderTest(TestCase):
 
                 state_holder.state.round = attempt
                 state_holder.mark_dirty()
-                state_holder.sync()
 
-                self._assert_state_equal(state_holder.state, expected_state)
+                has_set = state_holder.sync()
 
-                self.assertEqual(self._backend.get_state_call_count, 0)
-                self.assertEqual(self._backend.set_state_call_count, 1)
+                self.assertFalse(has_set)
 
-                self._backend.reset_call_count()
+                self.assert_state_equal(state_holder.state, expected_state)
+
+                self.assertEqual(self._mock_backend.get_state.call_count, 0)
+                self.assertEqual(self._mock_backend.set_state.call_count, 1)
+
+                self._mock_backend.reset_mock()
 
     def test_sync_sets_backend_state_if_local_state_is_new_and_dirty(self) -> None:
         state_holder = self._create_state_holder()
@@ -319,25 +323,26 @@ class RendezvousStateHolderTest(TestCase):
             with self.subTest(attempt=attempt):
                 state_holder.state.round = attempt
                 state_holder.mark_dirty()
-                state_holder.sync()
+
+                has_set = state_holder.sync()
+
+                self.assertTrue(has_set)
 
                 expected_state = self._backend.get_state_internal()
 
-                self._assert_state_equal(state_holder.state, expected_state)
+                self.assert_state_equal(state_holder.state, expected_state)
 
-                self.assertEqual(self._backend.get_state_call_count, 0)
-                self.assertEqual(self._backend.set_state_call_count, 1)
+                self.assertEqual(self._mock_backend.get_state.call_count, 0)
+                self.assertEqual(self._mock_backend.set_state.call_count, 1)
 
-                self._backend.reset_call_count()
+                self._mock_backend.reset_mock()
 
     def test_sync_uses_cached_state_if_cache_duration_is_specified(self) -> None:
-        state = self._create_dummy_state()
+        state = self._create_state()
 
         self._backend.set_state_internal(state)
 
-        with mock.patch(
-            "torch.distributed.elastic.rendezvous.dynamic_rendezvous.time"
-        ) as mock_time:
+        with patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous.time") as mock_time:
             for cache_duration in [1, 5, 10]:
                 with self.subTest(cache_duration=cache_duration):
                     self._cache_duration = cache_duration
@@ -347,29 +352,33 @@ class RendezvousStateHolderTest(TestCase):
                     mock_time.monotonic.return_value = 5
 
                     state_holder.sync()
-                    state_holder.sync()
 
-                    self.assertEqual(self._backend.get_state_call_count, 1)
-                    self.assertEqual(self._backend.set_state_call_count, 0)
+                    has_set = state_holder.sync()
+
+                    self.assertIsNone(has_set)
+
+                    self.assertEqual(self._mock_backend.get_state.call_count, 1)
+                    self.assertEqual(self._mock_backend.set_state.call_count, 0)
 
                     mock_time.monotonic.return_value = 5 + self._cache_duration
 
                     state_holder.sync()
-                    state_holder.sync()
 
-                    self.assertEqual(self._backend.get_state_call_count, 1)
-                    self.assertEqual(self._backend.set_state_call_count, 0)
+                    has_set = state_holder.sync()
 
-                    self._backend.reset_call_count()
+                    self.assertIsNone(has_set)
+
+                    self.assertEqual(self._mock_backend.get_state.call_count, 1)
+                    self.assertEqual(self._mock_backend.set_state.call_count, 0)
+
+                    self._mock_backend.get_state.reset_mock()
 
     def test_sync_gets_backend_state_if_cached_state_has_expired(self) -> None:
-        state = self._create_dummy_state()
+        state = self._create_state()
 
         self._backend.set_state_internal(state)
 
-        with mock.patch(
-            "torch.distributed.elastic.rendezvous.dynamic_rendezvous.time"
-        ) as mock_time:
+        with patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous.time") as mock_time:
             self._cache_duration = 1
 
             state_holder = self._create_state_holder()
@@ -377,21 +386,27 @@ class RendezvousStateHolderTest(TestCase):
             mock_time.monotonic.return_value = 5
 
             state_holder.sync()
-            state_holder.sync()
 
-            self.assertEqual(self._backend.get_state_call_count, 1)
-            self.assertEqual(self._backend.set_state_call_count, 0)
+            has_set = state_holder.sync()
+
+            self.assertIsNone(has_set)
+
+            self.assertEqual(self._mock_backend.get_state.call_count, 1)
+            self.assertEqual(self._mock_backend.set_state.call_count, 0)
 
             mock_time.monotonic.return_value = 5 + self._cache_duration + 0.01
 
             state_holder.sync()
-            state_holder.sync()
 
-            self.assertEqual(self._backend.get_state_call_count, 2)
-            self.assertEqual(self._backend.set_state_call_count, 0)
+            has_set = state_holder.sync()
+
+            self.assertIsNone(has_set)
+
+            self.assertEqual(self._mock_backend.get_state.call_count, 2)
+            self.assertEqual(self._mock_backend.set_state.call_count, 0)
 
     def test_sync_sanitizes_state(self) -> None:
-        expected_state = self._create_dummy_state()
+        expected_state = self._create_state()
 
         state = copy.deepcopy(expected_state)
 
@@ -401,11 +416,11 @@ class RendezvousStateHolderTest(TestCase):
         dead_node4 = _NodeDesc("dead4", 1, 1)
         dead_node5 = _NodeDesc("dead5", 1, 1)
 
-        state.last_keep_alives[dead_node1] = self._now - timedelta(seconds=91)
-        state.last_keep_alives[dead_node2] = self._now - timedelta(seconds=100)
-        state.last_keep_alives[dead_node3] = self._now - timedelta(seconds=110)
-        state.last_keep_alives[dead_node4] = self._now - timedelta(seconds=120)
-        state.last_keep_alives[dead_node5] = self._now - timedelta(seconds=130)
+        state.last_heartbeats[dead_node1] = self._now - timedelta(seconds=91)
+        state.last_heartbeats[dead_node2] = self._now - timedelta(seconds=100)
+        state.last_heartbeats[dead_node3] = self._now - timedelta(seconds=110)
+        state.last_heartbeats[dead_node4] = self._now - timedelta(seconds=120)
+        state.last_heartbeats[dead_node5] = self._now - timedelta(seconds=130)
 
         state.participants[dead_node1] = 0
         state.participants[dead_node2] = 0
@@ -420,7 +435,7 @@ class RendezvousStateHolderTest(TestCase):
 
         state_holder.sync()
 
-        self._assert_state_equal(state_holder.state, expected_state)
+        self.assert_state_equal(state_holder.state, expected_state)
 
     def test_sync_raises_error_if_backend_state_is_corrupt(self) -> None:
         self._backend.corrupt_state()
