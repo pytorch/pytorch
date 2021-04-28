@@ -16,13 +16,16 @@ float compress_uniform_simplified_(
     int bit_rate) {
   xmin = static_cast<at::Half>(xmin);
   float data_range = xmax - xmin;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float qmax = (1 << bit_rate) - 1;
   float scale = data_range == 0
       ? 1.0
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       : static_cast<float>(static_cast<at::Half>(data_range / qmax));
   float inverse_scale = 1.0f / scale;
 
   float norm = 0.0f;
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   constexpr int VLEN = 8;
   int i = 0;
 
@@ -86,7 +89,9 @@ void param_search_greedy(
     float& Xmin,
     float& Xmax,
     int bit_rate) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float stepsize = (Xmax - Xmin) / n_bins;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int min_bins = n_bins * (1 - ratio);
 
   vector<float> Xq(N);
@@ -99,6 +104,7 @@ void param_search_greedy(
   float cur_max = Xmax;
   float cur_loss = loss;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float thr = min_bins * stepsize;
   while (cur_min + thr < cur_max) {
     // move left
@@ -124,12 +130,14 @@ void param_search_greedy(
 }
 } // namespace internal
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FloatToFused4BitFakeRowwiseQuantized,
     FloatToFusedNBitFakeRowwiseQuantizedOp<
         4,
         float,
         internal::convertfp32fp32>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FloatToFused4BitFakeRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -137,6 +145,7 @@ OPERATOR_SCHEMA(FloatToFused4BitFakeRowwiseQuantized)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       X.set_dims(1, X.dims(1) + 8);
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
@@ -149,14 +158,17 @@ scale and biases in half float.
 )DOC")
     .Input(0, "input", "Float32 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FloatToFused4BitFakeRowwiseQuantized);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HalfToFused4BitFakeRowwiseQuantized,
     FloatToFusedNBitFakeRowwiseQuantizedOp<
         4,
         at::Half,
         internal::convertfp16fp32>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HalfToFused4BitFakeRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -164,6 +176,7 @@ OPERATOR_SCHEMA(HalfToFused4BitFakeRowwiseQuantized)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       X.set_dims(1, X.dims(1) + 8);
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
@@ -176,8 +189,10 @@ scale and biases in half float.
 )DOC")
     .Input(0, "input", "Float16 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(HalfToFused4BitFakeRowwiseQuantized);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FloatToFused4BitFakeRowwiseQuantized,
     GREEDY,
@@ -187,6 +202,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         internal::convertfp32fp32,
         true /* GREEDY */>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     HalfToFused4BitFakeRowwiseQuantized,
     GREEDY,
@@ -196,12 +212,14 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         internal::convertfp16fp32,
         true /* GREEDY */>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FloatToFused2BitFakeRowwiseQuantized,
     FloatToFusedNBitFakeRowwiseQuantizedOp<
         2,
         float,
         internal::convertfp32fp32>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FloatToFused2BitFakeRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -209,6 +227,7 @@ OPERATOR_SCHEMA(FloatToFused2BitFakeRowwiseQuantized)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       X.set_dims(1, X.dims(1) + 8);
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
@@ -221,14 +240,17 @@ scale and biases in half float.
 )DOC")
     .Input(0, "input", "Float32 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FloatToFused2BitFakeRowwiseQuantized);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HalfToFused2BitFakeRowwiseQuantized,
     FloatToFusedNBitFakeRowwiseQuantizedOp<
         2,
         at::Half,
         internal::convertfp16fp32>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HalfToFused2BitFakeRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -236,6 +258,7 @@ OPERATOR_SCHEMA(HalfToFused2BitFakeRowwiseQuantized)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       X.set_dims(1, X.dims(1) + 8);
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
@@ -248,8 +271,10 @@ scale and biases in half float.
 )DOC")
     .Input(0, "input", "Float16 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(HalfToFused2BitFakeRowwiseQuantized);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FloatToFused2BitFakeRowwiseQuantized,
     GREEDY,
@@ -259,6 +284,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         internal::convertfp32fp32,
         true /* GREEDY */>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     HalfToFused2BitFakeRowwiseQuantized,
     GREEDY,
