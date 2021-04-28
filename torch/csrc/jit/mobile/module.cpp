@@ -139,6 +139,7 @@ Method::Method(const Module* owner, Function* function)
 
 void Method::run(Stack& stack) const {
   auto observer = torch::observerConfig().getModuleObserver();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
   /* if the metadata dict doesn't contain "model_name", copy the metadata and
   set the value of "model_name" as name() */
