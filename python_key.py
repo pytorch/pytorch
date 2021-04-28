@@ -1,5 +1,6 @@
 import time
 import torch
+import functools
 from string import ascii_lowercase
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,9 +8,8 @@ import torch._C.key as key
 import torch.fx as fx
 from torch.fx import PythonTensor
 from nnc_compile import nnc_compile
-torch._C._jit_override_can_fuse_on_cpu(True)
-# import torch.autograd.functional
 from types import FunctionType, CodeType
+from functorch import key_wrap, ModuleWrap, jacrev, vmap, grad
 
 
 import torchvision.models as models
@@ -49,35 +49,6 @@ class ModuleBackward(nn.Module):
     def forward(self, a):
         return self.f_grad([a])
 
-def grad(f, inps):
-    def f_grad(args):
-        for idx in range(len(inps)):
-            args[idx] = key.addKey(PythonTensor(inps[idx].shape, args[idx]))
-            args[idx].requires_grad = True
-        out = f(*args)
-        out.backward()
-        return tuple(key.removeKey(args[idx].grad).proxy for idx in range(len(inps)))
-    var_string = ', '.join(ascii_lowercase[:len(inps)])
-    scope = {'f_grad': f_grad}
-    exec(f"""
-def f_out({var_string}):
-    return f_grad([{var_string}])
-""", scope)
-    return scope['f_out']
-
-def f(a, b):
-    c = (a*b)
-    d = c + torch.cos(b)
-    e = torch.dot(c, d)
-    return e + torch.dot(a, b)
-
-inps = (torch.randn(5), torch.randn(5))
-grad_f = fx.symbolic_trace(grad(f, inps))
-grad_f = nnc_compile(grad_f, inps)
-print(grad_f.code)
-exit(0)
-
-
 class Foo(torch.nn.Module):
     def __init__(self, num_features=50):
         super(Foo, self).__init__()
@@ -85,8 +56,33 @@ class Foo(torch.nn.Module):
         self.w = (nn.Parameter(torch.randn(1, num_features)))
 
     def forward(self, x):
-        return (self.linear(x * torch.sin(self.w))**2).sum()
+        out = (self.linear(x * torch.sin(self.w))**2).sum()
+        out.backward()
+        return list(self.parameters())
 
+
+
+from functorch import vmap
+batch_size, feature_size = 3, 5
+
+def model(weights,feature_vec):
+    # Very simple linear model with activation
+    assert feature_vec.dim() == 1
+    return feature_vec.dot(weights).relu()
+
+def compute_loss(weights, example, target):
+    y = model(weights, example)
+    return ((y - target) ** 2).mean()  # MSELoss
+
+weights = torch.randn(feature_size, requires_grad=True)
+examples = torch.randn(batch_size, feature_size)
+targets = torch.randn(batch_size)
+inputs = (weights,examples, targets)
+grad_weight_per_example = fx.symbolic_trace(key_wrap(vmap(grad(compute_loss, diff_argnums=(0,)), in_dims=(None, 0, 0)), inputs))
+print(grad_weight_per_example.code)
+
+
+exit(0)
 # grad_foo = ModuleBackward(f, inps)
 # nnc_grad = nnc_compile(grad_foo, inps)
 

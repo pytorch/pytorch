@@ -42,7 +42,7 @@ class PythonTensor(object):
         func = getattr(getattr(torch.ops, namespace), func_name)
         outs = kwargs['val']
         rets = []
-        proxy_args = [i.proxy if isinstance(i, PythonTensor) else i for i in args]
+        proxy_args = map_aggregate(args, lambda i: i.proxy if isinstance(i, PythonTensor) else i)
         out_proxy = func(*proxy_args)
         if len(outs) == 1 and isinstance(outs[0], torch.Tensor):
             return [PythonTensor(outs[0], out_proxy)]
@@ -118,7 +118,13 @@ class _CPatchManager(object):
         sys.setprofile(None)
 
 class Tracer(TracerBase):
-    """
+    # Reference: https://github.com/pytorch/pytorch/issues/54354
+    # The first line of this docstring overrides the one Sphinx generates for the
+    # documentation. We need it so that Sphinx doesn't leak `math`s path from the
+    # build environment (e.g. `<module 'math' from '/leaked/path').
+
+    """Tracer(autowrap_modules=(math,), enable_cpatching=False)
+
     ``Tracer`` is the class that implements the symbolic tracing functionality
     of ``torch.fx.symbolic_trace``. A call to ``symbolic_trace(m)`` is equivalent
     to ``Tracer().trace(m)``.
@@ -128,6 +134,10 @@ class Tracer(TracerBase):
     in the docstrings of the methods on this class.
     """
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), enable_cpatching: bool = False) -> None:
+        # This method's signature is overridden by the first line of this class'
+        # docstring. If this method's signature is modified, the signature that
+        # overrides it also should be modified accordingly.
+
         """
         Construct a Tracer object.
 
@@ -429,8 +439,9 @@ class Tracer(TracerBase):
                     if attr_val is p:
                         if n not in parameter_proxy_cache:
                             proxy = self.create_proxy('get_attr', n, (), {})
+                            # parameter_proxy_cache
                             parameter_proxy_cache[n] = key.addKey(PythonTensor(attr_val.shape, proxy))
-                            parameter_proxy_cache[n].requires_grad = True
+                            # parameter_proxy_cache[n].requires_grad = True
                         return parameter_proxy_cache[n]
             return attr_val
 

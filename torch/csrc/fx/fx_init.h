@@ -41,10 +41,10 @@ struct TORCH_API PythonTensorImpl : public c10::TensorImpl {
   // tensor are private.
 
   // Override a bunch of methods inherited from TensorImpl to return error messages.
-//   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
-//   void set_size(int64_t dim, int64_t new_size) override;
-//   void set_stride(int64_t dim, int64_t new_stride) override;
-//   void set_storage_offset(int64_t storage_offset) override;
+  bool is_contiguous(at::MemoryFormat memory_format) const override;
+  void set_size(int64_t dim, int64_t new_size) override;
+  void set_stride(int64_t dim, int64_t new_stride) override;
+  void set_storage_offset(int64_t storage_offset) override;
 // #ifdef DEBUG
 //   bool has_storage() const override;
 // #endif
