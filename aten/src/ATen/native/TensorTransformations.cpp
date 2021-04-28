@@ -82,6 +82,7 @@ void flip_cpu_kernel(TensorIterator& iter) {
   // When launch the index parallel version, set a relative samll grain size less than the INTERNAL::GRAIN_SIZE
   // to make the whole available thread numbers get more balanced work load and a better cache location.
   // The grain size here is chosen by the op benchmark to overcome the thread launch overhead
+  // This value was taken from the AdvancedIndexing kernel.
   const int index_parallel_grain_size = 3000;
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
       auto indexer = Indexer(ntensor - 2, &data[2], &strides[2]);
