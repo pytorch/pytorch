@@ -325,6 +325,7 @@ class MemoryPlanner {
   static at::DataPtr allocate_buffer(size_t size);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class ProcessedNode {
  public:
   ProcessedNode() = default;
