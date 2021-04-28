@@ -141,6 +141,17 @@ if(BUILD_CAFFE2 AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   add_subdirectory(mpi)
   add_subdirectory(observers)
   add_subdirectory(onnx)
+
+  include_directories(../third_party/optimizer)
+
+  set(ONNX_SRCS
+    "../third_party/optimizer/onnxoptimizer/optimize.cc"
+    "../third_party/optimizer/onnxoptimizer/pass.cc"
+    "../third_party/optimizer/onnxoptimizer/pass_registry.cc"
+    "../third_party/optimizer/onnxoptimizer/pass_manager.cc")
+
+  list(APPEND Caffe2_CPU_SRCS ${ONNX_SRCS})
+
   if(BUILD_CAFFE2_OPS)
     add_subdirectory(operators)
     add_subdirectory(operators/rnn)
