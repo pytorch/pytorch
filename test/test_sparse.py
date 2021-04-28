@@ -1,9 +1,4 @@
 import torch
-
-# TODO: remove this global setting
-# Sparse tests use double as the default dtype
-torch.set_default_dtype(torch.double)
-
 import itertools
 import functools
 import operator
@@ -95,7 +90,6 @@ class TestSparse(TestCase):
             ((10, 0, 3), 0, 3),
             ((10, 0, 3), 0, 0),
         ]
-
         printed = []
         for shape, sparse_dim, nnz in shape_sparse_dim_nnz:
             indices_shape = torch.Size((sparse_dim, nnz))
@@ -777,7 +771,7 @@ class TestSparse(TestCase):
     def test_coalesce_transpose_mm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [dj, di], dtype, device, coalesced)
-            y = torch.randn(dj, dk, device=device)
+            y = torch.randn(dj, dk, dtype=dtype, device=device)
 
             x_coalesced = x.coalesce()
             self.assertTrue(x_coalesced.is_coalesced())
@@ -1224,7 +1218,12 @@ class TestSparse(TestCase):
     @coalescedonoff
     @dtypes(torch.double)
     def test_sparse_addmm(self, device, dtype, coalesced):
-        def test_shape(m, n, p, nnz, broadcast):
+        def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
+            if alpha_beta is None:
+                alpha = random.random()
+                beta = random.random()
+            else:
+                alpha, beta = alpha_beta
             if broadcast:
                 D1 = torch.randn((), dtype=dtype, device=device).requires_grad_(True)
             else:
@@ -1233,14 +1232,20 @@ class TestSparse(TestCase):
             S = self._gen_sparse(2, nnz, [n, m], dtype, device, coalesced)[0]
             S_dense = S.to_dense().requires_grad_(True)
             S.requires_grad_(True)
-            self.assertEqual(torch.sparse.addmm(D1, S, D2), torch.addmm(D1, S_dense, D2))
+            Y = torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
+            Y_dense = torch.addmm(D1, S_dense, D2, beta=beta, alpha=alpha)
+            self.assertEqual(Y, Y_dense)
 
-            def fn(S, D1, D2):
-                return torch.sparse.addmm(D1, S, D2)
+            def fn(S, D1, D2, beta=beta, alpha=alpha):
+                return torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
             gradcheck(fn, (S, D1, D2), check_sparse_nnz=True)
 
-        test_shape(7, 8, 9, 20, False)
-        test_shape(7, 8, 9, 20, True)
+        test_shape(7, 8, 9, 20, False, None)
+        test_shape(7, 8, 9, 20, True, None)
+        test_shape(7, 8, 9, 20, False, (1, 0))
+        test_shape(7, 8, 9, 20, True, (1, 0))
+        test_shape(7, 8, 9, 20, False, (1, 1))
+        test_shape(7, 8, 9, 20, True, (1, 1))
 
     @coalescedonoff
     @dtypes(torch.double)
@@ -1549,7 +1554,7 @@ class TestSparse(TestCase):
 
         y = x1.clone()
         y.zero_()
-        expected = torch.zeros(x1.size())
+        expected = torch.zeros(x1.size(), dtype=dtype, device=device)
         self.assertEqual(self.safeToDense(y), expected)
 
         self.assertEqual(x1.is_coalesced(), coalesced)

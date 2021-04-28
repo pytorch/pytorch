@@ -336,6 +336,12 @@ class profile(object):
         assert self.profiler
         return self.profiler.function_events
 
+    def add_metadata(self, key: str, value: str):
+        """
+        Adds a user defined key/value metadata into the trace file
+        """
+        torch.autograd._add_metadata(key, value)
+
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_warmup()

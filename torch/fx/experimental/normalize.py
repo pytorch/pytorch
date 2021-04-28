@@ -1,125 +1,77 @@
 import torch
 import torch.fx
-import inspect
+import torch.fx as fx
 import operator
-from typing import Any, Callable, Dict, Optional, Tuple
-from torch.fx.node import Argument, Target
-from torch._jit_internal import boolean_dispatched
+from typing import Any, Callable, Dict, Tuple, Optional
+from torch.fx.node import Argument, Target, Node, map_aggregate
+from torch.fx.operator_schemas import normalize_module, normalize_function, create_type_hint
 
-from torch.fx import Transformer
-from torch.fx.operator_schemas import get_signature_for_torch_op
+from torch.fx import Transformer, Proxy
 from .schema_type_annotation import AnnotateTypesWithSchema
 
 class NormalizeArgs(Transformer):
     """
     Normalize arguments to Python targets. This means that
     `args/kwargs` will be matched up to the module/functional's
-    signature and rewritten to exclusively kwargs in positional order.
-    Also populates default values. Does not support positional-only
-    parameters or varargs parameters (*args, **kwargs).
+    signature and rewritten to exclusively kwargs in positional order
+    if `normalize_to_only_use_kwargs` is true. Also populates default
+    values. Does not support positional-only parameters or varargs
+    parameters (*args, **kwargs).
+
+    If the nodes have 'type' metadata, it will use it to disambiguate
+    overloads. Otherwise, it will throw an error.
 
     Example usage:
-
         m = torchvision.models.resnet18()
-
         traced = torch.fx.symbolic_trace(m)
-
         traced = NormalizeArgs(traced).transform()
     """
-    def __init__(self, module : torch.nn.Module, normalize_functionals : bool = True,
-                 normalize_modules : bool = True):
+    def __init__(self, module : torch.nn.Module,
+                 normalize_to_only_use_kwargs : bool = True):
         super().__init__(module)
-        self.normalize_functionals = normalize_functionals
-        self.normalize_modules = normalize_modules
+        self.node_map: Dict[Proxy, Node] = {}
+        self.normalize_to_only_use_kwargs = normalize_to_only_use_kwargs
 
-    def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
-        new_kwargs = None
+    def run_node(self, n: Node) -> Any:
+        args, kwargs = self.fetch_args_kwargs_from_env(n)
 
-        if self.normalize_functionals and target.__module__ == 'torch.nn.functional':
-            target_for_analysis = target
-            if target in boolean_dispatched:
-                # HACK: `boolean_dispatch` as used in `torch.nn.functional` makes it so that we have
-                # a 2-way dispatch based on a boolean value. Here we check that the `true` and `false`
-                # branches of the dispatch have exactly the same signature. If they do, use the `true`
-                # branch signature for analysis. Otherwise, leave this un-normalized
-                assert not isinstance(target, str)
-                dispatched = boolean_dispatched[target]
-                if_true, if_false = dispatched['if_true'], dispatched['if_false']
-                if inspect.signature(if_true).parameters != inspect.signature(if_false).parameters:
-                    return super().call_function(target, args, kwargs)
-                target_for_analysis = if_true
+        def get_type(arg):
+            if isinstance(arg, fx.Node):
+                return n.meta['type'] if 'type' in n.meta else None
+            return type(arg)
 
-            assert callable(target_for_analysis)
-            sig = inspect.signature(inspect.unwrap(target_for_analysis))
-            new_kwargs = self._args_kwargs_to_normalized_kwargs(sig, args, kwargs)
+        arg_types = map_aggregate(n.args, get_type)
+        assert(isinstance(arg_types, tuple))
+        arg_types = tuple([create_type_hint(i) for i in arg_types])
+        kwarg_types = {k: get_type(v) for k, v in kwargs.items()}
+        if n.op == 'call_function':
+            out = self.call_function(n.target, args, kwargs, arg_types, kwarg_types)
         else:
-            assert callable(target)
-            torch_op_schemas = get_signature_for_torch_op(target)
-            if torch_op_schemas:
-                # Iterate through all of the schema until we find one that matches
-                # If one matches, populate `new_kwargs` with the combined args/kwargs
-                # values. If none matches, `new_kwargs` will be None
-                for candidate_signature in torch_op_schemas:
-                    try:
-                        candidate_signature.bind(args, kwargs)
-                        new_kwargs = self._args_kwargs_to_normalized_kwargs(candidate_signature, args, kwargs)
-                        break
-                    except TypeError:
-                        continue
-        if new_kwargs:
-            # FIXME: `target(**kwargs)` doesn't keep things specified as kwargs
-            # in kwargs
-            return self.tracer.create_proxy('call_function', target, (), new_kwargs)
+            out = super().run_node(n)
+        self.node_map[out] = n
+        return out
+
+    def call_function(
+            self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any],
+            arg_types: Optional[Tuple[Any, ...]] = None, kwarg_types : Optional[Dict[str, Any]] = None):
+        assert callable(target)
+        new_args_and_kwargs = normalize_function(target, args, kwargs, arg_types, kwarg_types,  # type: ignore[arg-type]
+                                                 self.normalize_to_only_use_kwargs)
+        if new_args_and_kwargs:
+            new_args, new_kwargs = new_args_and_kwargs
+            return self.tracer.create_proxy('call_function', target, new_args, new_kwargs)
         else:
             return super().call_function(target, args, kwargs)
 
     def call_module(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
         assert isinstance(target, str)
-        submod = self.fetch_attr(target)
-        if self.normalize_modules and hasattr(submod.__class__, '__name__'):
-            classname = submod.__class__.__name__
-            if getattr(torch.nn, classname, None) == submod.__class__:
-                sig = inspect.signature(inspect.unwrap(submod.forward))
-                new_kwargs = self._args_kwargs_to_normalized_kwargs(sig, args, kwargs)
-                if new_kwargs:
-                    return super().call_module(target, (), new_kwargs)
-        return super().call_module(target, args, kwargs)
-
-    def _args_kwargs_to_normalized_kwargs(self, sig : inspect.Signature, args : Tuple[Argument, ...],
-                                          kwargs : Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Given a call target, args, and kwargs, return the arguments normalized into
-        a single kwargs dict, or None if the type signature is not supported by
-        this normalization.
-
-        Args:
-
-            target (inspect.Signature): Signature object for the target
-            args (Tuple): Arguments that appear at the callsite for `target`
-            kwargs (Dict): Keyword arugments that appear at the callsite for `target`
-
-        Returns:
-
-            Optional[Dict]: Normalized kwargs for `target`, or `None` if this target is not
-                supported
-        """
-
-        # Don't currently support positional-only
-        # or varargs (*args, **kwargs) signatures
-        supported_parameter_types = {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
-        if any(p.kind not in supported_parameter_types for p in sig.parameters.values()):
-            return None
-
-        bound_args = sig.bind(*args, **kwargs)
-        bound_args.apply_defaults()
-
-        new_kwargs : Dict[str, Any] = {}
-        for param in sig.parameters:
-            new_kwargs[param] = bound_args.arguments[param]
-
-        return new_kwargs
-
+        new_args_and_kwargs = normalize_module(self.module, target, args, kwargs,  # type: ignore[arg-type]
+                                               self.normalize_to_only_use_kwargs)
+        if new_args_and_kwargs:
+            new_args, new_kwargs = new_args_and_kwargs
+            return super().call_module(target, new_args, new_kwargs)
+        else:
+            return super().call_module(target, args, kwargs)
 
 class NormalizeOperators(AnnotateTypesWithSchema):
     """
