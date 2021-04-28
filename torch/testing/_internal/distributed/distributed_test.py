@@ -1298,6 +1298,8 @@ class DistributedTest:
         def test_broadcast_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_if_small_worldsize
@@ -1319,6 +1321,8 @@ class DistributedTest:
         def test_nccl_high_priority_stream(self):
             group, _, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
 
             new_port = str(MASTER_PORT + 1)
             os.environ['MASTER_PORT'] = new_port
@@ -1373,6 +1377,8 @@ class DistributedTest:
         def test_reduce_sum_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_reduce_helper(
                 group,
                 group_id,
@@ -1537,6 +1543,8 @@ class DistributedTest:
         def test_reduce_sum_cuda_twice(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_reduce_twice_helper(
                 group,
                 group_id,
@@ -2933,6 +2941,8 @@ class DistributedTest:
         def test_reduce_multigpu(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_reduce_multigpu_helper(
                 group,
                 group_id,
@@ -2976,6 +2986,8 @@ class DistributedTest:
         def test_all_gather_multigpu(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU)
 
         @unittest.skipIf(BACKEND != "nccl", "Only Nccl backend supports allgather multigpu")
@@ -2983,6 +2995,8 @@ class DistributedTest:
         def test_all_gather_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU, dtype=torch.cfloat)
 
         def _model_step(self, model):
@@ -3737,7 +3751,7 @@ class DistributedTest:
                 # the run time stats for this idx-th iteration will not
                 # be zeros.
                 ddp_logging_data = model_DDP.get_ddp_logging_data()
-                if (idx > 0 and (idx < 10 or idx % 2 != 0)):
+                if (idx > 0 and (idx < 10 or idx % 2 == 0)):
                     self.assertGreaterEqual(ddp_logging_data.forward_compute_time, 1)
                     self.assertGreaterEqual(ddp_logging_data.backward_compute_time, 1)
                     self.assertGreaterEqual(ddp_logging_data.backward_comm_time, 1)
@@ -3747,11 +3761,12 @@ class DistributedTest:
                     self.assertGreaterEqual(
                         ddp_logging_data.backward_comm_time,
                         ddp_logging_data.backward_compute_comm_overlap_time)
-                else:
-                    self.assertGreaterEqual(ddp_logging_data.forward_compute_time, 0)
-                    self.assertGreaterEqual(ddp_logging_data.backward_compute_comm_overlap_time, 0)
-                    self.assertGreaterEqual(ddp_logging_data.backward_compute_time, 0)
-                    self.assertGreaterEqual(ddp_logging_data.backward_comm_time, 0)
+                    self.assertEqual(ddp_logging_data.iteration, idx)
+                elif idx > 0:
+                    # if the idx-th iteration is not sampled to set runtime stats,
+                    # ddp_logging_data.iteration will not be updated to current
+                    # iteration.
+                    self.assertNotEqual(ddp_logging_data.iteration, idx)
 
                 # Shuffle the input so that DDP input is different
                 input = input[torch.randperm(batch_size)]
@@ -4165,9 +4180,11 @@ class DistributedTest:
                 for tensor in tensor_list:
                     self.assertEqual(tensor, t)
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_sync_params_and_buffers(self):
             # Test that after calling _sync_params_and_buffers, models across ranks
             # are the same and are equal to the model on the input rank.
@@ -4206,9 +4223,11 @@ class DistributedTest:
                 for t, expected in zip(net_module_states, expected_states):
                     self.assertEqual(t, expected)
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_grad_div_uneven_inputs(self):
             # Test gradient division during training with join() API. If
             # divide_by_initial_world_size=False, we scale by the effective world
@@ -4334,9 +4353,11 @@ class DistributedTest:
             )
             self._test_ddp_profiling(profiler_ctx=torch_profiler_ctx)
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_join_model_equivalence(self):
             # Verifies equivalence with model training locally and with DDP under
             # the join context manager.
@@ -4440,9 +4461,11 @@ class DistributedTest:
             self.assertTrue(ddp_logging_data.join_uneven_inputs)
             dist.barrier()
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_uneven_inputs(self):
             dim = 1000
             batch = 1
@@ -4591,9 +4614,11 @@ class DistributedTest:
                     find_unused_params=("unused_params_model" in test_case.name),
                 )
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_uneven_input_join_disable(self):
             # tests that if net.join() with enable=False is specified, DDP works as
             # expected with even inputs.
@@ -4625,9 +4650,11 @@ class DistributedTest:
             self.assertFalse(join_config.ddp_join_enabled)
             self.validate_net_equivalence(net)
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_uneven_input_exception(self):
             # Tests that exceptions during training are correctly propagated by the
             # context manager.
