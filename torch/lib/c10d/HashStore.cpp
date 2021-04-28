@@ -20,21 +20,21 @@ void HashStore::set(const std::string& key, const std::vector<uint8_t>& data) {
 
 std::vector<uint8_t> HashStore::compareSet(
     const std::string& key,
-    const std::vector<uint8_t>& currentValue,
-    const std::vector<uint8_t>& newValue) {
+    const std::vector<uint8_t>& expectedValue,
+    const std::vector<uint8_t>& desiredValue) {
   std::unique_lock<std::mutex> lock(m_);
   auto it = map_.find(key);
   if (it == map_.end()) {
-    if (currentValue.empty()) {
-      map_[key] = newValue;
+    if (expectedValue.empty()) {
+      map_[key] = desiredValue;
       cv_.notify_all();
-      return newValue;
+      return desiredValue;
     }
-    return currentValue;
-  } else if (it->second == currentValue) {
-    map_[key] = newValue;
+    return expectedValue;
+  } else if (it->second == expectedValue) {
+    map_[key] = desiredValue;
     cv_.notify_all();
-    return newValue;
+    return desiredValue;
   }
   return it->second;
 }
