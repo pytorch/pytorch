@@ -869,8 +869,6 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Opt
     if isinstance(obj, ScriptFunction):
         return obj
 
-    qualified_name = _qualified_name(obj)
-
     # If MonkeyType is installed, enable profile directed type annotation
     # Check if example_inputs are defined and generate call traces
     # for the method by running eager mode version of the method with
@@ -879,8 +877,19 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Opt
     if monkeytype_trace:
         monkeytype_config = JitTypeTraceConfig(type_trace_db)
         with monkeytype_trace(monkeytype_config):
-            for example_input in example_inputs:  # type: ignore[union-attr]
-                obj(*example_input)
+            for example_input in example_inputs:
+                # If the obj is an nn.Module or a class, then each method is
+                # executed with the arguments provided in the example inputs.
+                # example inputs here will be of tuple(class.method, (arguments))
+                # This is used to infer type annotations for those methods
+                # which are not called directly under the hood of monkeytype.
+                if isinstance(obj, torch.nn.Module) or inspect.isclass(obj):
+                    for module, example_input in example_inputs:  # type: ignore[union-attr]
+                        for example in example_input:
+                            module(*example)
+                else:
+                    obj(*example_input)
+        print(type_trace_db.trace_records)
     else:
         warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
                       "to enable Profile-Directed Typing in TorchScript. Refer to "
