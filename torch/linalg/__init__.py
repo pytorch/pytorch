@@ -1129,6 +1129,29 @@ Returns:
 
 Examples::
 
+    >>> from torch import linalg as LA
+    >>> A = torch.arange(9, dtype=torch.float).reshape(3, 3)
+    >>> A
+    tensor([[0., 1., 2.],
+            [3., 4., 5.],
+            [6., 7., 8.]])
+    >>> LA.matrix_norm(A)
+    tensor(14.2829)
+    >>> LA.matrix_norm(A, ord=-1)
+    tensor(9.)
+    >>> B = A.expand(2, -1, -1)
+    >>> B
+    tensor([[[0., 1., 2.],
+            [3., 4., 5.],
+            [6., 7., 8.]],
+
+            [[0., 1., 2.],
+            [3., 4., 5.],
+            [6., 7., 8.]]])
+    >>> LA.matrix_norm(B)
+    tensor([14.2829, 14.2829])
+    >>> LA.matrix_norm(B, dim=(0, 2))
+    tensor([ 3.1623, 10.0000, 17.2627])
 """)
 
 multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
