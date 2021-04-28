@@ -150,14 +150,14 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             >>> print(rets[1])  # tensor([2., 2.], device='cuda:1')
         """
         device_index_map = _to_device_index_map(device_map)
-
         curr_device_maps = super().device_maps
+
         if to in curr_device_maps:
             for k, v in device_index_map.items():
                 if k in curr_device_maps[to] and v != curr_device_maps[to][k]:
                     raise ValueError(
-                    "`set_device_map` only supports 1-to-1 mapping, trying "
-                    f"to map {k} to {v} and {curr_device_maps[to][k]}")
+                        "`set_device_map` only supports 1-to-1 mapping, trying "
+                        f"to map {k} to {v} and {curr_device_maps[to][k]}")
 
         super()._set_device_map(to, device_index_map)
 
