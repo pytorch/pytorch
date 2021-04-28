@@ -170,11 +170,14 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> S
     dtype = torch.float64 if actual.dtype.is_floating_point else torch.int64
     a_flat = actual.flatten().to(dtype)
     b_flat = expected.flatten().to(dtype)
+    matches_flat = ~mismatches.flatten()
 
     abs_diff = torch.abs(a_flat - b_flat)
+    abs_diff[matches_flat] = 0
     max_abs_diff, max_abs_diff_flat_idx = torch.max(abs_diff, 0)
 
     rel_diff = abs_diff / torch.abs(b_flat)
+    rel_diff[matches_flat] = 0
     max_rel_diff, max_rel_diff_flat_idx = torch.max(rel_diff, 0)
 
     return SimpleNamespace(
