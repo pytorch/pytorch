@@ -2291,6 +2291,56 @@ Tensor& linalg_vector_norm_out(const Tensor& self, const optional<Scalar>& opt_o
   return at::native::linalg_vector_norm_impl(self, opt_ord, opt_dim, keepdim, opt_dtype, result);
 }
 
+Tensor linalg_matrix_norm(
+    const Tensor& self,
+    const optional<Scalar>& ord,
+    optional<IntArrayRef> dim,
+    bool keepdim,
+    optional<ScalarType> dtype) {
+  TORCH_CHECK(self.ndimension() >= 2, "linalg.matrix_norm(): input tensor must be a matrix or batch of matrices");
+  TORCH_CHECK(!dim.has_value() || dim.value().size() == 2, "linalg.matrix_norm(): dim must be a 2-tuple of ints");
+  return at::native::linalg_norm(
+      self, ord, dim.value_or(IntArrayRef{-2, -1}), keepdim, dtype);
+}
+
+Tensor& linalg_matrix_norm_out(
+    const Tensor& self,
+    const optional<Scalar>& ord,
+    optional<IntArrayRef> dim,
+    bool keepdim,
+    optional<ScalarType> dtype,
+    Tensor& result) {
+  TORCH_CHECK(self.ndimension() >= 2, "linalg.matrix_norm(): input tensor must be a matrix or batch of matrices");
+  TORCH_CHECK(!dim.has_value() || dim.value().size() == 2, "linalg.matrix_norm(): dim must be a 2-tuple of ints");
+  return at::native::linalg_norm_out(
+      self, ord, dim.value_or(IntArrayRef{-2, -1}), keepdim, dtype, result);
+}
+
+Tensor linalg_matrix_norm(
+    const Tensor& self,
+    std::string ord,
+    optional<IntArrayRef> dim,
+    bool keepdim,
+    optional<ScalarType> dtype) {
+  TORCH_CHECK(self.ndimension() >= 2, "linalg.matrix_norm(): input tensor must be a matrix or batch of matrices");
+  TORCH_CHECK(!dim.has_value() || dim.value().size() == 2, "linalg.matrix_norm(): dim must be a 2-tuple of ints");
+  return at::native::linalg_norm(
+      self, ord, dim.value_or(IntArrayRef{-2, -1}), keepdim, dtype);
+}
+
+Tensor& linalg_matrix_norm_out(
+    const Tensor& self,
+    std::string ord,
+    optional<IntArrayRef> dim,
+    bool keepdim,
+    optional<ScalarType> dtype,
+    Tensor& result) {
+  TORCH_CHECK(self.ndimension() >= 2, "linalg.matrix_norm(): input tensor must be a matrix or batch of matrices");
+  TORCH_CHECK(!dim.has_value() || dim.value().size() == 2, "linalg.matrix_norm(): dim must be a 2-tuple of ints");
+  return at::native::linalg_norm_out(
+      self, ord, dim.value_or(IntArrayRef{-2, -1}), keepdim, dtype, result);
+}
+
 // Numerical or None norms
 Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
