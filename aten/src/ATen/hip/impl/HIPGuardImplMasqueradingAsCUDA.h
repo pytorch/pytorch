@@ -316,7 +316,7 @@ struct HIPMultiStreamGuardMasqueradingAsCUDA {
   HIPMultiStreamGuardMasqueradingAsCUDA& operator=(HIPMultiStreamGuardMasqueradingAsCUDA&& other) = delete;
 
 private:
-  c10::impl::InlineMultiStreamGuard<impl::HIPGuardImplMasqueradingAsCUDA> guard_;
+  c10::impl::InlineMultiStreamGuard<HIPGuardImplMasqueradingAsCUDA> guard_;
 
   static std::vector<Stream> unwrapStreams(ArrayRef<HIPStreamMasqueradingAsCUDA> hipStreams) {
     std::vector<Stream> streams;
