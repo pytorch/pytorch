@@ -1306,7 +1306,8 @@ class TestNormalizeOperators(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
-        op_skip = {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma', 'einsum'}
+        op_skip = {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma', 'einsum',
+                   'view', 'view_as'}
         # Unsupported input types
         if op.name in op_skip:
             return
