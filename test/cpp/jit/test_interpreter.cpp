@@ -15,6 +15,7 @@ class TypeCheckTest : public ::testing::Test {
  protected:
   TypeCheckTest() : interp(makeInterp()) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   InterpreterState interp;
 
  private:
@@ -36,6 +37,7 @@ graph(%a.1 : Tensor,
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, MatchingType) {
   // TypeCheck yields to true! Shape, grad and device matches.
   auto a = at::zeros({2, 2}, at::kFloat);
@@ -49,6 +51,7 @@ TEST_F(TypeCheckTest, MatchingType) {
   ASSERT_TRUE(stack[2].toBool());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, SizeMismatch) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({2, 2}, at::kFloat); // Size mismatch
@@ -59,6 +62,7 @@ TEST_F(TypeCheckTest, SizeMismatch) {
   ASSERT_FALSE(stack[2].toBool());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, GradientMismatch) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({3, 3}, at::kFloat);
@@ -69,6 +73,7 @@ TEST_F(TypeCheckTest, GradientMismatch) {
   ASSERT_FALSE(stack[2].toBool());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, ScalarTypeMismatch) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({3, 3}, at::kFloat);
@@ -80,6 +85,7 @@ TEST_F(TypeCheckTest, ScalarTypeMismatch) {
   ASSERT_FALSE(stack[2].toBool());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, DeviceMismatch_CUDA) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({3, 3}, at::kFloat);
@@ -122,6 +128,7 @@ TEST_F(TypeCheckTest, DeviceMismatch_CUDA) {
 //       vmap));
 // }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InterpreterTest, Basic_CUDA) {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -145,6 +152,7 @@ TEST(InterpreterTest, Basic_CUDA) {
   ASSERT_TRUE(exactlyEqual(outputs[1], cx));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InterpreterTest, IgnorableArgsInSchema) {
   auto graph = build_mobile_export_analysis_graph();
   MobileCode function(graph, "");
@@ -173,6 +181,7 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   ASSERT_TRUE(op_to_specified_args_non_const["aten::conv2d"] == 6);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InterpreterTest, runAsyncBasicTest) {
   /*
   TODO: there are some problem with C++ parsing script program involving
@@ -203,6 +212,7 @@ TEST(InterpreterTest, runAsyncBasicTest) {
     at::launch(f);
   };
   std::vector<IValue> stack;
+  // NOLINTNEXTLINE(modernize-use-emplace)
   stack.push_back(model._ivalue());
   InterpreterState interp(function, launcher);
   interp.runAsync(stack)->wait();
