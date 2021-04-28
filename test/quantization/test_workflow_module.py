@@ -54,12 +54,14 @@ from torch.testing._internal.common_quantized import (
 )
 
 # Reference method for fake quantize
+# Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
     dtype = X.dtype
     res = ((torch.clamp(torch.round(X.to(torch.float32) * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale)
     return res.to(dtype)
 
 # Reference method for the gradient of the fake quantize operator
+# Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
 def _fake_quantize_per_tensor_affine_grad_reference(dY, X, scale, zero_point, quant_min, quant_max):
     dtype = X.dtype
     Xq = torch.round(X.to(torch.float32) * (1.0 / scale) + zero_point)
@@ -116,6 +118,7 @@ def _permute_to_axis_zero(X, axis):
     return y, new_axis_list
 
 # Reference method for fake quantize
+# Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
 def _fake_quantize_per_channel_affine_reference(X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max):
     dtype = X.dtype
     X, permute_axis_list = _permute_to_axis_zero(X.to(torch.float32), axis)
@@ -129,6 +132,7 @@ def _fake_quantize_per_channel_affine_reference(X, per_channel_scale, per_channe
     return out.to(dtype)
 
 # Reference method for the gradient of the fake quantize operator
+# Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
 def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max):
     dtype = X.dtype
     X, permute_axis_list = _permute_to_axis_zero(X.to(torch.float32), axis)
@@ -920,6 +924,7 @@ class TestFakeQuantize(TestCase):
             Y_ref = _fake_quantize_per_tensor_affine_reference(
                 X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
             self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
+            self.assertTrue(Y_test.dtype == float_type)
 
     def test_forward_per_tensor_cachemask_cpu(self):
         device = torch.device('cpu')
@@ -956,6 +961,7 @@ class TestFakeQuantize(TestCase):
                 dout, X, scale, zero_point, quant_min, quant_max)
             Y_test.backward(dout)
             self.assertTrue(torch.allclose(dX, X.grad))
+            self.assertTrue(X.grad.dtype == float_type)
 
     def test_backward_per_tensor_cachemask_cpu(self):
         device = torch.device('cpu')
@@ -1295,6 +1301,7 @@ class TestFakeQuantize(TestCase):
             Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
             np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
+            self.assertTrue(Y.dtype ==float_type)
 
     def test_forward_per_channel_cachemask_cpu(self):
         self._test_forward_per_channel_cachemask_impl('cpu')
@@ -1424,7 +1431,7 @@ class TestFakeQuantize(TestCase):
             Y_prime.backward(dout)
             np.testing.assert_allclose(
                 dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
-            assert(dX.dtype == float_type)
+            assert(X.grad.dtype == float_type)
 
 
     def test_backward_per_channel_cachemask_cpu(self):
