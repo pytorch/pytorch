@@ -1275,17 +1275,35 @@ Tensor& bmm_out_cpu(const Tensor& batch1, const Tensor& batch2, Tensor &result) 
   return result;
 }
 
-Tensor& dot_out(const Tensor& self, const Tensor& tensor, Tensor& result) {
+Tensor& dot_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto output_device = result.device();
+  auto input1_device = self.device();
+  auto input2_device = other.device();
+  // check if the input & output tensors are on the same device.
+  TORCH_CHECK(
+    (output_device == input1_device) && (input1_device == input2_device),
+    "dot: Expected the output and input tensors to be on the "
+    "same device, but got the output tensor on ", output_device,
+    ", the 'input' tensor on ", input1_device, ", and the 'other' tensor on ", input2_device);
   at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-           "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
-  return result.fill_(self.dot(tensor));
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
+  return result.fill_(self.dot(other));
 }
 
 Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto output_device = result.device();
+  auto input1_device = self.device();
+  auto input2_device = other.device();
+  // check if the input & output tensors are on the same device.
+  TORCH_CHECK(
+    (output_device == input1_device) && (input1_device == input2_device),
+    "vdot: Expected the output and input tensors to be on the "
+    "same device, but got the output tensor on ", output_device,
+    ", the 'input' tensor on ", input1_device, ", and the 'other' tensor on ", input2_device);
   at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-           "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
   return result.fill_(self.vdot(other));
 }
 
