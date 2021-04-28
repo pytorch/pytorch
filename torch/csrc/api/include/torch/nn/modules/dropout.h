@@ -16,12 +16,14 @@ namespace nn {
 namespace detail {
 
 template <typename Derived>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class _DropoutNd : public torch::nn::Cloneable<Derived> {
  public:
   _DropoutNd(double p) : _DropoutNd(DropoutOptions().p(p)) {};
 
   explicit _DropoutNd(const DropoutOptions& options_ = {})
     : options(options_) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     reset();
   }
 
@@ -51,6 +53,7 @@ class _DropoutNd : public torch::nn::Cloneable<Derived> {
 /// ```
 /// Dropout model(DropoutOptions().p(0.42).inplace(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API DropoutImpl : public detail::_DropoutNd<DropoutImpl> {
 public:
   using detail::_DropoutNd<DropoutImpl>::_DropoutNd;
@@ -81,6 +84,7 @@ TORCH_MODULE(Dropout);
 /// ```
 /// Dropout2d model(Dropout2dOptions().p(0.42).inplace(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Dropout2dImpl : public detail::_DropoutNd<Dropout2dImpl> {
 public:
   using detail::_DropoutNd<Dropout2dImpl>::_DropoutNd;
