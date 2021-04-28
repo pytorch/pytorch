@@ -686,10 +686,10 @@ class TestTensorCreation(TestCase):
         self.assertEqual(res1, res2)
         self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
         # discontiguous channels-last inputs
-        x = torch.arange(24, dtype=torch.float, device=device).reshape(2,2,3,2).to(memory_format=torch.channels_last)
-        x1 = x[:,:,:2]
-        x2 = x[:,:,1:]
-        res1 = torch.cat((x1,x2), dim=-1)
+        x = torch.arange(24, dtype=torch.float, device=device).reshape(2, 2, 3, 2).to(memory_format=torch.channels_last)
+        x1 = x[:, :, :2]
+        x2 = x[:, :, 1:]
+        res1 = torch.cat((x1, x2), dim=-1)
         res2 = torch.cat((x1.contiguous(), x2.contiguous()), dim=-1)
         self.assertEqual(res1, res2)
         self.assertTrue(res1.is_contiguous(memory_format=torch.channels_last))
