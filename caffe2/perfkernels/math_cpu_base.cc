@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "common.h"
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include "math.h"
 
 #include <c10/util/irange.h>
@@ -27,6 +28,7 @@ void quantize_and_compress__base(
     uint64_t bitwidth,
     bool random,
     const float* random_buffer) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   uint64_t data_per_byte = 8 / bitwidth;
   uint64_t tail = input_size % data_per_byte;
   tail = tail ? data_per_byte - tail : 0;
@@ -45,7 +47,9 @@ void quantize_and_compress__base(
   reinterpret_cast<float*>(output_data + 2)[0] = minimum_element;
   reinterpret_cast<float*>(output_data + 2)[1] = maximum_element;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float gap = (maximum_element - minimum_element) / ((1 << bitwidth) - 1.0f);
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float gap_inverse = 1. / (gap + QEPSILON);
   uint8_t max_q = (1 << bitwidth) - 1;
   uint64_t bit_start = 0;
@@ -64,7 +68,9 @@ void quantize_and_compress__base(
         rounded = rounded > 0.0f ? rounded : 0.0f;
         uint8_t qval = rounded;
 
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         uint8_t orval = output_data[10 + i];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         output_data[10 + i] = orval | static_cast<uint8_t>(qval << bit_start);
       }
       bit_start += bitwidth;
@@ -83,7 +89,9 @@ void quantize_and_compress__base(
         thetimes = thetimes > 0.0f ? thetimes : 0.0f;
         uint8_t qval = nearbyint(thetimes);
 
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         uint8_t orval = output_data[10 + i];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         output_data[10 + i] = orval | static_cast<uint8_t>(qval << bit_start);
       }
       bit_start += bitwidth;
@@ -128,6 +136,7 @@ void decompress_and_dequantize__base(
       reinterpret_cast<const float*>(input_data + 2)[1];
   const uint64_t bitwidth = input_data[0];
   const float gap =
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       (maximum_element - minimum_element) / ((1 << bitwidth) - 1.f) +
       QEPSILON; // for exact recovering
 
@@ -144,6 +153,7 @@ void decompress_and_dequantize__base(
     uint64_t i = 0;
     for (; i < stride; ++i) {
       output_data[start + i] =
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
           ((input_data[10 + i] >> bit_start) & mask) * gap + minimum_element;
     }
     bit_start += bitwidth;
