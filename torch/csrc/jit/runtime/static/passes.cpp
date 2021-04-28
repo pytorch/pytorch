@@ -485,12 +485,12 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
     if (strcmp(node_qual_string, "fb::sigrid_transforms") == 0 ||
         strcmp(node_qual_string, "fb::sigrid_transforms_torch_bind") == 0 ||
         strcmp(node_qual_string, "fb::equally_split") == 0) {
-      const Value* sigrid_out = node->outputs()[0];
-      if (sigrid_out->uses().size() > 1) {
+      const Value* value_out = node->outputs()[0];
+      if (value_out->uses().size() > 1) {
         continue;
       }
 
-      Node* list_unpack_node = sigrid_out->uses()[0].user;
+      Node* list_unpack_node = value_out->uses()[0].user;
       if (list_unpack_node->kind() != prim::ListUnpack) {
         continue;
       }
@@ -515,5 +515,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
     }
   }
 }
+
 } // namespace jit
 } // namespace torch

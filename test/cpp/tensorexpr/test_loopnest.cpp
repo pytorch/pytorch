@@ -5377,5 +5377,352 @@ TEST(LoopNest, reorderInvalidLoopNest) {
       "reorder is only allowed on perfectly nested loops");
 }
 
+TEST(LoopNest, compressBufferSimple) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[i,j] = sin(i*j)
+  //   }
+  //   for (int j = 0; j < 199; ++j) {
+  //     B[i,j] = A[i,j] + A[i, j+1]
+  //   }
+  // }
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {i, j}, sin(i * j)));
+  auto forJ2 = For::make(
+      j,
+      0,
+      199,
+      Store::make(
+          b_buf,
+          {i, j},
+          Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j + 1}))));
+  auto forI = For::make(i, 0, 100, Block::make({forJ1, forJ2}));
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[0, j] =
+# CHECK: for (int j
+# CHECK-NEXT: B[i, j] = (A[0, j]) + (A[0, j + 1])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+}
+
+TEST(LoopNest, compressBufferMultipleDims) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[i,j] = sin(i*j)
+  //     B[i,j] = A[i,j] + A[i,j]
+  //   }
+  // }
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto store1 = Store::make(a_buf, {i, j}, sin(i * j));
+  auto store2 = Store::make(
+      b_buf,
+      {i, j},
+      Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j})));
+  auto forJ = For::make(j, 0, 200, Block::make({store1, store2}));
+  auto forI = For::make(i, 0, 100, forJ);
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[0, 0] =
+# CHECK-NEXT: B[i, j] = (A[0, 0]) + (A[0, 0])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 1);
+}
+
+TEST(LoopNest, compressBufferMultipleDims2) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     for (int k = 0; k < 300; ++k) {
+  //       A[i,j,k] = sin(i*j*k)
+  //     }
+  //     for (int k = 0; k < 299; ++j) {
+  //       B[i,j,k] = A[i,j,k] + A[i,j,k+1]
+  //     }
+  //   }
+  // }
+  Buf* A =
+      new Buf("A", {new IntImm(100), new IntImm(200), new IntImm(300)}, kInt);
+  Buf* B =
+      new Buf("B", {new IntImm(100), new IntImm(200), new IntImm(300)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store1 = Store::make(a_buf, {i, j, k}, sin(i * j * k));
+  auto forK1 = For::make(k, 0, 300, store1);
+  auto store2 = Store::make(
+      b_buf,
+      {i, j, k},
+      Add::make(
+          Load::make(a_buf, {i, j, k}), Load::make(a_buf, {i, j, k + 1})));
+  auto forK2 = For::make(k, 0, 299, store2);
+  auto forJ = For::make(j, 0, 200, Block::make({forK1, forK2}));
+  auto forI = For::make(i, 0, 100, forJ);
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: for (int k
+# CHECK-NEXT: A[0, 0, k] =
+# CHECK: for (int k
+# CHECK-NEXT: B[i, j, k] = (A[0, 0, k]) + (A[0, 0, k + 1])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 3);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(2))->value(), 300);
+}
+
+TEST(LoopNest, compressBufferDifferentOrderIndices) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[j, i] = sin(i*j)
+  //   }
+  //   for (int j = 0; j < 99; ++j) {
+  //     B[i, j] = A[j, i] + A[j+1, 0]
+  //   }
+  // }
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {j, i}, sin(i * j)));
+  auto forJ2 = For::make(
+      j,
+      0,
+      99,
+      Store::make(
+          b_buf,
+          {i, j},
+          Add::make(Load::make(a_buf, {j, i}), Load::make(a_buf, {j + 1, i}))));
+  auto forI = For::make(i, 0, 100, Block::make({forJ1, forJ2}));
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[j, 0] =
+# CHECK: for (int j
+# CHECK-NEXT: B[i, j] = (A[j, 0]) + (A[j + 1, 0])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 100);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 1);
+}
+
+TEST(LoopNest, compressBufferVariableBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < M; ++i) {
+  //   for (int j = 0; j < N; ++j) {
+  //     A[i,j] = sin(i*j)
+  //   }
+  //   for (int j = 0; j < N-1; ++j) {
+  //     B[i,j] = A[i,j] + A[i, j+1]
+  //   }
+  // }
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle M("M", kInt);
+  VarHandle N("N", kInt);
+  auto forJ1 = For::make(j, 0, N, Store::make(a_buf, {i, j}, sin(i * j)));
+  auto forJ2 = For::make(
+      j,
+      0,
+      N - 1,
+      Store::make(
+          b_buf,
+          {i, j},
+          Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j + 1}))));
+  auto forI = For::make(i, 0, M, Block::make({forJ1, forJ2}));
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[0, j] =
+# CHECK: for (int j
+# CHECK-NEXT: B[i, j] = (A[0, j]) + (A[0, j + 1])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+}
+
+TEST(LoopNest, compressBufferNoCommonParentLoops) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[i,j] = sin(i*j)
+  //   }
+  // }
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 199; ++j) {
+  //     B[i,j] = A[i,j] + A[i, j+1]
+  //   }
+  // }
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {i, j}, sin(i * j)));
+  auto forJ2 = For::make(
+      j,
+      0,
+      199,
+      Store::make(
+          b_buf,
+          {i, j},
+          Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j + 1}))));
+  auto forI1 = For::make(i, 0, 100, forJ1);
+  auto forI2 = For::make(i, 0, 100, forJ2);
+  auto par = Block::make({forI1, forI2});
+  LoopNest::compressBuffer(A, par);
+
+  // There should be no change in the buffer or code.
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i, j] =
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: B[i, j] = (A[i, j]) + (A[i, j + 1])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 100);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+}
+
+TEST(LoopNest, compressBufferIndicesMixed) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[i + j, j] = sin(i*j)
+  //   }
+  //   for (int j = 0; j < 199; ++j) {
+  //     B[i,j] = A[i + j, j] + A[i + j, j+1]
+  //   }
+  // }
+  Buf* A = new Buf("A", {new IntImm(300), new IntImm(200)}, kInt);
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {i + j, j}, sin(i * j)));
+  auto forJ2 = For::make(
+      j,
+      0,
+      199,
+      Store::make(
+          b_buf,
+          {i, j},
+          Add::make(
+              Load::make(a_buf, {i + j, j}),
+              Load::make(a_buf, {i + j, j + 1}))));
+  auto forI = For::make(i, 0, 100, Block::make({forJ1, forJ2}));
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  // There should be no change in the buffer or code.
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i + j, j] =
+# CHECK: for (int j
+# CHECK-NEXT: B[i, j] = (A[i + j, j]) + (A[i + j, j + 1])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 300);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+}
+
 } // namespace jit
 } // namespace torch

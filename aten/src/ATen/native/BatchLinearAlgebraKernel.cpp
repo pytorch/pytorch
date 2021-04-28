@@ -331,6 +331,78 @@ void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos
 }
 
 /*
+  The geqrf function computes the QR decomposition of matrices stored in `input`.
+  However, rather than producing a Q matrix directly, it produces a sequence of
+  elementary reflectors which may later be composed to construct Q - for example
+  with the orgqr or ormqr functions.
+
+  Args:
+  * `input` - [in] Input tensor for QR decomposition
+              [out] QR decomposition result which contains:
+              i)  The elements of R, on and above the diagonal.
+              ii) Directions of the reflectors implicitly defining Q.
+             Tensor with the directions of the elementary reflectors below the diagonal,
+              it will be overwritten with the result
+  * `tau` - [out] Tensor which will contain the magnitudes of the reflectors
+            implicitly defining Q.
+  * `m` - The number of rows of `input` to consider
+  * `n` - The number of columns of `input` to consider (actual sizes of `input` could be larger)
+
+  For further details, please see the LAPACK documentation for GEQRF.
+*/
+template <typename scalar_t>
+static void apply_geqrf(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+#ifndef USE_LAPACK
+  TORCH_CHECK(
+      false,
+      "Calling torch.geqrf on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  auto input_data = input.data_ptr<scalar_t>();
+  auto tau_data = tau.data_ptr<scalar_t>();
+  auto input_matrix_stride = matrixStride(input);
+  auto tau_stride = tau.size(-1);
+  auto batch_size = batchCount(input);
+  auto lda = std::max<int>(1, m);
+
+  int info;
+  // Run once, first to get the optimum work size.
+  // Since we deal with batches of matrices with the same dimensions, doing this outside
+  // the loop saves (batch_size - 1) workspace queries which would provide the same result
+  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
+  int lwork = -1;
+  scalar_t wkopt;
+  lapackGeqrf<scalar_t>(m, n, input_data, lda, tau_data, &wkopt, lwork, &info);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+
+  // if lwork is less than 'n' then a warning is printed:
+  // Intel MKL ERROR: Parameter 7 was incorrect on entry to SGEQRF.
+  lwork = std::max<int>(std::max<int>(1, n), real_impl<scalar_t, value_t>(wkopt));
+  Tensor work = at::empty({lwork}, input.options());
+
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+
+    // now compute the actual QR and tau
+    lapackGeqrf<scalar_t>(m, n, input_working_ptr, lda, tau_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
+
+    // info from lapackGeqrf only reports if the i-th parameter is wrong
+    // so we don't need to check it all the time
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+  }
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_geqrf'
+void geqrf_kernel(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_cpu", [&]{
+    apply_geqrf<scalar_t>(input, tau, m, n);
+  });
+}
+
+/*
   The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
   from a sequence of elementary reflectors, such as produced by the geqrf function.
 
@@ -480,6 +552,11 @@ REGISTER_ARCH_DISPATCH(linalg_eigh_stub, DEFAULT, &linalg_eigh_kernel);
 REGISTER_AVX_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 REGISTER_AVX2_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 REGISTER_VSX_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
+
+REGISTER_ARCH_DISPATCH(geqrf_stub, DEFAULT, &geqrf_kernel);
+REGISTER_AVX_DISPATCH(geqrf_stub, &geqrf_kernel);
+REGISTER_AVX2_DISPATCH(geqrf_stub, &geqrf_kernel);
+REGISTER_VSX_DISPATCH(geqrf_stub, &geqrf_kernel);
 
 REGISTER_ARCH_DISPATCH(orgqr_stub, DEFAULT, &orgqr_kernel_impl);
 REGISTER_AVX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);

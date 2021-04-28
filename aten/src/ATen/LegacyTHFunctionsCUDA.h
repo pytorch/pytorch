@@ -20,12 +20,6 @@ namespace cuda {
 
 Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, const Scalar& value);
 Tensor & _th_masked_fill_bool_(Tensor & self, const Tensor & mask, const Scalar& value);
-std::tuple<Tensor &,Tensor &> _th_sort_out(const Tensor & self, int64_t dim, bool descending, Tensor & values, Tensor & indices);
-std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending);
-std::tuple<Tensor &,Tensor &> _th_sort_out_stable(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices);
-std::tuple<Tensor,Tensor> _th_sort_stable(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending);
-std::tuple<Tensor &,Tensor &> _th_topk_out(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted, Tensor & values, Tensor & indices);
-std::tuple<Tensor,Tensor> _th_topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted);
 Tensor & _th_renorm_out(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm, Tensor & result);
 Tensor _th_renorm(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm);
 Tensor & _th_renorm_(Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm);
@@ -35,8 +29,6 @@ std::tuple<Tensor &,Tensor &> _th_gels_out(const Tensor & self, const Tensor & A
 std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A);
 Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper);
 Tensor _th_potri(const Tensor & self, bool upper);
-std::tuple<Tensor &,Tensor &> _th_geqrf_out(const Tensor & self, Tensor & res1, Tensor & res2);
-std::tuple<Tensor,Tensor> _th_geqrf(const Tensor & self);
 Tensor & _th_copy_ignoring_overlaps_(Tensor & self, const Tensor & src);
 Tensor & _thnn_multi_margin_loss_forward_out(const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor & output);
 Tensor _thnn_multi_margin_loss_forward(const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const optional<Tensor> & weight, int64_t reduction);

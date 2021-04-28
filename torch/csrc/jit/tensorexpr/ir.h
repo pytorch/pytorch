@@ -147,7 +147,7 @@ class BinaryOpNode : public ExprNode<Op> {
       const Expr* lhs_v,
       const Expr* rhs_v,
       IRNodeType expr_type,
-      ScalarType ret_type = ScalarType::None)
+      ScalarType ret_type = ScalarType::Undefined)
       : ExprNode<Op>(
             BinaryOpDtype(lhs_v->dtype(), rhs_v->dtype(), ret_type),
             expr_type),
@@ -433,6 +433,10 @@ class TORCH_API Load : public ExprNode<Load> {
 
   Load(Dtype dtype, const Buf* base_handle, std::vector<const Expr*> indices);
   Load(const Buf* base_handle, const std::vector<const Expr*>& indices);
+
+  void set_indices(std::vector<const Expr*> indices) {
+    indices_ = indices;
+  };
 
  private:
   const Buf* buf_;
