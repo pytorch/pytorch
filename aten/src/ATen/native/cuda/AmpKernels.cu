@@ -101,7 +101,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
   TORCH_CHECK(found_inf.scalar_type() == at::ScalarType::Float, "found_inf must be a float tensor.");
 
   // Ensures client code (GradScaler) filtered scaled_grads by dtype.
-  check_foreach_api_restrictions(scaled_grads);
+  check_foreach_api_restrictions(scaled_grads, /* check_dtype = */true);
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
 
