@@ -355,14 +355,14 @@ class TORCH_API OwnerRRef final : public RRef {
       worker_id_t ownerId,
       const RRefId& rrefId,
       TypePtr type,
-      c10::optional<std::vector<c10::DeviceIndex>> devices = {});
+      std::vector<c10::DeviceIndex> devices = {});
 
   OwnerRRef(
       worker_id_t ownerId,
       const RRefId& rrefId,
       TypePtr type,
       c10::optional<IValue> value,
-      c10::optional<std::vector<c10::DeviceIndex>> devices = {});
+      std::vector<c10::DeviceIndex> devices = {});
 
   inline bool isOwner() const override {
     return true;
@@ -407,7 +407,6 @@ class TORCH_API OwnerRRef final : public RRef {
  private:
   // a storage for device events for synchronization.
   std::vector<c10::Event> events_;
-  c10::optional<std::vector<c10::DeviceIndex>> devices_;
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const RRef& rref);

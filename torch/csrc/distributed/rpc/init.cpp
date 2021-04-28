@@ -226,10 +226,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               py::init<
                   const py::object&,
                   const py::object&,
-                  optional<std::vector<c10::DeviceIndex>>>(),
+                  std::vector<c10::DeviceIndex>>(),
               py::arg("value"),
               py::arg("type_hint") = py::none(),
-              py::arg("devices") = optional<std::vector<c10::DeviceIndex>>())
+              py::kw_only(),
+              py::arg("devices") = std::vector<c10::DeviceIndex>())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",

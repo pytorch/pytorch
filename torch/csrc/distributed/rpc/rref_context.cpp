@@ -313,7 +313,7 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
 c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     const RRefId& rrefId,
     const TypePtr& type,
-    c10::optional<std::vector<c10::DeviceIndex>> devices) {
+    std::vector<c10::DeviceIndex> devices) {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
@@ -369,7 +369,7 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
 
 c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
     const TypePtr& type,
-    c10::optional<std::vector<c10::DeviceIndex>> devices) {
+    std::vector<c10::DeviceIndex> devices) {
   // Don't add this OnwerRRef to the owners_ map yet, otherwise
   // it will never be removed from there. Instead, only add it to the
   // map in prepareChildFork, in case this local RRef is being passed
