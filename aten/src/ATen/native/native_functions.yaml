@@ -8972,3 +8972,8 @@
   variants: function
   dispatch:
     CPU, CUDA: segment_reduce_kernel
+
+- func: segment_reduce_backward(Tensor grad, Tensor output, Tensor data, *, Tensor? lengths=None) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: segment_reduce_backward_kernel
