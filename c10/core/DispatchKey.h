@@ -67,15 +67,6 @@ enum class DispatchKey : uint8_t {
   Metal,
   XPU, // For out of tree Intel's heterogeneous computing plug-in
 
-  // These are Caffe2 device types which we grandfathered into
-  // DispatchKey.
-  // TODO: Caffe2-only DispatchKeys actually should be removed from this enum
-  // and just simply be undispatchable.
-  MKLDNN, // (MKLDNN is treated as another "device" in Caffe2)
-  OpenGL,
-  OpenCL,
-  IDEEP,
-
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
   // A meta tensor can be used to dry run operators without actually doing any
