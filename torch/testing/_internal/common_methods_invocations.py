@@ -401,7 +401,7 @@ class UnaryUfuncInfo(OpInfo):
         self._domain_eps = 1e-5
 
 
-def sample_inputs_binary(op_info, device, dtype, requires_grad):
+def sample_inputs_binary(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
     if low is not None:
         low += op_info._domain_eps
@@ -437,6 +437,7 @@ def sample_inputs_binary(op_info, device, dtype, requires_grad):
             SampleInput(
                 make_tensor(shape_1, device, dtype, low=low, high=high, requires_grad=requires_grad),
                 args=(arg,),
+                kwargs=kwargs,
                 broadcasts_input=broadcasts_input,
             )
         )
@@ -3946,30 +3947,33 @@ op_db: List[OpInfo] = [
            op=torch.diff,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_diff),
-    OpInfo('div',
-           variant_test_name='no_rounding_mode',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_div,
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
-           assert_autodiffed=True),
-    OpInfo('div',
-           variant_test_name='true_rounding',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_div, rounding_mode=None),
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
-           assert_autodiffed=True),
-    OpInfo('div',
-           variant_test_name='trunc_rounding',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_div, rounding_mode='trunc'),
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
-           assert_autodiffed=True),
-    OpInfo('div',
-           variant_test_name='floor_rounding',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_div, rounding_mode='floor'),
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
-           assert_autodiffed=True),
+    BinaryUfuncInfo(
+        "div",
+        variant_test_name="no_rounding_mode",
+        aliases=("divide",),
+        ref=np.divide,
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=True,
+    ),
+    BinaryUfuncInfo(
+        "div",
+        variant_test_name="true_rounding",
+        aliases=("true_divide",),
+        ref=np.true_divide,
+        sample_inputs_func=partial(sample_inputs_binary, rounding_mode=None),
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=True,
+    ),
+    BinaryUfuncInfo(
+        "div",
+        variant_test_name="floor_rounding",
+        aliases=("floor_divide",),
+        ref=np.floor_divide,
+        domain=(1.0, None),
+        sample_inputs_func=partial(sample_inputs_binary, rounding_mode="floor"),
+        dtypes=all_types_and(torch.half, torch.bfloat16),
+        supports_out=True,
+    ),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half),
@@ -5643,19 +5647,6 @@ op_db: List[OpInfo] = [
         ref=np.subtract,
         supports_out=True,
     ),
-    BinaryUfuncInfo(
-        "div",
-        aliases=("divide",),
-        ref=np.divide,
-        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-        supports_out=True,
-    ),
-    BinaryUfuncInfo(
-        "true_divide",
-        ref=np.true_divide,
-        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-        supports_out=True,
-    )
 ]
 
 # Common operator groupings
