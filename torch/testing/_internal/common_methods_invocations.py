@@ -186,7 +186,8 @@ class OpInfo(object):
                  gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs),  # wrapper function for gradcheck
                  check_batched_grad=True,  # check batched grad when doing gradcheck
                  check_batched_gradgrad=True,  # check batched grad grad when doing gradgradcheck
-                 gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
+                 gradcheck_nondet_tol=None,  # tolerance for nondeterminism while performing gradcheck
+                 gradcheck_atol=None,  # absolute tolerance
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
                                             # function around gradcheck (testing._internal.common_utils.gradcheck)
@@ -243,6 +244,7 @@ class OpInfo(object):
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
+        self.gradcheck_atol = gradcheck_atol
         self.gradcheck_fast_mode = gradcheck_fast_mode
 
         self.supports_sparse = supports_sparse

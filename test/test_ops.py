@@ -1,5 +1,6 @@
 from functools import partial, wraps
 import warnings
+import copy
 
 import torch
 
@@ -88,6 +89,36 @@ class TestOpInfo(TestCase):
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
                          allowed_dtypes=[torch.double, torch.cdouble])
 
+def get_gradcheck_kwargs(op):
+    # Map from op attr to name of the param passed to gradcheck
+    gradcheck_kwarg_name_mappings = {
+        "check_batched_grad": "check_batched_grad",
+        "check_grad_dtypes": "check_grad_dtypes",
+        "gradcheck_nondet_tol": "nondet_tol",
+        "gradcheck_atol": "atol",
+        "gradcheck_fast_mode": "fast_mode",
+    }
+    gradgradcheck_kwarg_name_mappings = {
+        "check_batched_gradgrad": "check_batched_grad",
+    }
+    # Initialize kwargs with hardcoded settings
+    gradcheck_kwargs = {
+        "check_grad_dtypes": True,
+    }
+    for op_param_name, param_name in gradcheck_kwarg_name_mappings:
+        param_value = getattr(op, op_param_name, None)
+        # Do not pass even when value is explicitly set to None
+        if param_value is not None:
+            gradcheck_kwargs[param_name] = param_value
+    # gradgradcheck inherits the kwargs fromn gradcheck. We then override
+    # them wtih settings specific to gradgradcheck
+    gradgradcheck_kwargs = copy.copy(gradcheck_kwargs)
+    for op_param_name, param_name in gradgradcheck_kwarg_name_mappings:
+        param_value = getattr(op, op_param_name, None)
+        # Do not pass even when value is explicitly set to None
+        if param_value is not None:
+            gradgradcheck_kwargs[param_name] = param_value
+    return gradcheck_kwargs, gradgradcheck_kwargs
 
 class TestGradients(TestCase):
     exact_dtype = True
@@ -132,29 +163,18 @@ class TestGradients(TestCase):
                     return sample.output_process_fn_grad(output)
                 return output
 
-            # Splat TensorList inputs into single Tensor inputs
+            # Split TensorList inputs into single Tensor inputs
             gradcheck_args = (sample.input,) if isinstance(sample.input, torch.Tensor) else tuple(sample.input)
             gradcheck_args += sample.args
+            gradcheck_kwargs, gradgradcheck_kwargs = get_gradcheck_kwargs(op)
 
             if check == 'gradcheck':
-                self.assertTrue(gradcheck(fn, gradcheck_args,
-                                          check_batched_grad=op.check_batched_grad,
-                                          check_grad_dtypes=True,
-                                          nondet_tol=op.gradcheck_nondet_tol,
-                                          fast_mode=op.gradcheck_fast_mode))
+                self.assertTrue(gradcheck(fn, gradcheck_args, **gradcheck_kwargs))
             elif check == 'gradgradcheck':
-                self.assertTrue(gradgradcheck(fn, gradcheck_args,
-                                              gen_non_contig_grad_outputs=False,
-                                              check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True,
-                                              nondet_tol=op.gradcheck_nondet_tol,
-                                              fast_mode=op.gradcheck_fast_mode))
-                self.assertTrue(gradgradcheck(fn, gradcheck_args,
-                                              gen_non_contig_grad_outputs=True,
-                                              check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True,
-                                              nondet_tol=op.gradcheck_nondet_tol,
-                                              fast_mode=op.gradcheck_fast_mode))
+                gradgradcheck_kwargs["gen_non_contig_grad_outputs"] = False
+                self.assertTrue(gradgradcheck(fn, gradcheck_args, **gradcheck_kwargs))
+                gradgradcheck_kwargs["gen_non_contig_grad_outputs"] = True
+                self.assertTrue(gradgradcheck(fn, gradcheck_args, **gradcheck_kwargs))
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 

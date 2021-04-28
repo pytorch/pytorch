@@ -2196,9 +2196,7 @@ def gradcheck(fn, inputs, **kwargs):
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
-        # default value override values explicitly set to None
-        k = kwargs.get(key, None)
-        kwargs[key] = k if k is not None else value
+        kwargs[key] = value
 
     return torch.autograd.gradcheck(fn, inputs, **kwargs)
 
@@ -2216,9 +2214,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
-        # default value override values explicitly set to None
-        k = kwargs.get(key, None)
-        kwargs[key] = k if k is not None else value
+        kwargs[key] = value
 
     return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
 
