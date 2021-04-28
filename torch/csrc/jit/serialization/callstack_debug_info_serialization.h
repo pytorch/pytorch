@@ -38,6 +38,10 @@ class InlinedCallStackSerializer {
   // InlinedCallStackPtr can refer to the same one.
   ska::flat_hash_map<InlinedCallStackPtr, c10::IValue>
       serialized_inlined_callstack_;
+  // This caches serialized module instance info.
+  // There might be many nodes that are part of the same
+  // parent, grandparent etc. module.
+  ska::flat_hash_map<std::string, c10::IValue> serialized_module_instance_info_;
 };
 
 class TORCH_API CallStackDebugInfoPickler {
@@ -67,6 +71,8 @@ class InlinedCallStackDeserializer {
   ska::
       flat_hash_map<c10::intrusive_ptr<c10::ivalue::Tuple>, InlinedCallStackPtr>
           cached_inlined_callstacks_;
+  ska::flat_hash_map<c10::intrusive_ptr<c10::ivalue::Tuple>, ModuleInstanceInfo>
+      cached_module_instance_info_;
 };
 
 class TORCH_API CallStackDebugInfoUnpickler {

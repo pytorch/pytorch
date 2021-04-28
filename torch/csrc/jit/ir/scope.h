@@ -66,6 +66,7 @@ struct ModuleInstanceInfo {
   std::string instance_name_;
 
  public:
+  ModuleInstanceInfo() = default;
   ModuleInstanceInfo(c10::ClassTypePtr module_type, std::string instance_name);
   c10::ClassTypePtr class_type() {
     return module_type_;
@@ -77,7 +78,7 @@ struct ModuleInstanceInfo {
     return instance_name_;
   }
 
-  bool operator==(const ModuleInstanceInfo& rhs) {
+  bool operator==(const ModuleInstanceInfo& rhs) const {
     return (class_type() == rhs.class_type()) &&
         (instance_name() == rhs.instance_name());
   }

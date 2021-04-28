@@ -32,14 +32,10 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
   InlinedCallStackPtr callstack_ptr = source_callstack.second;
   std::string module_info =
       root_scope_string + "(" + top_module_type_name + ")";
+  std::ostringstream ss;
   if (!callstack_ptr) {
     // If not cs then top level node
     entries.emplace_back(StackEntry{"FunctionName_UNKNOWN", range});
-    std::ostringstream ss;
-    format_stack_trace(ss, entries);
-    std::string stack_trace = "Module hierarchy:" + module_info + "\n";
-    stack_trace += ss.str();
-    return {std::move(stack_trace), std::move(module_info)};
   } else {
     for (const auto& element : callstack_ptr->vec()) {
       const auto& opt_module_instance_info =
@@ -69,12 +65,10 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
           StackEntry{"FunctionName_UNKNOWN", std::get<kSourceRange>(element)});
     }
     entries.emplace_back(StackEntry{"FunctionName_UNKNOWN", range});
-    std::ostringstream ss;
-    format_stack_trace(ss, entries);
-    std::string stack_trace = "Module hierarchy:" + module_info + "\n";
-    stack_trace += ss.str();
-    return {std::move(stack_trace), std::move(module_info)};
   }
+  ss << "Module hierarchy:" << module_info << "\n";
+  format_stack_trace(ss, entries);
+  return {ss.str(), std::move(module_info)};
 }
 
 } // namespace
