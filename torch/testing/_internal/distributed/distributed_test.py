@@ -5325,7 +5325,7 @@ class DistributedTest:
             type_mapping = {
                 "list": list, "tuple": tuple, "dict": dict,
             }
-            for output_type in ["list", "tuple", "dict"]:
+            for output_type in type_mapping.keys():
                 for i in range(6):
                     out = model(inp, output_type=output_type)
                     loss = get_loss(out)
