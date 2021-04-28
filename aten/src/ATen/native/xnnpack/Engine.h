@@ -79,6 +79,12 @@ Tensor channel_shuffle(
     const Tensor& input,
     const int64_t groups);
 
+//
+// Activations
+//
+bool use_hardswish(const Tensor& input);
+Tensor hardswish(const Tensor& input);
+
 } // namespace xnnpack
 } // namespace native
 } // namespace at
