@@ -12,7 +12,6 @@
 #include <torch/csrc/distributed/rpc/agent_utils.h>
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
-#include <torch/csrc/distributed/rpc/utils.h>
 
 #ifdef USE_CUDA_NOT_ROCM
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
@@ -520,6 +519,30 @@ TensorPipeAgent::TensorPipeAgent(
       nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       processGroup_(std::move(processGroup)) {
+  // register Future factories
+  FutureFactoryRegistry::getInstance().registerFutureFactory(
+      c10::DeviceType::CPU,
+      [](const std::vector<c10::DeviceIndex>& devices)
+          -> std::shared_ptr<JitFuture> {
+        TORCH_INTERNAL_ASSERT(devices.empty());
+        return std::make_shared<JitFuture>(at::AnyClassType::get());
+      });
+
+#ifdef USE_CUDA_NOT_ROCM
+  FutureFactoryRegistry::getInstance().registerFutureFactory(
+      c10::DeviceType::CUDA,
+      [](const std::vector<c10::DeviceIndex>& devices)
+          -> std::shared_ptr<JitFuture> {
+        if (!devices.empty()) {
+          return std::make_shared<at::cuda::CUDAFuture>(
+              at::AnyClassType::get(), devices);
+        } else {
+          return std::make_shared<JitFuture>(at::AnyClassType::get());
+        }
+      });
+#endif
+
+  // collect worker names
   prepareNames();
 
   {
@@ -982,8 +1005,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   }
   ClientPipe& clientPipe = it->second;
 
-  auto futureResponseMessage = std::make_shared<AtomicJitFuture>(
-      devices_, reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
+  auto futureResponseMessage = std::make_shared<AtomicJitFuture>(devices_);
   uint64_t messageId = nextMessageID_++;
   requestMessage.setId(messageId);
 
