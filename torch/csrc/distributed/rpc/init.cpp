@@ -576,6 +576,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               ProcessGroupAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_get_device_map",
+          (std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>(
+              ProcessGroupAgent::*)(const WorkerInfo& dest) const) &
+              ProcessGroupAgent::getDeviceMap,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "join",
           &ProcessGroupAgent::join,
           py::call_guard<py::gil_scoped_release>(),
