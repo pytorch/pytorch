@@ -1670,12 +1670,12 @@ void initJitScriptBindings(PyObject* module) {
         return _load_for_mobile(in, optional_device);
       });
   m.def("_get_model_bytecode_version", [](const std::string& filename) {
-    return _get_model_bytecode_version(filename);
+    return mobile::_get_model_bytecode_version(filename);
   });
   m.def(
       "_get_model_bytecode_version_from_buffer", [](const std::string& buffer) {
         std::istringstream in(buffer);
-        return _get_model_bytecode_version(in);
+        return mobile::_get_model_bytecode_version(in);
       });
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
