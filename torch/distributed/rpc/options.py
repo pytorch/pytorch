@@ -25,19 +25,16 @@ def _to_device_index_map(device_map: Dict[DeviceType, DeviceType]) -> Dict[int, 
     for k in device_map:
         v = device_map[k]
         k, v = torch.device(k), torch.device(v)
-        if k.type != 'cuda' or v.type != 'cuda':
-            raise ValueError(
-                "`set_device_map` only supports CUDA devices, "
-                f"but got device pair {k}: {v}"
 
-            )
-        if v.index in reverse_map:
+        k_index = -1 if k.type == 'cpu' else k.index
+        v_index = -1 if v.type == 'cpu' else v.index
+        if v_index in reverse_map:
             raise ValueError(
                 "`device_map` only supports 1-to-1 mapping, "
                 f"trying to map {k} and {reverse_map[v.index]} to {v.index}"
             )
-        device_index_map[k.index] = v.index
-        reverse_map[v.index] = k.index
+        device_index_map[k_index] = v_index
+        reverse_map[v_index] = k_index
     return device_index_map
 
 
@@ -153,22 +150,15 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             >>> print(rets[1])  # tensor([2., 2.], device='cuda:1')
         """
         device_index_map = _to_device_index_map(device_map)
+
         curr_device_maps = super().device_maps
-        for k in device_map:
-            v = device_map[k]
-            k, v = torch.device(k), torch.device(v)
-
-            k_index = -1 if k.type == "cpu" else k.index
-            v_index = -1 if v.type == "cpu" else v.index
-
-            if to in curr_device_maps and k_index in curr_device_maps[to]:
-                curr_v = super().device_maps[to][k_index]
-                if curr_v != v_index:
+        if to in curr_device_maps:
+            for k, v in device_index_map.items():
+                if k in curr_device_maps[to] and v != curr_device_maps[to][k]:
                     raise ValueError(
-                        "`set_device_map` only supports 1-to-1 mapping, trying"
-                        f" to map {k} to {v} and {curr_device_maps[to][k]}"
-                    )
-            device_index_map[k_index] = v_index
+                    "`set_device_map` only supports 1-to-1 mapping, trying "
+                    f"to map {k} to {v} and {curr_device_maps[to][k]}")
+
         super()._set_device_map(to, device_index_map)
 
     def set_devices(self, devices: List[DeviceType]):
