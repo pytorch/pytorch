@@ -2,8 +2,11 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Adam, AdamOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Adam)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(3, 4)
     .AllowInplace({{0, 0}, {1, 1}, {2, 2}})
@@ -13,6 +16,7 @@ OPERATOR_SCHEMA(Adam)
       vector<DeviceOption> in_dev(def.input_size(), op_device);
       vector<DeviceOption> out_dev(def.output_size(), op_device);
       // ITER input lives on CPU
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_dev[5] = DeviceOption();
       return std::make_pair(in_dev, out_dev);
     })
@@ -39,6 +43,7 @@ and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
     .Input(2, "moment_2", "Second moment history")
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(5, "iter", "iteration number")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated first moment")
@@ -48,8 +53,11 @@ and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
     .Arg("beta2", "Default 0.999")
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseAdam, SparseAdamOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdam)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(7)
     .NumOutputs(3, 4)
     .EnforceInplace({{0, 0}, {1, 1}, {2, 2}})
@@ -59,6 +67,7 @@ OPERATOR_SCHEMA(SparseAdam)
       vector<DeviceOption> in_dev(def.input_size(), op_device);
       vector<DeviceOption> out_dev(def.output_size(), op_device);
       // ITER input lives on CPU
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_dev[6] = DeviceOption();
       return std::make_pair(in_dev, out_dev);
     })
@@ -76,7 +85,9 @@ OPERATOR_SCHEMA(SparseAdam)
     .Input(2, "moment_2", "Second moment history")
     .Input(3, "indices", "Sparse indices")
     .Input(4, "grad", "Gradient computed")
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(5, "lr", "learning rate")
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(6, "iter", "iteration number")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated first moment")
@@ -87,10 +98,13 @@ OPERATOR_SCHEMA(SparseAdam)
     .Arg("epsilon", "Default 1e-5")
     .Arg("enableRAdam", "Default false");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdam,
     RowWiseSparseAdamOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdam)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(7)
     .NumOutputs(3, 4)
     .EnforceInplace({{0, 0}, {1, 1}, {2, 2}})
@@ -100,6 +114,7 @@ OPERATOR_SCHEMA(RowWiseSparseAdam)
       vector<DeviceOption> in_dev(def.input_size(), op_device);
       vector<DeviceOption> out_dev(def.output_size(), op_device);
       // ITER input lives on CPU
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_dev[6] = DeviceOption();
       return std::make_pair(in_dev, out_dev);
     })
@@ -120,7 +135,9 @@ OPERATOR_SCHEMA(RowWiseSparseAdam)
     .Input(2, "moment_2", "Second moment history")
     .Input(3, "indices", "Sparse indices")
     .Input(4, "grad", "Gradient computed")
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(5, "lr", "learning rate")
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(6, "iter", "iteration number")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated first moment")
@@ -130,7 +147,10 @@ OPERATOR_SCHEMA(RowWiseSparseAdam)
     .Arg("beta2", "Default 0.999")
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Adam);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SparseAdam);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(RowWiseSparseAdam);
 } // namespace caffe2
