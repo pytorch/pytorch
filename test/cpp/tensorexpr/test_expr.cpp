@@ -489,6 +489,64 @@ TEST(Expr, LogicalOps02) {
   ASSERT_EQ(eval2.value<int>(), 1);
 }
 
+TEST(Expr, LogicalOps03) {
+  KernelScope kernel_scope;
+  ExprHandle a(23);
+  ExprHandle b(11);
+  ExprHandle c(0.72f);
+  ExprHandle d(0.69f);
+
+  // Bool types
+  ExprHandle bool_f1 = (a > b) && BoolImm::make(1);
+  ExprHandle bool_f2 = (c <= d) || BoolImm::make(1);
+
+  // Int types
+  ExprHandle int_f1 = (a > b) && IntImm::make(1);
+  ExprHandle int_f2 = (c <= d) || IntImm::make(1);
+
+  // Short types
+  ExprHandle short_f1 = (a > b) && ShortImm::make(1);
+  ExprHandle short_f2 = (c <= d) || ShortImm::make(1);
+
+  // Long types
+  ExprHandle long_f1 = (a > b) && LongImm::make(1);
+  ExprHandle long_f2 = (c <= d) || LongImm::make(1);
+
+  // Char types
+  ExprHandle char_f1 = (a > b) && CharImm::make(1);
+  ExprHandle char_f2 = (c <= d) || CharImm::make(1);
+
+  // Byte types
+  ExprHandle byte_f1 = (a > b) && ByteImm::make(1);
+  ExprHandle byte_f2 = (c <= d) || ByteImm::make(1);
+
+  SimpleIRExprEval eval1(bool_f1);
+  SimpleIRExprEval eval2(bool_f2);
+  SimpleIRExprEval eval3(int_f1);
+  SimpleIRExprEval eval4(int_f2);
+  SimpleIRExprEval eval5(short_f1);
+  SimpleIRExprEval eval6(short_f2);
+  SimpleIRExprEval eval7(long_f1);
+  SimpleIRExprEval eval8(long_f2);
+  SimpleIRExprEval eval9(char_f1);
+  SimpleIRExprEval eval10(char_f2);
+  SimpleIRExprEval eval11(byte_f1);
+  SimpleIRExprEval eval12(byte_f2);
+
+  ASSERT_EQ(eval1.value<bool>(), true);
+  ASSERT_EQ(eval2.value<bool>(), true);
+  ASSERT_EQ(eval3.value<int>(), 1);
+  ASSERT_EQ(eval4.value<int>(), 1);
+  ASSERT_EQ(eval5.value<short>(), 1);
+  ASSERT_EQ(eval6.value<short>(), 1);
+  ASSERT_EQ(eval7.value<long>(), 1);
+  ASSERT_EQ(eval8.value<long>(), 1);
+  ASSERT_EQ(eval9.value<signed char>(), 1);
+  ASSERT_EQ(eval10.value<signed char>(), 1);
+  ASSERT_EQ(eval11.value<unsigned char>(), 1);
+  ASSERT_EQ(eval12.value<unsigned char>(), 1);
+}
+
 TEST(Expr, BitwiseOps) {
   KernelScope kernel_scope;
   ExprHandle a(59);
