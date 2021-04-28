@@ -91,6 +91,12 @@ class Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
 
+# for testing pytrees
+class Foo(object):  # noqa: B209
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
 class TestFX(JitTestCase):
     def setUp(self):
         if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
@@ -2292,6 +2298,7 @@ class TestFX(JitTestCase):
         fx_f = symbolic_trace(f, enable_cpatching=True)
         assert(any(i.target == torch.randn for i in fx_f.graph.nodes))
 
+
     def test_pytree(self):
         def f_sum(x):
             return sum(x)
@@ -2311,10 +2318,6 @@ class TestFX(JitTestCase):
         def f_dict_add(x):
             return x['a'] + sum(x['z'])
 
-        class Foo(object):  # noqa: B209
-            def __init__(self, a, b):
-                self.a = a
-                self.b = b
 
         pytree._register_pytree_node(
             Foo,
@@ -2364,6 +2367,11 @@ class TestFX(JitTestCase):
             self.assertEqual(nf(val), orig_out)
             assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
             assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args)
+
+            pickled = pickle.dumps(nf)
+            nf = pickle.loads(pickled)
+            self.assertEqual(nf(val), orig_out)
+
         for f, inp in tests:
             verify_pytree(f, inp)
 
