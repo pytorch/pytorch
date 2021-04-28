@@ -34,6 +34,7 @@ caffe2::NetDef fakeNet() {
 // Common usage
 using namespace nom::repr;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, DeclareExport) {
   auto net = fakeNet();
   caffe2::injectDataEdgeIndicators(&net);
@@ -74,11 +75,13 @@ TEST(Converter, DeclareExport) {
   EXPECT_EQ(count, 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Distributed, InsertDeviceOptions) {
   auto net = fakeNet();
   caffe2::injectDataEdgeIndicators(&net);
   auto nn = caffe2::convertToNNModule(net);
   caffe2::DeviceOption d;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   caffe2::addBlobDeviceOptions({{"X", d}, {"Y", d}, {"W", d}}, &nn);
 
@@ -86,19 +89,23 @@ TEST(Distributed, InsertDeviceOptions) {
     for (auto& node : ns) {
       auto op = nn::get<NeuralNetOperator>(node);
       auto annot = dyn_cast<caffe2::Caffe2Annotation>(op->getAnnotation());
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto d = annot->getDeviceOption();
       EXPECT_EQ(d.device_type(), 1337);
     }
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Distributed, InsertDeviceOptionsFailureCase) {
   auto net = fakeNet();
   caffe2::injectDataEdgeIndicators(&net);
   auto nn = caffe2::convertToNNModule(net);
   caffe2::DeviceOption d;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   // We can only use correct blob names, expect failure otherwise
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(
       {
         caffe2::addBlobDeviceOptions(
@@ -107,6 +114,7 @@ TEST(Distributed, InsertDeviceOptionsFailureCase) {
       std::exception);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, InjectDataEdgeIndicators) {
   auto net = fakeNet();
 
@@ -143,9 +151,11 @@ TEST(Converter, InjectDataEdgeIndicators) {
 }
 
 // Main usage
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, OverloadedConvertToNNModule) {
   auto net = fakeNet();
   caffe2::DeviceOption d;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   auto nn = caffe2::convertToNNModule(net, {{"X", d}, {"Y", d}, {"W", d}});
 
@@ -153,17 +163,21 @@ TEST(Converter, OverloadedConvertToNNModule) {
     for (auto& node : ns) {
       auto op = nn::get<NeuralNetOperator>(node);
       auto annot = dyn_cast<caffe2::Caffe2Annotation>(op->getAnnotation());
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto d = annot->getDeviceOption();
       EXPECT_EQ(d.device_type(), 1337);
     }
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, OverloadedConvertToNNModuleFailure) {
   auto net = fakeNet();
   caffe2::DeviceOption d;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   // We can only use correct blob names, expect failure otherwise
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(
       {
         auto nn = caffe2::convertToNNModule(
