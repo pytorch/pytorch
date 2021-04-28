@@ -188,6 +188,11 @@ void div_floor_kernel(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
       cpu_kernel(iter,
           [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+            if (C10_UNLIKELY(b == 0)) {
+              // Divide by zero: return standard IEEE result
+              return a / b;
+            }
+
             auto mod = std::fmod(a, b);
             auto div = (a - mod) / b;
             if ((mod != 0) && (b < 0) != (mod < 0)) {
