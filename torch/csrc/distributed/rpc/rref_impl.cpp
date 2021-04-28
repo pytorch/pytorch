@@ -1,10 +1,12 @@
+#include <torch/csrc/distributed/rpc/rref_impl.h>
+
 #include <ATen/record_function.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -25,6 +27,16 @@ std::string getTypeStr(const c10::TypePtr& type) {
       return type->annotation_str();
   }
 }
+
+void blockCurrentStreams(const std::vector<c10::Event>& events) {
+  for (const c10::Event& event : events) {
+    c10::Device device{event.device_type(), event.device_index()};
+    c10::Stream stream =
+        c10::impl::getDeviceGuardImpl(device.type())->getStream(device);
+    event.block(stream);
+  }
+}
+
 } // namespace
 
 namespace torch {
@@ -239,6 +251,9 @@ const IValue& OwnerRRef::getValue() const {
   if (future_->hasError()) {
     (void)future_->value(); // Throws the error.
   }
+  // Before accessing the value in this RRef, current CUDA streams must wait
+  // for pending CUDA operations that create the value.
+  blockCurrentStreams(events_);
   return future_->constValue();
 }
 
