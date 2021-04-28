@@ -1053,6 +1053,34 @@ class Tensor(torch._C._TensorBase):
             else:
                 return _convert(ret, cls)
 
+    def __dlpack__(self, stream=None):
+        """
+        Creates a dlpack capsule of the current tensor to
+        be exported to other libraries.
+
+        This function will be called from the `from_dlpack` method
+        of the consumer library.
+
+        Args:
+            stream (integer or None): Object that represents a stream and provides
+                a `synchronize` method. Optional.
+        """
+        if isinstance(stream, torch.cuda.Stream) or hasattr(stream, 'synchronize'):
+            stream.synchronize()
+        elif stream is not None and type(stream) is int:
+            # currently in pytorch is not possible to create a stream
+            # from a given pointer
+            raise TypeError('Can\'t create a stream from an integer in PyTorch')
+
+        return torch.utils.dlpack.to_dlpack(self)
+
+    def __dlpack_device__(self) -> Tuple[Int, Int]:
+        dlpack_ids = {'cpu': 1, 'cuda': 2, 'rocm': 10}
+        idx = self.device.index if self.device.index is not None else 0
+        # TODO(ecastill) detect HIP or CUDA
+        # in torch rocm device is cuda too
+        return (dlpack_ids[self.device.type], idx)
+
     __module__ = 'torch'
 
 def _convert(ret, cls):
