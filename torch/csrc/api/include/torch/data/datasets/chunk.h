@@ -136,6 +136,7 @@ class BatchDataBuffer {
 
     // If we still have data remaining after filling the last pushed batch, add
     // them to the queue too.
+    // NOLINTNEXTLINE(bugprone-infinite-loop)
     while (remaining_size > 0) {
       UnwrappedBatchType current_batch;
 
@@ -325,6 +326,7 @@ class ChunkDataset final
       ChunkSampler chunk_sampler,
       ExampleSampler example_sampler,
       ChunkDatasetOptions options,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::function<void(UnwrappedBatchType&)> preprocessing_policy =
           std::function<void(UnwrappedBatchType&)>())
       : chunk_reader_(std::move(chunk_reader)),
@@ -337,6 +339,7 @@ class ChunkDataset final
         running_preloaders_(0),
         load_checkpoint_(false) {}
 
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~ChunkDataset() {
     // stop batch buffer first.
     if (batch_buffer_) {

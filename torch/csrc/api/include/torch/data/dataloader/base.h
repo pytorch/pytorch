@@ -40,6 +40,7 @@ class DataLoaderBase {
         main_thread_dataset_(std::move(main_thread_dataset)),
         sequencer_(new_sequencer()) {}
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   virtual ~DataLoaderBase() {
     join();
   }
