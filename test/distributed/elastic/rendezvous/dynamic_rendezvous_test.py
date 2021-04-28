@@ -123,9 +123,9 @@ class RendezvousStateTest(TestCase):
         # fmt: off
         expected_max_sizes = (
             (   5,    2 * (2 ** 10),),  #    10 machines <=   2KB  # noqa: E201, E241, E262
-            (  50,   12 * (2 ** 10),),  #   100 machines <=  12KB  # noqa: E201, E241, E262
-            ( 500,  120 * (2 ** 10),),  #  1000 machines <= 120KB  # noqa: E201, E241, E262
-            (5000, 1400 * (2 ** 10),),  # 10000 machines <= 1.4MB  # noqa: E201, E241, E262
+            (  50,   16 * (2 ** 10),),  #   100 machines <=  16KB  # noqa: E201, E241, E262
+            ( 500,  160 * (2 ** 10),),  #  1000 machines <= 160KB  # noqa: E201, E241, E262
+            (5000, 1600 * (2 ** 10),),  # 10000 machines <= 1.6MB  # noqa: E201, E241, E262
         )
         # fmt: on
 
