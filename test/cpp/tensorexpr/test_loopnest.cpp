@@ -33,7 +33,10 @@ TEST(LoopNest, ExprSimple01) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "f", {{16, "X"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+      "f",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{16, "X"}, {5, "y"}},
+      [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -54,7 +57,10 @@ TEST(LoopNest, ExprLower01) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "f", {{16, "x"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+      "f",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{16, "x"}, {5, "y"}},
+      [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -2833,7 +2839,10 @@ TEST(LoopNest, OuterLoopVectorization) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "f", {{8, "X"}, {8, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+      "f",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{8, "X"}, {8, "y"}},
+      [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -3570,7 +3579,11 @@ TEST(LoopNest, FlattenImperfectLoopNest) {
   auto inner_for = For::make(j, 0, 15, for_body);
   auto outer_for = For::make(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      i, 0, 10, Block::make({Store::make(a_buf, {i, i}, 0), inner_for}));
+      i,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      10,
+      Block::make({Store::make(a_buf, {i, i}, 0), inner_for}));
   Block::make({outer_for});
 
   std::vector<For*> loops = {outer_for, inner_for};
@@ -3728,18 +3741,25 @@ TEST(LoopNest, CacheReadsSimple) {
 
   Tensor* A = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   Tensor* B = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 30, j + 3);
       });
   Tensor* C = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "C",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
@@ -3810,18 +3830,25 @@ TEST(LoopNest, CacheReadsOuter) {
 
   Tensor* A = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   Tensor* B = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "C",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
@@ -3872,18 +3899,25 @@ TEST(LoopNest, CacheReadsInternal) {
 
   Tensor* A = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   Tensor* B = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "C",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
@@ -3933,19 +3967,26 @@ TEST(LoopNest, CacheReadsInner) {
 
   Tensor* A = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   // note im changing the offset of the first arg of the first call to A.
   Tensor* B = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 34, j + 40) + A->load(i + 30, j + 41);
       });
   Tensor* C = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "C",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
@@ -3995,18 +4036,25 @@ TEST(LoopNest, CacheWritesSimple) {
 
   Tensor* A = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   Tensor* B = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "C",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
@@ -4257,7 +4305,10 @@ TEST(LoopNest, CompoundTensorUsed) {
   Tensor* A = new Tensor(a_buf.node(), body);
   Tensor* B = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "B", {{10, "i"}, {3, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{10, "i"}, {3, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
         return A->load(i, j + 1) + A->load(i, j + 2);
       });
 
@@ -4518,7 +4569,10 @@ TEST(LoopNest, VectorizeUse) {
       "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
   Tensor* c = Compute(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      "c", {{N, "n"}}, [&](const VarHandle& n) { return b->load(n) + 2.0f; });
+      "c",
+      {{N, "n"}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      [&](const VarHandle& n) { return b->load(n) + 2.0f; });
   LoopNest nest({c}, {b, c});
   auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
   nest.vectorize(loops[0]);
@@ -5093,10 +5147,20 @@ TEST(LoopNest, fuseLoopsNested2DInner) {
   VarHandle n("n", kInt);
   auto forJ = For::make(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      j, 0, 100, Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
+      j,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      100,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
   auto forN = For::make(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      n, 0, 100, Store::make(b_buf, {i, n}, Add::make(i, Mul::make(n, 100))));
+      n,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      100,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      Store::make(b_buf, {i, n}, Add::make(i, Mul::make(n, 100))));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 20, Block::make({forJ, forN}));
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -5701,7 +5765,12 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies5) {
   VarHandle n("n", kInt);
   auto forJ = For::make(
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      j, 0, 100, Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
+      j,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      100,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
   auto forN = For::make(
       n,
       0,
@@ -5742,7 +5811,10 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
       100,
       Store::make(
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf,
+          {k},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forJ, forK});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -5774,7 +5846,10 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
       100,
       Store::make(
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          b_buf,
+          {k},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
