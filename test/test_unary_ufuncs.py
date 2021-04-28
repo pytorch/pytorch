@@ -80,7 +80,7 @@ def generate_tensors_from_vals(vals, device, dtype, domain):
         # Note: Complex numbers don't belong to ordered field,
         #       so we don't filter for them.
         if domain[0] is not None:
-            vals = list(filter(lambda x: x > domain[0], vals))
+            vals = list(filter(lambda x: x >= domain[0], vals))
         if domain[1] is not None:
             vals = list(filter(lambda x: x < domain[1], vals))
 

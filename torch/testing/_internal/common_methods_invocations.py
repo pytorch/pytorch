@@ -2805,8 +2805,12 @@ def sample_inputs_mvlgamma(op_info, device, dtype, requires_grad, **kwargs):
     tensor_shapes = ((S, S), ())
     ns = (1, 2, 3, 4, 5)
 
-    def compute_min_val(d):
-        return (d - 1.) / 2
+    # Since the accepted lower bound for input
+    # to mvlgamma depends on `p` argument,
+    # the following function computes the lower bound
+    # which we pass to `make_tensor`.
+    def compute_min_val(p):
+        return (p - 1.) / 2
 
     def generator():
         for shape, n in product(tensor_shapes, ns):
@@ -2814,6 +2818,41 @@ def sample_inputs_mvlgamma(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(make_arg(shape, low=min_val), args=(n,))
 
     return list(generator())
+
+
+# Since `mvlgamma` has multiple entries,
+# there are multiple common skips for the additional
+# entries. Following function is a helper to that end.
+def mvlgamma_skips(skip_redundant=False):
+    skips = (
+        # outside domain values are hard error for mvlgamma op.
+        SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
+    )
+    if not skip_redundant:
+        # Redundant tests
+        skips = skips + (
+            SkipInfo('TestGradients'),
+            SkipInfo('TestOpInfo'),
+            SkipInfo('TestCommon'),
+        )
+    return skips
+
+
+class MvlGammaInfo(UnaryUfuncInfo):
+    def __init__(self, variant_test_name, domain, skips, sample_kwargs):
+        super(MvlGammaInfo, self).__init__(
+            'mvlgamma',
+            ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
+            variant_test_name=variant_test_name,
+            domain=domain,
+            decorators=(precisionOverride({torch.float16: 5e-2}),),
+            dtypes=floating_types(),
+            dtypesIfCPU=floating_types(),
+            dtypesIfCUDA=floating_types_and(torch.half),
+            sample_inputs_func=sample_inputs_mvlgamma,
+            supports_out=False,
+            skips=skips,
+            sample_kwargs=sample_kwargs)
 
 
 def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
@@ -4491,100 +4530,32 @@ op_db: List[OpInfo] = [
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_mode,),
-    UnaryUfuncInfo('mvlgamma',
-                   ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
-                   variant_test_name='mvlgamma_p_1',
-                   domain=(1e-4, float('inf')),
-                   decorators=(precisionOverride({torch.float16: 5e-2}),),
-                   dtypes=floating_types(),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half),
-                   sample_inputs_func=sample_inputs_mvlgamma,
-                   supports_out=False,
-                   skips=(
-                       # outside domain values are hard error for mvlgamma op.
-                       SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
-                   ),
-                   sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
-    UnaryUfuncInfo('mvlgamma',
-                   ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
-                   variant_test_name='mvlgamma_p_2',
-                   domain=(0.6, float('inf')),
-                   decorators=(precisionOverride({torch.float16: 5e-2}),),
-                   dtypes=floating_types(),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half),
-                   sample_inputs_func=sample_inputs_mvlgamma,
-                   supports_out=False,
-                   skips=(
-                       # Redundant tests
-                       SkipInfo('TestGradients'),
-                       SkipInfo('TestOpInfo'),
-                       SkipInfo('TestCommon'),
-                       # outside domain values are hard error for mvlgamma op.
-                       SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
-                   ),
-                   sample_kwargs=lambda device, dtype, input: ({'p': 2}, {'d': 2})),
-    UnaryUfuncInfo('mvlgamma',
-                   ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
-                   domain=(1.1, float('inf')),
-                   decorators=(precisionOverride({torch.float16: 5e-2}),),
-                   variant_test_name='mvlgamma_p_3',
-                   dtypes=floating_types(),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half),
-                   sample_inputs_func=sample_inputs_mvlgamma,
-                   supports_out=False,
-                   skips=(
-                       # Redundant tests
-                       SkipInfo('TestGradients'),
-                       SkipInfo('TestOpInfo'),
-                       SkipInfo('TestCommon'),
-                       # outside domain values are hard error for mvlgamma op.
-                       SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
-                   ),
-                   sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
-    UnaryUfuncInfo('mvlgamma',
-                   ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
-                   domain=(1.6, float('inf')),
-                   decorators=(precisionOverride({torch.float16: 5e-2}),),
-                   variant_test_name='mvlgamma_p_4',
-                   dtypes=floating_types(),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half),
-                   sample_inputs_func=sample_inputs_mvlgamma,
-                   supports_out=False,
-                   skips=(
-                       # Redundant tests
-                       SkipInfo('TestGradients'),
-                       SkipInfo('TestOpInfo'),
-                       SkipInfo('TestCommon'),
-                       # outside domain values are hard error for mvlgamma op.
-                       SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
-                   ),
-                   sample_kwargs=lambda device, dtype, input: ({'p': 4}, {'d': 4})),
-    UnaryUfuncInfo('mvlgamma',
-                   ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
-                   domain=(2.1, float('inf')),
-                   variant_test_name='mvlgamma_p_5',
-                   decorators=(precisionOverride({torch.float16: 5e-2}),),
-                   dtypes=floating_types(),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half),
-                   sample_inputs_func=sample_inputs_mvlgamma,
-                   supports_out=False,
-                   skips=(
-                       # Redundant tests
-                       SkipInfo('TestGradients'),
-                       SkipInfo('TestOpInfo'),
-                       SkipInfo('TestCommon'),
-                       # outside domain values are hard error for mvlgamma op.
-                       SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
-                   ),
-                   sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
+    MvlGammaInfo(variant_test_name='mvlgamma_p_1',
+                 domain=(1e-4, float('inf')),
+                 skips=mvlgamma_skips(),
+                 sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
+    MvlGammaInfo(variant_test_name='mvlgamma_p_2',
+                 domain=(0.6, float('inf')),
+                 skips=mvlgamma_skips(skip_redundant=True),
+                 sample_kwargs=lambda device, dtype, input: ({'p': 2}, {'d': 2})),
+    MvlGammaInfo(variant_test_name='mvlgamma_p_3',
+                 domain=(1.1, float('inf')),
+                 skips=mvlgamma_skips(skip_redundant=True) + (
+                     SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
+                 ),
+                 sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
+    MvlGammaInfo(variant_test_name='mvlgamma_p_4',
+                 domain=(1.6, float('inf')),
+                 skips=mvlgamma_skips(skip_redundant=True) + (
+                     SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
+                 ),
+                 sample_kwargs=lambda device, dtype, input: ({'p': 4}, {'d': 4})),
+    MvlGammaInfo(variant_test_name='mvlgamma_p_5',
+                 domain=(2.1, float('inf')),
+                 skips=mvlgamma_skips(skip_redundant=True) + (
+                     SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
+                 ),
+                 sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
     OpInfo('ne',
            aliases=('not_equal',),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
