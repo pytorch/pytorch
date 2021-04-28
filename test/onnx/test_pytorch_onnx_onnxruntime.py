@@ -6303,7 +6303,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         model = torch.nn.EmbeddingBag(10, 5, mode="sum", include_last_offset=True)
         input = torch.randint(10, (7,))
-        offset = torch.tensor([0, 2, 5, 6])
+        offset = torch.tensor([0, 2, 5, 7])
         self.run_test(model, (input, offset))
 
         model = torch.nn.EmbeddingBag(10, 5, mode="max")

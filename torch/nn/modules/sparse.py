@@ -255,8 +255,12 @@ class EmbeddingBag(Module):
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor. See
                                  Notes for more details regarding sparse gradients. Note: this option is not
                                  supported when ``mode="max"``.
-        include_last_offset (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
-                                      is equivalent to the size of `indices`. This matches the CSR format.
+        include_last_offset (bool, optional): if ``True``, ``offsets`` has one
+            additional element, which must equal ``indices.size(0)``, and the
+            length of ``offsets`` is the number of bags + 1.  This matches the
+            CSR format. The purpose of this feature is to increase performance
+            by avoiding a special case calculation for the ending offset of the
+            last bag.
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
                                      gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
                                      during training, i.e. it remains as a fixed "pad". For a newly constructed

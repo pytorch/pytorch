@@ -302,6 +302,11 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
   int64_t numIndices = indices.size(0);
   int64_t numBags = offsets.size(0);
   if (include_last_offset) {
+    int64_t last_offset = offsets[-1].item<int64_t>();
+    TORCH_CHECK(last_offset == numIndices,
+        "embedding_bag: with include_last_offset=True, expected last",
+          " offset to equal input.size(0), ", numIndices,
+          ", but got ", last_offset);
     // Check https://github.com/pytorch/pytorch/issues/29019
     // We plan to add one more element in offsets, which is equal to the size of
     // indices. Currently for cuda devices, we still use the legacy

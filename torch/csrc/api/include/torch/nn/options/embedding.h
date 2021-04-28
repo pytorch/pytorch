@@ -120,8 +120,11 @@ struct TORCH_API EmbeddingBagOptions {
   TORCH_ARG(bool, sparse) = false;
   /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
   TORCH_ARG(torch::Tensor, _weight) = Tensor();
-  /// If ``true``, `offsets` has one additional element, where the last element
-  /// is equivalent to the size of `indices`. This matches the CSR format.
+  /// If ``true``, `offsets` has one additional element, which must equal
+  /// `indices.size(0)`, and the length of `offsets` is the number of bags + 1.
+  /// This matches the CSR format. The purpose of this feature is to increase
+  /// performance by avoiding a special case calculation for the ending offset
+  /// of the last bag.
   TORCH_ARG(bool, include_last_offset) = false;
   /// If specified, the entries at `padding_idx` do not contribute to the
   /// gradient; therefore, the embedding vector at padding_idx is not updated
@@ -152,9 +155,11 @@ struct TORCH_API EmbeddingBagFromPretrainedOptions {
   /// If ``true``, gradient w.r.t. `weight` matrix will be a sparse tensor.
   /// Note: this option is not supported when ``mode="kMax"``.
   TORCH_ARG(bool, sparse) = false;
-  /// If ``true``, `offsets` has one additional element, where the last element
-  /// is equivalent to the size of `indices`. This matches the CSR format. Note:
-  /// this option is currently only supported when ``mode="sum"``.
+  /// If ``true``, `offsets` has one additional element, which must equal
+  /// `indices.size(0)`, and the length of `offsets` is the number of bags + 1.
+  /// This matches the CSR format. The purpose of this feature is to increase
+  /// performance by avoiding a special case calculation for the ending offset
+  /// of the last bag.
   TORCH_ARG(bool, include_last_offset) = false;
   /// If specified, the entries at `padding_idx` do not contribute to the
   /// gradient; therefore, the embedding vector at padding_idx is not updated
@@ -195,9 +200,11 @@ struct TORCH_API EmbeddingBagFuncOptions {
   /// If specified, `per_sample_weights` must have exactly the same shape as input and is treated as
   /// having the same `offsets`, if those are not None.
   TORCH_ARG(torch::Tensor, per_sample_weights) = Tensor();
-  /// If ``true``, `offsets` has one additional element, where the last element
-  /// is equivalent to the size of `indices`. This matches the CSR format. Note:
-  /// this option is currently only supported when ``mode="sum"``.
+  /// If ``true``, `offsets` has one additional element, which must equal
+  /// `indices.size(0)`, and the length of `offsets` is the number of bags + 1.
+  /// This matches the CSR format. The purpose of this feature is to increase
+  /// performance by avoiding a special case calculation for the ending offset
+  /// of the last bag.
   TORCH_ARG(bool, include_last_offset) = false;
   /// If specified, the entries at `padding_idx` do not contribute to the
   /// gradient; therefore, the embedding vector at padding_idx is not updated

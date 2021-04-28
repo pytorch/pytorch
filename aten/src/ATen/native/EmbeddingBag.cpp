@@ -462,9 +462,16 @@ void check_arguments(
       TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
                                 "in the mini-batch has to start from position 0. "
                                 "However, got ", offsets[0]);
-      TORCH_CHECK(offset_n <= indices.sizes()[0], "offsets[-1] can not "
-                  "be greater than input's length ", indices.sizes()[0], " but got offsets[-1] of ",
-                  offset_n);
+      if (include_last_offset) {
+        TORCH_CHECK(offset_n == indices.size(0),
+            "embedding_bag: with include_last_offset=True, expected last ",
+            "offset to equal input.size(0), ", indices.size(0),
+            ", but got ", offset_n);
+      } else {
+        TORCH_CHECK(offset_n <= indices.sizes()[0], "offsets[-1] can not "
+                    "be greater than input's length ", indices.sizes()[0],
+                    " but got offsets[-1] of ", offset_n);
+      }
     }
   });
 

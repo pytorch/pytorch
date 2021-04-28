@@ -15748,6 +15748,31 @@ class TestNNDeviceType(NNTestCase):
                 embedding.zero_grad()
                 self.assertEqual(after, pre)
 
+    # Check that last offset is equal to input.size(0) if
+    # include_last_offset=True
+    def test_embedding_bag_include_last_offset_error(self, device):
+        input = torch.randint(0, 3, (10,), device=device)
+        weights = torch.randn(3, 4, device=device)
+
+        # Offsets args that should produce an error
+        offsets_error = [
+            torch.tensor([0, 5], device=device),
+            torch.tensor([0, 5, 11], device=device),
+            torch.tensor([0, 5, 9], device=device),
+        ]
+
+        for offsets in offsets_error:
+            error_msg = (
+                'embedding_bag: with include_last_offset=True, expected '
+                f'last offset to equal input.size[(]0[)], {input.size(0)}, '
+                f'but got {offsets[-1].item()}')
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.nn.functional.embedding_bag(input, weights, offsets, include_last_offset=True)
+
+        offsets = torch.tensor([0, 5, 10], device=device)
+        torch.nn.functional.embedding_bag(input, weights, offsets, include_last_offset=True)
+
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 1D input separated into bags
     # with an offset array. Compare against an equivalent 2D input that uses

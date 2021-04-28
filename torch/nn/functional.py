@@ -2205,8 +2205,12 @@ def embedding_bag(
             must have exactly the same shape as input and is treated as having the same
             :attr:`offsets`, if those are not None.
 
-        include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
-            The last element is the size of the input, or the ending index position of the last bag (sequence).
+        include_last_offset (bool, optional): if ``True``, ``offsets`` has one
+            additional element, which must equal ``indices.size(0)``, and the
+            length of ``offsets`` is the number of bags + 1.  This matches the
+            CSR format. The purpose of this feature is to increase performance
+            by avoiding a special case calculation for the ending offset of the
+            last bag.
 
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
                                      gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
