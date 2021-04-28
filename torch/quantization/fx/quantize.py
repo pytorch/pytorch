@@ -556,16 +556,19 @@ def handle_copy_nodes(
             non_tensor_input_nodes.add(node)
         if root_node is None and node.op != 'placeholder':
             # rule 4: remove observer for getitem if it is followed by an unmatched node
-            observer_node = node.args[0]
-            if len(observer_node.args) > 0:
-                observed_node = observer_node.args[0]
-                if is_activation_post_process_node(observer_node, modules) and \
+            maybe_observer_node = node.args[0]
+            if isinstance(maybe_observer_node, Node) and len(maybe_observer_node.args) > 0:
+                observed_node = maybe_observer_node.args[0]
+                if is_activation_post_process_node(maybe_observer_node, modules) and \
                    (observed_node.op, observed_node.target) == ("call_function", operator.getitem):
-                    actpp_to_remove.add(observer_node)
+                    actpp_to_remove.add(maybe_observer_node)
             unmatched_nodes.add(node)
 
         # rule 5: for special node, we'll just remove observer for its input
         special_nodes = [
+            # Note: observer placement for getitem is handled in multiple places
+            # since we may need to remove the observer for input and output of getitem
+            # the handling can be simplified if we support querying type of Proxy
             ("call_function", operator.getitem),
         ]
         if (node.op, node.target) in special_nodes:
