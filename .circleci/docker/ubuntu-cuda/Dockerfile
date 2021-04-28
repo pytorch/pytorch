@@ -94,6 +94,7 @@ ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 ADD ./common/install_openssl.sh install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
 RUN bash ./install_openssl.sh
 
 USER jenkins
