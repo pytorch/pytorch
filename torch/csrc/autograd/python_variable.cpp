@@ -822,13 +822,7 @@ struct THPVariableMeta {
   PyHeapTypeObject base;
 };
 
-int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
-  if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
-    return -1;
-  }
-  // TODO: put something nontrivial here
-  return 0;
-}
+int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs);
 
 PyTypeObject THPVariableMetaType = {
   PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
@@ -909,8 +903,21 @@ PyTypeObject THPVariableType = {
   0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPVariable_pynew                            /* tp_new */
+  // NB: It is illegal to directly create a _TensorBase.  Instead,
+  // subclass it first (the metaclass will initialize tp_new) and
+  // then construct it
+  nullptr,                                     /* tp_new */
 };
+
+int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
+  if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
+    return -1;
+  }
+  if (((PyTypeObject*)cls)->tp_base == &THPVariableType) {
+    ((PyTypeObject*)cls)->tp_new = THPVariable_pynew;
+  }
+  return 0;
+}
 
 namespace torch { namespace autograd {
 
