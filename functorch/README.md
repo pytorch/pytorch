@@ -39,8 +39,8 @@ Coming soon!
 `functorch` is a PyTorch C++ Extension module. To install,
 
 - Install [PyTorch from source](https://github.com/pytorch/pytorch#from-source).
-Be sure to make sure the changes from  https://github.com/pytorch/pytorch/pull/56824
-are on the branch. TODO: we should recommend a commit hash that is known to be stable
+8134806e23 is a known commit that this project works with; commits after that
+should be fine but haven't been formally tested.
 - Run `python setup.py install`. You can use `DEBUG=1` to compile in debug mode.
 
 Then, try to run some tests to make sure all is OK:
