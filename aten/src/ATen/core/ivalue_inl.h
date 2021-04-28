@@ -317,9 +317,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
  public:
   explicit Future(TypePtr type, std::vector<c10::Device> devices={})
-    : type_(std::move(type)),
-      impl_(getImplForDevices(devices)),
-      devices_(getSortedIndicesOfDevices(impl_, devices)) {
+      : type_(std::move(type)),
+        impl_(getImplForDevices(devices)),
+        devices_(getSortedIndicesOfDevices(impl_, devices)) {
     // Use current device to initialize currentDevice_. This is necessary
     // because preMarkCompletedHook won't be called when the Future contains
     // an error. Uninitialized currentDevice_ could lead to crash when used
@@ -765,6 +765,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   static std::vector<c10::DeviceIndex> getSortedIndicesOfDevices(
       const c10::impl::DeviceGuardImplInterface* impl,
       const std::vector<c10::Device>& devices) {
+    if (impl == nullptr) {
+      return {};
+    }
     c10::DeviceIndex deviceCount = impl->deviceCount();
     std::vector<bool> isDeviceUsed(deviceCount, false);
     for (const c10::Device& device : devices) {
@@ -795,7 +798,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // An upcast pointer to a virtual class which allows us to manipulate events,
   // streams, ... in a generic way, without an explicit dependency on CUDA.
-  const c10::impl::DeviceGuardImplInterface* const impl_;
+  const c10::impl::DeviceGuardImplInterface* const impl_ = nullptr;
 
   // The device that was current when markCompleted was called, which we'll
   // restore when invoking callbacks.
