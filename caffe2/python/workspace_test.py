@@ -716,6 +716,13 @@ class MyModule(torch.jit.ScriptModule):
     def multi_input(self, x: torch.Tensor, y: torch.Tensor, z: int = 2) -> torch.Tensor:
         return x + y + z
 
+    # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
+    #   `torch.jit.script_method`
+    @torch.jit.script_method
+    def multi_input_tensor_list(self, tensor_list):  # pyre-ignore: PT type annotations
+        # type: (List[Tensor]) -> Tensor
+        return tensor_list[0] + tensor_list[1] + tensor_list[2]
+
     @torch.jit.script_method
     def multi_output(self, x):
         return (x, x + 1)
@@ -753,6 +760,28 @@ class TestScriptModule(test_util.TestCase):
         np.testing.assert_almost_equal(workspace.FetchBlob("y"), val + val2 + 2, decimal=5)
         np.testing.assert_almost_equal(workspace.FetchBlob("y1"), val, decimal=5)
         np.testing.assert_almost_equal(workspace.FetchBlob("y2"), val + 1, decimal=5)
+
+    def testMultiTensorListInput(self):
+        self._createFeedModule()
+        val = np.random.rand(5, 5).astype(np.float32)
+        workspace.FeedBlob("w", val)
+        val2 = np.random.rand(5, 5).astype(np.float32)
+        workspace.FeedBlob("w2", val2)
+        val3 = np.random.rand(5, 5).astype(np.float32)
+        workspace.FeedBlob("w3", val3)
+
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "ScriptModule",
+                ["m", "w", "w2", "w3"],
+                ["y"],
+                method="multi_input_tensor_list",
+                pass_inputs_as_tensor_list=True,
+            )
+        )
+        np.testing.assert_almost_equal(
+            workspace.FetchBlob("y"), val + val2 + val3, decimal=5
+        )
 
     def testSerialization(self):
         tmpdir = tempfile.mkdtemp()
