@@ -2326,6 +2326,62 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return at::linalg_solve(Uh, at::matmul(U_contrib, Uh) + D_contrib * Uh);
 }
 
+Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                     const Tensor& lambda, const Tensor& v) {
+	// https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
+	// For A = VLV^{-1}, denoting the gradients gV and gL, we have
+ 	// gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V
+  // Where:
+  //   - E_ij = L_i - L_j if i != j
+  //   - diag_embed takes a vector into a diagonal matrix
+  //   - diag zeroes out elements outside of the diagonal
+  //   - The division by E is done just outside of the diagonal. In the diagonal it is set to zero
+
+  const auto glambda = grads[0];
+  const auto gv = grads[1];
+  const auto vh = v.conj().transpose(-2, -1);
+
+
+  if (gv.defined()) {
+    auto Econj = (lambda.unsqueeze(-2) - lambda.unsqueeze(-1)).conj();
+    if (at::GradMode::is_enabled()) {
+      // Avoids differentiating through at infinity when doing gradgrad
+      // 1 could be any number, as we are going to overwrite the diagonal
+      Econj.diagonal(0, -2, -1).fill_(1.);
+    }
+
+    const auto vhgv = at::matmul(vh, gv);
+
+    const auto re_diag_vhgh = at::real(vhgv).diagonal(0, -2, -1);
+    auto result = vhgv - at::matmul(vh, v * re_diag_vhgh.unsqueeze(-2));
+
+    result.div_(Econj);
+
+    // Copy gL into the diagonal
+    if (glambda.defined()) {
+      result.diagonal(0, -2, -1).copy_(glambda);
+    }
+    else {
+      result.diagonal(0, -2, -1).zero_();
+    }
+
+    // Conjugate by V^{-H}
+		result = at::linalg_solve(vh, at::matmul(result, vh));
+    // If it is real, we have to project the derivative onto the real numbers
+    return self.is_complex() ? result : at::real(result);
+  }
+  else {
+    if (glambda.defined()) {
+		  // Compute V^-H dL V^H
+			const auto result = at::linalg_solve(vh, glambda.unsqueeze(-1) * vh);
+      return self.is_complex() ? result : at::real(result);
+    } else {
+      // If neither is defined, there's nothing to do
+      return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+  }
+}
+
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
