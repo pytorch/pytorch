@@ -206,6 +206,7 @@ bool HSoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& b = Input(2);
   auto& label = Input(3);
   auto& intermediate_output = Input(4);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto& dY = Input(5);
 
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
@@ -228,6 +229,7 @@ bool HSoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   // Batch size
   int M = X.dim() > 1 ? X.dim32(0) : 1;
   // Input feature dimension
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int K = X.numel() / M;
   const auto* labeldata = label.data<int>();
 
@@ -354,6 +356,7 @@ bool HSoftmaxSearchOp<float, CPUContext>::RunOnDevice() {
   // Batch size
   int M = X.dim() > 1 ? X.dim32(0) : 1;
   // Input feature dimension
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int K = X.numel() / M;
   CAFFE_ENFORCE(W.dim() == 2, "Weight must be a matrix."); // N*K
   CAFFE_ENFORCE(b.dim() == 1, "Bias must be a vector."); // N
@@ -402,6 +405,7 @@ bool HSoftmaxSearchOp<float, CPUContext>::RunOnDevice() {
     // saving the results for each sample.
     std::partial_sort(
         info.begin(),
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         info.begin() + (top_n_ < info.size() ? top_n_ : info.size() - 1),
         info.end(),
         [&](std::pair<string, float> a, std::pair<string, float> b) {
@@ -412,6 +416,7 @@ bool HSoftmaxSearchOp<float, CPUContext>::RunOnDevice() {
     auto* y_score_data =
         Y_scores->template mutable_data<float>() + sample * top_n_;
     for (int i = 0; i < top_n_; i++) {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (i < info.size()) {
         y_name_data[i] = info[i].first;
         y_score_data[i] = info[i].second;
@@ -454,6 +459,7 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
   std::vector<int> labelIndices;
   labelIndices.resize(num_classes_);
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   int current_node_index = 0;
   for (int i = 0; i < num_classes_; ++i) {
     Node node(i, labelCounts[i]);
@@ -545,14 +551,19 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
 }
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(HSoftmax, HSoftmaxOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(HSoftmaxGradient,
   HSoftmaxGradientOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(HSoftmaxSearch, HSoftmaxSearchOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HuffmanTreeHierarchy,
     HuffmanTreeHierarchyOp<int64_t, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HSoftmax)
     .NumInputs(4)
     .NumOutputs(2)
@@ -596,6 +607,7 @@ used by the gradient operator to compute gradients for all samples in the batch.
         "The outputs from samples are stored in consecutive blocks in the forward "
         "pass and are used in reverse order in the backward gradientOp pass");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HSoftmaxGradient).NumInputs(6).NumOutputs(4);
 
 class GetHSoftmaxGradient : public GradientMakerBase {
@@ -609,8 +621,10 @@ class GetHSoftmaxGradient : public GradientMakerBase {
         vector<string>{GI(0), GI(1), GI(2), GO(1)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(HSoftmax, GetHSoftmaxGradient);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HSoftmaxSearch)
     .NumInputs(3)
     .NumOutputs(2)
@@ -640,8 +654,10 @@ search tree.
         "For nodes, it will be the name defined in the tree. "
         "For leafs, it will be the index of the word in the tree.")
     .Output(1, "Y_scores", "The corresponding scores of Y_names");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(HSoftmaxSearch);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HuffmanTreeHierarchy)
     .NumInputs(1)
     .NumOutputs(1)
@@ -653,6 +669,7 @@ the input labels. It returns the tree as serialized HierarchyProto
     .Input(0, "Labels", "The labels vector")
     .Output(0, "Hierarch", "Huffman coding hierarchy of the labels");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(HuffmanTreeHierarchyOp);
 }  // namespace
 }  // namespace caffe2
