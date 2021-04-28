@@ -485,9 +485,9 @@ def in_nodes(a: Argument, nodes: Set[Node]) -> bool:
         return all([in_nodes(arg, nodes) for arg in a])
     return False
 
-def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]):
+def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return node.op == "call_module" and \
-        is_activation_post_process(modules[node.target])
+        is_activation_post_process(modules[str(node.target)])
 
 def handle_copy_nodes(
         observed_graph: Graph, matches: Dict[str, MatchResult],
