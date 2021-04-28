@@ -274,7 +274,8 @@ TEST(LiteTrainerTest, SequentialSampler) {
   auto data_loader =
       torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-          DummyDataset(25), kBatchSize);
+          DummyDataset(25),
+          kBatchSize);
   int i = 1;
   for (const auto& batch : *data_loader) {
     for (const auto& example : batch) {
