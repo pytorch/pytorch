@@ -1305,11 +1305,15 @@ class DistributedDataParallel(Module):
     def get_ddp_logging_data(self):
         r"""
         This interface can be called after DistributedDataParallel() is
-        constructed. It returns DDPLoggingData for debugging and analysis.
-        More detailed explanation of the fields in DDPLoggingData are in
-        ``torch/c10/util/Logging.h``.
+        constructed. It returns a dictionary of logging data. It could help
+        for debugging and analysis. The loggind data includes DistributedDataParallel
+        constructor input parameters, some internal states of DistributedDataParallel
+        and performance metrics. Simply print the dictorinary and see what
+        these metrics are.
+        THis is a prototype interface and subject to change in the future.
         """
-        return self.logger._get_ddp_logging_data()
+        ddp_logging_data = self.logger._get_ddp_logging_data()
+        return {**ddp_logging_data.strs_map, **ddp_logging_data.ints_map}
 
     def set_ddp_runtime_logging_sample_rate(self, sample_rate):
         r"""
@@ -1320,6 +1324,7 @@ class DistributedDataParallel(Module):
         default, runtime stats are recorded for the first 10 iterations,
         after 10 iterations runtime stats are recorded once every
         "kDDPRuntimeLoggingSampleRate=100" training iterations.
+        This is a prototype interface and subject to change in the future.
         """
         if sample_rate < 1:
             raise ValueError(
