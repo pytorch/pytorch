@@ -33,6 +33,9 @@ class Logger {
   // Set running with uneven input detection (model.join() context manager)
   void set_uneven_input_join();
 
+  // Reset performance stats at current iteration
+  void reset_performance_stats();
+
   // Calculate avg stats using cpu timer and gpu timer
   // that has been recorded in reducer.
   void calculate_avg_cpu_time(
