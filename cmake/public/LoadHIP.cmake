@@ -147,14 +147,6 @@ endmacro()
 # Find the HIP Package
 find_package_and_print_version(HIP 1.0)
 
-if(HIP_VERSION VERSION_LESS "3.7")
-  # Disable Asserts In Code (Can't use asserts on HIP stack.)
-  add_definitions(-DNDEBUG)
-  message("HIP VERSION < 3.7; disablng asserts")
-else()
-  message("HIP VERSION >= 3.7; enabling asserts")
-endif()
-
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
 
@@ -223,6 +215,14 @@ if(HIP_FOUND)
   find_package_and_print_version(rocprim REQUIRED)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
+
+  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
+    message("ROCm version >= 4.1; enabling asserts")
+  else()
+    # Disable Asserts In Code (Can't use asserts on HIP stack.)
+    add_definitions(-DNDEBUG)
+    message("ROCm version < 4.1; disablng asserts")
+  endif()
 
   if(HIP_COMPILER STREQUAL clang)
     set(hip_library_name amdhip64)
