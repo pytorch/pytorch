@@ -1326,6 +1326,11 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
         return res
 
     samples = []
+    # Test case for large tensor.
+    largesample = SampleInput(make_tensor((L**3,), device, dtype,
+                              low=None, high=None,
+                              requires_grad=requires_grad))
+    samples.append(largesample)
 
     # Test cases for small 3d tensors.
     # Imitates legacy tests from test/test_torch.py
@@ -1352,7 +1357,6 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
         samples.append(SampleInput(scalar, kwargs=dict(stable=True)))
         samples.append(SampleInput(scalar, kwargs=dict(dim=0, stable=True)))
         samples.append(SampleInput(scalar, kwargs=dict(dim=0, descending=True, stable=True)))
-
     return samples
 
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
@@ -2960,11 +2964,15 @@ def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 def sample_inputs_msort(op_info, device, dtype, requires_grad):
-    sample = (SampleInput(make_tensor((S, M, S), device, dtype,
-                                      low=None, high=None,
-                                      requires_grad=requires_grad)),)
+    # test large sorting codepath
+    largesample = SampleInput(make_tensor((L**3,), device, dtype,
+                                          low=None, high=None,
+                                          requires_grad=requires_grad))
+    sample = SampleInput(make_tensor((S, M, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad))
 
-    return sample
+    return [largesample, sample]
 
 def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -3437,21 +3445,11 @@ op_db: List[OpInfo] = [
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
-           skips=(
-               # dot does not handle correctly out= dtypes
-               # https://github.com/pytorch/pytorch/issues/55561
-               SkipInfo('TestCommon', 'test_out'),
-           ),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot),
     OpInfo('vdot',
            dtypes=all_types_and_complex_and(torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
-           skips=(
-               # vdot does not handle correctly out= dtypes
-               # https://github.com/pytorch/pytorch/issues/55561
-               SkipInfo('TestCommon', 'test_out'),
-           ),
            sample_inputs_func=sample_inputs_dot_vdot),
     OpInfo('bmm',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
@@ -5198,7 +5196,6 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16),
-           # sort on CUDA is still in the TH, no torch.bool/torch.float16 support yet
            dtypesIfCUDA=all_types_and(torch.float16),
            dtypesIfROCM=all_types_and(torch.float16),
            sample_inputs_func=sample_inputs_sort,

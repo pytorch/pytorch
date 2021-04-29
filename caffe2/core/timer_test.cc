@@ -8,6 +8,7 @@
 namespace caffe2 {
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TimerTest, Test) {
   Timer timer;
 
@@ -17,6 +18,7 @@ TEST(TimerTest, Test) {
 
   // Sleep for a while, and get the time.
   timer.Start();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   float ns = timer.NanoSeconds();
   float us = timer.MicroSeconds();
@@ -38,6 +40,7 @@ TEST(TimerTest, Test) {
   EXPECT_LT(timer.MicroSeconds(), 1000);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TimerTest, TestLatency) {
   constexpr int iter = 1000;
   float latency = 0;

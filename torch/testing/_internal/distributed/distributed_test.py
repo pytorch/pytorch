@@ -1347,6 +1347,8 @@ class DistributedTest:
         def test_broadcast_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_if_small_worldsize
@@ -1368,6 +1370,8 @@ class DistributedTest:
         def test_nccl_high_priority_stream(self):
             group, _, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
 
             new_port = str(MASTER_PORT + 1)
             os.environ['MASTER_PORT'] = new_port
@@ -1422,6 +1426,8 @@ class DistributedTest:
         def test_reduce_sum_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_reduce_helper(
                 group,
                 group_id,
@@ -1586,6 +1592,8 @@ class DistributedTest:
         def test_reduce_sum_cuda_twice(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_reduce_twice_helper(
                 group,
                 group_id,
@@ -2982,6 +2990,8 @@ class DistributedTest:
         def test_reduce_multigpu(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_reduce_multigpu_helper(
                 group,
                 group_id,
@@ -3025,6 +3035,8 @@ class DistributedTest:
         def test_all_gather_multigpu(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU)
 
         @unittest.skipIf(BACKEND != "nccl", "Only Nccl backend supports allgather multigpu")
@@ -3032,6 +3044,8 @@ class DistributedTest:
         def test_all_gather_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU, dtype=torch.cfloat)
 
         def _model_step(self, model):
@@ -3290,10 +3304,10 @@ class DistributedTest:
                 )
                 ddp_logging_data = ddp_model.get_ddp_logging_data()
                 # Hook not registered yet, so should be empty
-                self.assertEqual(ddp_logging_data.comm_hook, "")
+                self.assertEqual(ddp_logging_data.get("comm_hook"), None)
                 ddp_model.register_comm_hook(None, hook)
                 ddp_logging_data = ddp_model.get_ddp_logging_data()
-                self.assertEqual(ddp_logging_data.comm_hook, hook.__qualname__)
+                self.assertEqual(ddp_logging_data.get("comm_hook"), hook.__qualname__)
 
             for hook in cpp_builtin_hooks:
                 ddp_model = torch.nn.parallel.DistributedDataParallel(
@@ -3302,10 +3316,10 @@ class DistributedTest:
                 )
                 ddp_logging_data = ddp_model.get_ddp_logging_data()
                 # Hook not registered yet, so should be empty
-                self.assertEqual(ddp_logging_data.comm_hook, "")
+                self.assertEqual(ddp_logging_data.get("comm_hook"), None)
                 ddp_model._register_builtin_comm_hook(hook)
                 ddp_logging_data = ddp_model.get_ddp_logging_data()
-                self.assertEqual(ddp_logging_data.comm_hook, str(hook))
+                self.assertEqual(ddp_logging_data.get("comm_hook"), str(hook))
 
             # No hook registered
             ddp_model = torch.nn.parallel.DistributedDataParallel(
@@ -3314,7 +3328,7 @@ class DistributedTest:
             )
             ddp_logging_data = ddp_model.get_ddp_logging_data()
             # Hook not registered yet, so should be empty
-            self.assertEqual(ddp_logging_data.comm_hook, "")
+            self.assertEqual(ddp_logging_data.get("comm_hook"), None)
             # After second forward pass, hook should still be empty string
             for i in range(2):
                 inp = torch.ones(1, 1, device=self.rank)
@@ -3322,7 +3336,7 @@ class DistributedTest:
                 loss.backward()
 
             ddp_logging_data = ddp_model.get_ddp_logging_data()
-            self.assertEqual(ddp_logging_data.comm_hook, "")
+            self.assertEqual(ddp_logging_data.get("comm_hook"), None)
 
         def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
@@ -3787,21 +3801,21 @@ class DistributedTest:
                 # be zeros.
                 ddp_logging_data = model_DDP.get_ddp_logging_data()
                 if (idx > 0 and (idx < 10 or idx % 2 == 0)):
-                    self.assertGreaterEqual(ddp_logging_data.forward_compute_time, 1)
-                    self.assertGreaterEqual(ddp_logging_data.backward_compute_time, 1)
-                    self.assertGreaterEqual(ddp_logging_data.backward_comm_time, 1)
+                    self.assertGreaterEqual(ddp_logging_data.get("forward_compute_time"), 1)
+                    self.assertGreaterEqual(ddp_logging_data.get("backward_compute_time"), 1)
+                    self.assertGreaterEqual(ddp_logging_data.get("backward_comm_time"), 1)
                     self.assertGreaterEqual(
-                        ddp_logging_data.backward_compute_time,
-                        ddp_logging_data.backward_compute_comm_overlap_time)
+                        ddp_logging_data.get("backward_compute_time"),
+                        ddp_logging_data.get("backward_compute_comm_overlap_time"))
                     self.assertGreaterEqual(
-                        ddp_logging_data.backward_comm_time,
-                        ddp_logging_data.backward_compute_comm_overlap_time)
-                    self.assertEqual(ddp_logging_data.iteration, idx)
+                        ddp_logging_data.get("backward_comm_time"),
+                        ddp_logging_data.get("backward_compute_comm_overlap_time"))
+                    self.assertEqual(ddp_logging_data.get("iteration"), idx)
                 elif idx > 0:
                     # if the idx-th iteration is not sampled to set runtime stats,
                     # ddp_logging_data.iteration will not be updated to current
                     # iteration.
-                    self.assertNotEqual(ddp_logging_data.iteration, idx)
+                    self.assertNotEqual(ddp_logging_data.get("iteration"), idx)
 
                 # Shuffle the input so that DDP input is different
                 input = input[torch.randperm(batch_size)]
@@ -3819,19 +3833,19 @@ class DistributedTest:
             model_DDP = self._test_ddp_logging_data(is_gpu=False)
 
             ddp_logging_data = model_DDP.get_ddp_logging_data()
-            self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
-            self.assertEqual(ddp_logging_data.rank, dist.get_rank())
-            self.assertEqual(ddp_logging_data.module_name, 'Net')
-            self.assertEqual(ddp_logging_data.device_ids, [])
+            self.assertEqual(ddp_logging_data.get("world_size"), dist.get_world_size())
+            self.assertEqual(ddp_logging_data.get("rank"), dist.get_rank())
+            self.assertEqual(ddp_logging_data.get("module_name"), 'Net')
+            self.assertEqual(ddp_logging_data.get("device_ids"), "")
             # output_device is -1 in default if it is not set, e.g.
             # output_device of CPU training is -1.
-            self.assertEqual(ddp_logging_data.output_device, -1)
-            self.assertEqual(ddp_logging_data.broadcast_buffers, True)
-            self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
-            self.assertEqual(ddp_logging_data.find_unused_parameters, False)
-            self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
-            self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
-            self.assertEqual(ddp_logging_data.iteration, 18)
+            self.assertEqual(ddp_logging_data.get("output_device"), -1)
+            self.assertEqual(ddp_logging_data.get("broadcast_buffers"), 1)
+            self.assertEqual(ddp_logging_data.get("bucket_cap_bytes"), 25 * 1024 * 1024)
+            self.assertEqual(ddp_logging_data.get("find_unused_parameters"), 0)
+            self.assertEqual(ddp_logging_data.get("gradient_as_bucket_view"), 0)
+            self.assertEqual(ddp_logging_data.get("backend_name"), dist.get_backend(group_id))
+            self.assertEqual(ddp_logging_data.get("iteration"), 18)
             params = list(model_DDP.parameters())
             num_params = 0
             param_size = 0
@@ -3839,36 +3853,37 @@ class DistributedTest:
             for p in params:
                 num_params += 1
                 param_size += p.numel() * p.element_size()
-            self.assertEqual(ddp_logging_data.dtypes, ["float"])
-            self.assertEqual(ddp_logging_data.total_parameter_size_bytes, param_size)
-            self.assertEqual(ddp_logging_data.num_parameter_tensors, num_params)
-            self.assertEqual(ddp_logging_data.bucket_sizes, [param_size])
-            self.assertEqual(ddp_logging_data.master_port, parse_env("MASTER_PORT"))
-            self.assertEqual(ddp_logging_data.master_addr, parse_env("MASTER_ADDR"))
-            self.assertEqual(ddp_logging_data.cuda_visible_devices, parse_env("CUDA_VISIBLE_DEVICES"))
-            self.assertEqual(ddp_logging_data.gloo_socket_ifname, parse_env("GLOO_SOCKET_IFNAME"))
-            self.assertEqual(ddp_logging_data.gloo_device_transport, parse_env("GLOO_DEVICE_TRANSPORT"))
-            self.assertEqual(ddp_logging_data.nccl_socket_ifname, parse_env("NCCL_SOCKET_IFNAME"))
-            self.assertEqual(ddp_logging_data.nccl_blocking_wait, parse_env("NCCL_BLOCKING_WAIT"))
-            self.assertEqual(ddp_logging_data.nccl_async_error_handling, parse_env("NCCL_ASYNC_ERROR_HANDLING"))
-            self.assertEqual(ddp_logging_data.nccl_debug, parse_env("NCCL_DEBUG"))
-            self.assertEqual(ddp_logging_data.nccl_nthreads, parse_env("NCCL_NTHREADS"))
-            self.assertEqual(ddp_logging_data.nccl_ib_timeout, parse_env("NCCL_IB_TIMEOUT"))
+            self.assertEqual(ddp_logging_data.get("dtypes"), "float")
+            self.assertEqual(ddp_logging_data.get("total_parameter_size_bytes"), param_size)
+            self.assertEqual(ddp_logging_data.get("num_parameter_tensors"), num_params)
+            self.assertEqual(ddp_logging_data.get("bucket_sizes"), str(param_size))
+            self.assertEqual(ddp_logging_data.get("master_port"), parse_env("MASTER_PORT"))
+            self.assertEqual(ddp_logging_data.get("master_addr"), parse_env("MASTER_ADDR"))
+            self.assertEqual(ddp_logging_data.get("cuda_visible_devices"), parse_env("CUDA_VISIBLE_DEVICES"))
+            if ddp_logging_data.get("backend_name") == "gloo":
+                self.assertEqual(ddp_logging_data.get("gloo_socket_ifname"), parse_env("GLOO_SOCKET_IFNAME"))
+                self.assertEqual(ddp_logging_data.get("gloo_device_transport"), parse_env("GLOO_DEVICE_TRANSPORT"))
+            self.assertEqual(ddp_logging_data.get("nccl_socket_ifname"), None)
+            self.assertEqual(ddp_logging_data.get("nccl_blocking_wait"), None)
+            self.assertEqual(ddp_logging_data.get("nccl_async_error_handling"), None)
+            self.assertEqual(ddp_logging_data.get("nccl_debug"), None)
+            self.assertEqual(ddp_logging_data.get("nccl_nthreads"), None)
+            self.assertEqual(ddp_logging_data.get("nccl_ib_timeout"), None)
             # test runtime logging fields
-            self.assertEqual(ddp_logging_data.unused_parameter_size, 0)
-            self.assertEqual(ddp_logging_data.has_rebuilt_buckets, True)
-            self.assertEqual(ddp_logging_data.rebuilt_bucket_sizes, [param_size])
+            self.assertEqual(ddp_logging_data.get("unused_parameter_size"), None)
+            self.assertEqual(ddp_logging_data.get("has_rebuilt_buckets"), 1)
+            self.assertEqual(ddp_logging_data.get("rebuilt_bucket_sizes"), str(param_size))
             # It is hard to test accurate latency, but it can test whether the latency is
             # a valid value and in the expected range.
-            self.assertGreaterEqual(ddp_logging_data.avg_forward_compute_time, 1)
-            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_time, 1)
-            self.assertGreaterEqual(ddp_logging_data.avg_backward_comm_time, 1)
+            self.assertGreaterEqual(ddp_logging_data.get("avg_forward_compute_time"), 1)
+            self.assertGreaterEqual(ddp_logging_data.get("avg_backward_compute_time"), 1)
+            self.assertGreaterEqual(ddp_logging_data.get("avg_backward_comm_time"), 1)
             self.assertGreaterEqual(
-                ddp_logging_data.avg_backward_compute_time,
-                ddp_logging_data.avg_backward_compute_comm_overlap_time)
+                ddp_logging_data.get("avg_backward_compute_time"),
+                ddp_logging_data.get("avg_backward_compute_comm_overlap_time"))
             self.assertGreaterEqual(
-                ddp_logging_data.avg_backward_comm_time,
-                ddp_logging_data.avg_backward_compute_comm_overlap_time)
+                ddp_logging_data.get("avg_backward_comm_time"),
+                ddp_logging_data.get("avg_backward_compute_comm_overlap_time"))
             # test larger net with mixed data types, verify multiple bucket sizes
             model = LargeNet()
             model.float()
@@ -3876,11 +3891,12 @@ class DistributedTest:
             model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1.5)
             ddp_logging_data = model_DDP.get_ddp_logging_data()
             params = list(model_DDP.parameters())
-            self.assertEqual(ddp_logging_data.bucket_cap_mb, 1.5)
+            self.assertEqual(ddp_logging_data.get("bucket_cap_bytes"), int(1.5 * 1024 * 1024))
+            bucket_sizes = [params[1].numel() * params[1].element_size(), params[0].numel() * params[0].element_size()]
             self.assertEqual(
-                ddp_logging_data.bucket_sizes,
-                [params[1].numel() * params[1].element_size(), params[0].numel() * params[0].element_size()])
-            self.assertEqual(','.join(ddp_logging_data.dtypes), 'double,float')
+                ddp_logging_data.get("bucket_sizes"),
+                ', '.join(str(x) for x in bucket_sizes))
+            self.assertEqual(ddp_logging_data.get("dtypes"), 'double, float')
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -3889,19 +3905,19 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             model_DDP = self._test_ddp_logging_data(is_gpu=True)
             ddp_logging_data = model_DDP.get_ddp_logging_data()
-            self.assertEqual(ddp_logging_data.device_ids, [rank])
-            self.assertEqual(ddp_logging_data.output_device, rank)
+            self.assertEqual(ddp_logging_data.get("device_ids"), str(rank))
+            self.assertEqual(ddp_logging_data.get("output_device"), rank)
             # test runtime logging fields
             # It is hard to test accurate latency, but it can test whether the latency is
             # a valid value and in the expected range.
-            self.assertGreaterEqual(ddp_logging_data.avg_forward_compute_time, 1)
-            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_comm_overlap_time, 1)
+            self.assertGreaterEqual(ddp_logging_data.get("avg_forward_compute_time"), 1)
+            self.assertGreaterEqual(ddp_logging_data.get("avg_backward_compute_comm_overlap_time"), 1)
             self.assertGreaterEqual(
-                ddp_logging_data.avg_backward_compute_time,
-                ddp_logging_data.avg_backward_compute_comm_overlap_time)
+                ddp_logging_data.get("avg_backward_compute_time"),
+                ddp_logging_data.get("avg_backward_compute_comm_overlap_time"))
             self.assertGreaterEqual(
-                ddp_logging_data.avg_backward_comm_time,
-                ddp_logging_data.avg_backward_compute_comm_overlap_time)
+                ddp_logging_data.get("avg_backward_comm_time"),
+                ddp_logging_data.get("avg_backward_compute_comm_overlap_time"))
 
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
@@ -4215,9 +4231,11 @@ class DistributedTest:
                 for tensor in tensor_list:
                     self.assertEqual(tensor, t)
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_sync_params_and_buffers(self):
             # Test that after calling _sync_params_and_buffers, models across ranks
             # are the same and are equal to the model on the input rank.
@@ -4256,9 +4274,11 @@ class DistributedTest:
                 for t, expected in zip(net_module_states, expected_states):
                     self.assertEqual(t, expected)
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_grad_div_uneven_inputs(self):
             # Test gradient division during training with join() API. If
             # divide_by_initial_world_size=False, we scale by the effective world
@@ -4384,9 +4404,11 @@ class DistributedTest:
             )
             self._test_ddp_profiling(profiler_ctx=torch_profiler_ctx)
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_join_model_equivalence(self):
             # Verifies equivalence with model training locally and with DDP under
             # the join context manager.
@@ -4487,12 +4509,14 @@ class DistributedTest:
             self.validate_net_equivalence(net)
             # Ensure that running with DDP uneven inputs was logged.
             ddp_logging_data = net.get_ddp_logging_data()
-            self.assertTrue(ddp_logging_data.join_uneven_inputs)
+            self.assertTrue(ddp_logging_data.get("join_uneven_inputs"))
             dist.barrier()
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_uneven_inputs(self):
             dim = 1000
             batch = 1
@@ -4641,9 +4665,11 @@ class DistributedTest:
                     find_unused_params=("unused_params_model" in test_case.name),
                 )
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_uneven_input_join_disable(self):
             # tests that if net.join() with enable=False is specified, DDP works as
             # expected with even inputs.
@@ -4675,9 +4701,11 @@ class DistributedTest:
             self.assertFalse(join_config.ddp_join_enabled)
             self.validate_net_equivalence(net)
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
         def test_ddp_uneven_input_exception(self):
             # Tests that exceptions during training are correctly propagated by the
             # context manager.
@@ -5729,3 +5757,47 @@ class DistributedTest:
             # Tests unused parameter reporting when DDP is configured to ignore
             # certain parameters.
             self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=True)
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_sync_bn_training_vs_eval(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            # Need to set track_running_stats=False, when track_running_stats=True,
+            # bn_training is False and sync could not occur in eval model.
+            model = nn.SyncBatchNorm(
+                2, momentum=0.99, track_running_stats=False
+            ).cuda(rank)
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank]
+            )
+            # Test sync occurs in training mode.
+            with torch.autograd.profiler.profile() as prof:
+                for i in range(6):
+                    inp = torch.randn(10, 2, 4, 4).cuda(rank)
+                    out = model(inp)
+                    loss = out.sum()
+                    loss.backward()
+
+            # SyncBN allgathers stats across all ranks, so verify call to
+            # all_gather in profiler.
+            all_gather_calls = get_profiling_event("all_gather", prof)
+            self.assertNotEqual([], all_gather_calls)
+
+            # Only do inference on one rank. If SyncBN did collective stats sync,
+            # this would hang/error.
+            model_inference = model.module
+            if self.rank == 0:
+                model_inference.eval()
+                with torch.autograd.profiler.profile() as prof:
+                    for i in range(6):
+                        inp = torch.randn(10, 2, 4, 4).cuda(rank)
+                        out = model_inference(inp)
+                        loss = out.sum()
+                        loss.backward()
+
+                # Ensure sync does not occur in eval() mode.
+                all_gather_calls = get_profiling_event("all_gather", prof)
+                self.assertEqual([], all_gather_calls)
