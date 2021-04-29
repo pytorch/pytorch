@@ -1394,6 +1394,10 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
     samples.append(SampleInput(make_arg(()), args=(0, index_tensor([0]), 2)))
     samples.append(SampleInput(make_arg(()), args=(0, index_tensor(0), 2)))
 
+    # Duplicate indices
+    samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor([0, 0]), 2)))
+    samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor([0, 0, 2]), make_arg(()))))
+
     return samples
 
 def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs):
