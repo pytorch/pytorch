@@ -13,7 +13,10 @@
 
 #if !defined(_WIN32)
 #include <unistd.h>
-#endif
+#else // defined(_WIN32)
+#include <Windows.h>
+#include <fileapi.h>
+#endif  // defined(_WIN32)
 
 namespace c10 {
 namespace detail {
@@ -85,6 +88,38 @@ struct TempFile {
   std::string name;
 };
 
+struct TempDir {
+  TempDir() = default;
+  explicit TempDir(std::string name) : name(std::move(name)) {}
+  TempDir(const TempDir&) = delete;
+  TempDir(TempDir&& other) noexcept : name(std::move(other.name)) {
+    other.name.clear();
+  }
+
+  TempDir& operator=(const TempDir&) = delete;
+  TempDir& operator=(TempDir&& other) {
+    name = std::move(other.name);
+    other.name.clear();
+    return *this;
+  }
+
+#if !defined(_WIN32)
+  ~TempDir() {
+    if (!name.empty()) {
+      rmdir(name.c_str());
+    }
+  }
+#else   // defined(_WIN32)
+  ~TempDir() {
+    if (!name.empty()) {
+      RemoveDirectoryA(name.c_str());
+    }
+  }
+#endif  // defined(_WIN32)
+
+  std::string name;
+};
+
 /// Attempts to return a temporary file or returns `nullopt` if an error
 /// occurred.
 ///
@@ -118,5 +153,50 @@ inline TempFile make_tempfile(std::string name_prefix = "torch-file-") {
     return std::move(*tempfile);
   }
   TORCH_CHECK(false, "Error generating temporary file: ", std::strerror(errno));
+}
+
+/// Attempts to return a temporary directory or returns `nullopt` if an error
+/// occurred.
+///
+/// The directory returned follows the pattern
+/// `<tmp-dir>/<name-prefix><random-pattern>/`, where `<tmp-dir>` is the value of
+/// the `"TMPDIR"`, `"TMP"`, `"TEMP"` or
+/// `"TEMPDIR"` environment variable if any is set, or otherwise `/tmp`;
+/// `<name-prefix>` is the value supplied to this function, and
+/// `<random-pattern>` is a random sequence of numbers.
+/// On Windows, `name_prefix` is ignored and `tmpnam` is used.
+inline c10::optional<TempDir> try_make_tempdir(
+    std::string name_prefix = "torch-dir-") {
+#if defined(_WIN32)
+  while (true) {
+    const char* dirname = std::tmpnam(nullptr);
+    if (!dirname) {
+      return c10::nullopt;
+    }
+    if (CreateDirectoryA(dirname, NULL)) {
+      return TempDir(dirname);
+    }
+    if (GetLastError() != ERROR_ALREADY_EXISTS) {
+      return c10::nullopt;
+    }
+  }
+  return TempDir(std::move(dirname));
+#else
+  std::vector<char> filename = detail::make_filename(std::move(name_prefix));
+  const char* dirname = mkdtemp(filename.data());
+  if (!dirname) {
+    return c10::nullopt;
+  }
+  return TempDir(dirname);
+#endif // defined(_WIN32)
+}
+
+/// Like `try_make_tempdir`, but throws an exception if a temporary directory could
+/// not be returned.
+inline TempDir make_tempdir(std::string name_prefix = "torch-dir-") {
+  if (auto tempdir = try_make_tempdir(std::move(name_prefix))) {
+    return std::move(*tempdir);
+  }
+  TORCH_CHECK(false, "Error generating temporary directory: ", std::strerror(errno));
 }
 } // namespace c10
