@@ -79,6 +79,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, const Scalar&);
   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
   using TensorScalarType = Tensor (*)(const Tensor&, const Scalar&);
+  using TensorScalarScalarType = Tensor (*)(const Tensor&, const Scalar&, const Scalar&);
 
 #define BINARY_POINTWISE_BATCH_RULE_SCALAR(op) \
   binary_pointwise_batch_rule<TensorTensorScalarType, &op, const Scalar&>
@@ -87,23 +88,25 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
 #define BINARY_POINTWISE_BATCH_RULE(op) binary_pointwise_batch_rule<TensorTensorType, &op>
 #define BINARY_POINTWISE(op) VMAP_SUPPORT(#op".Tensor", BINARY_POINTWISE_BATCH_RULE(at::op));
+#define SINGLE_ARG(...) __VA_ARGS__
 
   BINARY_POINTWISE_WITH_SCALAR(add);
   BINARY_POINTWISE_WITH_SCALAR(sub);
   BINARY_POINTWISE_WITH_SCALAR(rsub);
   BINARY_POINTWISE(mul);
+  VMAP_SUPPORT("add.Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarScalarType, &at::add, const Scalar&, const Scalar&>));
+  VMAP_SUPPORT("sub.Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarScalarType, &at::sub, const Scalar&, const Scalar&>));
+  VMAP_SUPPORT("mul.Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::mul, const Scalar&>));
+  VMAP_SUPPORT("div.Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::div, const Scalar&>));
   BINARY_POINTWISE(div);
   VMAP_SUPPORT("tanh_backward", BINARY_POINTWISE_BATCH_RULE(at::tanh_backward));
 
   // at::pow has three out-of-place overloads
-#define POW_BATCH_RULE binary_pointwise_batch_rule<TensorTensorType, &at::pow>
-  VMAP_SUPPORT("pow.Tensor_Tensor", POW_BATCH_RULE);
-#undef POW_BATCH_RULE
-#define POW_BATCH_RULE basic_unary_batch_rule<TensorScalarType, &at::pow, const Scalar&>
-  VMAP_SUPPORT("pow.Tensor_Scalar", POW_BATCH_RULE);
-#undef POW_BATCH_RULE
+  VMAP_SUPPORT("pow.Tensor_Tensor", SINGLE_ARG(binary_pointwise_batch_rule<TensorTensorType, &at::pow>));
+  VMAP_SUPPORT("pow.Tensor_Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::pow, const Scalar&>));
   VMAP_SUPPORT("pow.Scalar", pow_scalar_tensor_batch_rule);
 
+#undef SINGLE_ARG
 #undef BINARY_POINTWISE_BATCH_RULE_SCALAR
 #undef BINARY_POINTWISE_BATCH_RULE
 #undef BINARY_POINTWISE_WITH_SCALAR
