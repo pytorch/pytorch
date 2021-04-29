@@ -250,13 +250,9 @@ def _wait_all_workers():
     terminate the RPC framework, and there is no guarantee that the RPC
     framework will work after this method returns.
     """
-    try:
-        _all_gather(None, timeout=DEFAULT_SHUTDOWN_TIMEOUT)
-    except RuntimeError as ex:
-        logger.error(
-            f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
-        )
-
+    _all_gather(None, timeout=DEFAULT_SHUTDOWN_TIMEOUT)
+    # Removing to get a proper stack trace.
+    # @nocommit
 
 @_require_initialized
 def shutdown(graceful=True):
