@@ -55,17 +55,34 @@ inline std::vector<char> make_filename(std::string name_prefix) {
 
 struct TempFile {
 #if !defined(_WIN32)
+  TempFile() : fd(-1) {}
   TempFile(std::string name, int fd) : fd(fd), name(std::move(name)) {}
-
-  ~TempFile() {
-    unlink(name.c_str());
-    close(fd);
+  TempFile(const TempFile&) = delete;
+  TempFile(TempFile&& other) noexcept : fd(other.fd), name(std::move(other.name)) {
+    other.fd = -1;
+    other.name.clear();
   }
 
-  const int fd;
+  TempFile& operator=(const TempFile&) = delete;
+  TempFile& operator=(TempFile&& other) {
+    fd = other.fd;
+    name = std::move(other.name);
+    other.fd = -1;
+    other.name.clear();
+    return *this;
+  }
+
+  ~TempFile() {
+    if (fd >= 0) {
+      unlink(name.c_str());
+      close(fd);
+    }
+  }
+
+  int fd;
 #endif // !defined(_WIN32)
 
-  const std::string name;
+  std::string name;
 };
 
 /// Attempts to return a temporary file or returns `nullopt` if an error
@@ -98,7 +115,7 @@ inline c10::optional<TempFile> try_make_tempfile(
 /// not be returned.
 inline TempFile make_tempfile(std::string name_prefix = "torch-file-") {
   if (auto tempfile = try_make_tempfile(std::move(name_prefix))) {
-    return *tempfile;
+    return std::move(*tempfile);
   }
   TORCH_CHECK(false, "Error generating temporary file: ", std::strerror(errno));
 }
