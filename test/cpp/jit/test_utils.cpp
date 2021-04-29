@@ -196,6 +196,7 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
   for (auto& tensor : inputs) {
     maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return diff.abs().max().item<float>() < 2e-6 * maxValue;
 }
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
@@ -236,6 +237,7 @@ inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 }
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg({
     // This operator is intended to be used in JIT analysis and transformation
     // pass unit tests in which Values with type Tensor are often required. It
@@ -246,7 +248,7 @@ RegisterOperators reg({
         [](Stack* stack) { push(stack, at::Tensor()); },
         aliasAnalysisFromSchema()),
 });
-}
+} // namespace
 
 } // namespace jit
 } // namespace torch
