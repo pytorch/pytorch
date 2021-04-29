@@ -106,10 +106,8 @@ std::unordered_set<c10::Device> getLocalDevices(
 void checkValidDevicesOption(
     const std::unordered_set<c10::Device>& deviceSet,
     const std::vector<c10::Device>& deviceOpt) {
-  std::unordered_set<c10::Device> optsDeviceSet;
-  for (const c10::Device& dev : deviceOpt) {
-    optsDeviceSet.insert(dev);
-  }
+  std::unordered_set<c10::Device> optsDeviceSet(
+      deviceOpt.begin(), deviceOpt.end());
 
   // no duplications are allowed in opts_.devices
   TORCH_CHECK(

@@ -98,7 +98,7 @@ struct TORCH_API LazyStreamContext {
   LazyStreamContext& operator=(LazyStreamContext&& rhs) & = delete;
 
   explicit LazyStreamContext(c10::DeviceType device_type)
-      : impl_(c10::impl::getDeviceGuardImpl(device_type)) {}
+      : impl_(device_type) {}
 
   // let streams in this context wiat for current streams.
   void waitForCurrentStreams(const std::vector<torch::Tensor>& tensors = {}) {
@@ -109,8 +109,8 @@ struct TORCH_API LazyStreamContext {
     }
 
     for (const auto& entry : streams_) {
-      c10::Event event{impl_->type()};
-      event.record(impl_->getStream(entry.first));
+      c10::Event event{impl_.type()};
+      event.record(impl_.getStream(entry.first));
       event.block(entry.second);
     }
   }
@@ -130,7 +130,7 @@ struct TORCH_API LazyStreamContext {
   c10::Stream getStream(c10::Device device) {
     auto iter = streams_.find(device);
     if (iter == streams_.end()) {
-      auto stream = impl_->getStreamFromPool(device);
+      auto stream = impl_.getStreamFromPool(device);
       streams_.emplace(device, stream);
       return stream;
     } else {
@@ -147,11 +147,11 @@ struct TORCH_API LazyStreamContext {
   }
 
   c10::DeviceType deviceType() const {
-    return impl_->type();
+    return impl_.type();
   }
 
  private:
-  const c10::impl::DeviceGuardImplInterface* const impl_ = nullptr;
+  const c10::impl::VirtualGuardImpl impl_;
   std::unordered_map<c10::Device, c10::Stream> streams_;
 };
 

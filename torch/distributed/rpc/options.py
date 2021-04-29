@@ -20,8 +20,8 @@ def _to_device(device: DeviceType) -> torch.device:
 
 
 def _to_device_map(device_map: Dict[DeviceType, DeviceType]) -> Dict[torch.device, torch.device]:
-    device_map : Dict[int, int] = {}
-    reverse_map : Dict[int, int] = {}
+    full_device_map : Dict[torch.device, torch.device] = {}
+    reverse_map : Dict[torch.device, torch.device] = {}
     for k in device_map:
         v = device_map[k]
         k, v = torch.device(k), torch.device(v)
@@ -36,12 +36,12 @@ def _to_device_map(device_map: Dict[DeviceType, DeviceType]) -> Dict[torch.devic
                 "`device_map` only supports 1-to-1 mapping, "
                 f"trying to map {k} and {reverse_map[v]} to {v}"
             )
-        device_map[k] = v
+        full_device_map[k] = v
         reverse_map[v] = k
-    return device_map
+    return full_device_map
 
 
-def _to_device_list(devices: List[DeviceType]) -> List[int]:
+def _to_device_list(devices: List[DeviceType]) -> List[torch.device]:
     return list(map(_to_device, devices))
 
 
