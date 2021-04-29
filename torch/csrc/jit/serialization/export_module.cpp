@@ -115,7 +115,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
 
   Inline(*graph);
 
-  torch::jit::Code code(graph, func.name());
+  torch::jit::MobileCode code(graph, func.name());
   auto instructions_copy = code.instructions();
 
   // operator names
@@ -646,6 +646,7 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
           "There should be two parts in an operator name.");
       auto opname = op_item[0].toString()->string();
       auto overload = op_item[1].toString()->string();
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       opnames.emplace(overload.empty() ? opname : opname + "." + overload);
     }
   }

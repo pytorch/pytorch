@@ -13,6 +13,7 @@ struct EigenPowFunctor {
   template <int b_is_scalar, typename T1, typename T2, typename R>
   inline void
   Run(size_t n, const T1* a, const T2* b, T2 e, R* out, CPUContext*) {
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     if (b == NULL) {
       EigenVectorArrayMap<R>(out, n) =
           EIGEN_POW((ConstEigenVectorArrayMap<T1>(a, n)), (e));
@@ -21,12 +22,15 @@ struct EigenPowFunctor {
         if (b[0] == -1.) {
           EigenVectorArrayMap<R>(out, n) =
               ConstEigenVectorArrayMap<T1>(a, n).inverse();
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (b[0] == 0.5) {
           EigenVectorArrayMap<R>(out, n) =
               ConstEigenVectorArrayMap<T1>(a, n).sqrt();
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (b[0] == -0.5) {
           EigenVectorArrayMap<R>(out, n) =
               ConstEigenVectorArrayMap<T1>(a, n).rsqrt();
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         } else if (b[0] == 2.) {
           EigenVectorArrayMap<R>(out, n) =
               ConstEigenVectorArrayMap<T1>(a, n).square();
@@ -86,6 +90,7 @@ struct EigenPowFunctor {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Pow,
     PowOp<
@@ -94,6 +99,7 @@ REGISTER_CPU_OPERATOR(
         EigenPowFunctor,
         SameTypeAsInput>)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Pow)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -372,6 +378,7 @@ class GetPowGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Pow, GetPowGradient);
 
 } // namespace caffe2

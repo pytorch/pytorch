@@ -72,9 +72,9 @@ struct TORCH_API AutoNonVariableTypeMode {
   AutoNonVariableTypeMode(bool enabled = true) :
     autograd_guard_(c10::autograd_dispatch_keyset) {
     TORCH_WARN_ONCE("AutoNonVariableTypeMode is deprecated and will be removed in 1.10 release. "
-        "For kernel implementations please use AutoDispatchBelowAutograd instead, "
+        "For kernel implementations please use AutoDispatchBelowInplaceOrView instead, "
         "If you are looking for a user facing API to enable running your inference-only "
-        "workload, please use c10::InferenceMode. Using AutoDispatchBelowAutogradMode in user code "
+        "workload, please use c10::InferenceMode. Using AutoDispatchBelowInplaceOrView in user code "
         "is under risk of producing silent wrong result in some edge cases. "
         "See Note [AutoDispatchBelowAutograd] for more details.");
     TORCH_INTERNAL_ASSERT(enabled);
@@ -84,12 +84,16 @@ struct TORCH_API AutoNonVariableTypeMode {
   c10::impl::ExcludeDispatchKeyGuard autograd_guard_;
 };
 
-// Note this guard is used in VariableType kernels for functional ops
-// as well as InplaceOrView kernels for inplace/view ops to enforce the
-// invariant:
-//   Once you are in VariableType/InplaceOrView kernel for an op,
-//   you never go back to a kernel on same dispatch key until
-//   you finish the current op.
+/* Note [AutoDispatchBelowInplaceOrView]
+ * AutoDispatchBelowInplaceOrView is equivalent to AutoNonVariableTypeMode
+ * before we split inplace & view ops out of VariableType kernel.
+ * Note this guard is used in VariableType kernels for functional ops
+ * as well as InplaceOrView kernels for inplace/view ops to enforce the
+ * Invariant:
+ *   Once you are in VariableType/InplaceOrView kernel for an op,
+ *   you never go back to a kernel on same dispatch key until
+ *   you finish the current op.
+ */
 struct TORCH_API AutoDispatchBelowInplaceOrView {
   AutoDispatchBelowInplaceOrView() :
     dispatch_key_guard_(c10::autograd_dispatch_keyset_with_InplaceOrView) {
