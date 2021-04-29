@@ -1,4 +1,5 @@
 #include <ATen/core/ivalue.h>
+#include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/backport.h>
@@ -8,7 +9,6 @@
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 #include <torch/custom_class.h>
 
-#include <exception>
 #include <string>
 #include <vector>
 
