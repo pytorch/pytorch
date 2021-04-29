@@ -18,11 +18,14 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SmoothL1Loss, SmoothL1LossOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SmoothL1LossGradient,
     SmoothL1LossGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SmoothL1Loss)
     .NumInputs(4)
     .NumOutputs(1)
@@ -73,7 +76,9 @@ where N is the number of batch elements in the input predictions.
         "loss",
         "Scalar loss.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SmoothL1LossGradient)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(1)
     .Input(
@@ -112,6 +117,7 @@ class GetSmoothL1LossGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SmoothL1Loss, GetSmoothL1LossGradient);
 
 } // namespace caffe2
