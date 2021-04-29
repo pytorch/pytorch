@@ -1305,12 +1305,9 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
               fname, " only supports strided layout, got: ", self.layout());
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               fname, " only support floating point and complex dtypes");
-  TORCH_CHECK(result1.scalar_type() == result2.scalar_type(),
-           "provided by result1 dtype must match dtype of result2. Got ",
-           toString(result1.scalar_type()),
-           " and ",
-           toString(result2.scalar_type()),
-           ".");
+  TORCH_CHECK(result1.scalar_type() == c10::toValueType(result2.scalar_type()),
+              fname, " expected result1 to be real and match the precision of result2. Got ",
+              result1.scalar_type(), " and ", result2.scalar_type(), ".");
 
   TORCH_CHECK(correction_opt.has_value(),
       fname, ": the correction parameter must be given explicitly. ",
@@ -1392,10 +1389,15 @@ std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
       self, /*dim=*/c10::nullopt, /*correction=*/int64_t{unbiased ? 1 : 0});
 }
 
+static TensorOptions options_to_value_type(TensorOptions opts) {
+  auto scalar_type = typeMetaToScalarType(opts.dtype());
+  return opts.dtype(c10::toValueType(scalar_type));
+}
+
 std::tuple<Tensor, Tensor> var_mean(
     const Tensor& self, c10::optional<IntArrayRef> dim,
     c10::optional<int64_t> correction, bool keepdim) {
-  Tensor result1 = at::empty({0}, self.options());
+  Tensor result1 = at::empty({0}, options_to_value_type(self.options()));
   Tensor result2 = at::empty({0}, self.options());
   return std_var_mean_out(
       "var_mean", result1, result2, self, dim, correction, keepdim, false);
@@ -1404,7 +1406,7 @@ std::tuple<Tensor, Tensor> var_mean(
 std::tuple<Tensor, Tensor> std_mean(
     const Tensor& self, c10::optional<IntArrayRef> dim,
     c10::optional<int64_t> correction, bool keepdim) {
-  Tensor result1 = at::empty({0}, self.options());
+  Tensor result1 = at::empty({0}, options_to_value_type(self.options()));
   Tensor result2 = at::empty({0}, self.options());
   return std_var_mean_out(
       "std_mean", result1, result2, self, dim, correction, keepdim, true);
@@ -1442,7 +1444,7 @@ Tensor& std_out(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim
 
 Tensor std(const Tensor& self, c10::optional<IntArrayRef> dim,
            c10::optional<int64_t> correction, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, options_to_value_type(self.options()));
   return std_var_out("std", result, self, dim, correction, keepdim, true);
 }
 
@@ -1461,7 +1463,7 @@ Tensor& var_out(
 Tensor var(
     const Tensor& self, c10::optional<IntArrayRef> dim,
     c10::optional<int64_t> correction, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, options_to_value_type(self.options()));
   return std_var_out("var", result, self, dim, correction, keepdim, false);
 }
 
