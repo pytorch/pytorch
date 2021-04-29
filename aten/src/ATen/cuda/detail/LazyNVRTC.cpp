@@ -3,6 +3,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/DynamicLibrary.h>
 #include <stdexcept>
+#include <mutex>  // for std::call_once
 
 namespace at {
 namespace cuda {
@@ -40,32 +41,33 @@ at::DynamicLibrary& getNVRTCLibrary() {
   // library in CUDA 11.3 and later 11.x releases will have the same soname (Linux) or DLL name (Windows) as the NVRTC library in CUDA 11.2.
   constexpr auto major = CUDA_VERSION / 1000;
   constexpr auto minor = ( CUDA_VERSION / 10 ) % 10;
-  std::string lib_version;
+  static std::once_flag flag;
+  static std::string libname, alt_libname;
+  std::call_once(flag, [&] {
+    std::string lib_version;
 #if defined(_WIN32)
-  if (major < 11 || (major == 11 && minor < 3)) {
-    lib_version = std::to_string(major) + std::to_string(minor);
-  } else if (major == 11) {
-    lib_version = "112";
-  } else {
-    lib_version = std::to_string(major) + "0";
-  }
-  auto libname = std::string("nvrtc64_") + lib_version + "_0.dll";
-  std::string alt_libname;
+    if (major < 11 || (major == 11 && minor < 3)) {
+      lib_version = std::to_string(major) + std::to_string(minor);
+    } else if (major == 11) {
+      lib_version = "112";
+    } else {
+      lib_version = std::to_string(major) + "0";
+    }
+    libname = std::string("nvrtc64_") + lib_version + "_0.dll";
 #else
-  if (major < 11 || (major == 11 && minor < 3)) {
-    lib_version = std::to_string(major) + "." + std::to_string(minor);
-  } else if (major == 11) {
-    lib_version = "11.2";
-  } else {
-    lib_version = std::to_string(major);
-  }
-  auto libname = std::string("libnvrtc.so.") + lib_version;
+    if (major < 11 || (major == 11 && minor < 3)) {
+      lib_version = std::to_string(major) + "." + std::to_string(minor);
+    } else if (major == 11) {
+      lib_version = "11.2";
+    } else {
+      lib_version = std::to_string(major);
+    }
+    libname = std::string("libnvrtc.so.") + lib_version;
 #ifdef NVRTC_SHORTHASH
-  auto alt_libname = std::string("libnvrtc-") + C10_STRINGIZE(NVRTC_SHORTHASH) + ".so." + lib_version;
-#else
-  std::string alt_libname;
+    alt_libname = std::string("libnvrtc-") + C10_STRINGIZE(NVRTC_SHORTHASH) + ".so." + lib_version;
 #endif
 #endif
+  });
   static at::DynamicLibrary lib(libname.c_str(), alt_libname.empty() ? nullptr : alt_libname.c_str());
   return lib;
 }
