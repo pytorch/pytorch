@@ -23,6 +23,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   const auto value_sizes = value_.sizes();
   const auto value_strides = value_.strides();
   sizes_and_strides_.resize(public_dims);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int64_t dim = 0; dim < public_dims; dim++) {
     auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
     sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);

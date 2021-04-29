@@ -92,13 +92,16 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
 
 bool Context::checkCuBLASConfigDeterministic() {
   bool cublas_config_deterministic = true;
   // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
   // is set to deterministic setting
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (hasCUDART() && (versionCUDART() >= 10020)) {
     char* workspace_config = std::getenv(cublas_config_var_name);
     cublas_config_deterministic = (workspace_config != nullptr) && (
@@ -240,6 +243,7 @@ Allocator* getCPUAllocator() {
 //    means the allow_tf32 flags are overrided and tf32 is force disabled
 // override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool override_allow_tf32_flag = false;
 
 NoTF32Guard::NoTF32Guard() {
@@ -273,6 +277,7 @@ void Context::setDefaultMobileCPUAllocator() {
       "Cannot set another allocator.");
   // Setting the priority high to make sure no other allocator gets used instead of this.
   prev_allocator_ptr_ = c10::GetCPUAllocator();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
 }
 
@@ -281,6 +286,7 @@ void Context::unsetDefaultMobileCPUAllocator() {
       "setDefaultMobileCPUAllocator must have been called "
       "before unsetDefaultMobileCPUAllocator.");
   // Setting the priority high to make sure no other allocator gets used instead of this.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c10::SetCPUAllocator(prev_allocator_ptr_ , /*priority*/ 100);
   prev_allocator_ptr_ = nullptr;
 }
