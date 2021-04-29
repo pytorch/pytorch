@@ -1212,18 +1212,28 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
       m, "Future")
-      .def(py::init([](std::vector<c10::DeviceIndex> devices = {}) {
+      .def(py::init([](const std::vector<py::object>& pyDevices = {}) {
         c10::intrusive_ptr<c10::ivalue::Future> fut;
 #ifdef USE_CUDA
-        if (devices.empty()) {
+        if (pyDevices.empty()) {
           fut = c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get());
         } else {
+          std::vector<c10::Device> devices;
+          devices.reserve(pyDevices.size());
+          for (const py::object& pyDev : pyDevices) {
+            TORCH_CHECK_TYPE(
+                THPDevice_Check(pyDev.ptr()),
+                "Expected torch.device, got ",
+                py::repr(pyDev));
+            auto device = reinterpret_cast<THPDevice*>(pyDev.ptr());
+            devices.emplace_back(device->device);
+          }
           fut = c10::make_intrusive<at::cuda::CUDAFuture>(
               PyObjectType::get(), std::move(devices));
         }
 #else
         TORCH_CHECK_VALUE(
-            devices.empty(),
+            pyDevices.empty(),
             "Tried to instantiate a Future with some devices, but PyTorch was built without CUDA support");
         fut = c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get());
 #endif

@@ -97,19 +97,48 @@ std::string formatSetOfDevices(
   return oss.str();
 }
 
+const c10::impl::DeviceGuardImplInterface* getImplForDevices(
+    const std::vector<c10::Device>& devices) {
+  if (devices.empty()) {
+    return nullptr;
+  }
+  c10::DeviceType deviceType = devices[0].type();
+  for (size_t idx = 1; idx < devices.size(); idx++) {
+    TORCH_CHECK_VALUE(
+        devices[idx].type() == deviceType,
+        "Expected all devices to be of the same type, but got a mismatch between ",
+        devices[0],
+        " and ",
+        devices[idx]);
+  }
+  return c10::impl::getDeviceGuardImpl(deviceType);
+}
+
 // We need devices to be sorted in order to use set_difference.
-std::vector<c10::DeviceIndex> sortDevices(
-    std::vector<c10::DeviceIndex> devices) {
-  std::sort(devices.begin(), devices.end());
-  return devices;
+std::vector<c10::DeviceIndex> getSortedIndicesOfDevices(
+    const c10::impl::DeviceGuardImplInterface* impl,
+    const std::vector<c10::Device>& devices) {
+  std::vector<bool> isDeviceUsed(impl->deviceCount(), false);
+  for (const c10::Device& device : devices) {
+    TORCH_CHECK_VALUE(
+        device.has_index(), "Expected devices to have indices, got ", device);
+    isDeviceUsed[device.index()] = true;
+  }
+  std::vector<c10::DeviceIndex> deviceIndices;
+  for (c10::DeviceIndex idx = 0; idx < isDeviceUsed.size(); idx++) {
+    if (isDeviceUsed[idx]) {
+      deviceIndices.push_back(idx);
+    }
+  }
+  return deviceIndices;
 }
 
 } // namespace
 
-CUDAFuture::CUDAFuture(at::TypePtr type, std::vector<c10::DeviceIndex> devices)
+CUDAFuture::CUDAFuture(at::TypePtr type, std::vector<c10::Device> devices)
     : at::ivalue::Future(std::move(type)),
-      impl_(c10::impl::getDeviceGuardImpl(c10::kCUDA)),
-      devices_(sortDevices(std::move(devices))) {
+      impl_(getImplForDevices(devices)),
+      devices_(getSortedIndicesOfDevices(impl_, devices)) {
   // Use current device to initialize currentDevice_. This is necessary
   // because preMarkCompletedHook won't be called when the Future contains
   // an error. Uninitialized currentDevice_ could lead to crash when used
@@ -119,7 +148,12 @@ CUDAFuture::CUDAFuture(at::TypePtr type, std::vector<c10::DeviceIndex> devices)
 
 c10::intrusive_ptr<ivalue::Future> CUDAFuture::createInstance(
     at::TypePtr type) {
-  return c10::make_intrusive<CUDAFuture>(std::move(type), devices_);
+  std::vector<c10::Device> devices;
+  devices.reserve(devices_.size());
+  for (const c10::DeviceIndex& index : devices_) {
+    devices.emplace_back(impl_->type(), index);
+  }
+  return c10::make_intrusive<CUDAFuture>(std::move(type), std::move(devices));
 }
 
 /**
