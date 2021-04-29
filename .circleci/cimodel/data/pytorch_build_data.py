@@ -32,14 +32,9 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("cuda", [
-            ("10.1", [
-                ("3.6", [
-                    ('build_only', [X(True)]),
-                ]),
-            ]),
             ("10.2", [
                 ("3.6", [
-                    ("shard_test", [XImportant(True)]),
+                    ("shard_test", [X(True)]),
                     ("libtorch", [
                         (True, [
                             ('build_only', [X(True)]),
@@ -49,7 +44,7 @@ CONFIG_TREE_DATA = [
             ]),
             ("11.1", [
                 ("3.8", [
-                    ("shard_test", [X(True)]),
+                    ("shard_test", [XImportant(True)]),
                     ("libtorch", [
                         (True, [
                             ('build_only', [XImportant(True)]),

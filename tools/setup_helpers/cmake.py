@@ -256,7 +256,8 @@ class CMake:
              'ONNX_ML',
              'ONNX_NAMESPACE',
              'ATEN_THREADING',
-             'WERROR')
+             'WERROR',
+             'OPENSSL_ROOT_DIR')
         })
 
         for var, val in my_env.items():
