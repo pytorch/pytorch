@@ -301,8 +301,8 @@ void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
 
 std::vector<uint8_t> FileStore::compareSet(
     const std::string& key,
-    const std::vector<uint8_t>& currentValue,
-    const std::vector<uint8_t>& newValue) {
+    const std::vector<uint8_t>& expectedValue,
+    const std::vector<uint8_t>& desiredValue) {
   std::string regKey = regularPrefix_ + key;
   std::unique_lock<std::mutex> l(activeFileOpLock_);
   File file(path_, O_RDWR | O_CREAT, timeout_);
@@ -310,17 +310,17 @@ std::vector<uint8_t> FileStore::compareSet(
   // Always refresh since even though the key exists in the cache,
   // it might be outdated
   pos_ = refresh(file, pos_, cache_);
-  if ((cache_.count(regKey) == 0 && currentValue.empty()) ||
-      (cache_.count(regKey) != 0 && cache_[regKey] == currentValue)) {
+  if ((cache_.count(regKey) == 0 && expectedValue.empty()) ||
+      (cache_.count(regKey) != 0 && cache_[regKey] == expectedValue)) {
     // if the key does not exist and currentValue arg is empty or
     // the key does exist and current value is what is expected, then set it
     file.seek(0, SEEK_END);
     file.write(regKey);
-    file.write(newValue);
-    return newValue;
+    file.write(desiredValue);
+    return desiredValue;
   } else if (cache_.count(regKey) == 0) {
     // if the key does not exist
-    return currentValue;
+    return expectedValue;
   }
   // key exists but current value is not expected
   return cache_[regKey];
