@@ -26,12 +26,10 @@ struct WorkEntry {
       std::vector<at::Tensor>* srcPtr,
       std::vector<at::Tensor>* dstPtr,
       std::function<void(std::unique_ptr<WorkEntry>&)> run)
-      : run(run) {
+      : dst(dstPtr ? *dstPtr : std::vector<at::Tensor>()),
+        run(run) {
     if (srcPtr) {
       src = *srcPtr;
-    }
-    if (dstPtr) {
-      dst = std::make_shared<std::vector<at::Tensor>>(*dstPtr);
     }
   }
 
@@ -45,7 +43,7 @@ struct WorkEntry {
 
   // We use `dst` for returning resulting vectors in WorkMPI::result, so we need to
   // keep it alive.
-  std::shared_ptr<std::vector<at::Tensor>> dst;
+  const std::vector<at::Tensor> dst;
 
   // src rank returned, for recv only
   int* srcRank = nullptr;
@@ -81,7 +79,7 @@ class ProcessGroupMPI : public ProcessGroup {
   class WorkMPI : public ProcessGroup::Work {
    public:
     WorkMPI(
-        std::shared_ptr<std::vector<at::Tensor>> outputTensors,
+        std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt)
@@ -90,7 +88,7 @@ class ProcessGroupMPI : public ProcessGroup {
               OpType::UNKNOWN,
               profilingTitle,
               inputTensors),
-          outputTensors_(std::move(outputTensors)) {}
+          outputTensors_(outputTensors) {}
 
    virtual std::vector<at::Tensor> result() override;
 
@@ -98,7 +96,7 @@ class ProcessGroupMPI : public ProcessGroup {
     friend class ProcessGroupMPI;
 
    private:
-    std::shared_ptr<std::vector<at::Tensor>> outputTensors_;
+    std::vector<at::Tensor> outputTensors_;
   };
 
   class AsyncWork : public ProcessGroup::Work {

@@ -95,11 +95,7 @@ void checkSameSizeAndType(
 } // namespace
 
 std::vector<at::Tensor> ProcessGroupMPI::WorkMPI::result() {
-  if (outputTensors_) {
-    return *outputTensors_;
-  } else {
-    return std::vector<at::Tensor>();
-  }
+  return outputTensors_;
 }
 
 ProcessGroupMPI::AsyncWork::AsyncWork(
@@ -476,7 +472,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [this](std::unique_ptr<WorkEntry>& entry) {
         auto data = (entry->src)[0];
-        std::vector<at::Tensor>& outputDataVec = *entry->dst;
+        std::vector<at::Tensor> outputDataVec = entry->dst;
         auto flatOutputTensor = newLikeFlat(outputDataVec);
 
         c10::DeviceGuard guard(data.device());
@@ -540,8 +536,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
         void* recvbuf = nullptr;
         at::Tensor flatOutputTensor;
 
+        std::vector<at::Tensor> dstdata = entry->dst;
         if (rank_ == opts.rootRank) {
-          flatOutputTensor = newLikeFlat(*entry->dst);
+          flatOutputTensor = newLikeFlat(dstdata);
           recvbuf = flatOutputTensor.data_ptr();
         }
 
@@ -558,7 +555,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
             pgComm_));
 
         if (rank_ == opts.rootRank) {
-          std::vector<at::Tensor>& outputDataVec = *entry->dst;
+          const std::vector<at::Tensor>& outputDataVec = entry->dst;
           // copy the flattened output tensors to the outputs
           for (size_t i = 0; i < outputDataVec.size(); ++i) {
             outputDataVec.at(i).copy_(flatOutputTensor[i]);
@@ -610,7 +607,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->dst)[0];
+        auto data = (entry->dst)[0];
         void* sendbuf = nullptr;
         at::Tensor flatInputTensor;
 
@@ -688,7 +685,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
     std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
         [opts, this](std::unique_ptr<WorkEntry>& entry) {
           auto srcdata = (entry->src)[0];
-          auto dstdata = (*entry->dst)[0];
+          auto dstdata = (entry->dst)[0];
           c10::DeviceGuard guard(srcdata.device());
           std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
           MPI_CHECK(MPI_Alltoall(
@@ -716,7 +713,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
         [opts, this, inputSplitSizes, outputSplitSizes](
             std::unique_ptr<WorkEntry>& entry) {
           auto srcdata = (entry->src)[0];
-          auto dstdata = (*entry->dst)[0];
+          auto dstdata = (entry->dst)[0];
           std::vector<int> send_lengths(size_);
           std::vector<int> recv_lengths(size_);
           std::vector<int> send_offsets(size_);
@@ -766,7 +763,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
         std::vector<int> send_offsets(size_);
         std::vector<int> recv_offsets(size_);
         auto srcdata = entry->src;
-        auto dstdata = *entry->dst;
+        auto dstdata = entry->dst;
         int64_t src_len = c10d::computeLengthsAndOffsets(
             srcdata, &send_lengths, &send_offsets);
         int64_t dst_len = c10d::computeLengthsAndOffsets(
