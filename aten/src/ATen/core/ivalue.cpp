@@ -217,8 +217,8 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       subValues.insert(*this);
       c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
       auto match = py_obj->tryToInferType();
-      TORCH_INTERNAL_ASSERT(match.success(),
-            "Cannot infer type of ", py_obj->toStr(), "\n:", match.reason());
+      TORCH_CHECK_TYPE(match.success(),
+            "Cannot infer type of ", py_obj->toStr(), ": ", match.reason());
       auto contained_value = py_obj->toIValue(match.type());
       contained_value.getSubValues(subValues);
       break;
@@ -227,8 +227,8 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Device:
     case Tag::Uninitialized:
     case Tag::Capsule:
-      TORCH_INTERNAL_ASSERT(
-          false, "sub ivalue is nat enabled for: ", this->tagKind());
+      TORCH_CHECK_TYPE(
+          false, "Cannot inspect value of type ", this->tagKind());
       // Fall through
     default:
       // don't record scalars.
@@ -337,6 +337,7 @@ size_t IValue::hash(const IValue& v) {
       // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
       // the tensor to emulate it
       return c10::get_hash(v.payload.as_tensor.unsafeGetTensorImpl());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case Tag::Storage:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::Int:
@@ -507,6 +508,7 @@ std::ostream& IValue::repr(
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {

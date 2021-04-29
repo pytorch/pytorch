@@ -10,6 +10,11 @@
 
 namespace c10d {
 
+// callback function will be given arguments (optional<string> oldValue,
+// optional<string> newValue)
+using WatchKeyCallback =
+    std::function<void(c10::optional<std::string>, c10::optional<std::string>)>;
+
 class Store : public torch::CustomClassHolder {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
@@ -65,10 +70,10 @@ class Store : public torch::CustomClassHolder {
   // DELETE: callback(currentValue, c10::nullopt) // null newValue
   virtual void watchKey(
       const std::string& /* unused */,
-      std::function<void(
-          c10::optional<std::string>,
-          c10::optional<std::string>)> /* unused */) {
-    TORCH_INTERNAL_ASSERT(false, "watchKey only implemented for TCPStore.");
+      WatchKeyCallback /* unused */) {
+    TORCH_CHECK(
+        false,
+        "watchKey only implemented for TCPStore and PrefixStore that wraps TCPStore.");
   }
 
  protected:

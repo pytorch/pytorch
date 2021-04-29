@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import unittest
 from torch.testing._internal.jit_utils import JitTestCase
+from torch._C import parse_ir
 
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantized import override_quantized_engine
@@ -34,6 +36,10 @@ TEST_CUDNN = False
 if TEST_CUDA and not TEST_ROCM:  # Skip ROCM
     torch.ones(1).cuda()  # initialize cuda context
     TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0')))
+
+def removeExceptions(graph):
+    for n in graph.findAllNodes('prim::RaiseException'):
+        n.destroy()
 
 class TestFreezing(JitTestCase):
     def test_freeze_module(self):
@@ -1825,6 +1831,128 @@ class TestFrozenOptimizations(JitTestCase):
 
             self.assertEqual(mod_eager(inp), frozen_mod(inp))
 
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_incompatible_perf_formats(self):
+        with set_default_dtype(torch.float):
+            class Mod(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 64, 3, 2)
+                    self.max_pool = torch.nn.MaxPool2d(111, 111)
+
+                def forward(self, x):
+                    a = self.conv(x)
+                    b = self.max_pool(a)
+                    return a + b
+
+            model = Mod()
+            model.eval()
+            mod = torch.jit.freeze(torch.jit.script(model))
+            N, C, H, W, = 10, 3, 224, 224
+            inp = torch.randn(N, C, H, W)
+            self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+            self.assertTrue(torch.allclose(model(inp), mod(inp)))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_pool2d_batchnorm(self):
+        with set_default_dtype(torch.float):
+
+            pooling_layers = [torch.nn.AdaptiveAvgPool2d(4),
+                              # torch.nn.AdaptiveMaxPool2d(4), # return tuples
+                              torch.nn.MaxPool2d(4),
+                              torch.nn.AvgPool2d(4),
+                              torch.nn.BatchNorm2d(64).eval()]
+
+            for pl in pooling_layers:
+                sub_model = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 2, 2), torch.nn.ReLU(), pl, torch.nn.Hardswish())
+                sub_model.eval()
+                mod = torch.jit.freeze(torch.jit.script(sub_model))
+                N, C, H, W, = 10, 3, 224, 224
+                inp = torch.randn(N, C, H, W)
+                # these two passes needed to remove
+                # a size check in BatchNorm2d
+                removeExceptions(mod.graph)
+                self.run_pass('dce', mod.graph)
+                self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                FileCheck().check("aten::to_dense").check_next("return").run(mod.graph)
+                self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_pool3d_batchnorm(self):
+        with set_default_dtype(torch.float):
+
+            pooling_layers = [torch.nn.MaxPool3d(4),
+                              # torch.nn.AdaptiveAvgPool3d(4), # no ideep bindings
+                              # torch.nn.AdaptiveMaxPool3d(4), # return tuples
+                              torch.nn.AvgPool3d(4),
+                              torch.nn.BatchNorm3d(64).eval()]
+
+            for pl in pooling_layers:
+                sub_model = torch.nn.Sequential(torch.nn.Conv3d(3, 64, 2, 2), torch.nn.ReLU(), pl, torch.nn.Hardswish())
+                sub_model.eval()
+                mod = torch.jit.freeze(torch.jit.script(sub_model))
+                N, C, H, W, D = 10, 3, 64, 64, 64
+                inp = torch.randn(N, C, D, H, W)
+                # these two passes needed to remove
+                # a size check in BatchNorm2d
+                removeExceptions(mod.graph)
+                self.run_pass('dce', mod.graph)
+                self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                FileCheck().check("aten::to_dense").check_next("return").run(mod.graph)
+                self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @skipIfNoTorchVision
+    def test_conv_hardswish(self):
+        with set_default_dtype(torch.float):
+            activations = [
+                torch.nn.Hardswish(),
+                torch.nn.Hardsigmoid(),
+                torch.nn.ReLU6(),
+                torch.nn.Tanh(),
+                torch.nn.Hardtanh(0., 6.),
+                torch.nn.Hardtanh(1., 100.),
+                torch.nn.Hardtanh(-100., -1.),
+            ]
+
+            model = torchvision.models.resnet18()
+            for activation in activations:
+                sub_model = torch.nn.Sequential(model.conv1, activation)
+                sub_model.eval()
+                mod = torch.jit.freeze(torch.jit.script(sub_model))
+                N, C, H, W, = 10, 3, 224, 224
+                inp = torch.randn(N, C, H, W)
+                self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                FileCheck().check_count("aten::to_dense", 1, exactly=True).run(mod.graph)
+                self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_hardswish_hardsigmoid(self):
+        with set_default_dtype(torch.float):
+            op_map = {
+                'prim::MKLDNNHardSwish' : F.hardswish,
+                'prim::MKLDNNHardSigmoid' : F.hardsigmoid,
+            }
+
+            input_sizes = ([0], [1], [3], [1, 3, 8, 8])
+            for (mkldnn_opname, aten_op) in op_map.items():
+                for size in input_sizes:
+                    for inplace in (True, False):
+                        inplace_str = "_" if inplace else ""
+                        inplace_tgt = "%34" if inplace else "%35"
+                        graph_str = f"""graph(%input.1 : Tensor):
+                            %33 : None = prim::Constant()
+                            %34 : Tensor = aten::to_mkldnn(%input.1, %33)
+                            %35 : Tensor = {mkldnn_opname}{inplace_str}(%34)
+                            return ({inplace_tgt})
+                        """
+                        g = parse_ir(graph_str)
+                        m = self.createFunctionFromGraph(g)
+                        x = torch.rand(size)
+                        # `inplace=False` is intentional, otherwise we modify the input
+                        # and we aren't testing aten impls anyways
+                        self.assertTrue(torch.allclose(aten_op(x, inplace=False), m(x).to_dense()))
+
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
     def setUp(self):
@@ -1851,9 +1979,10 @@ class TestMKLDNNReinplacing(JitTestCase):
 
     def test_successful(self):
         # simple conv-relu
-        mod_eager = nn.Sequential(self.getConv(), nn.ReLU(), nn.ReLU())
+
+        mod_eager = nn.Sequential(self.getConv(), nn.Hardswish(), nn.ReLU())
         mod = self.freezeAndConvert(mod_eager)
-        FileCheck().check("mkldnn_convolution").check_next("aten::relu_").check_next("aten::relu_").run(mod.graph)
+        FileCheck().check("mkldnn_convolution").check_next("prim::MKLDNNHardSwish_").check_next("aten::relu_").run(mod.graph)
         self.checkResults(mod_eager, mod)
 
     def test_merge_liveness(self):
