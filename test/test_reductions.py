@@ -2246,18 +2246,23 @@ class TestReductions(TestCase):
         expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
         test_against_np(expanded)
 
+    # Tests to ensure that reduction functions employing comparison operators are usable when there
+    # exists a zero dimension (i.e. when the the tensors are empty) in the tensor. These tests specifically
+    # cater to functions where specifying the `dim` parameter is only way to trigger logic for reduction
+    # along the zero dimension. Not specifying the `dim` directly throws errors that the operation does
+    # have identity for the cases given below.
     def test_tensor_compare_ops_empty(self, device):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
         test_functions = [
-            ('amax', torch.amax, {}),
-            ('amin', torch.amin, {}),
-            ('argmax', torch.argmax, {'dtype': torch.int64}),
-            ('argmin', torch.argmin, {'dtype': torch.int64}),
-            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, {}),
-            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, {}),
-            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, {}),
-            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, {}),
+            ('amax', torch.amax, {}, np.amax),
+            ('amin', torch.amin, {}. np.amin),
+            ('argmax', torch.argmax, {'dtype': torch.int64}, np.argmax),
+            ('argmin', torch.argmin, {'dtype': torch.int64}, np.argmin),
+            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, {}, np.max),
+            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, {}, np.min),
+            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, {}, np.partition),
+            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, {}, np.median),
         ]
 
         for name, fn, dtype in test_functions:
@@ -2272,9 +2277,11 @@ class TestReductions(TestCase):
                              msg=error_msg)
 
             # Check if function raises error on specified zero'd dimension as reduction dim.
-            print(name)
             self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input, dim=1))
 
+    # Tests to ensure that reduction of zero-dim tensors (i.e. empty tensors) using comparison operators raises an error
+    # if no `dim` parameter is specified. This exists separately from tests in test_tensot_compare_ops_empty because not
+    # specifying a `dim` parameter in the above tests does not throw errors. 
     def test_tensor_compare_ops_optional_dim_empty(self, device):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
@@ -2286,6 +2293,11 @@ class TestReductions(TestCase):
         for name, fn in test_functions:
             self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input))
 
+    # Tests to ensure that reduction of zero-dim tensors (i.e. empty tensors) using math operators works when a
+    # non-zero dim is specified for the reduction and throws an error when the dim specified is 0. Although
+    # there is some repetition with test_tensor_compare_ops_optional_dim_empty and test_tensor_compare_ops_empty,
+    # these tests are kept separate since tests for math operators also require checking for correctness of the
+    # returned data using allclose() or isinf() which does not exists in the former tests.
     def test_tensor_reduce_ops_empty(self, device):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
@@ -2323,6 +2335,9 @@ class TestReductions(TestCase):
                 # ignore if there is no allreduce.
                 self.assertTrue('dim' in str(err))
 
+    # Tests to ensure that any() and all() functions work with zero-dim tensors. Kept separate from
+    # other tests for checking reduction with zero-dim tensors because these tests have significantly
+    # different testing behaviour than that used for the former tests.
     def test_reduction_empty_any_all(self, device):
         shape = (2, 0, 4)
         x = torch.randn(shape, device=device)
@@ -2335,9 +2350,9 @@ class TestReductions(TestCase):
             else:
                 out_dtype = torch.bool  # output of all/any is bool irrespective of input dtype
 
-            # any
             xb = x.to(dtype)
             yb = x.to(dtype)
+            # any
             self.assertEqual((2, 0), xb.any(2).shape)
             self.assertEqual((2, 0, 1), xb.any(2, keepdim=True).shape)
             self.assertEqual(torch.zeros((2, 4), device=device, dtype=out_dtype), xb.any(1))

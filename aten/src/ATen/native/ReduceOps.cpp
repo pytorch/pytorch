@@ -1129,8 +1129,8 @@ Tensor &any_out(const Tensor &self, int64_t dim, bool keepdim, Tensor &result) {
 }
 
 Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:",
-              self.scalar_type(), result.scalar_type());
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Expected the dtype for input and out to match, but got ",
+              self.scalar_type(), " for input's dtype and ",  result.scalar_type(), " for out's dtype.");
   if (self.numel() == 0) {
     zero_numel_check_dims(self, dim, "amin()");
   }
@@ -1148,8 +1148,8 @@ Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
 }
 
 Tensor &amax_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:",
-              self.scalar_type(), result.scalar_type());
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Expected the dtype for input and out to match, but got ",
+              self.scalar_type(), " for input's dtype and ",  result.scalar_type(), " for out's dtype.");
   if (self.numel() == 0) {
     zero_numel_check_dims(self, dim, "amax()");
   }
@@ -1185,7 +1185,7 @@ Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
     }
     in = self;
   } else {
-    TORCH_CHECK_INDEX(self.numel() != 0, "argmax_out(): Expected reduction dim for self.numel() == 0.");
+    TORCH_CHECK_INDEX(self.numel() != 0, "argmax_out(): Expected reduction dim to be specified for input.numel() == 0.");
     in = self.reshape({-1});
     keepdim = false;
   }
@@ -1221,7 +1221,7 @@ Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
     }
     in = self;
   } else {
-    TORCH_CHECK_INDEX(self.numel() != 0, "argmin_out(): Expected reduction dim for self.numel() == 0.");
+    TORCH_CHECK_INDEX(self.numel() != 0, "argmin_out(): Expected reduction dim to be specified for input.numel() == 0.");
     in = self.reshape({-1});
     keepdim = false;
   }

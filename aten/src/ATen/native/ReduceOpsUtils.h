@@ -282,7 +282,7 @@ static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, con
 static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
                                      const Tensor& self, const int64_t dim,
                                      const bool keepdim, const char *fn_name) {
-  TORCH_CHECK(self.numel() == 0,  fn_name, ": Expected self.numel() != 0.");
+  TORCH_INTERNAL_ASSERT(self.numel() == 0,  fn_name, ": Expected self.numel() != 0.");
   zero_numel_check_dims(self, dim, fn_name);
   std::vector<int64_t> sizes;
   if (keepdim) {
