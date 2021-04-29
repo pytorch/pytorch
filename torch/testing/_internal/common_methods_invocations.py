@@ -639,7 +639,12 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
-def sample_inputs_add(op_info, device, dtype, requires_grad, **kwargs):
+# In order to use the kwarg alpha, partials should be used in an OpInfo's sample_inputs_func
+# eg. sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2)
+# Then one sample input would also be generated corresponding to the value of alpha provided.
+# In the future, kwargs 'alpha_floating', 'alpha_integral' & 'alpha_complex' can be used to
+# specify scalars of floating, integral & complex types as values for "alpha".
+def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
     scalar = 1 if dtype is torch.bool else scalar
     tests_list = [
@@ -666,6 +671,12 @@ def sample_inputs_add(op_info, device, dtype, requires_grad, **kwargs):
                                                requires_grad=requires_grad),
                                    args=(arg,),
                                    broadcasts_input=broadcasts_input))
+    # Adds an extra sample using "alpha" if it's passed in kwargs
+    if 'alpha' in kwargs:
+        a = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
+        b = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
+        sample = SampleInput(a, args=(b,), kwargs={'alpha': kwargs['alpha']})
+        samples.append(sample)
     return tuple(samples)
 
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
@@ -3375,7 +3386,18 @@ op_db: List[OpInfo] = [
     OpInfo('add',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_add,
+           sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
+           supports_inplace_autograd=False),
+    OpInfo('mul',
+           aliases=('multiply',),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_binary_pwise),
+    OpInfo('sub',
+           aliases=('subtract',),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           assert_autodiffed=True,
+           sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
            supports_inplace_autograd=False),
     OpInfo('addmm',
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
@@ -5633,29 +5655,8 @@ def method_tests():
     return [
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
         ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
-        ('sub', (S, S, S), ((S, S, S),), '', (True,)),
-        ('sub', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
-        ('sub', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
-        ('sub', (S, 1, S), ((M, S),), 'broadcast_all', (True,)),
-        ('sub', (S, S, S), ((),), 'scalar_broadcast_rhs', (True,)),
-        ('sub', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
-        ('sub', (S, S, S), (3.14,), 'constant', (True,)),
-        ('sub', (), (3.14,), 'scalar_constant', (True,)),
-        ('sub', (S, S, S), (3.14j,), 'complex_scalar_constant', (True,)),
         ('__rsub__', (S, S, S), (3.14,), 'constant', (True, 'aten::rsub')),
         ('__rsub__', (), (3.14,), 'scalar_constant', (True, 'aten::rsub')),
-        ('mul', (S, S, S), ((S, S, S),), '', (True,)),
-        ('mul', (), ((),), 'scalar', (True,)),
-        ('mul', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
-        ('mul', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
-        ('mul', (S, 1, S), ((M, S),), 'broadcast_all', (True,)),
-        ('mul', (S, S, S), ((),), 'scalar_broadcast_rhs', (True,)),
-        ('mul', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
-        ('mul', (S, S, S), (3.14,), 'constant', (True,)),
-        ('mul', (), (3.14,), 'scalar_constant', (True,)),
-        # TODO(@anjali411): enable these tests
-        # ('mul', (S, S, S), (3.14j,), 'imaginary_constant', (True,)),
-        # ('mul', (), (3.14j,), 'imaginary_scalar_constant', (True,)),
         ('__rmul__', (S, S, S), (3.14,), 'constant', (True, 'aten::mul')),
         ('__rmul__', (), (3.14,), 'scalar_constant', (True, 'aten::mul')),
         ('div', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
