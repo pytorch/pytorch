@@ -186,8 +186,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
     try {
       addMetadata(key, value);
     }
-    catch(const c10::Error& e) {
-      PyErr_SetString(PyExc_RuntimeError, e.msg());
+    catch(const std::runtime_error& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
     }
   });
 #endif
