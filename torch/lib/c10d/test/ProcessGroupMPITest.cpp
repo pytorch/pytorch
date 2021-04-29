@@ -32,23 +32,24 @@ void waitWork(
 
 void testAllreduce(int iter = 1000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  std::vector<std::vector<at::Tensor>> outputTensors;
-  {
-    // Generate inputs
-    std::vector<std::vector<at::Tensor>> allTensors(iter);
-    for (auto i = 0; i < iter; ++i) {
-      auto tensor = at::ones({16, 16}) * i;
-      allTensors[i] = std::vector<at::Tensor>({tensor});
-    }
 
-    std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-    for (auto& tensors : allTensors) {
-      c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
-          pg->allreduce(tensors);
-      works.push_back(std::move(work));
-    }
-    waitWork(pg, works, &outputTensors);
+  // Generate inputs
+  std::vector<std::vector<at::Tensor>> allTensors(iter);
+  for (auto i = 0; i < iter; ++i) {
+    auto tensor = at::ones({16, 16}) * i;
+    allTensors[i] = std::vector<at::Tensor>({tensor});
   }
+
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
+  for (auto& tensors : allTensors) {
+    // Queue the work.
+    c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
+        pg->allreduce(tensors);
+    works.push_back(std::move(work));
+  }
+
+  std::vector<std::vector<at::Tensor>> outputTensors;
+  waitWork(pg, works, &outputTensors);
 
   // Get the world size
   auto worldSize = pg->getSize();
