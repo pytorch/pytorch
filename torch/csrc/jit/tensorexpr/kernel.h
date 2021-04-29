@@ -120,6 +120,11 @@ class TORCH_API TensorExprKernel {
       const std::vector<ExprHandle>& axes);
 
   ArgValue toArg(const torch::jit::Value* v) const;
+  ExprHandle constant(const torch::jit::Value* v);
+
+  ExprHandle tensorOrConstant(
+      const torch::jit::Value* v,
+      const std::vector<ExprHandle>& axes);
 
 
   Tensor* computeConv2d(const torch::jit::Value* v);
