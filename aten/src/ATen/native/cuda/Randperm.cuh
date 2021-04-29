@@ -19,8 +19,9 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
   if (tid != 0 && (keys[tid] & mask) == (keys[tid - 1] & mask)) return;  // not the beginning of an island
 
   // find the size of islands
-  int island_size = 0;
-  while ((keys[tid + ++island_size] & mask) == (keys[tid] & mask));
+  int island_size = 1;
+  while ((tid + island_size < n) && (keys[tid + island_size] & mask) == (keys[tid] & mask)) island_size++;
+  island_size++;
 
   // do random permutation inside each island.
   data += tid;
