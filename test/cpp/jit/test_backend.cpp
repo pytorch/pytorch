@@ -8,6 +8,7 @@
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, ToBackend) {
   Module m("m");
   m.define(R"(
@@ -22,6 +23,7 @@ TEST(BackendTest, ToBackend) {
   )");
 
   std::vector<IValue> inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(2.0 * torch::ones({}));
   inputs.emplace_back(1.0 * torch::ones({}));
   auto ref = m.forward(inputs).toTuple()->elements();
@@ -79,6 +81,7 @@ TEST(BackendTest, ToBackend) {
   AT_ASSERT(res[1].toTensor().equal(ref[1].toTensor()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, ToBackendNotAvailable) {
   Module m("m");
   m.define(R"(
@@ -93,6 +96,7 @@ TEST(BackendTest, ToBackendNotAvailable) {
   )");
 
   std::vector<IValue> inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(2.0 * torch::ones({}));
   inputs.emplace_back(1.0 * torch::ones({}));
   auto ref = m.forward(inputs).toTuple()->elements();
@@ -112,6 +116,7 @@ TEST(BackendTest, ToBackendNotAvailable) {
       lm.forward(inputs).toTuple()->elements(), "Backend is not available.");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, TestCompiler) {
   Module m("m");
   m.define(R"(
@@ -120,6 +125,7 @@ TEST(BackendTest, TestCompiler) {
   )");
 
   std::vector<IValue> inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(2.0 * torch::ones({}));
   inputs.emplace_back(1.0 * torch::ones({}));
   auto ref = m.forward(inputs);
@@ -142,6 +148,7 @@ TEST(BackendTest, TestCompiler) {
   AT_ASSERT(mres.toTensor().equal(ref.toTensor()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, TestCompilerNotSupport) {
   Module m("m");
   m.define(R"(
