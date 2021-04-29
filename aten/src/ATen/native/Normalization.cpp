@@ -430,35 +430,24 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))
-               && ((input.dim() == 2 && input.size(0) <= 131070 && training) // per-activation, training
-                 || (input.dim() == 2 && input.size(0) <= 262136 && !training) // per-activation, eval
-                 || (input.dim() >= 3 && input.size(0) <= 880801 && training) // spatial, training
-                 || (input.dim() >= 3 && input.size(0) <= 65535 && !training)) //spatial, eval
+               && (input.dim() >= 3)
+               && ((input.size(0) <= 880801 && training) // spatial, training
+                   ||(input.size(0) <= 65535 && !training)) //spatial, eval
                && detail::getCUDAHooks().compiledWithCuDNN()
+               && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
                && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
-  if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
+  if (use_cudnn) {
+    auto input_c = input.contiguous(input.suggest_memory_format());
     auto weight_c = weight.contiguous();
     auto bias_c = bias.contiguous();
     auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
     auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
 
-    Tensor input_c;
-    if (input.dim() == 2) {
-      // cudnn has poor performance for (N, C) contiguous layout
-      // Instead, reshape to (1, C, N) so the batch dimension is contiguous
-      input_c = input.unsqueeze(0).transpose(1, 2).contiguous();
-    } else {
-      input_c = input.contiguous(input.suggest_memory_format());
-    }
     Tensor output, save_mean, save_var, reserve;
     std::tie(output, save_mean, save_var, reserve) =
         at::cudnn_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c,
                              training, momentum, eps);
-
-    if (input.dim() == 2) {
-      output = output.transpose(1, 2).squeeze(0);
-    }
 
     return std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t>(
         output, save_mean, save_var, reserve, 1);
