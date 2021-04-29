@@ -87,6 +87,7 @@ static PyObject* accumulateGradVar(PyObject *_self, void* _unused)
   return THPVariable_Wrap(grad_acc->variable);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static struct PyGetSetDef accumulate_grad_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
   {(char*)"variable", accumulateGradVar, nullptr, nullptr, nullptr},
