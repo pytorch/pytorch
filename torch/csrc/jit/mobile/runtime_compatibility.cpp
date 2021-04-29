@@ -1,5 +1,5 @@
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/mobile/runtime_bytecode_version.h>
+#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 
 namespace torch {
 namespace jit {
