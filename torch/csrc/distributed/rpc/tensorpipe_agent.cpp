@@ -12,6 +12,7 @@
 #include <torch/csrc/distributed/rpc/agent_utils.h>
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #include <c10/core/StreamGuard.h>
 
@@ -482,26 +483,6 @@ TensorPipeAgent::TensorPipeAgent(
       nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       processGroup_(std::move(processGroup)) {
-  // register Future factories for CUDA
-#ifdef USE_CUDA_NOT_ROCM
-  FutureFactoryRegistry::getInstance().registerFutureFactory(
-      c10::DeviceType::CUDA,
-      [](const std::vector<c10::DeviceIndex>& devices)
-          -> std::shared_ptr<JitFuture> {
-        if (!devices.empty()) {
-          std::vector<c10::Device> fullDevices;
-          fullDevices.reserve(devices.size());
-          for (const c10::DeviceIndex index : devices) {
-            fullDevices.emplace_back(c10::kCUDA, index);
-          }
-          return std::make_shared<at::cuda::CUDAFuture>(
-              at::AnyClassType::get(), std::move(fullDevices));
-        } else {
-          return std::make_shared<JitFuture>(at::AnyClassType::get());
-        }
-      });
-#endif
-
   // collect worker names
   prepareNames();
 

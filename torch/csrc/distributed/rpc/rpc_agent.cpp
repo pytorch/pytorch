@@ -1,7 +1,5 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-#include <torch/csrc/distributed/rpc/utils.h>
-
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -22,16 +20,7 @@ RpcAgent::RpcAgent(
       cb_(std::move(cb)),
       rpcTimeout_(rpcTimeout),
       profilingEnabled_(false),
-      rpcAgentRunning_(false) {
-  // Register Future factory for CPU
-  FutureFactoryRegistry::getInstance().registerFutureFactory(
-      c10::DeviceType::CPU,
-      [](const std::vector<c10::DeviceIndex>& devices)
-          -> std::shared_ptr<JitFuture> {
-        TORCH_INTERNAL_ASSERT(devices.empty());
-        return std::make_shared<JitFuture>(at::AnyClassType::get());
-      });
-}
+      rpcAgentRunning_(false) {}
 
 RpcAgent::~RpcAgent() {
   if (rpcAgentRunning_.load()) {
