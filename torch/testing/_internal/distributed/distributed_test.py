@@ -3481,6 +3481,24 @@ class DistributedTest:
                 num_iters=4, ddp_comm_hook=allreduce_hook
             )
 
+        @unittest.skipIf(
+            BACKEND != "mpi" and BACKEND != 'nccl',
+            "get_future is only supported on mpi and nccl"
+        )
+        def test_get_future(self):
+            def mult(fut):
+                return [t * 3 for t in fut.wait()]
+
+            def add(fut):
+                return [t + 1 for t in fut.wait()]
+            group, group_id, rank = self._init_global_test()
+            input = _build_tensor(3, 2)
+            fut = group_id.allreduce([input]).get_future()
+            res = fut.then(mult).then(add).wait()
+            expected = _build_tensor(3, 2 * len(group) * 3 + 1)
+
+            self.assertEqual(res[0], expected)
+
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_no_gpu
