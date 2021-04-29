@@ -19,8 +19,9 @@ ${RuntimeHeader}
 ${HalfHeader}
 ${RandHeader}
 
-#define POS_INFINITY INFINITY
-#define NEG_INFINITY -INFINITY
+#define NAN __int_as_float(0x7fffffff)
+#define POS_INFINITY __int_as_float(0x7f800000)
+#define NEG_INFINITY __int_as_float(0xff800000)
 
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
