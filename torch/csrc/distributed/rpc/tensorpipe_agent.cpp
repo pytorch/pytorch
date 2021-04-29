@@ -489,8 +489,13 @@ TensorPipeAgent::TensorPipeAgent(
       [](const std::vector<c10::DeviceIndex>& devices)
           -> std::shared_ptr<JitFuture> {
         if (!devices.empty()) {
+          std::vector<c10::Device> fullDevices;
+          fullDevices.reserve(devices.size());
+          for (const c10::DeviceIndex index : devices) {
+            fullDevices.emplace_back(c10::kCUDA, index);
+          }
           return std::make_shared<at::cuda::CUDAFuture>(
-              at::AnyClassType::get(), devices);
+              at::AnyClassType::get(), std::move(fullDevices));
         } else {
           return std::make_shared<JitFuture>(at::AnyClassType::get());
         }
