@@ -28,6 +28,7 @@ c10::IValue preprocess(
     // Without removing them we will run into compilation errors.
     // So eliminate deadcode just remove those getattr nodes.
     EliminateDeadCode(graph);
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto key = method.name();
     auto node_debug_handles = generate_debug_handles(graph);
     std::stringstream ss;
@@ -38,6 +39,7 @@ c10::IValue preprocess(
              << toIValue(node->output()).value();
           ss << "<debug_handle>" << node_debug_handles[node];
           break;
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         case aten::add:
           ss << node->kind().toQualString();
           ss << "<debug_handle>" << node_debug_handles[node];
@@ -67,6 +69,7 @@ c10::IValue preprocess(
 }
 
 constexpr auto backend_name = "backend_with_compiler_demo";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto pre_reg = backend_preprocess_register(backend_name, preprocess);
 } // namespace
 
