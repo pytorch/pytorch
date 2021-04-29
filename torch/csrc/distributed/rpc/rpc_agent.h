@@ -92,11 +92,14 @@ struct TORCH_API RpcRetryOptions {
   // sendWithRetries function.
   RpcRetryOptions() = default;
   // Maximum number of times we will retry the RPC
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int maxRetries{5};
   // Initial duration between consecutive RPC send attempts
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::chrono::milliseconds rpcRetryDuration{std::chrono::milliseconds(1000)};
   // Constant for exponential backoff used while calculating future wait
   // durations
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float retryBackoff{1.5};
 };
 
@@ -266,14 +269,20 @@ class TORCH_API RpcAgent {
       const WorkerInfo& dest);
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const WorkerInfo workerInfo_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::unique_ptr<RequestCallback> cb_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::atomic<std::chrono::milliseconds> rpcTimeout_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::atomic<bool> profilingEnabled_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<TypeResolver> typeResolver_;
   // Atomic boolean indicating whether this agent is running. It controls
   // whether several background threads should be running. It is set in
   // RpcAgent::start() and unset in the derived class shutdown().
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::atomic<bool> rpcAgentRunning_;
 
  private:

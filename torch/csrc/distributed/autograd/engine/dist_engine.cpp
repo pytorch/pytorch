@@ -601,6 +601,7 @@ size_t DistEngine::numBackwardPasses() const {
 
 std::unordered_map<std::string, int> DistEngine::getDebugInfo() const {
   std::unordered_map<std::string, int> debugInfo;
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   auto& DistAutogradContainer = DistAutogradContainer::getInstance();
   debugInfo[kNumBackwardPasses] = numBackwardPasses();
   debugInfo[kNumAutogradContexts] =

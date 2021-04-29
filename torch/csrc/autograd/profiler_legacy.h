@@ -91,6 +91,7 @@ inline int64_t getTime(bool allow_monotonic = false) {
     mode = CLOCK_MONOTONIC;
   }
   clock_gettime(mode, &t);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
 #endif
 }

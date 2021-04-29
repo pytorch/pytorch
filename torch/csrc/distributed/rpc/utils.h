@@ -205,6 +205,7 @@ class TORCH_API FutureFactoryRegistry final {
       const std::vector<c10::DeviceIndex>& devices = {});
 
  private:
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   future_factory_t factories_[static_cast<size_t>(
       c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 };
