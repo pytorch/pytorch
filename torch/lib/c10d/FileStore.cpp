@@ -310,21 +310,19 @@ std::vector<uint8_t> FileStore::compareSet(
   // Always refresh since even though the key exists in the cache,
   // it might be outdated
   pos_ = refresh(file, pos_, cache_);
-  if (cache_.count(regKey) == 0) {
-    // if the key does not exist and current value is empty then set it
-    if (currentValue.empty()) {
-      file.seek(0, SEEK_END);
-      file.write(regKey);
-      file.write(newValue);
-      return newValue;
-    }
-    return currentValue;
-  } else if (cache_[regKey] == currentValue) {
+  if ((cache_.count(regKey) == 0 && currentValue.empty()) ||
+      (cache_.count(regKey) != 0 && cache_[regKey] == currentValue)) {
+    // if the key does not exist and currentValue arg is empty or
+    // the key does exist and current value is what is expected, then set it
     file.seek(0, SEEK_END);
     file.write(regKey);
     file.write(newValue);
     return newValue;
+  } else if (cache_.count(regKey) == 0) {
+    // if the key does not exist
+    return currentValue;
   }
+  // key exists but current value is not expected
   return cache_[regKey];
 }
 
