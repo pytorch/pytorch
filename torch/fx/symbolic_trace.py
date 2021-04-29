@@ -2,8 +2,9 @@ import builtins
 import functools
 import inspect
 import importlib
+import math
 import os
-from types import CodeType, FunctionType
+from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 from itertools import chain
 import torch
@@ -93,7 +94,7 @@ class Tracer(TracerBase):
     # documentation. We need it so that Sphinx doesn't leak `math`s path from the
     # build environment (e.g. `<module 'math' from '/leaked/path').
 
-    """Tracer(autowrap_modules=("math",), enable_cpatching=False)
+    """Tracer(autowrap_modules=(math,), enable_cpatching=False)
 
     ``Tracer`` is the class that implements the symbolic tracing functionality
     of ``torch.fx.symbolic_trace``. A call to ``symbolic_trace(m)`` is equivalent
@@ -103,7 +104,7 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self, autowrap_modules: Tuple[str] = ("math", ), enable_cpatching: bool = False) -> None:
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), enable_cpatching: bool = False) -> None:
         # This method's signature is overridden by the first line of this class'
         # docstring. If this method's signature is modified, the signature that
         # overrides it also should be modified accordingly.
@@ -113,7 +114,7 @@ class Tracer(TracerBase):
 
         Args:
 
-            autowrap_modules (List[str]): defaults to `["math"]`,
+            autowrap_modules (List[ModuleType]): defaults to `[math]`,
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap().
 
@@ -133,12 +134,12 @@ class Tracer(TracerBase):
         # Functions we will eagerly wrap when we see them while tracing
         # this captures both `math.sqrt()` and `from math import sqrt` automatically
         self._autowrap_function_ids: Set[int] = {
-            id(value) for name, value in chain(*[importlib.import_module(m).__dict__.items() for m in autowrap_modules])
+            id(value) for name, value in chain(*[m.__dict__.items() for m in autowrap_modules])
             if not name.startswith("_") and callable(value)}
 
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
-        self._autowrap_search: List[str] = list(autowrap_modules)
+        self._autowrap_search: List[str] = [mod.__name__ for mod in autowrap_modules]
         self.enable_cpatching = enable_cpatching
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
