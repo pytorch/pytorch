@@ -10,11 +10,11 @@
 #include <ATen/core/ivalue_inl.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/macros/Export.h>
 #include <c10/util/intrusive_ptr.h>
@@ -164,7 +164,7 @@ std::function<void(void)> CUDAFuture::wrapCallback(
     }
 
     // Use the dedicated callback stream to run callback.
-    at::cuda::CUDAMultiStreamGuard streamGuard(streams);
+    c10::cuda::CUDAMultiStreamGuard streamGuard(streams);
 
     for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
       cudaEvent.block(at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
