@@ -54,6 +54,7 @@ void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fill_stub, &fill_kernel);
 
 } // namespace native
