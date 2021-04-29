@@ -10,6 +10,7 @@
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/Parallel.h>
 
+#include <torch/csrc/autograd/functions/utils.h>
 #include <c10/util/irange.h>
 
 #include <TH/TH.h>  // for USE_LAPACK
@@ -2734,6 +2735,12 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 }
 
 Tensor linalg_eigvals(const Tensor& input) {
+  // if input requires grad we must compute the eigenvectors to make this function differentiable
+  // the eigenvectors are not exposed to the user
+  if (torch::autograd::compute_requires_grad(input)) {
+    return std::get<0>(at::linalg_eig(input));
+  }
+
   ScalarType complex_dtype = toComplexType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
 

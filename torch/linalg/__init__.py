@@ -373,7 +373,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 .. seealso::
 
         :func:`torch.linalg.eigvals` computes only the eigenvalues.
-        However, that function is not differentiable.
+        Unlike :func:`torch.linalg.eig`, the gradients of this function are always stable.
 
         :func:`torch.linalg.eigh` for a (faster) function that computes the eigenvalue decomposition
         for Hermitian and symmetric matrices.
@@ -445,8 +445,9 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
 .. note:: {sync_note}
 
-.. note:: This function is not differentiable. If you need differentiability use
-          :func:`torch.linalg.eig` instead, which also computes the eigenvectors.
+.. seealso::
+
+        :func:`torch.linalg.eig` computes the full eigenvalue decomposition.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
