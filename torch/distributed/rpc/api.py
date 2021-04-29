@@ -490,12 +490,6 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         to retrieve the result value locally.
 
     .. warning ::
-        Using GPU tensors as arguments or return values of ``func`` is not
-        supported since we don't support sending GPU tensors over the wire. You
-        need to explicitly copy GPU tensors to CPU before using them as
-        arguments or return values of ``func``.
-
-    .. warning ::
         The ``remote`` API does not copy storages of argument tensors until
         sending them over the wire, which could be done by a different thread
         depending on the RPC backend type. The caller should make sure that the
