@@ -215,7 +215,6 @@ jobs:
           [ ! -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]
 
   clang-tidy:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -261,6 +260,7 @@ jobs:
             git submodule update --init --recursive
 
             export USE_NCCL=0
+            export USE_DEPLOY=1
             # We really only need compile_commands.json, so no need to build!
             time python setup.py --cmake-only build
 
