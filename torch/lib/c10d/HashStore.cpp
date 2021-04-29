@@ -24,14 +24,18 @@ std::vector<uint8_t> HashStore::compareSet(
     const std::vector<uint8_t>& newValue) {
   std::unique_lock<std::mutex> lock(m_);
   auto it = map_.find(key);
-  if (it == map_.end()){
-    return currentValue;
-  }
-  else if (it->second == currentValue){
+  if ((it == map_.end() && currentValue.empty()) ||
+      (it != map_.end() && it->second == currentValue)) {
+    // if the key does not exist and currentValue arg is empty or
+    // the key does exist and current value is what is expected, then set it
     map_[key] = newValue;
     cv_.notify_all();
     return newValue;
+  } else if (it == map_.end()) {
+    // if the key does not exist
+    return currentValue;
   }
+  // key exists but current value is not expected
   return it->second;
 }
 
