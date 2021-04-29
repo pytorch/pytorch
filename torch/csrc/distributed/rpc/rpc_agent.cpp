@@ -287,7 +287,7 @@ bool RpcAgent::isGILProfilingEnabled() {
   return profilingEnabled_.load();
 }
 
-std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> RpcAgent::getDeviceMap(
+std::unordered_map<c10::Device, c10::Device> RpcAgent::getDeviceMap(
     const WorkerInfo& dest) {
   // Default implementation has no device map.
   return {};
