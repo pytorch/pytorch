@@ -5,13 +5,6 @@ from ._src.vmap import vmap
 from ._src.eager_transforms import grad, grad_with_value, vjp, jacrev
 from ._src.make_functional import make_functional, make_functional_with_buffers
 
-# Python key stuff is not in pytorch/pytorch core
-try:
-    from ._src.python_key import key_wrap, ModuleWrap
-except:
-    pass
-
-
 # Monkeypatching lol
 _old_cross_entropy = torch.nn.functional.cross_entropy
 
