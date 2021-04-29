@@ -206,6 +206,22 @@ TEST(StaticRuntime, IndividualOps_Sub) {
   testStaticRuntime(sub_scalar_alpha, args3);
 }
 
+TEST(StaticRuntime, IndividualOps_Norm) {
+  auto a = at::randn({2, 3});
+  auto dim = std::vector<int64_t>({1});
+  auto dtype = at::ScalarType::Float;
+
+  std::vector<IValue> args0{a, 2, dtype};
+  testStaticRuntime(norm_3arg, args0);
+
+  std::vector<IValue> args1{a, 3, dim, false};
+  testStaticRuntime(norm_4arg, args1);
+
+  std::vector<IValue> args2{a, 4, dim, true, dtype};
+  testStaticRuntime(norm_5arg, args2);
+
+}
+
 TEST(StaticRuntime, IndividualOps_Reshape) {
   auto a = at::randn({2, 3});
   auto b = std::vector<int64_t>({3, 2});

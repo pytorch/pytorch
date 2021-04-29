@@ -13,6 +13,7 @@ struct TextFileReaderInstance {
       char escape,
       const std::string& filename,
       int numPasses,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::vector<int>& types)
       : fileReader(filename),
         tokenizer(Tokenizer(delims, escape), &fileReader, numPasses),
@@ -49,6 +50,7 @@ class CreateTextFileReaderOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<TextFileReaderInstance>>(0) =
+        // NOLINTNEXTLINE(modernize-make-unique)
         std::unique_ptr<TextFileReaderInstance>(new TextFileReaderInstance(
             {'\n', '\t'}, '\0', filename_, numPasses_, fieldTypes_));
     return true;
@@ -73,6 +75,7 @@ inline void convert(
       // TODO(azzolini): avoid copy, use faster conversion
       std::string str_copy(src_start, src_end);
       const char* src_copy = str_copy.c_str();
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       char* src_copy_end;
       float val = strtof(src_copy, &src_copy_end);
       if (src_copy == src_copy_end) {
@@ -100,6 +103,7 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
         OperatorBase::Input<std::unique_ptr<TextFileReaderInstance>>(0).get();
 
     CAFFE_ENFORCE(
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         instance->fieldTypes.size() == numFields,
         "Invalid number of outputs. Expected " +
             to_string(instance->fieldTypes.size()) + " got " +
@@ -120,8 +124,10 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
       std::lock_guard<std::mutex> guard(instance->globalMutex_);
 
       bool finished = false;
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       Token token;
       while (!finished && (rowsRead < batchSize_)) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int field;
         for (field = 0; field < numFields; ++field) {
           finished = !instance->tokenizer.next(token);
@@ -135,6 +141,7 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
                   (field > 0 && token.startDelimId == 1),
               "Invalid number of columns at row ",
               instance->rowsRead + rowsRead + 1);
+          // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
           const auto& meta = instance->fieldMetas[field];
           char*& data = datas[field];
           convert(
@@ -163,9 +170,12 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
 
 CAFFE_KNOWN_TYPE(std::unique_ptr<TextFileReaderInstance>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateTextFileReader, CreateTextFileReaderOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TextFileReaderRead, TextFileReaderReadOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateTextFileReader)
     .NumInputs(0)
     .NumOutputs(1)
@@ -178,6 +188,7 @@ OPERATOR_SCHEMA(CreateTextFileReader)
         "List with type of each field. Type enum is found at core.DataType.")
     .Output(0, "handler", "Pointer to the created TextFileReaderInstance.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TextFileReaderRead)
     .NumInputs(1)
     .NumOutputs(1, INT_MAX)
@@ -189,7 +200,9 @@ OPERATOR_SCHEMA(TextFileReaderRead)
     .Input(0, "handler", "Pointer to an existing TextFileReaderInstance.")
     .Arg("batch_size", "Maximum number of rows to read.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(CreateTextFileReader);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(TextFileReaderRead);
 
 } // namespace caffe2
