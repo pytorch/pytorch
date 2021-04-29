@@ -486,6 +486,10 @@ def in_nodes(a: Argument, nodes: Set[Node]) -> bool:
         return all([in_nodes(arg, nodes) for arg in a])
     return False
 
+def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
+    return node.op == "call_module" and \
+        is_activation_post_process(modules[str(node.target)])
+
 def handle_copy_nodes(
         observed_graph: Graph, matches: Dict[str, MatchResult],
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
@@ -494,7 +498,7 @@ def handle_copy_nodes(
         modules: Dict[str, torch.nn.Module]):
     observed_nodes: Set[Node] = set()
     copy_nodes: Set[Node] = set()
-    non_tensor_input_binary_op_nodes: Set[Node] = set()
+    non_tensor_input_nodes: Set[Node] = set()
     unmatched_nodes: Set[Node] = set()
     actpp_to_remove: Set[Node] = set()
     env: Dict[Any, Any] = {}
@@ -508,7 +512,7 @@ def handle_copy_nodes(
         root_node, matched_nodes, pattern, quantize_handler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
 
-        if node.op == "call_module" and is_activation_post_process(modules[node.target]):
+        if is_activation_post_process_node(node, modules):
             # rule 1: if the input of a copy node is observed, we won't need to
             # insert observer for the output of copy node
             if in_nodes(node.args[0], copy_nodes) and in_nodes(node.args[0], observed_nodes):
@@ -516,15 +520,15 @@ def handle_copy_nodes(
                 # an observed copy node
                 actpp_to_remove.add(node)
 
-            # rule 2: if the previous node is a binary op without tensor input, we can remove the observer
-            if in_nodes(node.args[0], non_tensor_input_binary_op_nodes):
+            # rule 2: if the previous node is an op without tensor input, we can remove the observer
+            if in_nodes(node.args[0], non_tensor_input_nodes):
                 actpp_to_remove.add(node)
             observed_nodes.add(node)
 
         if root_node is node and qconfig is not None:
             if isinstance(quantize_handler, CopyNodeQuantizeHandler):
                 copy_nodes.add(node)
-                # if previous node is observed, the copy node will be observed as well
+                # rule 3: if previous node is observed, the copy node will be observed as well
                 if in_nodes(node.args[0], observed_nodes):
                     prev_node = node.args[0]
                     if (
@@ -533,7 +537,7 @@ def handle_copy_nodes(
                         is_activation_post_process(modules[prev_node.target])  # type: ignore[index]
                     ):
                         prev_prev_node = prev_node.args[0]
-                        # If previous node is unmatched, the input to copy node should not
+                        # rule 3.1: If previous node is unmatched, the input to copy node should not
                         # be observed. For example, in the pattern of
                         #
                         # user_node_unmatched -> obs -> copy_node_matched -> next_node
@@ -550,12 +554,24 @@ def handle_copy_nodes(
 
 
         if all_node_args_have_no_tensors(node, modules, cache_for_no_tensor_check):
-            non_tensor_input_binary_op_nodes.add(node)
+            non_tensor_input_nodes.add(node)
         if root_node is None and node.op != 'placeholder':
+            # rule 4: remove observer for getitem if it is followed by an unmatched node
+            if len(node.args) > 0:
+                maybe_observer_node = node.args[0]
+                if isinstance(maybe_observer_node, Node) and len(maybe_observer_node.args) > 0:
+                    observed_node = maybe_observer_node.args[0]
+                    if is_activation_post_process_node(maybe_observer_node, modules):
+                        assert isinstance(observed_node, Node)
+                        if (observed_node.op, observed_node.target) == ("call_function", operator.getitem):
+                            actpp_to_remove.add(maybe_observer_node)
             unmatched_nodes.add(node)
 
-        # rule 3: for special node, we'll just remove observer for its input
+        # rule 5: for special node, we'll just remove observer for its input
         special_nodes = [
+            # Note: observer placement for getitem is handled in multiple places
+            # since we may need to remove the observer for input and output of getitem
+            # the handling can be simplified if we support querying type of Proxy
             ("call_function", operator.getitem),
         ]
         if (node.op, node.target) in special_nodes:

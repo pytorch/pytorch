@@ -432,8 +432,9 @@ class Tracer(TracerBase):
 
         self.submodule_paths = None
 
-        # For some reason having both the graph point to the tracer and vice
-        # versa causes pickle problems, so break that cycle.
+        # Since the tracer might be packaged along with a GraphModule that it helped generate, and that
+        # graphs are explicilty not saved, set self.graph to None so that it doesn't get packaged
+        # along with the tracer.
         graph = self.graph
         graph.tracer = self
         self.graph = None
