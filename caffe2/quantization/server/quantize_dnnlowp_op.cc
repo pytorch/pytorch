@@ -42,6 +42,7 @@ bool QuantizeDNNLowPOp<T>::RunOnDevice() {
     in_zero_point = input_qparam_blob->qparam.zero_point;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorQuantizationParams in_qparams;
 
   if (use_input_qparam) {
@@ -70,33 +71,40 @@ bool QuantizeDNNLowPOp<T>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Quantize)
     .NumInputs(1, 2)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInput(0);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Quantize,
     DNNLOWP,
     QuantizeDNNLowPOp<uint8_t>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Quantize,
     DNNLOWP_ROWWISE,
     QuantizeDNNLowPOp<uint8_t>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Quantize,
     DNNLOWP_16,
     QuantizeDNNLowPOp<uint16_t>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Quantize,
     DNNLOWP_ROWWISE_16,
     QuantizeDNNLowPOp<uint16_t>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Quantize,
     DNNLOWP,
     QuantizeDNNLowPOp<uint8_t>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Quantize,
     DNNLOWP_ROWWISE,
