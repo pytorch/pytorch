@@ -21,7 +21,7 @@ from torch.testing import \
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
-     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride,)
+     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride, onlyCPU)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
@@ -2003,6 +2003,20 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **k
     )
 
     return samples
+
+def sample_inputs_ormqr(op_info, device, dtype, requires_grad):
+    sample_inputs = []
+    batches = [(), (0, ), (2, ), (2, 1)]
+    ns = [5, 2, 0]
+    tf = [True, False]
+    for batch, (m, n), left, transpose in product(batches, product(ns, ns), tf, tf):
+        reflectors = make_tensor((*batch, m, n), device, dtype, requires_grad=requires_grad)
+        tau = make_tensor((*batch, min(m, n)), device, dtype, requires_grad=requires_grad)
+        other_matrix_shape = (m, n) if left else (n, m)
+        other = make_tensor((*batch, *other_matrix_shape), device, dtype, requires_grad=requires_grad)
+        kwargs = {"left": left, "transpose": transpose}
+        sample_inputs.append(SampleInput(reflectors, args=(tau, other,), kwargs=kwargs))
+    return tuple(sample_inputs)
 
 def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -4521,6 +4535,12 @@ op_db: List[OpInfo] = [
            aliases=('ger', ),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_outer,),
+    OpInfo('ormqr',
+           op=torch.ormqr,
+           dtypes=floating_and_complex_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_ormqr,
+           decorators=[onlyCPU, skipCPUIfNoLapack]),
     OpInfo('permute',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
