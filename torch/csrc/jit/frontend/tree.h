@@ -98,6 +98,7 @@ struct Tree : c10::intrusive_ptr_target {
       throw std::runtime_error(ss.str());
     }
   }
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~Tree() = default;
 
  private:
@@ -167,6 +168,7 @@ struct Compound : public Tree {
 
 // tree pretty printer
 struct pretty_tree {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   pretty_tree(const TreeRef& tree, size_t col = 40) : tree(tree), col(col) {}
   const TreeRef& tree;
   size_t col;
