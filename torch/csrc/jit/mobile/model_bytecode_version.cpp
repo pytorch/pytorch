@@ -110,7 +110,7 @@ c10::IValue readArchive(
   return ivalues;
 }
 
-bool check_zip_file(std::shared_ptr<ReadAdapterInterface>& rai) {
+bool check_zip_file(std::shared_ptr<ReadAdapterInterface> rai) {
   std::array<uint8_t, 2> first_short{};
   static constexpr uint8_t first_slot = 0x80;
   static constexpr uint8_t second_slot = 0x02;
