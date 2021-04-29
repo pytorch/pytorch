@@ -38,6 +38,7 @@ jobs:
           popd
       - name: Run TorchBench
         run: |
+          PR_MERGE_BASE=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")
           PR_BODY_FILE=/tmp/pr-body.txt
           echo "$PR_BODY" > ${PR_BODY_FILE}
           # shellcheck disable=SC1091
@@ -47,7 +48,7 @@ jobs:
                   --pytorch-path "${HOME}"/pytorch \
                   --torchbench-path "${PWD}"/benchmark \
                   --pr-num "$PR_NUM" \
-                  --pr-base-sha "$PR_BASE_SHA" \
+                  --pr-base-sha "$PR_MERGE_BASE" \
                   --pr-head-sha "$PR_HEAD_SHA" \
                   --pr-body "$PR_BODY_FILE"
       - name: Remove conda environment
