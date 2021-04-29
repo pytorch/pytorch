@@ -23,7 +23,7 @@ if [ -z $cuda_installer_name ]; then
 fi
 
 # msbuild_project_dir
-declare -a msbuild_project_dir=(
+declare -a build_dirs=(
     "10 CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
     "11 visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
 )
@@ -46,7 +46,7 @@ declare -a install_packages=(
     "11, ${cuda11_packages_template}"
 )
 for elem in "${install_packages[@]}"; do
-    IFS="," read -a strarr <<< "$elem" # use comma as delimiter because packages includes whitespace     
+    IFS="," read -a strarr <<< "$elem" # use comma as delimiter because packages includes whitespace
     if [[ "$cuda_major_version" == "${strarr[0]}" ]]; then
         packages_template="${strarr[1]}"
         cuda_install_packages=${packages_template//[1-9][0-9*]\.[0-9]/$CUDA_VERSION}
