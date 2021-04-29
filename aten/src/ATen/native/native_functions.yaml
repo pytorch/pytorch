@@ -2924,9 +2924,9 @@
 
 - func: randn_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
 
-- func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randperm(int n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: randperm.out(int n, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -4031,6 +4031,9 @@
     SparseCPU, SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
+
+- func: positive(Tensor(a) self) -> Tensor(a)
+  variants: function, method
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
@@ -6178,12 +6181,13 @@
 - func: topk.values(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
     CPU: topk_out_cpu
-    CUDA: legacy::cuda::_th_topk_out
+    CUDA: topk_out_cuda
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   variants: method, function
   dispatch:
-    CPU, CUDA: topk
+    CPU: topk
+    CUDA: topk_cuda
     QuantizedCPU: topk_quantized_cpu
 
 - func: all(Tensor self) -> Tensor
@@ -7478,15 +7482,14 @@
 
 - func: adaptive_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool2d_backward_out_cpu
     CUDA: adaptive_max_pool2d_backward_out_cuda
 
 - func: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool2d_backward_cpu
-    CUDA: adaptive_max_pool2d_backward_cuda
+  structured_delegate: adaptive_max_pool2d_backward.grad_input
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
@@ -7503,15 +7506,14 @@
 
 - func: adaptive_max_pool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool3d_backward_out_cpu
     CUDA: adaptive_max_pool3d_backward_out_cuda
 
 - func: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool3d_backward_cpu
-    CUDA: adaptive_max_pool3d_backward_cuda
+  structured_delegate: adaptive_max_pool3d_backward.grad_input
 
 - func: avg_pool2d.out(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -8969,4 +8971,4 @@
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False) -> Tensor
   variants: function
   dispatch:
-    CPU: _segment_reduce_cpu
+    CPU, CUDA: segment_reduce_kernel
