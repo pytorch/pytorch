@@ -194,23 +194,15 @@ using future_factory_t = std::function<std::shared_ptr<JitFuture>(
 // A registry for Future factories that create either ivalue::Future or
 // CUDAFuture. The RPC agent is responsible for registering Future
 // factories.
-class FutureFactoryRegistry final {
+class TORCH_API FutureFactoryRegistry final {
  public:
-  static FutureFactoryRegistry& getInstance() {
-    // Leaky singleton to avoid module destructor races.
-    static FutureFactoryRegistry* registry = new FutureFactoryRegistry();
-    return *registry;
-  }
+  static FutureFactoryRegistry& getInstance();
 
-  void registerFutureFactory(c10::DeviceType type, future_factory_t factory) {
-    factories_[static_cast<size_t>(type) & 0xFF] = std::move(factory);
-  }
+  void registerFutureFactory(c10::DeviceType type, future_factory_t factory);
 
   std::shared_ptr<JitFuture> createFuture(
       c10::DeviceType type,
-      const std::vector<c10::DeviceIndex>& devices = {}) {
-    return factories_[static_cast<size_t>(type) & 0xFF](devices);
-  }
+      const std::vector<c10::DeviceIndex>& devices = {});
 
  private:
   future_factory_t factories_[static_cast<size_t>(
