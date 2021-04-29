@@ -67,7 +67,7 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
         hasMappedDevice = true;
       }
     } else {
-      const auto deviceIter = deviceMap.find(deviceIndex);
+      const auto deviceIter = deviceMap.find(t.device().index());
       TORCH_CHECK(
           deviceIter != deviceMap.end(),
           errStr,
