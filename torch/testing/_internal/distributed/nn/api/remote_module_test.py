@@ -500,15 +500,13 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             ret_fut = remote_module.forward_async(*args, **kwargs)
             ret = ret_fut.wait()
             self.assertEqual(ret, tuple(reversed(args + (t2,))))
-            # TODO: Once the RPC backend can support directly sending GPU tensors, the expected device type should be "cuda:0".
-            self.assertEqual(ret[0].device.type, "cpu")
-            self.assertEqual(ret[2].device.type, "cpu")
+            self.assertEqual(ret[0].device, torch.device("cuda:0"))
+            self.assertEqual(ret[2].device, torch.device("cuda:0"))
 
             ret = remote_module.forward(*args, **kwargs)
             self.assertEqual(ret, tuple(reversed(args + (t2,))))
-            # TODO: Once the RPC backend can support directly sending GPU tensors, the expected device type should be "cuda:0".
-            self.assertEqual(ret[0].device.type, "cpu")
-            self.assertEqual(ret[2].device.type, "cpu")
+            self.assertEqual(ret[0].device, torch.device("cuda:0"))
+            self.assertEqual(ret[2].device, torch.device("cuda:0"))
 
     @skip_if_lt_x_gpu(1)
     @dist_utils.dist_init
@@ -531,5 +529,4 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
         ret = run_forward(scripted_remote_module)
 
         self.assertEqual(ret, ("3", 2, torch.ones(1)))
-        # TODO: Once the RPC backend can support directly sending GPU tensors, the expected device type should be "cuda:0".
-        self.assertEqual(ret[2].device.type, "cpu")
+        self.assertEqual(ret[2].device, torch.device("cuda:0"))

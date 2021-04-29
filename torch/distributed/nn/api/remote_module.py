@@ -159,6 +159,8 @@ class _RemoteModule(nn.Module):
         kwargs = kwargs if kwargs is not None else {}
 
         self.on, self.device = _parse_remote_device(remote_device)
+        agent = rpc._get_current_rpc_agent()
+        self.is_device_map_set = bool(agent._get_device_map(agent.get_worker_info(self.on)))
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.

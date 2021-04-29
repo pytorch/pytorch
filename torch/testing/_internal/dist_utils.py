@@ -89,12 +89,17 @@ def dist_init(
         self.setup_fault_injection(faulty_messages, messages_to_delay)
 
         if setup_rpc:
+            device_map = {0: 0, 1: 1}
+            options = rpc.TensorPipeRpcBackendOptions(init_method=self.init_method)
+            dst = worker_name((self.rank + 1) % self.world_size)
+            options.set_device_map(dst, device_map)
+
             rpc.init_rpc(
                 name="worker%d" % self.rank,
-                backend=self.rpc_backend,
+                backend=rpc.BackendType.TENSORPIPE,
                 rank=self.rank,
                 world_size=self.world_size,
-                rpc_backend_options=self.rpc_backend_options,
+                rpc_backend_options=options,
             )
 
         return_value = old_test_method(self, *arg, **kwargs)
