@@ -236,7 +236,7 @@ class TestBinaryUfuncs(TestCase):
     @ops(binary_ufuncs, allowed_dtypes=floating_and_complex_types_and(
         torch.bfloat16, torch.half, torch.int8, torch.int16, torch.int32, torch.int64
     ))
-    def test_reference_numerics_hard(self, device, dtype, op):
+    def _test_reference_numerics_hard(self, device, dtype, op):
         if not op.handles_large_floats:
             raise self.skipTest("This op does not handle large values")
 
@@ -245,7 +245,7 @@ class TestBinaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @ops(binary_ufuncs, allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half))
-    def test_reference_numerics_extremal(self, device, dtype, op):
+    def _test_reference_numerics_extremal(self, device, dtype, op):
         handles_extremals = (op.handles_complex_extremals if
                              dtype in (torch.cfloat, torch.cdouble) else op.handles_extremals)
         if not handles_extremals:
