@@ -2326,11 +2326,13 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return at::linalg_solve(Uh, at::matmul(U_contrib, Uh) + D_contrib * Uh);
 }
 
-Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                     const Tensor& lambda, const Tensor& v) {
-	// https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
-	// For A = VLV^{-1}, denoting the gradients gV and gL, we have
- 	// gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V
+Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
+                           const Tensor& self,
+                           const Tensor& lambda,
+                           const Tensor& v) {
+  // https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
+  // For A = VLV^{-1}, denoting the gradients gV and gL, we have
+  // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V
   // Where:
   //   - E_ij = L_i - L_j if i != j
   //   - diag_embed takes a vector into a diagonal matrix
@@ -2367,14 +2369,14 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, 
     }
 
     // Conjugate by V^{-H}
-		result = at::linalg_solve(vh, at::matmul(result, vh));
+    result = at::linalg_solve(vh, at::matmul(result, vh));
     // If it is real, we have to project the derivative onto the real numbers
     return self.is_complex() ? result : at::real(result);
   }
   else {
     if (glambda.defined()) {
-		  // Compute V^-H dL V^H
-			const auto result = at::linalg_solve(vh, glambda.unsqueeze(-1) * vh);
+      // Compute V^-H dL V^H
+      const auto result = at::linalg_solve(vh, glambda.unsqueeze(-1) * vh);
       // If it is real, we have to project the derivative onto the real numbers
       return self.is_complex() ? result : at::real(result);
     } else {
