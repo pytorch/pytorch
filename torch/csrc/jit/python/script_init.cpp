@@ -119,14 +119,7 @@ struct PythonResolver : public Resolver {
         py::cast<std::string>(py::module::import("torch._jit_internal")
                                   .attr("_qualified_name")(obj)));
 
-    // auto pyClass =
-    //     py::module::import("torch.jit._state")
-    //         .attr("_get_script_class")(qualifiedName.qualifiedName());
-    // if (!pyClass.is_none()) {
     return get_python_cu()->get_type(qualifiedName);
-    // }
-
-    // return nullptr;
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
@@ -875,12 +868,6 @@ void initJitScriptBindings(PyObject* module) {
               })
           .def(
               "_properties", [](Object& self) { return self.get_properties(); })
-          .def(
-              "equals",
-              [](Object& self, const Object& rhs) { return self.equals(rhs); })
-          .def(
-              "enable_reference_semantics",
-              [](Object& self) { self.enable_reference_semantics(); })
           .def("__copy__", &Object::copy)
           .def(
               "__hash__",
@@ -966,7 +953,11 @@ void initJitScriptBindings(PyObject* module) {
            return py::str("ScriptObject");
          }
          return invokeScriptMethodFromPython(
-             *method, std::move(args), std::move(kwargs));
+             *method,
+             // NOLINTNEXTLINE(performance-move-const-arg)
+             std::move(args),
+             // NOLINTNEXTLINE(performance-move-const-arg)
+             std::move(kwargs));
        }}};
 
   for (const char* mm_name : magic_method_names) {
@@ -981,7 +972,11 @@ void initJitScriptBindings(PyObject* module) {
               throw NotImplementedError();
             }
             return invokeScriptMethodFromPython(
-                *method, std::move(args), std::move(kwargs));
+                *method,
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(args),
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(kwargs));
           });
     }
   }
@@ -1331,7 +1326,11 @@ void initJitScriptBindings(PyObject* module) {
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             Function& callee = *strongPtr.function_;
             py::object result = invokeScriptFunctionFromPython(
-                callee, tuple_slice(std::move(args), 1), std::move(kwargs));
+                callee,
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                tuple_slice(std::move(args), 1),
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(kwargs));
             return result;
             END_HANDLE_TH_ERRORS_PYBIND
           })
@@ -1423,7 +1422,11 @@ void initJitScriptBindings(PyObject* module) {
             Method& method = py::cast<Method&>(args[0]);
 
             return invokeScriptMethodFromPython(
-                method, tuple_slice(std::move(args), 1), std::move(kwargs));
+                method,
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                tuple_slice(std::move(args), 1),
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(kwargs));
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def_property_readonly("graph", &Method::graph)

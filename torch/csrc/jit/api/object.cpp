@@ -42,10 +42,5 @@ Object Object::copy() const {
 Object Object::deepcopy() const {
   return Object(_ivalue()->deepcopy());
 }
-
-bool Object::equals(const Object& rhs) const {
-  return _ivalue()->equals(*rhs._ivalue());
-}
-
 } // namespace jit
 } // namespace torch

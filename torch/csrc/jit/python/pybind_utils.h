@@ -758,11 +758,6 @@ inline py::object toPyObject(IValue ivalue) {
       return py::cast(Object(obj));
     }
 
-    if (obj->has_reference_semantics()) {
-      return py::module::import("torch.jit._recursive")
-          .attr("wrap_cpp_class")(py::cast(Object(obj)));
-    }
-
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass = getScriptedClassOrError(obj->type());
@@ -776,7 +771,6 @@ inline py::object toPyObject(IValue ivalue) {
       py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
     }
     return pyObj;
-
   } else if (ivalue.isPyObject()) {
     // return borrowed reference to ensure it correctly incref the underlying
     // PyObject

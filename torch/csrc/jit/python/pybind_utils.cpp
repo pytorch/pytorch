@@ -164,12 +164,6 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         return script_obj.value()._ivalue();
       }
 
-      // try {
-      //   Object* script_object = object.cast<Object*>();
-      //   return script_object->_ivalue();
-      // } catch (...) {
-      // }
-
       // otherwise is a normal class object, we create a fresh
       // ivalue::Object to use from the py object.
       // 1. create a bare ivalue

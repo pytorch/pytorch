@@ -175,15 +175,6 @@ struct TORCH_API Object {
   // `ClassType`, including deepcopy of Tensors
   Object deepcopy() const;
 
-  bool equals(const Object& rhs) const;
-
-  bool has_reference_semantics() const {
-    return _ivalue_->has_reference_semantics();
-  }
-  void enable_reference_semantics() {
-    _ivalue_->enable_reference_semantics();
-  }
-
  private:
   // mutable be we lazily initialize in module_object.
   mutable ObjectPtr _ivalue_;

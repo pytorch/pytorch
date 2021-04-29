@@ -54,20 +54,6 @@ class TestClassType(JitTestCase):
         self.assertEqual(obj.get_a(), 2)
         self.assertEqual(obj.attr, 2)
 
-        # Check that reference semantics are not erased by passing a
-        # scripted object to/from TorchScript.
-        def test_fn_with_return(obj: Foo):
-            obj.set_a(3)
-            return obj
-
-        scripted_fn_with_return = torch.jit.script(test_fn_with_return)
-        obj = torch.jit.script(Foo(1))
-
-        obj = scripted_fn_with_return(obj)
-        scripted_fn(obj)
-        self.assertEqual(obj.get_a(), 2)
-        self.assertEqual(obj.attr, 2)
-
     def test_get_with_method(self):
         class FooTest(object):
             def __init__(self, x):
