@@ -1129,7 +1129,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   }
 
   {
-    at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
     work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
         c10::ListType::create(c10::TensorType::get()),
         getIndicesOfDevices(devices));
@@ -1225,7 +1225,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   }
 
   if (opType == OpType::RECV) {
-    at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
     work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
         c10::ListType::create(c10::TensorType::get()),
         getIndicesOfDevices(devices));
