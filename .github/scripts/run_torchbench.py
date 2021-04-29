@@ -64,7 +64,7 @@ def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> List[str]:
         return model_list
     # Sanity check: make sure all the user specified models exist in torchbench repository
     benchmark_path = os.path.join(torchbench_path, "torchbenchmark", "models")
-    full_model_list = [ model for model in os.listdir(benchmark_path) if os.path.isdir(os.path.join(benchmark_path, model)) ]
+    full_model_list = [model for model in os.listdir(benchmark_path) if os.path.isdir(os.path.join(benchmark_path, model))]
     for m in model_list:
         if m not in full_model_list:
             print(f"The model {m} you specified does not exist in TorchBench suite. Please double check.")
