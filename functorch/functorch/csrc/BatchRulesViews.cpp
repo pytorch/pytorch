@@ -27,7 +27,7 @@ namespace at { namespace functorch {
 // `self_bdim = 0`, and `dim = 0`. Note that there are **no BatchedTensors**
 // involved in this case; there exists some plumbing that automatically unwraps
 // BatchedTensors before calling the batch rule.
-// 
+//
 // To write the logic of the batch rule: think about the semantics of the
 // `sum` operation if `self` had an additional dimension (indicated by self_bdim):
 // - If `self_bdim` is null, then we just do `result = self.sum(dim)` as usual
@@ -47,15 +47,15 @@ namespace at { namespace functorch {
 //     VMAP_SUPPORT("sum.int", sum_batch_rule);
 //     ...
 //   }
-//  
+//
 // Note [Reusing batch rules to add vmap support for a complicated operator]
 // Can't figure out how to write a batch rule for a big operation? If the
 // operation can be expressed as a composition of other operations that do have
 // batch rules, then that is another way to add vmap support. For example,
-// consider the following schema 
+// consider the following schema
 //   func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1)
 // and assume we already have batching rules for basic arithmetic operators.
-// 
+//
 // To add vmap support, define a decomposition using the same signature:
 //   Tensor addcmul_decomp(const Tensor& self, const Tensor& tensor1,
 //                         const Tensor& tensor2, const Scalar& value) {
@@ -73,7 +73,7 @@ namespace at { namespace functorch {
 // TODO: This is kinda complicated. Saving this for a future date.
 
 std::tuple<Tensor, optional<int64_t>> flatten_batch_rule(
-    const Tensor& self, 
+    const Tensor& self,
     optional<int64_t> self_bdim,
     int64_t start_dim, int64_t end_dim) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
@@ -86,7 +86,7 @@ std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
     int64_t dim) {
-  auto self_ = moveBatchDimToFront(self, self_bdim); 
+  auto self_ = moveBatchDimToFront(self, self_bdim);
   auto rank = rankWithoutBatchDim(self, self_bdim);
   dim = maybe_wrap_dim(dim, rank + 1);
   if (self_bdim) {

@@ -93,11 +93,11 @@ the gradients of the output of func w.r.t. to `inputs[0]`.
 ```py
 >>> from functorch import grad
 >>> x = torch.randn([])
->>> cos_x = grad(torch.sin)(x)
+>>> cos_x = grad(lambda x: torch.sin(x))(x)
 >>> assert torch.allclose(cos_x, x.cos())
 >>>
 >>> # Second-order gradients
->>> neg_sin_x = grad(grad(torch.sin))(x)
+>>> neg_sin_x = grad(grad(lambda x: torch.sin(x)))(x)
 >>> assert torch.allclose(neg_sin_x, -x.sin())
 ```
 
