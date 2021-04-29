@@ -1067,7 +1067,7 @@ class DistributedDataParallel(Module):
                             # and throws RuntimeError in 3.7+ (PEP 479), so just
                             # raise RuntimeError here.
                             raise RuntimeError(
-                                f"Rank {dist.get_rank(self.process_group)} exhausted all inputs."
+                                f"Rank {self._distributed_rank} exhausted all inputs."
                             )
                         if is_last_joiner:
                             is_last_joiner = False
