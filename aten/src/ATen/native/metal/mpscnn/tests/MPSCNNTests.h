@@ -49,5 +49,8 @@ bool test_reshape();
 bool test_mean_dim();
 bool test_mean_dim2();
 bool test_mean_dim3();
+bool test_chunk();
+bool test_chunk2();
+bool test_chunk3();
 
 #endif
