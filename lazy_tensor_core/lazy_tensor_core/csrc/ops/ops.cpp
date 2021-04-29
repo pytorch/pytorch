@@ -281,7 +281,8 @@ NodePtr ARange(const at::Scalar& start, const at::Scalar& end,
 }
 
 NodePtr BroadcastTensors(lazy_tensors::Span<const Value> tensors) {
-  NodePtr node = GenericOp(OpKind(at::aten::broadcast_tensors), tensors);
+  NodePtr node = GenericOp(OpKind(at::aten::broadcast_tensors), tensors,
+                           /*num_outputs=*/tensors.size());
   node->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
