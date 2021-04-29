@@ -484,8 +484,7 @@ class MultiProcessTestCase(TestCase):
         if sys.platform != 'win32' and sys.platform != 'darwin':
             # Register signal handler to dump stack traces on FATALs.
             # Windows and MacOS do not support the signal handlers.
-            import caffe2.python._import_c_extension as C
-            C.set_print_stack_traces_on_fatal_signal(True)  # type: ignore[attr-defined]
+            torch._C._set_print_stack_traces_on_fatal_signal(True)  # type: ignore[attr-defined]
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.

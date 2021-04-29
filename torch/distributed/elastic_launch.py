@@ -533,6 +533,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, List[str]]:
         start_method=args.start_method,
         redirects=Std.from_str(args.redirects),
         tee=Std.from_str(args.tee),
+        log_dir=args.log_dir,
     )
 
     with_python = not args.no_python
