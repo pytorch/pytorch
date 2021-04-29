@@ -2108,7 +2108,8 @@ class TestReductions(TestCase):
                 return
             self.fail("Failed to hit RuntimeError!")
 
-        self.assertEqual(torch_result, numpy_result, exact_dtype=False)
+        exact_dtype = input.dtype != torch.bfloat16
+        self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_var_vs_numpy(self, device, dtype):
@@ -2155,17 +2156,6 @@ class TestReductions(TestCase):
             numpy_res = np.asarray(np.var(array, **numpy_kwargs))
             torch_res = torch.var(tensor, dim=dim, correction=correction, keepdim=keepdim)
 
-            # Result should never be complex (gh-56627), but for now just test the
-            # imaginary component is 0 or an allowed non-finite value
-            if torch_res.is_complex():
-                imag = torch_res.imag
-                torch_res = torch_res.real
-                finite = imag.isfinite()
-                # All finite imaginary components are zero
-                self.assertEqual(finite, imag == 0)
-                # All non-finite imaginary components coincide with non-finite real components
-                self.assertTrue(torch.all(finite | ~torch_res.isfinite()))
-
             # inf vs. nan results are sensitive to machine precision,
             # just treat them as equivalent
             numpy_res[np.isinf(numpy_res)] = np.nan
@@ -2195,17 +2185,6 @@ class TestReductions(TestCase):
             numpy_kwargs = dict(axis=dim, ddof=correction, keepdims=keepdim)
             numpy_res = np.asarray(np.std(array, **numpy_kwargs))
             torch_res = torch.std(tensor, dim=dim, correction=correction, keepdim=keepdim)
-
-            # Result should never be complex (gh-56627), but for now just test the
-            # imaginary component is 0 or an allowed non-finite value
-            if torch_res.is_complex():
-                imag = torch_res.imag
-                torch_res = torch_res.real
-                finite = imag.isfinite()
-                # All finite imaginary components are zero
-                self.assertEqual(finite, imag == 0)
-                # All non-finite imaginary components coincide with non-finite real components
-                self.assertTrue(torch.all(finite | ~torch_res.isfinite()))
 
             # inf vs. nan results are sensitive to machine precision,
             # just treat them as equivalent
