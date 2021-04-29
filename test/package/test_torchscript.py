@@ -455,6 +455,7 @@ class PackageScriptModuleTest(PackageTestCase):
 
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as e:
+            e.save_pickle("res", "tensor", shared_tensor)
             e.save_pickle("res", "mod1.pkl", mod1)
             e.save_pickle("res", "mod2.pkl", mod2)
 
