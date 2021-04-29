@@ -60,7 +60,7 @@ void GpuLower::replaceSymbolicSizes() {
         continue;
       } else if (id->getIterType() == IterType::BroadcastWithoutStride) {
         continue;
-      // NOLINTNEXTLINE(bugprone-branch-clone)
+        // NOLINTNEXTLINE(bugprone-branch-clone)
       } else if (id->getIterType() == IterType::BroadcastWithStride) {
         dim++;
         continue;
@@ -208,7 +208,7 @@ class TORCH_CUDA_CU_API GpuLower::KernelIrMapper : private OptInConstDispatch {
       default:
         TORCH_CHECK(false, "Unexpected expression type");
     }
-  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   }
 
   void handle(const Statement* node) override {
