@@ -412,10 +412,16 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     if (completed_) {
       // This should be rare and shouldn't cause log spew. Its important to
       // log errors and thats why we have this log here.
-      LOG(INFO)
-          << "Skipping setting following error on the Future since "
-          << "it is already marked completed (this is not neccessarily an error): "
-          << tryRetrieveErrorMessageInternal(eptr);
+      std::string msg = c10::str(
+          "Skipping setting following error on the Future since "
+          "it is already marked completed (this is not neccessarily "
+          "an error):\n", tryRetrieveErrorMessageInternal(eptr));
+      if (eptr_) {
+        msg += c10::str(
+            ", \nOriginal exception:\n",
+            tryRetrieveErrorMessageInternal(eptr_));
+      }
+      LOG(INFO) << msg;
       return;
     } else {
       setErrorInternal(std::move(eptr), lock);
