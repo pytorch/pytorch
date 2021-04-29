@@ -3,7 +3,7 @@ import sys
 import torch
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.jit._monkeytype_config import _IS_MONKEYTYPE_INSTALLED
-from typing import List, Dict, Tuple  # noqa: F401
+from typing import List, Dict, Tuple, Any  # noqa: F401
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -100,6 +100,40 @@ class TestPDT(JitTestCase):
         scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((3, 4, 5), )])
         self.assertEqual(scripted_fn_int((1, 2, 3)), test_list_and_tuple((1, 2, 3)))
 
+    def test_nested_list_and_tuple(self):
+        def test_nested_list(inp):
+            return [sum(v) for v in inp]
+
+        def test_nested_tuple(inp):
+            ans = 0.0
+            for tup in inp:
+                for val in tup:
+                    if val > 0:
+                        ans *= val
+            return ans
+
+        make_global(test_nested_list, test_nested_tuple)
+
+        list_inp = [[1, 2, 3, ], [5, 6, 7, ]]
+        scripted_fn = torch.jit._script_pdt(test_nested_list, example_inputs=[(list_inp, ), ])
+        inp = [[0, 4, 7, ], [8, 11, ], [6, -1, -20, ]]
+        self.assertEqual(scripted_fn(inp, ), test_nested_list(inp, ))
+
+        list_inp = ([1, 2, 3, ], [5, 6, 7, ])
+        scripted_fn = torch.jit._script_pdt(test_nested_list, example_inputs=[(list_inp, ), ])
+        inp = ([0, 4, 7, ], [8, 11, ], [6, -1, -20, ])
+        self.assertEqual(scripted_fn(inp, ), test_nested_list(inp, ))
+
+        tup_inp = [(1.0, 2.6, 3.7, ), (5.7, 6.1, 1.7, )]
+        scripted_fn = torch.jit._script_pdt(test_nested_tuple, example_inputs=[(tup_inp, ), ])
+        inp = [(1.0, 4.1, 7.4, ), (4.8, 1.1, -1.2, ), (6.3, -1.3, -2.0, )]
+        self.assertEqual(scripted_fn(inp, ), test_nested_tuple(inp, ))
+
+        tup_inp = ((True, False, True, ), (False, False, False, ))
+        scripted_fn = torch.jit._script_pdt(test_nested_tuple, example_inputs=[(tup_inp, ), ])
+        inp = ((True, True, True, ), (False, False, True, ))
+        self.assertEqual(scripted_fn(inp, ), test_nested_tuple(inp, ))
+
     def test_pdt_dict(self):
         def test_dict(a):
             return a['foo']
@@ -152,9 +186,13 @@ class TestPDT(JitTestCase):
 
     def test_class_as_profiled_types(self):
         class UserDefinedClass:
-            def fn(self, b):
+            def fn(self, b) -> Any:
                 assert b is not None
-                return b
+                if isinstance(b, int):
+                    return b if b > 0 else -1
+                elif isinstance(b, float):
+                    return b if b > 0.0 else -1.0
+                return 0
 
         def test_model(a, m):
             assert not isinstance(a, bool)
