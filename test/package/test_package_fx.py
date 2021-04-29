@@ -1,7 +1,7 @@
 from io import BytesIO
 
 import torch
-from torch.fx import Graph, GraphModule, Tracer, symbolic_trace
+from torch.fx import Graph, GraphModule, symbolic_trace
 from torch.package import (
     ObjMismatchError,
     PackageExporter,
@@ -17,31 +17,17 @@ except ImportError:
     from common import PackageTestCase
 
 
-class CustomTracer(Tracer):
-    def is_leaf_module(self, m, module_qualified_name,) -> bool:
-        return super().is_leaf_module(m, module_qualified_name) or module_qualified_name == "MyModule"
-
-
-class MyModule(torch.nn.Module):
-    def forward(self, x):
-        return torch.relu(x)
-
-
-class SimpleTest(torch.nn.Module):
-    def forward(self, x):
-        return torch.relu(x + 3.0)
-
-
 class TestPackageFX(PackageTestCase):
     """Tests for compatibility with FX."""
 
     def test_package_fx_simple(self):
+        from package_fx_test_utils import SimpleTest
+
         st = SimpleTest()
         traced = symbolic_trace(st)
 
         f = BytesIO()
         with PackageExporter(f, verbose=False) as pe:
-            pe.extern(["io", "sys"])
             pe.save_pickle("model", "model.pkl", traced)
 
         f.seek(0)
@@ -134,8 +120,10 @@ class TestPackageFX(PackageTestCase):
         produced using a custom Tracer is packaged, is it unpackaged
         using the same custom Tracer.
         """
+        from package_fx_test_utils import MyModule, PackageFXTestTracer
+
         my_mod = MyModule()
-        tracer = CustomTracer()
+        tracer = PackageFXTestTracer()
         graph = tracer.trace(my_mod)
 
         self.assertIs(graph.tracer, tracer)
@@ -144,16 +132,13 @@ class TestPackageFX(PackageTestCase):
 
         f = BytesIO()
         with PackageExporter(f, verbose=False) as pe:
-            pe.extern(["io", "sys"])
             pe.save_pickle("model", "model.pkl", gm)
 
         f.seek(0)
         pi = PackageImporter(f)
         loaded = pi.load_pickle("model", "model.pkl")
 
-        # TODO: How to check that loaded uses CustomTracer (rather, packaged
-        # CustomTracer)?
-        # self.assertIsInstance(loaded.graph.tracer, CustomTracer)
+        self.assertTrue(loaded.graph.tracer.is_package_fx_test_tracer)
 
 
 if __name__ == "__main__":
