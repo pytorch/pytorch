@@ -57,20 +57,21 @@ MemoryPlan create_test_memory_plan(const std::vector<int64_t>& buffer_sizes) {
 TEST(Function, ExecuteBadMul) {
   const int a = 999;
   const int n = 100;
+  const int size = 128;
   Function f;
 
   f.set_nnc_kernel_id("bad_mul");
-  f.set_input_specs({create_test_input_spec({128})});
-  f.set_output_spec({create_test_output_spec({128})});
+  f.set_input_specs({create_test_input_spec({size})});
+  f.set_output_spec({create_test_output_spec({size})});
   f.set_parameters({at::ones({1}, at::kInt).mul(n)});
-  f.set_memory_plan(create_test_memory_plan({sizeof(float) * 128}));
+  f.set_memory_plan(create_test_memory_plan({sizeof(float) * size}));
 
   c10::List<at::Tensor> input({
-      at::ones({128}, at::kFloat).mul(a)
+      at::ones({size}, at::kFloat).mul(a)
   });
   auto outputs = f.run(c10::impl::toList(input));
   auto output = ((const c10::IValue&) outputs[0]).toTensor();
-  auto expected_output = at::ones({128}, at::kFloat).mul(a * n);
+  auto expected_output = at::ones({size}, at::kFloat).mul(a * n);
   EXPECT_TRUE(output.equal(expected_output));
 }
 
@@ -78,15 +79,22 @@ TEST(Function, Serialization) {
   Function f;
   f.set_name("test_function");
   f.set_nnc_kernel_id("test_kernel");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f.set_input_specs({create_test_input_spec({1, 3, 224, 224})});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f.set_output_spec({create_test_output_spec({1000})});
   f.set_parameters({
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ones({1, 16, 3, 3}, at::kFloat),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ones({16, 32, 1, 1}, at::kFloat),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ones({32, 1, 3, 3}, at::kFloat)
   });
   f.set_memory_plan(create_test_memory_plan({
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       sizeof(float) * 1024,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       sizeof(float) * 2048,
   }));
 
@@ -113,25 +121,29 @@ TEST(Function, Serialization) {
 }
 
 TEST(Function, ValidInput) {
+  const int size = 128;
   Function f;
   f.set_nnc_kernel_id("dummy");
-  f.set_input_specs({create_test_input_spec({128})});
+  f.set_input_specs({create_test_input_spec({size})});
 
   c10::List<at::Tensor> input({
-      at::ones({128}, at::kFloat)
+      at::ones({size}, at::kFloat)
   });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto)
   EXPECT_NO_THROW(
       f.run(c10::impl::toList(input)));
 }
 
 TEST(Function, InvalidInput) {
+  const int size = 128;
   Function f;
   f.set_nnc_kernel_id("dummy");
-  f.set_input_specs({create_test_input_spec({128})});
+  f.set_input_specs({create_test_input_spec({size})});
 
   c10::List<at::Tensor> input({
-      at::ones({256}, at::kFloat)
+      at::ones({size * 2}, at::kFloat)
   });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto)
   EXPECT_THROW(
       f.run(c10::impl::toList(input)),
       c10::Error);

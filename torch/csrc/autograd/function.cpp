@@ -18,6 +18,7 @@ namespace torch { namespace autograd {
 // The current evaluating node. This is useful to assign the current node as a
 // parent of new nodes created during the evaluation of this node in anomaly
 // mode.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local std::shared_ptr<Node> current_evaluating_node = nullptr;
 
 NodeGuard::NodeGuard(std::shared_ptr<Node> node) {

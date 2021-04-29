@@ -292,7 +292,8 @@ void CudaPrinter::visit(const Intrinsics* v) {
   if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
     func_name = func_name + "f";
   }
-  if (v->op_type() == IntrinsicsOp::kAbs && !is_integral(returnType)) {
+  if (v->op_type() == IntrinsicsOp::kAbs &&
+      !c10::isIntegralType(returnType, true)) {
     // since kAbs's func_name is `abs`, prefix `f` for floating point
     func_name = "f" + func_name;
   }
@@ -470,7 +471,7 @@ void CudaPrinter::visit(const AtomicAdd* v) {
 }
 
 void CudaPrinter::visit(const Max* v) {
-  if (is_integral(v->dtype().scalar_type())) {
+  if (v->dtype().is_integral()) {
     os() << "max(";
   } else {
     os() << "maximum(";
@@ -482,7 +483,7 @@ void CudaPrinter::visit(const Max* v) {
 }
 
 void CudaPrinter::visit(const Min* v) {
-  if (is_integral(v->dtype().scalar_type())) {
+  if (v->dtype().is_integral()) {
     os() << "min(";
   } else {
     os() << "minimum(";
