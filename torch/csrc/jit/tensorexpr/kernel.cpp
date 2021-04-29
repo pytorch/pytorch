@@ -1387,8 +1387,8 @@ Tensor* computeMatmul(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("matmul", outputShape, dtype);
-  const Buf* a = c10::get<BufHandle>(A).node();
-  const Buf* b = c10::get<BufHandle>(B).node();
+  const Buf* a = c10::get<BufHandle>(inputs[0]).node();
+  const Buf* b = c10::get<BufHandle>(inputs[1]).node();
 
   auto size_a = ExprVectorToExprHandleVector(a->dims());
   auto size_b = ExprVectorToExprHandleVector(b->dims());
