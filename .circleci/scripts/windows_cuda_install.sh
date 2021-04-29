@@ -3,27 +3,57 @@ set -eux -o pipefail
 
 cuda_major_version=${CUDA_VERSION%.*}
 
-if [[ "$cuda_major_version" == "10" ]]; then
-    cuda_installer_name="cuda_10.1.243_426.00_win10"
-    msbuild_project_dir="CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
-    cuda_install_packages="nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1"
-elif [[ "$cuda_major_version" == "11" ]]; then
-    if [[ "${CUDA_VERSION}" == "11.1" ]]; then
-        cuda_installer_name="cuda_11.1.0_456.43_win10"
-        msbuild_project_dir="visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
-        cuda_install_packages="nvcc_11.1 cuobjdump_11.1 nvprune_11.1 nvprof_11.1 cupti_11.1 cublas_11.1 cublas_dev_11.1 cudart_11.1 cufft_11.1 cufft_dev_11.1 curand_11.1 curand_dev_11.1 cusolver_11.1 cusolver_dev_11.1 cusparse_11.1 cusparse_dev_11.1 npp_11.1 npp_dev_11.1 nvrtc_11.1 nvrtc_dev_11.1 nvml_dev_11.1"
-    elif [[ "${CUDA_VERSION}" == "11.2" ]]; then
-        cuda_installer_name="cuda_11.2.2_461.33_win10_1"
-        msbuild_project_dir="visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
-        cuda_install_packages="nvcc_11.2 cuobjdump_11.2 nvprune_11.2 nvprof_11.2 cupti_11.2 cublas_11.2 cublas_dev_11.2 cudart_11.2 cufft_11.2 cufft_dev_11.2 curand_11.2 curand_dev_11.2 cusolver_11.2 cusolver_dev_11.2 cusparse_11.2 cusparse_dev_11.2 npp_11.2 npp_dev_11.2 nvrtc_11.2 nvrtc_dev_11.2 nvml_dev_11.2"
-    else
-        echo "This should not happen! ABORT."
-        exit 1
+# cuda_installer_name
+declare -a installers=(
+    "10.1 cuda_10.1.243_426.00_win10"
+    "11.1 cuda_11.1.0_456.43_win10"
+    "11.2 cuda_11.2.2_461.33_win10"
+)
+
+for elem in "${installers[@]}"; do
+    read -a strarr <<< "$elem"  # uses default whitespace IFS
+    if [[ "$CUDA_VERSION" == "${strarr[0]}" ]]; then
+        cuda_installer_name=${strarr[1]}
+        break
     fi
-else
+done
+if [ -z $cuda_installer_name ]; then
     echo "CUDA_VERSION $CUDA_VERSION is not supported yet"
     exit 1
 fi
+
+# msbuild_project_dir
+declare -a msbuild_project_dir=(
+    "10 CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
+    "11 visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
+)
+
+for elem in "${build_dirs[@]}"; do
+    read -a strarr <<< "$elem" # uses default whitespace IFS
+    if [[ "$cuda_major_version" == "${strarr[0]}" ]]; then
+        msbuild_project_dir=${strarr[1]}
+        break
+    fi
+done
+
+# cuda_install_packages
+cuda10_packages_template="nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1"
+
+cuda11_packages_template="nvcc_11.1 cuobjdump_11.1 nvprune_11.1 nvprof_11.1 cupti_11.1 cublas_11.1 cublas_dev_11.1 cudart_11.1 cufft_11.1 cufft_dev_11.1 curand_11.1 curand_dev_11.1 cusolver_11.1 cusolver_dev_11.1 cusparse_11.1 cusparse_dev_11.1 npp_11.1 npp_dev_11.1 nvrtc_11.1 nvrtc_dev_11.1 nvml_dev_11.1"
+
+declare -a install_packages=(
+    "10, ${cuda10_packages_template}"
+    "11, ${cuda11_packages_template}"
+)
+for elem in "${install_packages[@]}"; do
+    IFS="," read -a strarr <<< "$elem" # use comma as delimiter because packages includes whitespace     
+    if [[ "$cuda_major_version" == "${strarr[0]}" ]]; then
+        packages_template="${strarr[1]}"
+        cuda_install_packages=${packages_template//[1-9][0-9*]\.[0-9]/$CUDA_VERSION}
+        break
+    fi
+done
+
 
 if [[ "$cuda_major_version" == "11" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
     cuda_install_packages="${cuda_install_packages} Display.Driver"
