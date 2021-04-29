@@ -92,6 +92,7 @@ enum class PickleOpCode : char {
 
 using ::c10::IValue;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct WriteableTensorData {
   const char* data() const {
     return static_cast<const char*>(tensor_.storage().data());
@@ -123,6 +124,7 @@ class TORCH_API Pickler {
   Pickler(std::function<void(const char*, size_t)> writer)
       : Pickler(std::move(writer), nullptr, nullptr, nullptr) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Pickler(
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table,
@@ -132,6 +134,7 @@ class TORCH_API Pickler {
         tensor_table_(tensor_table),
         type_renamer_(std::move(type_renamer)),
         memoized_class_types_(memoized_class_types) {}
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~Pickler();
 
   // Push protocol onto the stack
