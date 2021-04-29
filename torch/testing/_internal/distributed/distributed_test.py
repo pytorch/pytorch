@@ -45,6 +45,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
+from torch.cuda.amp import GradScaler, autocast
 
 try:
     import torchvision
@@ -3411,6 +3412,70 @@ class DistributedTest:
             self._test_DistributedDataParallel(
                 gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
 
+        def _test_DistributedDataParallel_with_amp(self, grad_is_view=False):
+            torch.manual_seed(31415)
+            # Creates model and optimizer in default precision
+            model = copy.deepcopy(DDP_NET).cuda()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.03)
+
+            # Creates a GradScaler once at the beginning of training.
+            scaler = GradScaler()
+
+            ddp_model = nn.parallel.DistributedDataParallel(
+                model, device_ids=[self.rank], gradient_as_bucket_view=grad_is_view)
+
+            input = torch.randn(dist.get_world_size() * 2, 2).cuda()
+            target = torch.randn(dist.get_world_size() * 2, 4).cuda()
+            loss_fn = nn.MSELoss()
+
+            # verify grads are none before training
+            for p in ddp_model.parameters():
+                self.assertTrue(p is not None)
+                self.assertTrue(p.grad is None)
+
+            for idx in range(20):
+                optimizer.zero_grad()
+                # Runs the forward pass with autocasting.
+                with autocast():
+                    output = ddp_model(input)
+                    loss = loss_fn(output, target)
+
+                # Scales loss.  Calls backward() on scaled loss to create scaled gradients.
+                # Backward passes under autocast are not recommended.
+                # Backward ops run in the same dtype autocast chose for corresponding forward ops.
+                scaler.scale(loss).backward()
+
+                # verify grads are not none and are valid during training
+                for p in ddp_model.parameters():
+                    if p.requires_grad:
+                        self.assertTrue(p.grad is not None)
+                        self.assertFalse(p.grad.isnan().any())
+                        self.assertFalse(p.grad.isinf().any())
+
+                # scaler.step() first unscales the gradients of the optimizer's assigned params.
+                # If these gradients do not contain infs or NaNs, optimizer.step() is then called,
+                # otherwise, optimizer.step() is skipped.
+                scaler.step(optimizer)
+
+                # Updates the scale for next iteration.
+                scaler.update()
+
+                # Shuffle the input so that DDP input is different
+                torch.manual_seed(1337 + idx)
+                input = input[torch.randperm(dist.get_world_size() * 2)]
+
+            return ddp_model
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        def test_DistributedDataParallel_with_amp_and_grad_is_view(self):
+            torch.cuda.set_device(self.rank)
+            ddp_model_grad_not_view = self._test_DistributedDataParallel_with_amp(grad_is_view=False)
+            ddp_model_grad_is_view = self._test_DistributedDataParallel_with_amp(grad_is_view=True)
+            for i, j in zip(ddp_model_grad_not_view.parameters(), ddp_model_grad_is_view.parameters()):
+                self.assertEqual(i, j)
+
         def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset,
                                                         output_device=None, affine=True):
             # Run a simple end to end DDP model, use result of single node model
@@ -5033,7 +5098,6 @@ class DistributedTest:
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
-        @skip_if_rocm
         def test_ddp_control_flow_same_across_ranks(self):
             # Control flow that is the same across ranks.
             batch = 20
@@ -5132,7 +5196,6 @@ class DistributedTest:
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
-        @skip_if_rocm
         def test_ddp_control_flow_different_across_ranks(self):
             # Control flow that is different across ranks.
             batch = 20
@@ -5708,3 +5771,47 @@ class DistributedTest:
             # Tests unused parameter reporting when DDP is configured to ignore
             # certain parameters.
             self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=True)
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_sync_bn_training_vs_eval(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            # Need to set track_running_stats=False, when track_running_stats=True,
+            # bn_training is False and sync could not occur in eval model.
+            model = nn.SyncBatchNorm(
+                2, momentum=0.99, track_running_stats=False
+            ).cuda(rank)
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank]
+            )
+            # Test sync occurs in training mode.
+            with torch.autograd.profiler.profile() as prof:
+                for i in range(6):
+                    inp = torch.randn(10, 2, 4, 4).cuda(rank)
+                    out = model(inp)
+                    loss = out.sum()
+                    loss.backward()
+
+            # SyncBN allgathers stats across all ranks, so verify call to
+            # all_gather in profiler.
+            all_gather_calls = get_profiling_event("all_gather", prof)
+            self.assertNotEqual([], all_gather_calls)
+
+            # Only do inference on one rank. If SyncBN did collective stats sync,
+            # this would hang/error.
+            model_inference = model.module
+            if self.rank == 0:
+                model_inference.eval()
+                with torch.autograd.profiler.profile() as prof:
+                    for i in range(6):
+                        inp = torch.randn(10, 2, 4, 4).cuda(rank)
+                        out = model_inference(inp)
+                        loss = out.sum()
+                        loss.backward()
+
+                # Ensure sync does not occur in eval() mode.
+                all_gather_calls = get_profiling_event("all_gather", prof)
+                self.assertEqual([], all_gather_calls)
