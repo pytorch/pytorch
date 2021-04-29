@@ -116,6 +116,7 @@ bool PatternNetTransform::PatternRule(
     int parent = edge.first;
     // g_idx doesn't have parent in subgraph that p_[p_idx] has
     // inverse_ops_ gets the index of a p_idx inside of ordered_ops_.
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (inverse_ops_[parent] < subgraph.size() &&
         g.node(g_idx).parents.count(subgraph[inverse_ops_[parent]]) == 0) {
       return false;
@@ -124,6 +125,7 @@ bool PatternNetTransform::PatternRule(
 
   for (const auto& edge : p_.node(p_idx).children) {
     int child = edge.first;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (inverse_ops_[child] < subgraph.size() &&
         g.node(g_idx).children.count(subgraph[inverse_ops_[child]]) == 0) {
       return false;
@@ -182,6 +184,7 @@ bool PatternNetTransform::ReplaceRule(
 
   // Append all the new operators.
   for (const auto i : c10::irange(r_.size())) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     int new_node_idx = offset + i;
 
     OperatorDef new_op = r_.node(i).op;
