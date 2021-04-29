@@ -745,6 +745,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.poisson: lambda input, generator=None: -1,
         torch.poisson_nll_loss: lambda input, target, log_input, full, eps, reduction: -1,
         torch.polygamma: lambda input, n, out=None: -1,
+        torch.positive: lambda input, out=None: -1,
         torch.prelu: lambda input, weight: -1,
         torch.ones_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.pow: lambda input, exponent, out=None: -1,
