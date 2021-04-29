@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/impl/InlineDeviceGuard.h>
+#include <c10/util/ArrayRef.h>
 
 namespace c10 {
 namespace impl {
@@ -60,7 +61,7 @@ public:
   ///
   /// WARNING: reset_stream does NOT preserve previously set streams on
   /// different devices.  If you need to set streams on multiple devices
-  /// on CUDA, use CUDAMultiStreamGuard instead.
+  /// use MultiStreamGuard instead.
   void reset_stream(Stream stream) {
     // TODO: make a version that takes an impl argument.  Unfortunately,
     // that will require SFINAE because impl is only valid for the
@@ -182,6 +183,58 @@ public:
 
 private:
   optional<InlineStreamGuard<T>> guard_;
+};
+
+template <typename T>
+class InlineMultiStreamGuard {
+public:
+  /// Calls `set_stream` on each of the streams in the list.
+  /// This may be useful if you need to set different streams
+  /// for different devices.
+  explicit InlineMultiStreamGuard(ArrayRef<Stream> streams) {
+    if (!streams.empty()) {
+      impl_.emplace(getDeviceTypeOfStreams(streams));
+      original_streams_.reserve(streams.size());
+      for (const Stream& s : streams) {
+        original_streams_.push_back(this->impl_->exchangeStream(s));
+      }
+    }
+  }
+
+  /// Copy is disallowed
+  InlineMultiStreamGuard(const InlineMultiStreamGuard&) = delete;
+  InlineMultiStreamGuard<T>& operator=(const InlineMultiStreamGuard&) = delete;
+
+  /// Move is disallowed, as StreamGuard does not have an uninitialized state,
+  /// which is required for moves on types with nontrivial destructors.
+  InlineMultiStreamGuard(InlineMultiStreamGuard&& other) = delete;
+  InlineMultiStreamGuard& operator=(InlineMultiStreamGuard&& other) = delete;
+
+  ~InlineMultiStreamGuard() {
+    for (const Stream& s : original_streams_) {
+      this->impl_->exchangeStream(s);
+    }
+  }
+
+protected:
+  optional<T> impl_;
+
+private:
+  /// The original streams that were active on all devices.
+  std::vector<Stream> original_streams_;
+
+  static DeviceType getDeviceTypeOfStreams(ArrayRef<Stream> streams) {
+    TORCH_INTERNAL_ASSERT(!streams.empty());
+    DeviceType type = streams[0].device_type();
+    for (size_t idx = 1; idx < streams.size(); idx++) {
+      TORCH_CHECK_VALUE(
+        streams[idx].device_type() == type,
+        "Streams have a mix of device types: stream 0 is on ",
+        streams[0].device(), " while stream ", idx, " is on device ",
+        streams[idx].device());
+    }
+    return type;
+  }
 };
 
 }} // namespace c10::impl
