@@ -6,6 +6,7 @@
 
 #include <string>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, CanCompileMultipleFunctions) {
   auto module = torch::jit::compile(R"JIT(
       def test_mul(a, b):
@@ -36,6 +37,7 @@ TEST(TorchScriptTest, CanCompileMultipleFunctions) {
 }
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   auto module = torch::jit::compile(R"JIT(
       def nested_loop(a: List[List[Tensor]], b: int):
@@ -70,6 +72,7 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
 }
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, TestDictArgMatching) {
   auto module = torch::jit::compile(R"JIT(
       def dict_op(a: Dict[str, Tensor], b: str):
@@ -81,6 +84,7 @@ TEST(TorchScriptTest, TestDictArgMatching) {
   ASSERT_EQ(1, output.toTensor()[0].item<int64_t>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, TestTupleArgMatching) {
   auto module = torch::jit::compile(R"JIT(
       def tuple_op(a: Tuple[List[int]]):
@@ -95,6 +99,7 @@ TEST(TorchScriptTest, TestTupleArgMatching) {
 
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, TestOptionalArgMatching) {
   auto module = torch::jit::compile(R"JIT(
       def optional_tuple_op(a: Optional[Tuple[int, str]]):
@@ -112,7 +117,9 @@ TEST(TorchScriptTest, TestOptionalArgMatching) {
 
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, TestPickle) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::IValue float_value(2.3);
 
   // TODO: when tensors are stored in the pickle, delete this
@@ -122,6 +129,7 @@ TEST(TorchScriptTest, TestPickle) {
   torch::IValue ivalue = torch::jit::unpickle(data.data(), data.size());
 
   double diff = ivalue.toDouble() - float_value.toDouble();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double eps = 0.0001;
   ASSERT_TRUE(diff < eps && diff > -eps);
 }
