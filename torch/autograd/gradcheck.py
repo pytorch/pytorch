@@ -437,6 +437,8 @@ def get_fast_analytical_jacobians(inputs, outputs, nondet_tol, check_grad_dtypes
                                                              fast_mode=True, v=v)
         jacobian_scalars: List[torch.Tensor] = []
         for vJ, u in zip(all_vJ, all_u_dense):
+            # Why do we need squeeze here? vJ is a 2-d tensor so that we can reuse
+            # the error checking logic from slow mode
             vJ = vJ.T.squeeze(0)
             if vJ.is_complex():  # C -> R
                 tv = torch.view_as_real(vJ)
