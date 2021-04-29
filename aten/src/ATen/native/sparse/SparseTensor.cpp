@@ -279,6 +279,7 @@ void _validate_sparse_coo_tensor_args(
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
   TORCH_CHECK(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       size.size() == sparse_dim + dense_dim,
       "number of dimensions must be sparse_dim (",
       sparse_dim,
@@ -365,6 +366,7 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, I
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   Tensor values = expand_values_if_needed(values_);
@@ -635,6 +637,7 @@ void inline sparse_mask_out_cpu_kernel(
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
   scalar_t* t_ptr = t.data_ptr<scalar_t>();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
       int64_t idx = 0;
@@ -757,6 +760,7 @@ Tensor sparse_mask_helper_cpu(
 
   // Step 1: flatten the sparse indices `t._indices()` tensor and then  map this
   // flatten value `index` to the original position `i`
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   auto t_indices_accessor = t_i.accessor<int64_t, 2>();
   for (int64_t i = 0; i < t_nnz; i++) {
     int64_t index = ti_flattened_indices.data_ptr<int64_t>()[i];
