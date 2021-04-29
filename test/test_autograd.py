@@ -5552,12 +5552,12 @@ def add_test(
                             inplace_args_variable = deepcopy(args_variable)
                             inplace_args_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                                for i in inplace_args_variable)
+
                             inplace_output_variable = (
                                 getattr(inplace_self_variable_copy[0], inplace_name)(*inplace_args_variable_copy,
                                                                                      **kwargs_variable))
                             if not isinstance(inplace_output_variable, tuple):
                                 inplace_output_variable = (inplace_output_variable,)
-
                             self.assertEqual(inplace_output_variable, output_variable)
                             # Check that gradient is the same
                             for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
@@ -5565,14 +5565,12 @@ def add_test(
                                 if not isinstance(inp_i, torch.Tensor):
                                     assert not isinstance(i, torch.Tensor)
                                     continue
-
                                 if inp_i.grad is not None:
                                     with torch.no_grad():
                                         inp_i.grad.zero_()
                                 if i.grad is not None:
                                     with torch.no_grad():
                                         i.grad.zero_()
-
                             for i_o, o in zip(inplace_output_variable, output_variable):
                                 if dtype.is_complex:
                                     grad = randn_like(i_o).to(torch.cdouble)
@@ -5580,7 +5578,6 @@ def add_test(
                                     grad = randn_like(i_o).double()
                                 i_o.backward(grad)
                                 o.backward(grad)
-
                             for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
                                                 (self_variable,) + args_variable):
                                 if not isinstance(inp_i, torch.Tensor):
