@@ -223,7 +223,12 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
           "CharTensor",
           "ByteTensor",
           "BoolTensor"};
-      if (isTorch(select.value()) && tensor_subtypes.count(name) == 1) {
+
+      // Special case to handle types from typing module
+      const std::unordered_set<std::string> typing_types = {
+          "List", "Tuple", "Optional", "Dict", "Union"};
+      if ((isTorch(select.value()) && tensor_subtypes.count(name) == 1) ||
+          typing_types.count(name) == 1) {
         return name;
       } else {
         // Otherwise, it's a fully qualified class name

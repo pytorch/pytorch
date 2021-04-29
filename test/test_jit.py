@@ -14527,6 +14527,47 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, "cannot be compiled since it inherits from nn.Module"):
             torch.jit.script(MyModule)
 
+    def test_multiline_typing_variables(self):
+        def test_list():
+            value: typing.List[
+                torch.Tensor
+            ] = [torch.ones(1), torch.ones(1), ]
+
+            return value
+        self.checkScript(test_list, ())
+
+        def test_tuple():
+            value: typing.Tuple[
+                torch.Tensor
+            ] = (torch.ones(1), )
+
+            return value
+        self.checkScript(test_tuple, ())
+
+        def test_dict():
+            value: typing.Dict[
+                int, int
+            ] = {1: 1, 2: 2}
+
+            return value
+        self.checkScript(test_dict, ())
+
+        def test_union():
+            value: typing.Union[
+                int, NoneType
+            ] = None
+
+            return value
+        self.checkScript(test_union, ())
+
+        def test_optional():
+            value: typing.Optional[
+                int
+            ] = None
+
+            return value
+        self.checkScript(test_optional, ())
+
     def test_view_write(self):
         def fn(x, y):
             l = []
