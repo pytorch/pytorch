@@ -43,11 +43,11 @@ std::vector<at::Tensor> constructTensors(
 
 } // namespace
 
-#ifndef C10_MOBILE
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-#else
+
+#ifdef C10_MOBILE
 extern "C" {
 #endif
 
@@ -247,10 +247,10 @@ const static RegisterNNCExternalFunction nnc_addmm(
 
 #endif
 
-#ifndef C10_MOBILE
+#ifdef C10_MOBILE
+} // extern "C"
+#endif
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
-#else
-} // extern "C"
-#endif
