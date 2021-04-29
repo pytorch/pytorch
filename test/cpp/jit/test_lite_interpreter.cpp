@@ -19,6 +19,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
@@ -27,7 +28,9 @@ TEST(LiteInterpreterTest, UpsampleNearest2d) {
   )");
 
   std::vector<IValue> inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(torch::rand({1, 3, 128, 128}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   inputs.emplace_back(at::Scalar(2.0));
   auto ref = m.forward(inputs);
 
@@ -42,6 +45,7 @@ TEST(LiteInterpreterTest, UpsampleNearest2d) {
   ASSERT_TRUE(resd.equal(refd));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, CheckAttrAccess) {
   Module m("m");
   m.register_attribute("mobile_optimized", BoolType::get(), true);
@@ -106,6 +110,7 @@ TEST(LiteInterpreterTest, MethodInvocation) { // NOLINT (use =delete in gtest)
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Conv) {
   auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
   if (s && strcmp(s, "1") == 0)
@@ -114,13 +119,16 @@ TEST(LiteInterpreterTest, Conv) {
   std::vector<torch::jit::IValue> inputs;
 
   Module m("m");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
     def forward(self, input):
       return torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
   )");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-use-emplace)
   inputs.push_back(torch::ones({1, 1, 28, 28}));
 
   auto outputref = m.forward(inputs).toTensor();
@@ -138,6 +146,7 @@ TEST(LiteInterpreterTest, Conv) {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Inline) {
   Module m("m");
   m.define(R"JIT(
@@ -155,9 +164,11 @@ TEST(LiteInterpreterTest, Inline) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("foo3")(inputs);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Tuple) {
   Module m("m");
   m.define(R"JIT(
@@ -176,6 +187,7 @@ TEST(LiteInterpreterTest, Tuple) {
   AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Dict) {
   Module m("m");
   m.define(R"JIT(
@@ -194,6 +206,7 @@ TEST(LiteInterpreterTest, Dict) {
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, PrimOverload) {
   /*
   // temporarily disabled
@@ -213,6 +226,7 @@ TEST(LiteInterpreterTest, PrimOverload) {
   */
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Prim) {
   Module m("m");
   m.define(R"JIT(
@@ -221,6 +235,7 @@ TEST(LiteInterpreterTest, Prim) {
   )JIT");
 
   std::vector<IValue> inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 3.5 * torch::ones({});
   inputs.emplace_back(minput);
   auto ref = m.run_method("forward", minput);
@@ -230,6 +245,7 @@ TEST(LiteInterpreterTest, Prim) {
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto bcinputs = inputs;
     res = bc.get_method("forward")(bcinputs);
   }
@@ -239,6 +255,7 @@ TEST(LiteInterpreterTest, Prim) {
   AT_ASSERT(resi == refi);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, PrimScalar) {
   Module m("m");
   m.define(R"JIT(
@@ -247,6 +264,7 @@ TEST(LiteInterpreterTest, PrimScalar) {
   )JIT");
 
   std::vector<IValue> inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 3.5 * torch::ones({});
   inputs.emplace_back(minput);
   auto ref = m.run_method("forward", minput);
@@ -256,6 +274,7 @@ TEST(LiteInterpreterTest, PrimScalar) {
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto bcinputs = inputs;
     res = bc.get_method("forward")(bcinputs);
   }
@@ -265,6 +284,7 @@ TEST(LiteInterpreterTest, PrimScalar) {
   AT_ASSERT(resi == refi);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, LoadOrigJit) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -278,6 +298,7 @@ TEST(LiteInterpreterTest, LoadOrigJit) {
   ASSERT_THROWS_WITH_MESSAGE(_load_for_mobile(ss), "file not found");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, WrongMethodName) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -290,12 +311,14 @@ TEST(LiteInterpreterTest, WrongMethodName) {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<IValue> inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
   ASSERT_THROWS_WITH_MESSAGE(
       bc.get_method("forward")(inputs), "is not defined");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, SetState) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -310,6 +333,7 @@ TEST(LiteInterpreterTest, SetState) {
   )");
 
   std::vector<IValue> inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
 
@@ -323,6 +347,7 @@ TEST(LiteInterpreterTest, SetState) {
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto bcinputs = inputs;
     res = bc.get_method("forward")(bcinputs);
   }
@@ -361,6 +386,7 @@ struct ClassNamespaceValue : public SugaredValue {
     }
 
     // If it's not a custom class, assume it's another namespace
+    // NOLINTNEXTLINE(performance-move-const-arg)
     return std::make_shared<ClassNamespaceValue>(std::move(fullName));
   }
 
@@ -393,6 +419,7 @@ struct TestModuleResolver : public Resolver {
 };
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, BuiltinClass) {
   script::Module m("m");
 
@@ -425,6 +452,7 @@ TEST(LiteInterpreterTest, BuiltinClass) {
   AT_ASSERT(str == expected);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, BuiltinFunction) {
   script::Module m("m");
   auto custom_class_obj =
@@ -440,11 +468,13 @@ TEST(LiteInterpreterTest, BuiltinFunction) {
   mobile::Module bc = _load_for_mobile(ss);
   auto res =
       bc.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
   AT_ASSERT(str == expected);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, ModuleInfoBasic) {
   Module m("M");
   m.define(R"JIT(
@@ -474,6 +504,7 @@ TEST(LiteInterpreterTest, ModuleInfoBasic) {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, NotSaveModuleInfo) {
   Module m("M");
   m.define(R"JIT(
@@ -497,6 +528,7 @@ TEST(LiteInterpreterTest, NotSaveModuleInfo) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
   Module a("A");
   a.define(R"JIT(
@@ -533,6 +565,7 @@ TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   Module a("A");
   a.define(R"JIT(
@@ -575,6 +608,7 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
   a.define(R"JIT(
@@ -640,6 +674,7 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   Module a("A");
   a.define(R"JIT(
@@ -688,6 +723,7 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   Module a("A");
   a.define(R"JIT(
@@ -746,6 +782,7 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, Eval) {
   std::vector<torch::jit::IValue> inputs;
 
@@ -758,6 +795,7 @@ TEST(LiteInterpreterTest, Eval) {
       return torch.dropout(input, 1.0, self.training)
   )");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-use-emplace)
   inputs.push_back(torch::ones({1, 1, 28, 28}));
   m.eval();
   auto outputref = m.forward(inputs).toTensor();
@@ -779,6 +817,7 @@ TEST(LiteInterpreterTest, Eval) {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, FindWrongMethodName) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -793,6 +832,7 @@ TEST(LiteInterpreterTest, FindWrongMethodName) {
   ASSERT_TRUE(bc.find_method("forward") == c10::nullopt);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, FindAndRunMethod) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -803,6 +843,7 @@ TEST(LiteInterpreterTest, FindAndRunMethod) {
   )");
 
   std::vector<IValue> inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
   auto ref = m.get_method("add_it")(inputs);
@@ -823,6 +864,7 @@ TEST(LiteInterpreterTest, FindAndRunMethod) {
   AT_ASSERT(resd == refd);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, RunMethodVariadic) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -832,6 +874,7 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
   )");
 
   std::vector<IValue> inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inputx = 5 * torch::ones({});
   auto inputy = 4 * torch::ones({});
   auto ref = m.run_method("add_three", inputx, inputy);
@@ -846,6 +889,7 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
   AT_ASSERT(resd == refd);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, DuplicateSetState) {
   Module m("M");
   m.register_parameter("foo", torch::ones({}), false);
@@ -875,6 +919,7 @@ TEST(LiteInterpreterTest, DuplicateSetState) {
   ASSERT_EQ(methods.size(), expected_n);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, ExtraFiles) {
   const auto script = R"JIT(
     def forward(self):
@@ -905,6 +950,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
 
   for (auto& file_name : all_files) {
     if (file_name.find("extra/") == 0) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       loaded_extra_files[file_name.substr(6)] = "";
     }
   }
@@ -914,9 +960,12 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
   torch::jit::Module m("m");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
     def forward(self, input):
@@ -944,6 +993,7 @@ TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
 }
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto reg =
     torch::class_<TorchBindLiteInterpreterTestStruct>(
         "_TorchScriptTesting",

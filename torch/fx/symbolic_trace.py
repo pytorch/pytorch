@@ -88,7 +88,13 @@ class _CPatchManager(object):
         sys.setprofile(None)
 
 class Tracer(TracerBase):
-    """
+    # Reference: https://github.com/pytorch/pytorch/issues/54354
+    # The first line of this docstring overrides the one Sphinx generates for the
+    # documentation. We need it so that Sphinx doesn't leak `math`s path from the
+    # build environment (e.g. `<module 'math' from '/leaked/path').
+
+    """Tracer(autowrap_modules=(math,), enable_cpatching=False)
+
     ``Tracer`` is the class that implements the symbolic tracing functionality
     of ``torch.fx.symbolic_trace``. A call to ``symbolic_trace(m)`` is equivalent
     to ``Tracer().trace(m)``.
@@ -98,6 +104,10 @@ class Tracer(TracerBase):
     in the docstrings of the methods on this class.
     """
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), enable_cpatching: bool = False) -> None:
+        # This method's signature is overridden by the first line of this class'
+        # docstring. If this method's signature is modified, the signature that
+        # overrides it also should be modified accordingly.
+
         """
         Construct a Tracer object.
 
