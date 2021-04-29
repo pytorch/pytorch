@@ -4877,9 +4877,8 @@ class TestLinalg(TestCase):
         self.assertEqual(m3, m2)
         self.assertEqual(m3.norm(2, 0), m2.norm(2, 0))
 
-    # TODO: make this work on CUDA, too
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_ormqr(self, device, dtype):
 
@@ -4916,8 +4915,8 @@ class TestLinalg(TestCase):
         for batch, (m, n), fortran_contiguous in product(batches, product(ns, ns), [True, False]):
             run_test(batch, m, n, fortran_contiguous)
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_ormqr_errors_and_warnings(self, device, dtype):
         test_cases = [
