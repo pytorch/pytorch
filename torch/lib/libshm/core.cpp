@@ -55,15 +55,20 @@ void start_manager() {
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
   if (handle.length() == 0) {
-    std::string msg("error executing torch_shm_manager at \"");
+    std::string msg("no response from torch_shm_manager at \"");
     msg += manager_executable_path;
     msg += "\"";
     throw std::runtime_error(msg);
   }
 
   handle.pop_back(); // remove \n
-  if (handle == "ERROR")
-    throw std::exception();
+  if (handle.rfind("ERROR: ", 0) == 0) {
+    std::string msg("torch_shm_manager at \"");
+    msg += manager_executable_path;
+    msg += "\": ";
+    msg += handle.substr(7);  // remove "ERROR: "
+    throw std::runtime_error(msg);
+  }
 
   ClientSocket manager {handle};
   managers.emplace(std::move(handle), std::move(manager));
