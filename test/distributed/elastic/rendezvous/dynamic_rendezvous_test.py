@@ -22,6 +22,36 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
 )
 
 
+class RendezvousTimeoutTest(TestCase):
+    def test_init_initializes_timeout(self) -> None:
+        timeout = RendezvousTimeout(
+            timedelta(seconds=50),
+            timedelta(seconds=60),
+            timedelta(seconds=70),
+        )
+
+        self.assertEqual(timeout.join, timedelta(seconds=50))
+        self.assertEqual(timeout.last_call, timedelta(seconds=60))
+        self.assertEqual(timeout.close, timedelta(seconds=70))
+
+    def test_init_initializes_timeout_if_no_timeout_is_specified(self) -> None:
+        timeout = RendezvousTimeout()
+
+        self.assertEqual(timeout.join, timedelta(seconds=600))
+        self.assertEqual(timeout.last_call, timedelta(seconds=30))
+        self.assertEqual(timeout.close, timedelta(seconds=30))
+
+    def test_init_raises_error_if_timeout_is_not_positive(self) -> None:
+        join_timeouts = [timedelta(seconds=0), timedelta(seconds=-1)]
+
+        for join_timeout in join_timeouts:
+            with self.subTest(join_timeout=join_timeout):
+                with self.assertRaisesRegex(
+                    ValueError, rf"^The join timeout \({join_timeout}\) must be positive.$"
+                ):
+                    timeout = RendezvousTimeout(join_timeout)
+
+
 class NodeDescTest(TestCase):
     def test_repr(self) -> None:
         desc = _NodeDesc("dummy_fqdn", 3, 5)
@@ -51,36 +81,6 @@ class NodeDescGeneratorTest(TestCase):
                 desc = desc_generator.generate()
 
                 self.assertEqual(repr(desc), f"{fqdn}_{pid}_{local_id}")
-
-
-class RendezvousTimeoutTest(TestCase):
-    def test_init_initializes_timeout(self) -> None:
-        timeout = RendezvousTimeout(
-            timedelta(seconds=50),
-            timedelta(seconds=60),
-            timedelta(seconds=70),
-        )
-
-        self.assertEqual(timeout.join, timedelta(seconds=50))
-        self.assertEqual(timeout.last_call, timedelta(seconds=60))
-        self.assertEqual(timeout.close, timedelta(seconds=70))
-
-    def test_init_initializes_timeout_if_no_timeout_is_specified(self) -> None:
-        timeout = RendezvousTimeout()
-
-        self.assertEqual(timeout.join, timedelta(seconds=600))
-        self.assertEqual(timeout.last_call, timedelta(seconds=30))
-        self.assertEqual(timeout.close, timedelta(seconds=30))
-
-    def test_init_raises_error_if_timeout_is_not_positive(self) -> None:
-        join_timeouts = [timedelta(seconds=0), timedelta(seconds=-1)]
-
-        for join_timeout in join_timeouts:
-            with self.subTest(join_timeout=join_timeout):
-                with self.assertRaisesRegex(
-                    ValueError, rf"^The join timeout \({join_timeout}\) must be positive.$"
-                ):
-                    timeout = RendezvousTimeout(join_timeout)
 
 
 class DummyStore(Store):

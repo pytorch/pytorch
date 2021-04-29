@@ -7,7 +7,11 @@ import tempfile
 import unittest
 from unittest import mock
 
-from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, ProcessFailure, record
+from torch.distributed.elastic.multiprocessing.errors import (
+    ChildFailedError,
+    ProcessFailure,
+    record,
+)
 from torch.distributed.elastic.multiprocessing.errors.error_handler import _write_error
 from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
@@ -49,6 +53,15 @@ class ApiTest(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
+
+    def test_failure_incorrect_reply_file(self):
+        content = {"unknown_key": "unknown_value"}
+        with open(self.test_error_file, "w") as fp:
+            json.dump(content, fp)
+        with self.assertRaises(Exception):
+            ProcessFailure(
+                local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
+            )
 
     def failure_with_error_file(self, exception):
         _write_error(exception, self.test_error_file)

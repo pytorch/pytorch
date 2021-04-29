@@ -2,6 +2,7 @@ from typing import List, Optional, Union
 import itertools
 from typing_extensions import Literal
 from dataclasses import dataclass
+import textwrap
 
 from tools.codegen.context import method_with_native_function
 from tools.codegen.utils import Target, mapMaybe
@@ -220,11 +221,13 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
         return f"""
 void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
                 TensorOptions options, DimnameList names) override {{
-    {self.gen_class_set_output_body(k)}
-    if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
+{textwrap.indent(self.gen_class_set_output_body(k), "    ")}
+    if (!names.empty()) {{
+      namedinference::propagate_names(outputs_[output_idx], names);
+    }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
-    {set_output_super}
+{textwrap.indent(set_output_super, "    ")}
 }}
 """
 
@@ -239,8 +242,9 @@ if (C10_UNLIKELY(current_device.has_value())) {
   guard_.reset_device(options.device());
 }
 """
+            maybe_set_guard_line = maybe_set_guard + "\n"
         else:
-            maybe_set_guard = ''
+            maybe_set_guard_line = maybe_set_guard = ''
 
         if k is SchemaKind.functional:
             if self.dispatch_key == DispatchKey.Meta:
@@ -266,8 +270,7 @@ if (strides.empty()) {
                     empty_strided_impl = "at::empty_strided"
                 else:
                     raise AssertionError("unsupported dispatch key")
-                return f"""
-{maybe_set_guard}
+                return f"""{maybe_set_guard_line}
 if (strides.empty()) {{
     outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
 }} else {{
@@ -278,8 +281,7 @@ if (strides.empty()) {{
         elif k is SchemaKind.inplace:
             return maybe_set_guard
         elif k is SchemaKind.out:
-            return f"""
-{maybe_set_guard}
+            return f"""{maybe_set_guard_line}
 const auto& out = outputs_[output_idx].get();
 TORCH_CHECK(options.dtype() == out.dtype(),
     "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
@@ -336,17 +338,20 @@ if (resized) {{
         else:
             guard_field = ''
 
-        return f"""
-struct {class_name} final : public {parent_class} {{
-    {self.gen_class_ctor(k, class_name, len(f.func.returns))}
-    {self.gen_class_set_output(k, parent_class, generate_super)}
-    const Tensor& maybe_get_output(int64_t output_idx) override {{
-        return outputs_[output_idx];
-    }}
-    std::array<{output_type}, {len(f.func.returns)}> outputs_;
-    {guard_field}
-}};
-"""
+        indent = " " * 4
+        class_ctor_str = self.gen_class_ctor(k, class_name, len(f.func.returns))
+        lines = (
+            f"struct {class_name} final : public {parent_class} {{",
+            f"{textwrap.indent(class_ctor_str, indent)}",
+            f"{textwrap.indent(self.gen_class_set_output(k, parent_class, generate_super), indent)}",
+            "    const Tensor& maybe_get_output(int64_t output_idx) override {",
+            "        return outputs_[output_idx];",
+            "    }",
+            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
+            f"{textwrap.indent(guard_field, indent)}",
+            "};"
+        )
+        return '\n'.join(line for line in lines if line)
 
     @method_with_native_function
     def gen_one(self, f: NativeFunction) -> Optional[str]:

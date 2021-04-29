@@ -216,7 +216,7 @@ def _insert_dtype_cast_after_node(
                 dtype_cast_mod = dtype_cast_mod_cls()
                 setattr(gm_b, new_dtype_cast_name, dtype_cast_mod)
                 new_dtype_cast_node = graph_c.create_node(
-                    'call_module', new_dtype_cast_name, (prev_node_c,), {},
+                    'call_module', new_dtype_cast_name, (prev_node_c_inner,), {},
                     new_dtype_cast_name)
                 results.append(new_dtype_cast_node)
         return results
