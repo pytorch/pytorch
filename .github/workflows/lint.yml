@@ -215,6 +215,7 @@ jobs:
           [ ! -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]
 
   clang-tidy:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
