@@ -2217,6 +2217,7 @@ void fake_quant_per_channel_cachemask_cpu(
     return ((quant_min <= qval) && (qval <= quant_max));
   });
 
+  // NO OP
   // write fake_quant
   cpu_kernel(iter, [=](float self, float scale, int64_t zero_point) -> float {
     float inv_scale = 1.0f / scale;

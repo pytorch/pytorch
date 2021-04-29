@@ -50,6 +50,7 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
     int64_t axis,
     int64_t quant_min,
     int64_t quant_max) {
+  // NO OP
   TORCH_CHECK(self.scalar_type() == ScalarType::Float);
   TORCH_CHECK(scale.scalar_type() == ScalarType::Float,
               "Scale must be Float, found ", scale.scalar_type());

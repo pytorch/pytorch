@@ -1276,7 +1276,7 @@ class TestFakeQuantize(TestCase):
 
     def _test_forward_per_channel_cachemask_impl(self, device):
         for torch_type in (torch.qint8, torch.quint8):
-
+            # NO OP
             X = torch.randn(1, 2, 4, 4).to(device)
             # pick the scale + zp so that some values get clipped
             axis = 1

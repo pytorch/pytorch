@@ -96,7 +96,8 @@ void fake_quant_per_channel_cachemask_cuda(
       const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + zero_point);
       return ((quant_min <= qval) && (qval <= quant_max));
     });
-
+  
+  // NO OP  
   // write fake_quant
   gpu_kernel(iter,
     [=] GPU_LAMBDA (float input_val, float scale, int64_t zero_point) -> float {
