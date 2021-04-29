@@ -56,16 +56,30 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
       remoteName);
   std::vector<c10::DeviceIndex> deviceIndices;
   deviceIndices.reserve(tensors.size());
-  bool hasCudaTensor = false;
+  bool hasMappedDevice = false;
   for (const auto& t : tensors) {
-    const auto deviceIter = deviceMap.find(t.device().index());
-    TORCH_CHECK(
-        deviceIter != deviceMap.end(),
-        errStr,
-        " for device ",
-        t.device(),
-        " but received a tensor on that device.");
-    deviceIndices.push_back(deviceIter->second);
+    if (t.device().is_cpu()) {
+      const auto deviceIter = deviceMap.find(-1);
+      if (deviceIter == deviceMap.end()) {
+        deviceIndices.push_back(-1);
+      } else {
+        deviceIndices.push_back(deviceIter->second);
+        hasMappedDevice = true;
+      }
+    } else {
+      const auto deviceIter = deviceMap.find(deviceIndex);
+      TORCH_CHECK(
+          deviceIter != deviceMap.end(),
+          errStr,
+          " for device ",
+          t.device(),
+          " but received a tensor on that device.");
+      deviceIndices.push_back(deviceIter->second);
+      hasMappedDevice = true;
+    }
+  }
+  if (!hasMappedDevice) {
+    deviceIndices.clear();
   }
   return deviceIndices;
 }
