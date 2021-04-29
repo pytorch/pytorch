@@ -93,6 +93,7 @@ Message getMessageWithProfiling(
   auto wrappedProfilingMsg = RpcWithProfilingReq(
       msgType,
       std::move(wrappedRpcMessage),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(profilerConfig),
       globallyUniqueProfilingId);
 
@@ -163,6 +164,7 @@ std::shared_ptr<JitFuture> sendMessageWithAutograd(
     auto msgWithProfiling = getMessageWithProfiling(
         std::move(msg),
         rpc::MessageType::RUN_WITH_PROFILING_REQ,
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(profilerConfig));
     fut = agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
   } else {
