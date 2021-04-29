@@ -46,7 +46,9 @@ std::vector<std::string> parseMethodHandle(const std::string& blob) {
 class BackendWithCompiler : public PyTorchBackendInterface {
  public:
   // Constructor.
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   explicit BackendWithCompiler() {}
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~BackendWithCompiler() = default;
 
   bool is_available() override {
@@ -86,7 +88,9 @@ class BackendWithCompiler : public PyTorchBackendInterface {
             instruction.size() > 15,
             "Constant value is expected in ",
             instruction);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto sub = instruction.substr(15);
+        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
         const_val = stod(sub);
       } else if (token == "aten::add") {
         output_list.emplace_back(x.add(h, const_val));
@@ -107,6 +111,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
 
 namespace {
 constexpr auto backend_name = "backend_with_compiler_demo";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cls = torch::jit::backend<BackendWithCompiler>(backend_name);
 } // namespace
 
