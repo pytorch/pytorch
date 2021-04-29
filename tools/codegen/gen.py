@@ -195,6 +195,10 @@ class ComputeFunction:
         if Variant.function not in f.variants and not self.is_redispatching_fn:
             return None
 
+        with native_function_manager(f):
+            return self.callImpl(f)
+
+    def callImpl(self, f: NativeFunction) -> str:
         name = cpp.name(f.func)
 
         sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)

@@ -1580,7 +1580,6 @@ graph(%Ra, %Rb):
 
         traced = torch.jit.trace(outer, (torch.randn(4), torch.randn(5)))
         script = torch.jit.script(outer)
-        fns = [traced, script]
         x, y = torch.randn(10), torch.randn(2)
         for fn in [traced, script]:
             self.assertGraphContains(fn.graph, kind='aten::einsum')
