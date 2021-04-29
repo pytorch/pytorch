@@ -210,7 +210,7 @@ def _tensorpipe_check_local_device_maps(name, options):
 
     if len(local_devices) > 0 and not all([
         max(local_devices) < torch.cuda.device_count(),
-        min(local_devices) >= 0,
+        min(local_devices) >= -1,
     ]):
         raise ValueError(
             f"Invalid device in TensorPipe options on {name}:\n"
