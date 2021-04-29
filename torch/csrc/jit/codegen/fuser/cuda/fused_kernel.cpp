@@ -51,12 +51,12 @@ void codegenOutputQuery(
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     major = 5;
     minor = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_major <= 8 && prop->major > 6) { // 8 supports 2-6.x
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     major = 6;
     minor = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     major = 7;
