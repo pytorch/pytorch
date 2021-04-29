@@ -2328,10 +2328,10 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
 
 Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
                            const Tensor& self,
-                           const Tensor& lambda,
-                           const Tensor& v) {
+                           const Tensor& L,
+                           const Tensor& V) {
   // https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
-  // For A = VLV^{-1}, denoting the gradients gV and gL, we have
+  // For A = VLV^{-1}, denoting the gradients gA, gV and gL, we have
   // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V
   // Where:
   //   - E_ij = L_i - L_j if i != j
@@ -2339,49 +2339,48 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
   //   - diag zeroes out elements outside of the diagonal
   //   - The division by E is done just outside of the diagonal. In the diagonal it is set to zero
 
-  const auto glambda = grads[0];
-  const auto gv = grads[1];
-  const auto vh = v.conj().transpose(-2, -1);
+  const auto gL = grads[0];
+  const auto gV = grads[1];
+  const auto Vh = V.conj().transpose(-2, -1);
 
-
-  if (gv.defined()) {
-    const auto lambda_conj = lambda.conj();
-    auto Econj = lambda_conj.unsqueeze(-2) - lambda_conj.unsqueeze(-1);
+  if (gV.defined()) {
+    const auto L_conj = L.conj();
+    auto Econj = L_conj.unsqueeze(-2) - L_conj.unsqueeze(-1);
     if (at::GradMode::is_enabled()) {
       // Avoids differentiating through at infinity when doing gradgrad
       // 1 could be any number, as we are going to overwrite the diagonal
       Econj.diagonal(0, -2, -1).fill_(1.);
     }
 
-    const auto vhgv = at::matmul(vh, gv);
+    const auto VhgV = at::matmul(Vh, gV);
 
-    const auto re_diag_vhgh = at::real(vhgv).diagonal(0, -2, -1);
-    auto result = vhgv - at::matmul(vh, v * re_diag_vhgh.unsqueeze(-2));
+    const auto diag_re_VhgV = at::real(VhgV).diagonal(0, -2, -1);
+    auto result = VhgV - at::matmul(Vh, V * diag_re_VhgV.unsqueeze(-2));
 
     result.div_(Econj);
 
     // Copy gL into the diagonal
-    if (glambda.defined()) {
-      result.diagonal(0, -2, -1).copy_(glambda);
+    if (gL.defined()) {
+      result.diagonal(0, -2, -1).copy_(gL);
     }
     else {
       result.diagonal(0, -2, -1).zero_();
     }
 
     // Conjugate by V^{-H}
-    result = at::linalg_solve(vh, at::matmul(result, vh));
+    result = at::linalg_solve(Vh, at::matmul(result, Vh));
     // If it is real, we have to project the derivative onto the real numbers
     return self.is_complex() ? result : at::real(result);
   }
   else {
-    if (glambda.defined()) {
-      // Compute V^-H dL V^H
-      const auto result = at::linalg_solve(vh, glambda.unsqueeze(-1) * vh);
+    if (gL.defined()) {
+      // Compute V^-H gL V^H
+      const auto result = at::linalg_solve(Vh, gL.unsqueeze(-1) * Vh);
       // If it is real, we have to project the derivative onto the real numbers
       return self.is_complex() ? result : at::real(result);
     } else {
       // If neither is defined, there's nothing to do
-      return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      return at::zeros_like(self, at::MemoryFormat::Contiguous);
     }
   }
 }
