@@ -168,7 +168,8 @@ void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
   }
 }
 
-ProcessGroup::ProcessGroup(int rank, int size) : rank_(rank), size_(size) {
+ProcessGroup::ProcessGroup(int rank, int size)
+    : rank_(rank), size_(size), dist_debug_level_(parseDistDebugLevel()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }
 
