@@ -11,11 +11,6 @@
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/utils.h>
-
-#ifdef USE_CUDA_NOT_ROCM
-#include <ATen/cuda/CUDAFuture.h>
-#endif
 
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
@@ -286,10 +281,13 @@ class TensorPipeAgent : public RpcAgent {
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
     explicit AtomicJitFuture(const std::vector<c10::DeviceIndex>& devices) {
-      c10::DeviceType type =
-          devices.empty() ? c10::DeviceType::CPU : c10::DeviceType::CUDA;
-      jitFuture =
-          FutureFactoryRegistry::getInstance().createFuture(type, devices);
+      std::vector<c10::Device> fullDevices;
+      fullDevices.reserve(devices.size());
+      for (const c10::DeviceIndex index : devices) {
+        fullDevices.emplace_back(c10::kCUDA, index);
+      }
+      jitFuture = std::make_shared<at::ivalue::Future>(
+          at::AnyClassType::get(), std::move(fullDevices));
     }
 
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
