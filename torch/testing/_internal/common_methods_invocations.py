@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import \
      torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_warn_once,
      GRADCHECK_NONDET_TOL,)
 
-from distutils.version import LooseVersion
+from setuptools import distutils
 
 if TEST_SCIPY:
     import scipy.special
@@ -639,7 +639,12 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
-def sample_inputs_add(op_info, device, dtype, requires_grad, **kwargs):
+# In order to use the kwarg alpha, partials should be used in an OpInfo's sample_inputs_func
+# eg. sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2)
+# Then one sample input would also be generated corresponding to the value of alpha provided.
+# In the future, kwargs 'alpha_floating', 'alpha_integral' & 'alpha_complex' can be used to
+# specify scalars of floating, integral & complex types as values for "alpha".
+def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
     scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
     scalar = 1 if dtype is torch.bool else scalar
     tests_list = [
@@ -666,6 +671,12 @@ def sample_inputs_add(op_info, device, dtype, requires_grad, **kwargs):
                                                requires_grad=requires_grad),
                                    args=(arg,),
                                    broadcasts_input=broadcasts_input))
+    # Adds an extra sample using "alpha" if it's passed in kwargs
+    if 'alpha' in kwargs:
+        a = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
+        b = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
+        sample = SampleInput(a, args=(b,), kwargs={'alpha': kwargs['alpha']})
+        samples.append(sample)
     return tuple(samples)
 
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
@@ -1326,6 +1337,11 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
         return res
 
     samples = []
+    # Test case for large tensor.
+    largesample = SampleInput(make_tensor((L**3,), device, dtype,
+                              low=None, high=None,
+                              requires_grad=requires_grad))
+    samples.append(largesample)
 
     # Test cases for small 3d tensors.
     # Imitates legacy tests from test/test_torch.py
@@ -1352,7 +1368,6 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
         samples.append(SampleInput(scalar, kwargs=dict(stable=True)))
         samples.append(SampleInput(scalar, kwargs=dict(dim=0, stable=True)))
         samples.append(SampleInput(scalar, kwargs=dict(dim=0, descending=True, stable=True)))
-
     return samples
 
 def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
@@ -1389,6 +1404,10 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
     samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor(0), 2)))
     samples.append(SampleInput(make_arg(()), args=(0, index_tensor([0]), 2)))
     samples.append(SampleInput(make_arg(()), args=(0, index_tensor(0), 2)))
+
+    # Duplicate indices
+    samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor([0, 0]), 2)))
+    samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor([0, 0, 2]), make_arg(()))))
 
     return samples
 
@@ -2960,11 +2979,15 @@ def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 def sample_inputs_msort(op_info, device, dtype, requires_grad):
-    sample = (SampleInput(make_tensor((S, M, S), device, dtype,
-                                      low=None, high=None,
-                                      requires_grad=requires_grad)),)
+    # test large sorting codepath
+    largesample = SampleInput(make_tensor((L**3,), device, dtype,
+                                          low=None, high=None,
+                                          requires_grad=requires_grad))
+    sample = SampleInput(make_tensor((S, M, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad))
 
-    return sample
+    return [largesample, sample]
 
 def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -3363,7 +3386,18 @@ op_db: List[OpInfo] = [
     OpInfo('add',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_add,
+           sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
+           supports_inplace_autograd=False),
+    OpInfo('mul',
+           aliases=('multiply',),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_binary_pwise),
+    OpInfo('sub',
+           aliases=('subtract',),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           assert_autodiffed=True,
+           sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
            supports_inplace_autograd=False),
     OpInfo('addmm',
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
@@ -3437,21 +3471,11 @@ op_db: List[OpInfo] = [
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
-           skips=(
-               # dot does not handle correctly out= dtypes
-               # https://github.com/pytorch/pytorch/issues/55561
-               SkipInfo('TestCommon', 'test_out'),
-           ),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot),
     OpInfo('vdot',
            dtypes=all_types_and_complex_and(torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
-           skips=(
-               # vdot does not handle correctly out= dtypes
-               # https://github.com/pytorch/pytorch/issues/55561
-               SkipInfo('TestCommon', 'test_out'),
-           ),
            sample_inputs_func=sample_inputs_dot_vdot),
     OpInfo('bmm',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
@@ -5198,7 +5222,6 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16),
-           # sort on CUDA is still in the TH, no torch.bool/torch.float16 support yet
            dtypesIfCUDA=all_types_and(torch.float16),
            dtypesIfROCM=all_types_and(torch.float16),
            sample_inputs_func=sample_inputs_sort,
@@ -5469,11 +5492,11 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                active_if=TEST_SCIPY and distutils.version.LooseVersion(scipy.__version__) < "1.4.0"),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                active_if=TEST_SCIPY and distutils.version.LooseVersion(scipy.__version__) < "1.4.0"),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                active_if=TEST_SCIPY and distutils.version.LooseVersion(scipy.__version__) < "1.4.0"),
                    )),
     UnaryUfuncInfo('lgamma',
                    ref=reference_lgamma if TEST_SCIPY else _NOTHING,
@@ -5632,29 +5655,8 @@ def method_tests():
     return [
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
         ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
-        ('sub', (S, S, S), ((S, S, S),), '', (True,)),
-        ('sub', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
-        ('sub', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
-        ('sub', (S, 1, S), ((M, S),), 'broadcast_all', (True,)),
-        ('sub', (S, S, S), ((),), 'scalar_broadcast_rhs', (True,)),
-        ('sub', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
-        ('sub', (S, S, S), (3.14,), 'constant', (True,)),
-        ('sub', (), (3.14,), 'scalar_constant', (True,)),
-        ('sub', (S, S, S), (3.14j,), 'complex_scalar_constant', (True,)),
         ('__rsub__', (S, S, S), (3.14,), 'constant', (True, 'aten::rsub')),
         ('__rsub__', (), (3.14,), 'scalar_constant', (True, 'aten::rsub')),
-        ('mul', (S, S, S), ((S, S, S),), '', (True,)),
-        ('mul', (), ((),), 'scalar', (True,)),
-        ('mul', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
-        ('mul', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
-        ('mul', (S, 1, S), ((M, S),), 'broadcast_all', (True,)),
-        ('mul', (S, S, S), ((),), 'scalar_broadcast_rhs', (True,)),
-        ('mul', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
-        ('mul', (S, S, S), (3.14,), 'constant', (True,)),
-        ('mul', (), (3.14,), 'scalar_constant', (True,)),
-        # TODO(@anjali411): enable these tests
-        # ('mul', (S, S, S), (3.14j,), 'imaginary_constant', (True,)),
-        # ('mul', (), (3.14j,), 'imaginary_scalar_constant', (True,)),
         ('__rmul__', (S, S, S), (3.14,), 'constant', (True, 'aten::mul')),
         ('__rmul__', (), (3.14,), 'scalar_constant', (True, 'aten::mul')),
         ('div', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
