@@ -14817,6 +14817,9 @@ dedent """
 
     def test_compare_optional_variables(self):
         def check_equal_to_none(a: Optional[bool], val: bool):
+            # flake8 error due to use of a == None
+            # Error: E711 comparison to None should be 'if cond is None:'
+            # Hence, suppressing the error.
             if a == None:  # noqa: E711
                 return val
             else:
