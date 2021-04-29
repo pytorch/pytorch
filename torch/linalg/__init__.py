@@ -697,6 +697,8 @@ of shape `(*, m, n)`, `(*, m, k)` respectively, it cointains
   It has shape equal to the batch dimensions of :attr:`A`.
   It is computed when `m > n` and every matrix in :attr:`A` is full-rank,
   otherwise, it is an empty tensor.
+  If :attr:`A` is a batch of matrices and any matrix in the batch is not full rank,
+  then an empty tensor is returned. This behavior may change in a future PyTorch release.
 - `rank`: tensor of ranks of the matrices in :attr:`A`.
   It has shape equal to the batch dimensions of :attr:`A`.
   It is computed when :attr:`driver` is one of (`'gelsy'`, `'gelsd'`, `'gelss'`),
