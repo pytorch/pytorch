@@ -42,6 +42,7 @@ void multinomial_with_replacement_apply(
   for (int64_t i = 0; i < n_dist; i++) {
     /* Get normalized cumulative distribution from prob distribution */
     scalar_t sum = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     scalar_t val;
     int n_zeros = 0;
     for (int64_t j = 0; j < n_categories; j++) {
@@ -68,6 +69,7 @@ void multinomial_with_replacement_apply(
 
     /* normalize cumulative probability distribution so that last val is 1
     i.e. doesn't assume original self row sums to one */
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if ((sum > 0) || ((sum < 1.00001) && (sum > 0.99999))) {
       for (int64_t j = 0; j < n_categories; j++) {
         cum_dist_ptr[j * cum_dist_stride_0] /= sum;
@@ -82,8 +84,11 @@ void multinomial_with_replacement_apply(
       ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot] */
       int left_pointer = 0;
       int right_pointer = n_categories;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int mid_pointer;
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       scalar_t cum_prob;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int sample_idx;
       /* Make sure the last cumulative distribution bucket sums to 1 */
       cum_dist_ptr[(n_categories - 1) * cum_dist_stride_0] = 1;
@@ -117,6 +122,7 @@ static void multinomial_with_replacement_kernel_impl(
 }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     multinomial_with_replacement_stub,
     &multinomial_with_replacement_kernel_impl);
