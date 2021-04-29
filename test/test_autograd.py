@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoL
                                                   load_tests,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
                                                   TemporaryFileName, TEST_WITH_ROCM,
-                                                  gradcheck, gradgradcheck, make_tensor)
+                                                  gradcheck, gradgradcheck)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -865,6 +865,46 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, y_grad * grad_output)
         self.assertEqual(z.grad, z_grad * grad_output)
 
+    def test_sparse_backward(self):
+        class FixedGradientFunction(Function):
+            @staticmethod
+            def forward(ctx, x, grad_x):
+                ctx.save_for_backward(grad_x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_x):
+                saved_grad_x, = ctx.saved_tensors
+                return saved_grad_x, None
+
+        size = torch.Size([6, 3, 2])
+        i1 = torch.LongTensor([
+            [0, 3, 4],
+            [0, 2, 2],
+        ])
+        v1 = torch.DoubleTensor([[1, 2], [4, 5], [7, 8]])
+        sparse_grad1 = torch.sparse.DoubleTensor(i1, v1, size)
+        i2 = torch.LongTensor([
+            [0, 1, 3, 4],
+            [0, 1, 2, 2],
+        ])
+        v2 = torch.DoubleTensor([[1, 2], [4, 3], [4, 5], [7, 8]])
+        sparse_grad2 = torch.sparse.DoubleTensor(i2, v2, size)
+        dense_grad = torch.rand(size).double()
+        fn = FixedGradientFunction
+
+        # sparse first
+        x = torch.randn(size, requires_grad=True)
+        (fn.apply(x, sparse_grad1) + fn.apply(x, dense_grad) + fn.apply(x, sparse_grad2)).sum().backward()
+        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
+        # dense first
+        x = torch.randn(size, requires_grad=True)
+        (fn.apply(x, dense_grad) + fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
+        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
+        # sparse only
+        x = torch.randn(size, requires_grad=True)
+        (fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
+        self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
     def test_sparse_mm_backward(self):
         size = (3, 3)
@@ -2915,7 +2955,12 @@ class TestAutograd(TestCase):
     def test_sinc(self):
         # The derivative of sinc(x) at x=0 has to be special cased.
         # A naive computation will result in 0/0 -> NaN.
-        a = torch.tensor([0.0, 1.0], dtype=torch.double, requires_grad=True)
+        # We also need to be careful when we are very close to 0, as the
+        # derivative's denominator is squared, and there are some floats
+        # that are positive and whose squares are zero.
+        a = torch.tensor([0.0, torch.finfo(torch.double).tiny, 1.0],
+                         dtype=torch.double,
+                         requires_grad=True)
         gradcheck(torch.sinc, a)
 
     def test_igamma(self):
@@ -2970,16 +3015,12 @@ class TestAutograd(TestCase):
 
         self.assertFalse(torch.autograd._profiler_enabled())
 
-        last_end = 0
-        names = ['aten::mul', 'aten::to', 'aten::empty_strided', 'aten::copy_',
-                 'aten::empty', 'aten::add', 'aten::to', 'aten::empty_strided',
-                 'aten::copy_', 'aten::empty']
-        top_level_names = ['aten::mul', 'aten::add']
+        names = ['aten::mul', 'aten::add']
+        found_indices = set()
         for evt in p.function_events:
-            if evt.time_range.start > last_end:
-                self.assertTrue(evt.name in top_level_names)
-                last_end = evt.time_range.end
-            self.assertTrue(evt.name in names)
+            if evt.name in names:
+                found_indices.add(names.index(evt.name))
+        self.assertEquals(len(found_indices), len(names))
 
     def test_profiler_seq_nr(self):
         with profile(use_kineto=kineto_available()) as p:
@@ -3170,33 +3211,17 @@ class TestAutograd(TestCase):
 
         print(prof.function_events)
 
-        top_level_expected_events_and_shapes = [
-            ('aten::linear', [[128, 20], [30, 20], [30]]),
-            ('aten::linear', [[128, 30], [40, 30], [40]])
+        linear_expected_shapes = [
+            [[128, 20], [30, 20], [30]],
+            [[128, 30], [40, 30], [40]],
         ]
 
-        expected_iter = iter(top_level_expected_events_and_shapes)
-        last_end = 0
-
+        found_indices = set()
         for event in prof.function_events:
-            if event.time_range.start > last_end:
-                name_expected, input_shape_expected = next(expected_iter)
-                if name_expected is not None:
-                    self.assertEqual(event.name, name_expected)
-                self.assertEqual(event.input_shapes, input_shape_expected)
-                last_end = event.time_range.end
-
-    def test_profiler_no_cuda(self):
-        print("")
-        layer = torch.nn.Linear(20, 30)
-        x = torch.randn(128, 20)
-        with profile(use_cuda=False, use_kineto=kineto_available()) as prof:
-            layer(x)
-
-        prof_str = str(prof)
-        print(prof_str)
-        self.assertTrue('cpu' in prof_str.lower())
-        self.assertTrue('cuda' not in prof_str.lower())
+            if event.name == "aten::linear":
+                self.assertTrue(event.input_shapes in linear_expected_shapes)
+                found_indices.add(linear_expected_shapes.index(event.input_shapes))
+        self.assertEqual(len(found_indices), len(linear_expected_shapes))
 
     def test_profiler_aggregation_lstm(self):
         print("")
@@ -7361,8 +7386,7 @@ class TestAutogradDeviceType(TestCase):
             m = torch.cat((asd, asd))
             m.sum().backward()
 
-    @dtypes(torch.double, torch.cdouble)
-    def test_sparse_ctor_getter_backward(self, device, dtype):
+    def test_sparse_ctor_getter_backward(self, device):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
         def _test(size, sparse_dim, nnz, device):
             v_size = [nnz] + list(size[sparse_dim:])
@@ -7370,12 +7394,12 @@ class TestAutogradDeviceType(TestCase):
             i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
             i = i.to(torch.long)
 
-            inp = torch.randn(v_size, device=device, requires_grad=True)
+            inp = torch.randn(v_size, requires_grad=True)
             other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True, device=device,
-                                         dtype=dtype)[0]
+                                         dtype=torch.double)[0]
 
             def fn(v):
-                x = torch.sparse_coo_tensor(i, v, size, dtype=dtype, device=device)
+                x = torch.sparse_coo_tensor(i, v, size, device=device)
                 y = (x + other).coalesce()
                 yv = y.values()
                 new_v = yv.tanh()
@@ -7395,48 +7419,6 @@ class TestAutogradDeviceType(TestCase):
             dense_size = [1, 0, 2] if empty_v else [1, 2]
             nnz = 0 if empty_nnz else 5
             _test(sparse_size + dense_size, len(sparse_size), nnz, device)
-
-    @dtypes(torch.double, torch.cdouble)
-    def test_sparse_backward(self, device, dtype):
-        class FixedGradientFunction(Function):
-            @staticmethod
-            def forward(ctx, x, grad_x):
-                ctx.save_for_backward(grad_x)
-                return x
-
-            @staticmethod
-            def backward(ctx, grad_x):
-                saved_grad_x, = ctx.saved_tensors
-                return saved_grad_x, None
-
-        size = torch.Size([6, 3, 2])
-        i1 = torch.tensor([
-            [0, 3, 4],
-            [0, 2, 2],
-        ], dtype=torch.long)
-        v1 = make_tensor([3, 2], dtype=dtype, device=device)
-        sparse_grad1 = torch.sparse_coo_tensor(i1, v1, size, dtype=dtype, device=device)
-        i2 = torch.tensor([
-            [0, 1, 3, 4],
-            [0, 1, 2, 2],
-        ], dtype=torch.long)
-        v2 = make_tensor([4, 2], dtype=dtype, device=device)
-        sparse_grad2 = torch.sparse_coo_tensor(i2, v2, size, dtype=dtype, device=device)
-        dense_grad = torch.rand(size, device=device, dtype=dtype)
-        fn = FixedGradientFunction
-
-        # sparse first
-        x = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
-        (fn.apply(x, sparse_grad1) + fn.apply(x, dense_grad) + fn.apply(x, sparse_grad2)).sum().backward()
-        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
-        # dense first
-        x = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
-        (fn.apply(x, dense_grad) + fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
-        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
-        # sparse only
-        x = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
-        (fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
-        self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
     # autograd tests via common_method_invocations don't allow input tensors to
     # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when
