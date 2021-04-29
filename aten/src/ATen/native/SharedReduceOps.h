@@ -129,7 +129,7 @@ struct WelfordOps {
     auto ret = (divisor > 0) ?
       (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
       : NAN;
-		return res_t(ret, mean);
+    return res_t(ret, mean);
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
