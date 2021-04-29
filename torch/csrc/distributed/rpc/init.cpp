@@ -171,6 +171,23 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               JIT :meth:`~torch.jit.save` / :meth:`~torch.jit.load`, etc.) will
               lead to errors.
 
+          Args:
+              value (object): The value to be wrapped by this RRef.
+              type_hint (Type, optional): Python type that should be passed to
+                  ``TorchScript`` compiler as type hint for ``value``.
+              devices (List[int], optional): CUDA devices used by the
+                  ``value``. When this is provided, this ``RRef`` will inspect
+                  the ``value``, get Tensor devices, and record an
+                  ``CUDAEvent`` for each device used by the ``value``. Later,
+                  when ``local_value()`` is called, this ``RRef`` will use
+                  recorded ``CUDAEvent`` objects to block current CUDA streams.
+                  Only use this argument when it is necessary for this ``RRef``
+                  to perform CUDA stream synchronizations. Note that
+                  ``CUDAEvent`` objects are only recorded once at ``RRef``
+                  construction time. If the ``value`` is later changed
+                  in-place, CUDA stream synchronizations need to be performed
+                  in application code.
+
           Example::
               Following examples skip RPC initialization and shutdown code
               for simplicity. Refer to RPC docs for those details.
@@ -206,9 +223,14 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               >>> rpc.rpc_sync("worker1", f, args=(rref,))
           )")
           .def(
-              py::init<const py::object&, const py::object&>(),
+              py::init<
+                  const py::object&,
+                  const py::object&,
+                  std::vector<c10::DeviceIndex>>(),
               py::arg("value"),
-              py::arg("type_hint") = py::none())
+              py::arg("type_hint") = py::none(),
+              py::kw_only(),
+              py::arg("devices") = std::vector<c10::DeviceIndex>())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
@@ -547,13 +569,14 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                        const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
-        return std::make_unique<ProcessGroupAgent>(
+        return std::shared_ptr<ProcessGroupAgent>(new ProcessGroupAgent(
             store,
             std::move(workerName),
             pg,
             numSendRecvThreads,
             rpcTimeout,
-            std::make_unique<RequestCallbackImpl>());
+            std::make_unique<RequestCallbackImpl>()),
+          impl::destroy_without_gil<ProcessGroupAgent>);
       }))
       .def(
           "get_worker_info",
@@ -640,14 +663,15 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                       int worldSize,
                       c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
                       TensorPipeRpcBackendOptions opts) {
-            return std::make_shared<TensorPipeAgent>(
+            return std::shared_ptr<TensorPipeAgent>(new TensorPipeAgent(
                 store,
                 std::move(selfName),
                 selfId,
                 worldSize,
                 std::move(processGroup),
                 std::move(opts),
-                std::make_unique<RequestCallbackImpl>());
+                std::make_unique<RequestCallbackImpl>()),
+              impl::destroy_without_gil<TensorPipeAgent>);
           }),
           py::arg("store"),
           py::arg("name"),
