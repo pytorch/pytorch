@@ -87,7 +87,8 @@ class TORCH_API RRefContext {
   // it is not yet available.
   c10::intrusive_ptr<OwnerRRef> getOrCreateOwnerRRef(
       const RRefId& rrefId,
-      const TypePtr& type);
+      const TypePtr& type,
+      std::vector<c10::DeviceIndex> devices = {});
 
   // Create an empty owner rref of type.
   // This method is called to first time generate an ``OwnerRRef``, e.g.,
@@ -95,7 +96,9 @@ class TORCH_API RRefContext {
   // 2) create the ``OwnerRRef`` on `rpc.remote()` caller side.
   // What's common in these two cases are, 1) the RRefId hasn't been generated
   // 2) the TypePtr is presented.
-  c10::intrusive_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);
+  c10::intrusive_ptr<OwnerRRef> createOwnerRRef(
+      const TypePtr& type,
+      std::vector<c10::DeviceIndex> devices = {});
 
   // Returns a Future of the OwnerRRef, which will be marked completed when
   // ``OwnerRRef`` is created. This method is used when the TypePtr is not
