@@ -14815,6 +14815,24 @@ dedent """
                 .check_count(s2, 1, exactly=True) \
                 .check_count("BINGET", 2, exactly=True).run(out.getvalue())
 
+    def test_compare_optional_variables(self):
+        def check_equal_to_none(a: Optional[bool], val: bool):
+            if a == None:  # noqa: E711
+                return val
+            else:
+                return a
+
+        def check_not_equal_to_none(a: Optional[int], val: int):
+            if a != None:  # noqa: E711
+                return val
+            else:
+                return a
+
+        self.checkScript(check_equal_to_none, (None, False))
+        self.checkScript(check_equal_to_none, (True, False))
+        self.checkScript(check_not_equal_to_none, (None, 1))
+        self.checkScript(check_not_equal_to_none, (10, 1))
+
     def test_sys_stdout_override(self):
         @torch.jit.script
         def foo():

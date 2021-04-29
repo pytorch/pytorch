@@ -746,6 +746,22 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::eq.optional(t1? self, t2 obj) -> bool"),
+         [](Stack* stack) {
+           IValue self, obj;
+           pop(stack, self, obj);
+           push(stack, self.is(obj));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::ne.optional(t1? self, t2 obj) -> bool"),
+         [](Stack* stack) {
+           IValue self, obj;
+           pop(stack, self, obj);
+           push(stack, !self.is(obj));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::eq.enum(AnyEnumType a, AnyEnumType b) -> bool"),
          [](Stack* stack) {
