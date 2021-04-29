@@ -34,6 +34,7 @@ typedef struct {
   std::atomic<int> refcount;
 } THMapInfo;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char * unknown_filename = "filename not specified";
 #ifdef _WIN32
 const char * unknown_eventname = "eventname not specified";
@@ -212,8 +213,11 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 #else /* _WIN32 */
   {
     /* open file */
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int fd;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int flags; // shadow
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     struct stat file_stat;
 
     if (flags_ & (TH_ALLOCATOR_MAPPED_SHARED | TH_ALLOCATOR_MAPPED_SHAREDMEM)) {
@@ -231,11 +235,13 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 
     if (!(flags_ & TH_ALLOCATOR_MAPPED_FROMFD)) {
       if (flags_ & TH_ALLOCATOR_MAPPED_SHARED) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if ((fd = open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
           AT_ERROR("unable to open file <", filename_, "> in read-write mode");
         }
       } else if (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_OPEN
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         if((fd = shm_open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
           AT_ERROR("unable to open shared memory object <", filename_, "> in read-write mode");
         }
@@ -259,11 +265,13 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
     }
 
     if (size > 0) {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (size > file_stat.st_size) {
         if (flags_) {
           if (ftruncate(fd, size) == -1) {
             AT_ERROR("unable to resize file <", filename_, "> to the right size");
           }
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           if (fstat(fd, &file_stat) == -1 || file_stat.st_size < size) {
             ::close(fd);
             AT_ERROR("unable to stretch file <", filename_, "> to the right size");
@@ -577,6 +585,7 @@ void* THRefcountedMapAllocator::data() const {
 }
 
 THMapAllocator::~THMapAllocator() {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   close();
   c10::reportMemoryUsageToProfiler(base_ptr_, -size_, c10::Device(c10::DeviceType::CPU));
 }

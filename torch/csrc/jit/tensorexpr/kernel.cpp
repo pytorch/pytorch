@@ -149,7 +149,9 @@ bool conv2dIsSupported(const torch::jit::Node* node) {
   auto const& bias = tensorSizes(node->input(2));
   auto const& stride = constant_as<c10::List<int64_t>>(node->input(3));
   auto const& pad = constant_as<c10::List<int64_t>>(node->input(4));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto const& dilation = constant_as<c10::List<int64_t>>(node->input(5));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto const& groups = constant_as<int64_t>(node->input(6));
 
   // Everything should be statically known.
@@ -1357,8 +1359,8 @@ Tensor* computeMatmul(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("matmul", outputShape, dtype);
-  const Buf* a = c10::get<BufHandle>(inputs[0]).node();
-  const Buf* b = c10::get<BufHandle>(inputs[1]).node();
+  const Buf* a = c10::get<BufHandle>(A).node();
+  const Buf* b = c10::get<BufHandle>(B).node();
 
   auto size_a = ExprVectorToExprHandleVector(a->dims());
   auto size_b = ExprVectorToExprHandleVector(b->dims());
@@ -1372,6 +1374,7 @@ Tensor* computeMatmul(
   // an aten::matmul.
   // Native, even naive, lowering is beneficial when the sizes are small because
   // it allows to eliminate dispatch overhead.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (total_size && total_size->value() < 1000) {
     return Reduce(
         "nnc_matmul",
@@ -1729,6 +1732,7 @@ Tensor* tensorexpr::computeOperandValue(
                 tensorOrConstant(inputs[0], indices), // input
                 tensorOrConstant(inputs[3], {c}), // mean
                 tensorOrConstant(inputs[4], {c}), // var
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 constant(inputs[7]) // eps
             };
 
@@ -1750,10 +1754,13 @@ Tensor* tensorexpr::computeOperandValue(
             if (hasWeight) {
               weight = exprInputs[4];
             }
+            // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
             if (hasBias) {
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               bias = exprInputs[5];
             }
 
+            // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
             auto inv_var = rsqrt(var + eps);
             auto alpha = inv_var * weight;
             auto beta = bias - mean * alpha;
@@ -2445,6 +2452,7 @@ void fuseAllLoops(Stmt* st) {
     if (!loopBoundsAllEqual(loopsToFuse)) {
       return;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* fusedLoop;
     if (!LoopNest::fuseLoops(loopsToFuse, &fusedLoop)) {
       return;
@@ -2779,7 +2787,6 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
 }
 
 
-
 template <typename T>
 std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
   // initialize original index locations
@@ -2858,6 +2865,7 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
               Mod::make(absolute_position, IntImm::make(stride));
           new_axes[stride_index] = index;
         }
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         return BufHandle(buf).load(new_axes);
       });
 }
@@ -2920,6 +2928,7 @@ void TensorExprKernel::compile() {
         if (output->hasUses()) {
           Tensor* t = computeValue(output);
           bufs_.emplace(output, t->buf());
+          // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
           block->append_stmt(t->stmt());
         }
       }
