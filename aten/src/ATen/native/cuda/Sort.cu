@@ -187,6 +187,18 @@ void sortKeyValueInplace(Tensor& key,
 #undef HANDLE_A_CASE
 }
 
+namespace {
+
+struct offset_t {
+  int stride;
+  int begin;
+  __device__ int operator[](int i) {
+    return stride * (begin + i);
+  }
+};
+
+}
+
 // We perform a segmented sort in cub with inputs that have
 // more than 1024/2048 elements along the selected dimension.
 // Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
@@ -319,14 +331,11 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
       int64_t n = std::min(remaining, nbatch);
       int64_t nsegments = n / nsort;
 
-      auto int_options = indices.options().dtype(kInt);
-      auto offset_begins = at::arange(0, n, nsort, int_options);
-      auto offset_ends = at::arange(nsort, n + nsort, nsort, int_options);
       auto reverse_indices = at::arange(nsort, indices.options()).view({1, nsort}).expand({nsegments, nsort}).contiguous();
 
       at::cuda::cub::segmented_sort_pairs(self_ptr, values_ptr,
         reverse_indices.data_ptr<int64_t>(), indices_ptr, n, nsegments,
-        offset_begins.data_ptr<int>(), offset_ends.data_ptr<int>(), descending);
+        offset_t{(int)nsort, 0}, offset_t{(int)nsort, 1}, descending);
 
       remaining -= n;
       self_ptr += n;
