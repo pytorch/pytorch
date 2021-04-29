@@ -123,6 +123,12 @@ SparseTensor& neg_out_sparse(const SparseTensor& t, SparseTensor& r) {
   return r;
 }
 
+SparseTensor neg_sparse(const SparseTensor& t) {
+  SparseTensor r = get_result_tensor_for_unary_op(t);
+  neg_out_sparse(t, r);
+  return r;
+}
+
 SparseTensor& neg_sparse_(SparseTensor& t) {
   return neg_out_sparse(t, t);
 }
