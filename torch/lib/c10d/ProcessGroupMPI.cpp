@@ -95,8 +95,8 @@ void checkSameSizeAndType(
 } // namespace
 
 std::vector<at::Tensor> ProcessGroupMPI::WorkMPI::result() {
-  if (outputs_) {
-    return *outputs_;
+  if (outputTensors_) {
+    return *outputTensors_;
   } else {
     return std::vector<at::Tensor>();
   }
@@ -104,11 +104,11 @@ std::vector<at::Tensor> ProcessGroupMPI::WorkMPI::result() {
 
 ProcessGroupMPI::AsyncWork::AsyncWork(
     MPI_Request request,
-    const std::vector<at::Tensor>* outputs,
+    const std::vector<at::Tensor>* outputTensors,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors)
     : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
-      outputs_(outputs),
+      outputTensors_(outputTensors),
       request_(request) {
   memset(&status_, 0, sizeof(status_));
 }
@@ -191,8 +191,8 @@ void ProcessGroupMPI::AsyncWork::abort() {
 }
 
 std::vector<at::Tensor> ProcessGroupMPI::AsyncWork::result() {
-  if (outputs_) {
-    return *outputs_;
+  if (outputTensors_) {
+    return *outputTensors_;
   } else {
     return std::vector<at::Tensor>();
   }
