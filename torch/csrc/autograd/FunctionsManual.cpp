@@ -3125,8 +3125,10 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
 }
 
 Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
-  auto out = grad * ((M_PI * self * (M_PI * self).cos() - (M_PI * self).sin()) / (M_PI * self * self)).conj();
-  return at::where(self == 0.0, at::zeros({}, grad.options()), out);
+  auto self_pi = self * M_PI;
+  auto self_squared_pi = self * self * M_PI;
+  auto out = grad * ((self_pi * self_pi.cos() - self_pi.sin()) / self_squared_pi).conj();
+  return at::where(self_squared_pi == 0.0, at::zeros({}, grad.options()), out);
 }
 
 Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices) {
