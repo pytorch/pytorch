@@ -113,7 +113,7 @@ def _iter_tensor(x_tensor):
 def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3) -> List[Tuple[torch.Tensor, ...]]:
     """Computes the numerical Jacobian of `fn(inputs)` with respect to `target`. If
     not specified, targets are the input. Returns M * N Jacobians where N is the
-    number of tensors in target that require grad and N is the number of non-integral
+    number of tensors in target that require grad and M is the number of non-integral
     outputs.
 
     Args:
@@ -454,6 +454,8 @@ def _get_analytical_vJu(inputs, outputs, nondet_tol, check_grad_dtypes, all_v, a
                                                      fast_mode=True, v=v)
         jacobian_scalars: List[torch.Tensor] = []
         for vJ, u in zip(all_vJ, all_u):
+            # Why do we need squeeze here? vJ is a 2-d tensor so that we can reuse
+            # the error checking logic from slow mode
             vJ = vJ.T.squeeze(0)
             if vJ.is_complex():  # C -> R
                 tv = torch.view_as_real(vJ)
