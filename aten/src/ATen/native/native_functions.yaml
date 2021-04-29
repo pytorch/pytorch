@@ -4345,7 +4345,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _nnz_sparse
-    SparseCsrCPU: _nnz_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: _nnz_sparse_csr
   device_guard: False
 
 # NOTE: [ coalesce autograd ]
@@ -4398,19 +4398,19 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: values_sparse
-    SparseCsrCPU: values_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: values_sparse_csr
   device_guard: False
 
 - func: crow_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU: crow_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: crow_indices_sparse_csr
   device_guard: False
 
 - func: col_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU: col_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: col_indices_sparse_csr
   device_guard: False
 
 - func: hspmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
