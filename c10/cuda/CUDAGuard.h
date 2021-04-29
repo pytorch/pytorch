@@ -232,5 +232,33 @@ private:
   c10::impl::InlineOptionalStreamGuard<impl::CUDAGuardImpl> guard_;
 };
 
+/// A variant of MultiStreamGuard that is specialized for CUDA.
+struct CUDAMultiStreamGuard {
+  explicit CUDAMultiStreamGuard(ArrayRef<CUDAStream> streams)
+    : guard_(unwrapStreams(streams)) {}
+
+  /// Copy is disallowed
+  CUDAMultiStreamGuard(const CUDAMultiStreamGuard&) = delete;
+  CUDAMultiStreamGuard& operator=(const CUDAMultiStreamGuard&) = delete;
+
+  // See Note [Move construction for RAII guards is tricky]
+  CUDAMultiStreamGuard(CUDAMultiStreamGuard&& other) = delete;
+
+  // See Note [Move assignment for RAII guards is tricky]
+  CUDAMultiStreamGuard& operator=(CUDAMultiStreamGuard&& other) = delete;
+
+private:
+  c10::impl::InlineMultiStreamGuard<impl::CUDAGuardImpl> guard_;
+
+  static std::vector<Stream> unwrapStreams(ArrayRef<CUDAStream> cudaStreams) {
+    std::vector<Stream> streams;
+    streams.reserve(cudaStreams.size());
+    for (const CUDAStream& cudaStream : cudaStreams) {
+      streams.push_back(cudaStream);
+    }
+    return streams;
+  }
+};
+
 } // namespace cuda
 } // namespace c10
