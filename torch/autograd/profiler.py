@@ -481,6 +481,8 @@ class profile(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         if self.kineto_activities:
             self.kineto_results = torch.autograd._disable_profiler()
             parsed_results = parse_kineto_results(self.kineto_results)
