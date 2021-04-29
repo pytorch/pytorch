@@ -22,22 +22,22 @@
       int64_t args_num,                 \
       int64_t* extra_args);
 
-#ifndef C10_MOBILE
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-#else
+
+#ifdef C10_MOBILE
 extern "C" {
 #endif
 
 FOR_ALL_EXTERNAL_FUNCTIONS(DECLARE_EXTERNAL_FUNCTION)
 
-#ifndef C10_MOBILE
+#ifdef C10_MOBILE
+} // extern "C"
+#endif
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
-#else
-} // extern "C"
-#endif
 
 #undef DECLARE_EXTERNAL_FUNCTION
