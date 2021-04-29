@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
@@ -56,49 +57,6 @@ void postSetStateValidate(const IValue& v) {
               attrType->repr_str()));
     }
   }
-}
-
-IValue readArchiveAndTensors(
-    const std::string& archive_name,
-    const std::string& pickle_prefix,
-    const std::string& tensor_prefix,
-    c10::optional<TypeResolver> type_resolver,
-    c10::optional<ObjLoader> obj_loader,
-    c10::optional<at::Device> device,
-    PyTorchStreamReader& stream_reader) {
-  std::string picklename = pickle_prefix + archive_name + ".pkl";
-  at::DataPtr pickle_ptr;
-  size_t pickle_size;
-  std::tie(pickle_ptr, pickle_size) = stream_reader.getRecord(picklename);
-
-  size_t bytes_read = 0;
-  auto data = reinterpret_cast<const char*>(pickle_ptr.get());
-  auto reader = [&](char* buffer, size_t len) -> size_t {
-    if (bytes_read >= pickle_size) {
-      return 0;
-    }
-    len = std::min(pickle_size - bytes_read, len);
-    // Copy len bytes into buffer
-    const char* start = data + bytes_read;
-    std::memcpy(buffer, start, len);
-    bytes_read += len;
-    return len;
-  };
-  std::string tensor_dir_path =
-      (tensor_prefix.compare("") != 0) ? tensor_prefix : archive_name + "/";
-  auto read_record = [&](const std::string& name) {
-    std::string ss = tensor_dir_path + name;
-    return std::get<0>(stream_reader.getRecord(ss));
-  };
-
-  Unpickler unpickler(
-      reader,
-      type_resolver ? std::move(*type_resolver) : nullptr,
-      obj_loader ? std::move(*obj_loader) : nullptr,
-      std::move(read_record),
-      device);
-  unpickler.set_version(stream_reader.version());
-  return unpickler.parse_ivalue();
 }
 
 namespace {
@@ -282,6 +240,7 @@ Module ScriptModuleDeserializer::deserialize(
     const std::string& key = "extra/" + kv.first;
     if (reader_->hasRecord(key)) {
       at::DataPtr meta_ptr;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t meta_size;
       std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
       extra_files[kv.first] =
@@ -415,12 +374,14 @@ Module load(
     ExtraFilesMap& extra_files) {
   // Verify that we're loading a zip archive and not a torch.save pickle archive
   // (marked by the 0x80 0x02 bytes at the start)
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   uint8_t first_short[2];
   rai->read(
       /*pos=*/0,
       /*buf=*/&first_short,
       /*n=*/2,
       /*what=*/"checking archive");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (first_short[0] == 0x80 && first_short[1] == 0x02) {
     // NB: zip files by spec can start with any data, so technically they might
     // start with 0x80 0x02, but in practice zip files start with a file entry
