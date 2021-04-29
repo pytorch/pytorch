@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from torch.distributed.elastic.events import _get_or_create_logger, Event, EventSource
+from torch.testing._internal.common_utils import run_tests
 
 
 class EventLibTest(unittest.TestCase):
@@ -46,3 +47,7 @@ class EventLibTest(unittest.TestCase):
         json_event = event.serialize()
         deser_event = Event.deserialize(json_event)
         self.assert_event(event, deser_event)
+
+
+if __name__ == "__main__":
+    run_tests()

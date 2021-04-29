@@ -57,7 +57,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Any
 
 from torch.distributed.elastic.utils.logging import get_logger
 
@@ -111,9 +111,8 @@ class ProcessFailure:
                     log.info(
                         f"User process failed with error data: {json.dumps(self.error_file_data, indent=2)}"
                     )
-                    self.message = self.error_file_data["message"]["message"]
-                    self.timestamp = int(
-                        self.error_file_data["message"]["extraInfo"]["timestamp"]
+                    self.message, self.timestamp = self._get_error_data(
+                        self.error_file_data
                     )
             except Exception:
                 log.exception(f"Failed to parse reply file: {self.error_file}")
@@ -131,6 +130,14 @@ class ProcessFailure:
                 )
             else:
                 self.message = f"Process failed with exitcode {self.exitcode}"
+
+    def _get_error_data(self, error_file_data: Dict[str, Any]) -> Tuple[str, int]:
+        message = error_file_data["message"]
+        if isinstance(message, str):
+            timestamp = error_file_data.get("timestamp", 0)
+        else:
+            timestamp = int(message["extraInfo"]["timestamp"])
+        return (message, timestamp)
 
     def _set_no_reply_file(self):
         self.error_file = _NOT_AVAILABLE
