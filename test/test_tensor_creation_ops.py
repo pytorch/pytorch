@@ -655,7 +655,7 @@ class TestTensorCreation(TestCase):
         res2 = torch.cat((x, y), out=z)
         self.assertEqual(res1, res2)
 
-    @onlyCPU
+    @onlyOnCPUAndCUDA
     def test_cat_in_channels_last(self, device):
         for dim in range(4):
             x = torch.randn((4, 15, 8, 8), device=device)
@@ -677,7 +677,7 @@ class TestTensorCreation(TestCase):
             self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
             self.assertEqual(res1, res2)
 
-    @onlyCUDA
+    @onlyOnCPUAndCUDA
     def test_cat_preserve_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8), device=device)
         y = torch.randn(x.shape, device=device)
@@ -685,6 +685,15 @@ class TestTensorCreation(TestCase):
         res2 = torch.cat((x.contiguous(memory_format=torch.channels_last), y.contiguous(memory_format=torch.channels_last)))
         self.assertEqual(res1, res2)
         self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
+        # discontiguous channels-last inputs
+        x = torch.arange(24, dtype=torch.float, device=device).reshape(2, 2, 3, 2).to(memory_format=torch.channels_last)
+        x1 = x[:, :, :2]
+        x2 = x[:, :, 1:]
+        res1 = torch.cat((x1, x2), dim=-1)
+        res2 = torch.cat((x1.contiguous(), x2.contiguous()), dim=-1)
+        self.assertEqual(res1, res2)
+        self.assertTrue(res1.is_contiguous(memory_format=torch.channels_last))
+
 
     @onlyCUDA
     @deviceCountAtLeast(2)
@@ -3245,16 +3254,17 @@ class TestRandomTensorCreation(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @onlyCUDA
     def test_randperm(self, device):
-        if device == 'cpu':
+        if device == 'cpu' or device == 'meta':
             rng_device = None
         else:
+            # TODO: This won't actually work for non-CUDA device
+            # see https://github.com/pytorch/pytorch/issues/54282
             rng_device = [device]
 
-        # Test core functionality. On CUDA, for small n, randperm is offloaded to CPU instead. For large n, randperm is
-        # executed on GPU.
-        for n in (100, 50000, 100000):
+        # Test core functionality. On CUDA, different value of n has different
+        # code path
+        for n in (5, 100, 50000, 100000):
             # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
             # different from others on CUDA.
             for dtype in (torch.long, torch.half, torch.float):
@@ -3279,7 +3289,8 @@ class TestRandomTensorCreation(TestCase):
         self.assertEqual(res2.numel(), 0)
 
         # Test exceptions when n is too large for a floating point type
-        for dtype, small_n, large_n in ((torch.half, 2**11 + 1, 2**11 + 2),
+        for dtype, small_n, large_n in ((torch.uint8, 2**8, 2**8 + 1),
+                                        (torch.half, 2**11 + 1, 2**11 + 2),
                                         (torch.float, 2**24 + 1, 2**24 + 2),
                                         (torch.double, 2**25,  # 2**53 + 1 is too large to run
                                          2**53 + 2)):
