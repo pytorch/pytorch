@@ -251,6 +251,11 @@ test_distributed() {
     build/bin/HashStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/HashStoreTest.xml
     build/bin/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
+    MPIEXEC=$(command -v mpiexec)
+    if [[ -n "$MPIEXEC" ]]; then
+      MPICMD="${MPIEXEC} -np 2 build/bin/ProcessGroupMPITest"
+      eval "$MPICMD"
+    fi
     build/bin/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
     build/bin/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
     build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
