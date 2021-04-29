@@ -9,6 +9,7 @@ namespace jit {
 namespace mobile {
 using Stack = std::vector<c10::IValue>;
 using DebugHandle = int64_t;
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Code {
   // TODO: Combine instructions and debug handles vector
   // into std::vector<<std::pair<Instruction, DebugHandle>>
