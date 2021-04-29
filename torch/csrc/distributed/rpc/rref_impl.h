@@ -351,20 +351,18 @@ class TORCH_API OwnerRRef final : public RRef {
   OwnerRRef& operator=(const OwnerRRef& other) = delete;
   OwnerRRef& operator=(OwnerRRef&& other) = delete;
 
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
-      : OwnerRRef(ownerId, rrefId, type, {}) {}
+  OwnerRRef(
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      TypePtr type,
+      std::vector<c10::DeviceIndex> devices = {});
 
   OwnerRRef(
       worker_id_t ownerId,
       const RRefId& rrefId,
       TypePtr type,
-      c10::optional<IValue> value)
-      : RRef(ownerId, rrefId, type) {
-    future_ = std::make_shared<JitFuture>(type);
-    if (value.has_value()) {
-      future_->markCompleted(value.value());
-    }
-  }
+      c10::optional<IValue> value,
+      std::vector<c10::DeviceIndex> devices = {});
 
   inline bool isOwner() const override {
     return true;
