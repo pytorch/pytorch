@@ -435,6 +435,7 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "fuse_loops",
           [](const std::vector<For*>& loops) {
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             For* fused_loop;
             LoopNest::fuseLoops(loops, &fused_loop);
             return fused_loop;
