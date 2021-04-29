@@ -1,4 +1,5 @@
 #include <ATen/core/ivalue.h>
+#include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/backport.h>
@@ -8,7 +9,6 @@
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 #include <torch/custom_class.h>
 
-#include <exception>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -352,12 +352,12 @@ bool _backport_for_mobile_impl(
 
 // Forward declare so that _backport_for_mobile() overloads can
 // call this method directly.
-bool _backport_to_version_for_mobile_impl(
+bool _backport_for_mobile_impl(
     std::shared_ptr<ReadAdapterInterface> rai,
     std::shared_ptr<PyTorchStreamWriter> writer,
     const int64_t to_version);
 
-bool _backport_to_version_for_mobile(
+bool _backport_for_mobile(
     std::istream& in,
     std::ostream& out,
     const int64_t to_version) {
@@ -368,22 +368,20 @@ bool _backport_to_version_for_mobile(
   };
   std::unique_ptr<PyTorchStreamWriter> writer =
       std::make_unique<PyTorchStreamWriter>(writer_func);
-  return _backport_to_version_for_mobile(
-      std::move(rai), std::move(writer), to_version);
+  return _backport_for_mobile(std::move(rai), std::move(writer), to_version);
 }
 
-bool _backport_to_version_for_mobile(
+bool _backport_for_mobile(
     std::istream& in,
     const std::string& output_filename,
     const int64_t to_version) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   std::unique_ptr<PyTorchStreamWriter> writer =
       std::make_unique<PyTorchStreamWriter>(output_filename);
-  return _backport_to_version_for_mobile(
-      std::move(rai), std::move(writer), to_version);
+  return _backport_for_mobile(std::move(rai), std::move(writer), to_version);
 }
 
-bool _backport_to_version_for_mobile(
+bool _backport_for_mobile(
     const std::string& input_filename,
     std::ostream& out,
     const int64_t to_version) {
@@ -395,11 +393,11 @@ bool _backport_to_version_for_mobile(
   };
   std::unique_ptr<PyTorchStreamWriter> writer =
       std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
-  return _backport_to_version_for_mobile_impl(
+  return _backport_for_mobile_impl(
       std::move(rai), std::move(writer), to_version);
 }
 
-bool _backport_to_version_for_mobile(
+bool _backport_for_mobile(
     const std::string& input_filename,
     const std::string& output_filename,
     const int64_t to_version) {
@@ -407,19 +405,19 @@ bool _backport_to_version_for_mobile(
       std::make_unique<FileAdapter>(input_filename);
   std::unique_ptr<PyTorchStreamWriter> writer =
       std::make_unique<PyTorchStreamWriter>(output_filename);
-  return _backport_to_version_for_mobile_impl(
+  return _backport_for_mobile_impl(
       std::move(rai), std::move(writer), to_version);
 }
 
-bool _backport_to_version_for_mobile(
+bool _backport_for_mobile(
     std::shared_ptr<ReadAdapterInterface> rai,
     std::unique_ptr<PyTorchStreamWriter> writer,
     const int64_t to_version) {
-  return _backport_to_version_for_mobile_impl(
+  return _backport_for_mobile_impl(
       std::move(rai), std::move(writer), to_version);
 }
 
-bool _backport_to_version_for_mobile_impl(
+bool _backport_for_mobile_impl(
     std::shared_ptr<ReadAdapterInterface> rai,
     std::shared_ptr<PyTorchStreamWriter> writer,
     const int64_t to_version) {

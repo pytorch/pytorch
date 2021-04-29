@@ -715,8 +715,8 @@ TEST(LiteInterpreterTest, BackPortToVersionByteCodeModelV4ToV3) {
   // Backport script_module_v5.ptl to an older version
   std::ostringstream oss;
   const int64_t to_version_3 = 3;
-  bool backPortSuccess = mobile::_backport_to_version_for_mobile(
-      test_model_file_v4, oss, to_version_3);
+  bool backPortSuccess =
+      mobile::_backport_for_mobile(test_model_file_v4, oss, to_version_3);
   AT_ASSERT(!backPortSuccess);
 }
 
@@ -733,8 +733,8 @@ TEST(LiteInterpreterTest, BackPortToVersionByteCodeModelV5ToV4) {
   // Backport script_module_v5.ptl to an older version
   std::ostringstream oss;
   const int64_t to_version_4 = 4;
-  bool backPortSuccess = mobile::_backport_to_version_for_mobile(
-      test_model_file_v5, oss, to_version_4);
+  bool backPortSuccess =
+      mobile::_backport_for_mobile(test_model_file_v5, oss, to_version_4);
   AT_ASSERT(backPortSuccess);
 
   // Check backport model version
@@ -749,7 +749,7 @@ TEST(LiteInterpreterTest, BackPortToVersionByteCodeModelV5ToV4) {
   auto actual_result = m.forward(input_data).toTensor();
   auto expected_result = at::ones({2, 4}, ScalarType::Double) * 3;
 
-  AT_ASSERT(compare_tensor(actual_result, expected_result));
+  AT_ASSERT(actual_result.equal(expected_result));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

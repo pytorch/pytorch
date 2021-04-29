@@ -73,8 +73,7 @@ def _export_operator_list(module: LiteScriptModule):
         return a set of root operator names (with overload name) that are used by any method
         in this mobile module.
     """
-    # TODO fix mypy here
-    return torch._C._export_operator_list(module._c)  # type: ignore[attr-defined]
+    return torch._C._export_operator_list(module._c)
 
 def _get_model_bytecode_version(f_input) -> int:
     r"""
@@ -107,7 +106,7 @@ def _get_model_bytecode_version(f_input) -> int:
     else:
         return torch._C._get_model_bytecode_version_from_buffer(f_input.read())
 
-def _backport_to_version_for_mobile(f_input, f_output, version):
+def _backport_for_mobile(f_input, f_output, version):
     r"""
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
@@ -122,11 +121,11 @@ def _backport_to_version_for_mobile(f_input, f_output, version):
 
     if ((isinstance(f_input, str) or isinstance(f_input, pathlib.Path)) and (
             isinstance(f_output, str) or isinstance(f_output, pathlib.Path))):
-        return torch._C._backport_to_version_for_mobile(str(f_input), str(f_output), version)
+        return torch._C._backport_for_mobile(str(f_input), str(f_output), version)
     else:
-        return torch._C._backport_to_version_for_mobile_from_buffer(f_input.read(), f_output, version)
+        return torch._C._backport_for_mobile_from_buffer(f_input.read(), str(f_output), version)
 
-def _backport_to_version_for_mobile_to_buffer(f_input, version):
+def _backport_for_mobile_to_buffer(f_input, version):
     r"""
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
@@ -140,6 +139,6 @@ def _backport_to_version_for_mobile_to_buffer(f_input, version):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
     if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)):
-        return torch._C._backport_to_version_for_mobile_to_buffer(str(f_input), version)
+        return torch._C._backport_for_mobile_to_buffer(str(f_input), version)
     else:
-        return torch._C._backport_to_version_for_mobile_from_buffer_to_buffer(f_input.read(), version)
+        return torch._C._backport_for_mobile_from_buffer_to_buffer(f_input.read(), version)
