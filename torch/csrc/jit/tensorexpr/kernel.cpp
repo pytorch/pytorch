@@ -3018,6 +3018,7 @@ void TensorExprKernel::compile() {
     if (properly_strided_output->stmt()) {
       block->append_stmt(properly_strided_output->stmt());
     }
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     bufs_[output] = properly_strided_output->buf();
     const auto& tt = output->type()->expect<TensorType>();
     auto sizes = *tt->sizes().concrete_sizes();
