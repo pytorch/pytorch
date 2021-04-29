@@ -87,9 +87,11 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    dsplit
     column_stack
     dstack
     gather
+    hsplit
     hstack
     index_select
     masked_select
@@ -114,6 +116,7 @@ Indexing, Slicing, Joining, Mutating Ops
     transpose
     unbind
     unsqueeze
+    vsplit
     vstack
     where
 
@@ -337,6 +340,7 @@ Pointwise Ops
     negative
     nextafter
     polygamma
+    positive
     pow
     rad2deg
     real
