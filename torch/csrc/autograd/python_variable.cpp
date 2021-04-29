@@ -42,6 +42,7 @@ using namespace torch::autograd;
 
 namespace py = pybind11;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPVariableClass = nullptr;
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -439,6 +440,7 @@ PyObject *THPVariable_get_names(PyObject *self, void *unused)
 
   const auto dimnames = tensor.names();
   for (size_t i = 0; i < size; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject* str;
     if (dimnames[i].type() == at::NameType::WILDCARD) {
       // PyTuple_SET_ITEM steals a reference to the object. When the tuple is
@@ -758,6 +760,7 @@ int THPVariable_set_imag(THPVariable* self, THPVariable *imag, void *unused)
 
 // properties are registered here because we are currently only able to bind them
 // manually. TODO: make declarable in native_functions
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPVariable_properties[] = {
   {"T", (getter)THPVariable_get_T, nullptr, nullptr, nullptr},
   {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
@@ -795,12 +798,14 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyMappingMethods THPVariable_as_mapping = {
   THPVariable_length,
   THPVariable_getitem,
   THPVariable_setitem,
 };
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef extra_methods[] = {
   {"as_subclass", castPyCFunctionWithKeywords(THPVariable_as_subclass),
     METH_VARARGS | METH_KEYWORDS, nullptr},
@@ -809,12 +814,72 @@ static PyMethodDef extra_methods[] = {
   {nullptr}
 };
 
+/* From https://github.com/python/cpython/blob/v3.7.0/Modules/xxsubtype.c
+   If compiled as a shared library instead, some compilers don't allow addresses
+   of Python objects defined in other libraries to be used in static
+   initializers here.  The DEFERRED_ADDRESS macro is used to tag the slots where
+   such addresses appear; the module init function must fill in the tagged slots
+   at runtime.  The argument is for documentation -- the macro ignores it.
+*/
+#define DEFERRED_ADDRESS(ADDR) nullptr
+
+struct THPVariableMeta {
+  PyHeapTypeObject base;
+};
+
+int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs);
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+PyTypeObject THPVariableMetaType = {
+  PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
+  "torch._C._TensorMeta",                      /* tp_name */
+  sizeof(THPVariableMeta),                     /* tp_basicsize */
+  0,                                           /* tp_itemsize */
+  nullptr,                                     /* tp_dealloc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  0,                                           /* tp_vectorcall_offset */
+  nullptr,                                     /* tp_getattr */
+  nullptr,                                     /* tp_setattr */
+  nullptr,                                     /* tp_reserved */
+  nullptr,                                     /* tp_repr */
+  nullptr,                                     /* tp_as_number */
+  nullptr,                                     /* tp_as_sequence */
+  nullptr,                                     /* tp_as_mapping */
+  nullptr,                                     /* tp_hash  */
+  nullptr,                                     /* tp_call */
+  nullptr,                                     /* tp_str */
+  nullptr,                                     /* tp_getattro */
+  nullptr,                                     /* tp_setattro */
+  nullptr,                                     /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,    /* tp_flags */
+  nullptr,                                     /* tp_doc */
+  nullptr,                                     /* tp_traverse */
+  nullptr,                                     /* tp_clear */
+  nullptr,                                     /* tp_richcompare */
+  0,                                           /* tp_weaklistoffset */
+  nullptr,                                     /* tp_iter */
+  nullptr,                                     /* tp_iternext */
+  nullptr,                                     /* tp_methods */
+  nullptr,                                     /* tp_members */
+  nullptr,                                     /* tp_getset */
+  DEFERRED_ADDRESS(&PyType_Type),              /* tp_base */
+  nullptr,                                     /* tp_dict */
+  nullptr,                                     /* tp_descr_get */
+  nullptr,                                     /* tp_descr_set */
+  0,                                           /* tp_dictoffset */
+  THPVariableMetaType_init,                    /* tp_init */
+  nullptr,                                     /* tp_alloc */
+  nullptr                                      /* tp_new */
+};
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPVariableType = {
-  PyVarObject_HEAD_INIT(nullptr, 0)
+  PyVarObject_HEAD_INIT(&THPVariableMetaType, 0)
   "torch._C._TensorBase",                      /* tp_name */
   sizeof(THPVariable),                         /* tp_basicsize */
   0,                                           /* tp_itemsize */
   (destructor)THPVariable_dealloc,             /* tp_dealloc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
@@ -847,11 +912,25 @@ PyTypeObject THPVariableType = {
   0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPVariable_pynew                            /* tp_new */
+  // NB: It is illegal to directly create a _TensorBase.  Instead,
+  // subclass it first (the metaclass will initialize tp_new) and
+  // then construct it
+  nullptr,                                     /* tp_new */
 };
+
+int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
+  if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
+    return -1;
+  }
+  if (((PyTypeObject*)cls)->tp_base == &THPVariableType) {
+    ((PyTypeObject*)cls)->tp_new = THPVariable_pynew;
+  }
+  return 0;
+}
 
 namespace torch { namespace autograd {
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 extern PyMethodDef variable_methods[];
 extern void initTorchFunctions(PyObject *module);
 
@@ -862,6 +941,7 @@ void initTensorImplConversion(PyObject* module) {
         unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
     TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
+    // NOLINTNEXTLINE(performance-move-const-arg)
     return py::cast(std::move(tensor));
   });
   // set on the module level to avoid mixing pybind and plain CPython extensions
@@ -875,6 +955,12 @@ void initTensorImplConversion(PyObject* module) {
 
 bool THPVariable_initModule(PyObject *module)
 {
+  THPVariableMetaType.tp_base = &PyType_Type;
+  if (PyType_Ready(&THPVariableMetaType) < 0)
+    return false;
+  Py_INCREF(&THPVariableMetaType);
+  PyModule_AddObject(module, "_TensorMeta",   (PyObject *)&THPVariableMetaType);
+
   static std::vector<PyMethodDef> methods;
   THPUtils_addPyMethodDefs(methods, torch::autograd::variable_methods);
   THPUtils_addPyMethodDefs(methods, extra_methods);
