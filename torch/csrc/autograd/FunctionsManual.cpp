@@ -2332,7 +2332,7 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
                            const Tensor& V) {
   // https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
   // For A = VLV^{-1}, denoting the gradients gA, gV and gL, we have
-  // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V
+  // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V^H
   // Where:
   //   - E_ij = L_i - L_j if i != j
   //   - diag_embed takes a vector into a diagonal matrix
