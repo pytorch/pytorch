@@ -426,7 +426,7 @@ def sample_inputs_binary(op_info, device, dtype, requires_grad):
 
 # Metadata class for binary "universal functions (ufuncs)" that accept two
 # tensor and have common properties
-class _BinaryUfuncInfo(OpInfo):
+class BinaryUfuncInfo(OpInfo):
     """Operator information for 'universal binary functions (binary ufuncs).'
     These are functions of two tensors with common properties like:
       - they are elementwise functions
@@ -443,24 +443,16 @@ class _BinaryUfuncInfo(OpInfo):
                  name,  # the string name of the function
                  *,
                  ref,  # a reference function
-                 dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
-                 dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                 dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                 dtypesIfROCM=floating_types_and(torch.half),
                  domain=(None, None),  # the [low, high) domain of the function
+                 dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                  sample_inputs_func=sample_inputs_binary,
-                 supports_sparse=False,
                  **kwargs):
-        super(_BinaryUfuncInfo, self).__init__(name,
-                                               dtypes=dtypes,
-                                               dtypesIfCPU=dtypesIfCPU,
-                                               dtypesIfCUDA=dtypesIfCUDA,
-                                               dtypesIfROCM=dtypesIfROCM,
-                                               sample_inputs_func=sample_inputs_func,
-                                               supports_sparse=supports_sparse,
-                                               supports_inplace_autograd=False,
-                                               assert_autodiffed=True,
-                                               **kwargs)
+        super(BinaryUfuncInfo, self).__init__(name,
+                                              dtypes=dtypes,
+                                              sample_inputs_func=sample_inputs_func,
+                                              supports_inplace_autograd=False,
+                                              assert_autodiffed=True,
+                                              **kwargs)
         self.ref = ref
         self.domain = domain
 
@@ -5626,53 +5618,35 @@ op_db: List[OpInfo] = [
 ]
 
 op_db += [
-    _BinaryUfuncInfo('add',
-                     aliases=('add',),
-                     ref=np.add,
-                     dtypes=all_types_and_complex(),
-                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-                     supports_out=True,
-                     sample_inputs_func=sample_inputs_binary,
-                     decorators=(precisionOverride({torch.bfloat16: 5e-1,
-                                                    torch.float16: 5e-1}),),
-                     ),
-    _BinaryUfuncInfo('mul',
-                     aliases=('multiply',),
-                     ref=np.multiply,
-                     dtypes=all_types_and_complex(),
-                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-                     supports_out=True,
-                     sample_inputs_func=sample_inputs_binary,
-                     decorators=(precisionOverride({torch.bfloat16: 5e-1,
-                                                    torch.float16: 5e-1}),),
-                     ),
-    _BinaryUfuncInfo('sub',
-                     aliases=('subtract',),
-                     ref=np.subtract,
-                     # skip subtraction of bool types
-                     dtypes=all_types_and_complex(),
-                     dtypesIfCUDA=all_types_and_complex_and(torch.half),
-                     supports_out=True,
-                     sample_inputs_func=sample_inputs_binary,
-                     decorators=(precisionOverride({torch.bfloat16: 5e-1,
-                                                    torch.float16: 5e-1}),),
-                     ),
-    _BinaryUfuncInfo('div',
-                     aliases=('divide',),
-                     ref=np.divide,
-                     # skip subtraction of bool types
-                     dtypes=all_types_and_complex(),
-                     dtypesIfCUDA=all_types_and_complex_and(torch.half),
-                     supports_out=True,
-                     sample_inputs_func=sample_inputs_binary,
-                     decorators=(precisionOverride({torch.bfloat16: 5e-1,
-                                                    torch.float16: 5e-1}),),
-                     ),
+    BinaryUfuncInfo('add',
+                    ref=np.add,
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    supports_out=True,
+                    ),
+    BinaryUfuncInfo('mul',
+                    aliases=('multiply',),
+                    ref=np.multiply,
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    supports_out=True,
+                    ),
+    BinaryUfuncInfo('sub',
+                    aliases=('subtract',),
+                    ref=np.subtract,
+                    # skip subtraction of bool types
+                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                    supports_out=True,
+                    ),
+    BinaryUfuncInfo('div',
+                    aliases=('divide',),
+                    ref=np.divide,
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    supports_out=True,
+                    )
 ]
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
-binary_ufuncs = [op for op in op_db if isinstance(op, _BinaryUfuncInfo)]
+binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]

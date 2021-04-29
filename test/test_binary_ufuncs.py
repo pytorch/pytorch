@@ -19,7 +19,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
     skipCUDAIfRocm, skipIf, ops)
-from torch.testing import all_types_and_complex_and, assert_allclose
+from torch.testing import all_types_and_complex_and, assert_close
 from torch.testing._internal.common_methods_invocations import binary_ufuncs
 
 if TEST_SCIPY:
@@ -1218,9 +1218,7 @@ class TestBinaryUfuncs(TestCase):
     @onlyOnCPUAndCUDA
     @ops(binary_ufuncs)
     def test_reference_numerics(self, device, dtype, op):
-        precision = self.precision
         if dtype == torch.bfloat16:
-            precision *= 10
             np_dtype = np.float16
 
             def to_numpy(t):
@@ -1234,13 +1232,13 @@ class TestBinaryUfuncs(TestCase):
 
         # TODO: turn these into separate tests
         for sample in op.sample_inputs(device, dtype):
-            _input = (sample.input,) + sample.args
-            torch_res = getattr(torch, op.name)(*_input).cpu()
-            numpy_res = op.ref(*[to_numpy(t) for t in _input])
-            assert_allclose(torch_res, numpy_res, rtol=precision, atol=precision)
+            torch_inputs = (sample.input,) + sample.args
+            numpy_inputs = [to_numpy(t) for t in torch_inputs]
 
+            torch_output = getattr(torch, op.name)(*torch_inputs).cpu()
+            numpy_output = torch.as_tensor(op.ref(*numpy_inputs), dtype=torch_output.dtype)
 
-
+            assert_close(torch_output, numpy_output, equal_nan=True)
 
     @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False), torch.testing.get_all_dtypes(include_complex=False)))
     def test_maximum_minimum_type_promotion(self, device, dtypes):
