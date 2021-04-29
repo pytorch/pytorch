@@ -189,121 +189,6 @@ __global__ void atomicadaptivemaxgradinput(
     }
   }
 }
-
-void adaptive_max_pool2d_backward_out_cuda_template(
-           Tensor& gradInput,
-           const Tensor& gradOutput_,
-           const Tensor& input,
-           const Tensor& indices)
-{
-  TensorArg grad_input_arg{ gradInput, "gradInput", 1 };
-  TensorArg grad_output_arg{ gradOutput_, "gradOutput_", 2 };
-  TensorArg input_arg{ input, "input", 3 };
-  TensorArg indices_arg{ indices, "indices", 4 };
-
-  checkAllSameGPU("adaptive_max_pool2d_out_cuda",
-                 {grad_input_arg, grad_output_arg, input_arg, indices_arg});
-
-  bool atomic = true; // suboptimal, but without atomic it doesn't pass the tests
-
-  Tensor gradOutput = gradOutput_.contiguous();
-
-  if (input.ndimension() == 3) {
-    int64_t sizeD  = input.size(0);
-    int64_t isizeH = input.size(1);
-    int64_t isizeW = input.size(2);
-
-    int64_t osizeH = gradOutput.size(1);
-    int64_t osizeW = gradOutput.size(2);
-
-    //bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
-
-    gradInput.resize_as_(input);
-    gradInput.zero_();
-
-    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
-      "adaptive_max_pool2d_backward_cuda",
-      [&] {
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
-
-        // cuda blocks & threads:
-        int blocksH = (int)(16L / sizeD);
-        blocksH = blocksH < 1 ? 1 : blocksH;
-        dim3 blocks(sizeD, blocksH);
-        dim3 threads(32, 8);
-
-        if(atomic)
-        {
-          // run updateGradInput kernel, accumulate gradients atomically
-          atomicadaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                              gradInput_data, gradOutput_data,
-                                              indices_data,
-                                              isizeH, isizeW, osizeH, osizeW);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        }
-        else
-        {
-          // run updateGradInput kernel
-          atomicadaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                              gradInput_data, gradOutput_data,
-                                              indices_data,
-                                              isizeH, isizeW, osizeH, osizeW);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        }
-      }
-    );
-  } else {
-    int64_t sizeB  = input.size(0);
-    int64_t sizeD  = input.size(1);
-    int64_t isizeH = input.size(2);
-    int64_t isizeW = input.size(3);
-
-    int64_t osizeH = gradOutput.size(2);
-    int64_t osizeW = gradOutput.size(3);
-
-    gradInput.resize_as_(input);
-    gradInput.zero_();
-
-    //bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
-
-    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
-      "adaptive_max_pool2d_backward_cuda",
-      [&] {
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
-
-        // cuda blocks & threads:
-        int blocksH = (int)(16L / sizeD);
-        blocksH = blocksH < 1 ? 1 : blocksH;
-        dim3 blocks(sizeB*sizeD, blocksH);
-        dim3 threads(32, 8);
-
-        if(atomic)
-        {
-          // run updateGradInput kernel, accumulate gradients atomically
-          atomicadaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                              gradInput_data, gradOutput_data,
-                                              indices_data,
-                                              isizeH, isizeW, osizeH, osizeW);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        }
-        else
-        {
-          // run updateGradInput kernel, accumulate gradients atomically
-          adaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                              gradInput_data, gradOutput_data,
-                                              indices_data,
-                                              isizeH, isizeW, osizeH, osizeW);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        }
-      }
-    );
-  }
-}
-
 } // namespace
 
 // 4d tensor B x D x H x W
@@ -410,38 +295,150 @@ const Tensor& indices) {
   }
 }
 
-Tensor& adaptive_max_pool2d_backward_out_cuda(const Tensor& gradOutput_,
-  const Tensor& input,
-  const Tensor& indices,
-  Tensor& gradInput)
-{
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("adaptive_max_pool2d_backward_out_cuda");
-  adaptive_max_pool2d_backward_out_cuda_template(
-    gradInput,
-    gradOutput_,
-    input,
-    indices);
-  return gradInput;
-}
+TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cuda)
+(const Tensor& gradOutput,
+ const Tensor& input,
+ const Tensor& indices,
+ const Tensor& gradInput) {
+  globalContext().alertNotDeterministic(
+      "adaptive_max_pool2d_backward_cuda");
 
-Tensor adaptive_max_pool2d_backward_cuda(
-  const Tensor& gradOutput_,
-  const Tensor& input,
-  const Tensor& indices)
-{
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("adaptive_max_pool2d_backward_cuda");
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  adaptive_max_pool2d_backward_out_cuda_template(
-    gradInput,
-    gradOutput_,
-    input,
-    indices);
-  return gradInput;
-}
+  TensorArg grad_input_arg{gradInput, "gradInput", 1};
+  TensorArg grad_output_arg{gradOutput, "gradOutput", 2};
+  TensorArg input_arg{input, "input", 3};
+  TensorArg indices_arg{indices, "indices", 4};
 
+  checkAllSameGPU(
+      "adaptive_max_pool2d_backward_cuda",
+      {grad_input_arg, grad_output_arg, input_arg, indices_arg});
+
+  bool atomic =
+      true; // suboptimal, but without atomic it doesn't pass the tests
+
+  Tensor gradOutput_ = gradOutput.contiguous();
+
+  if (input.ndimension() == 3) {
+    int64_t sizeD = input.size(0);
+    int64_t isizeH = input.size(1);
+    int64_t isizeW = input.size(2);
+
+    int64_t osizeH = gradOutput_.size(1);
+    int64_t osizeW = gradOutput_.size(2);
+
+    // bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
+
+    gradInput.zero_();
+
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kHalf,
+        kBFloat16,
+        input.scalar_type(),
+        "adaptive_max_pool2d_backward_cuda",
+        [&] {
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
+          int64_t* indices_data = indices.data_ptr<int64_t>();
+
+          // cuda blocks & threads:
+          int blocksH = (int)(16L / sizeD);
+          blocksH = blocksH < 1 ? 1 : blocksH;
+          dim3 blocks(sizeD, blocksH);
+          dim3 threads(32, 8);
+
+          if (atomic) {
+            // run updateGradInput kernel, accumulate gradients atomically
+            atomicadaptivemaxgradinput<<<
+                blocks,
+                threads,
+                0,
+                at::cuda::getCurrentCUDAStream()>>>(
+                gradInput_data,
+                gradOutput_data,
+                indices_data,
+                isizeH,
+                isizeW,
+                osizeH,
+                osizeW);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          } else {
+            // run updateGradInput kernel
+            atomicadaptivemaxgradinput<<<
+                blocks,
+                threads,
+                0,
+                at::cuda::getCurrentCUDAStream()>>>(
+                gradInput_data,
+                gradOutput_data,
+                indices_data,
+                isizeH,
+                isizeW,
+                osizeH,
+                osizeW);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          }
+        });
+  } else {
+    int64_t sizeB = input.size(0);
+    int64_t sizeD = input.size(1);
+    int64_t isizeH = input.size(2);
+    int64_t isizeW = input.size(3);
+
+    int64_t osizeH = gradOutput_.size(2);
+    int64_t osizeW = gradOutput_.size(3);
+
+    gradInput.zero_();
+
+    // bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
+
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kHalf,
+        kBFloat16,
+        input.scalar_type(),
+        "adaptive_max_pool2d_backward_cuda",
+        [&] {
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
+          int64_t* indices_data = indices.data_ptr<int64_t>();
+
+          // cuda blocks & threads:
+          int blocksH = (int)(16L / sizeD);
+          blocksH = blocksH < 1 ? 1 : blocksH;
+          dim3 blocks(sizeB * sizeD, blocksH);
+          dim3 threads(32, 8);
+
+          if (atomic) {
+            // run updateGradInput kernel, accumulate gradients atomically
+            atomicadaptivemaxgradinput<<<
+                blocks,
+                threads,
+                0,
+                at::cuda::getCurrentCUDAStream()>>>(
+                gradInput_data,
+                gradOutput_data,
+                indices_data,
+                isizeH,
+                isizeW,
+                osizeH,
+                osizeW);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          } else {
+            // run updateGradInput kernel, accumulate gradients atomically
+            adaptivemaxgradinput<<<
+                blocks,
+                threads,
+                0,
+                at::cuda::getCurrentCUDAStream()>>>(
+                gradInput_data,
+                gradOutput_data,
+                indices_data,
+                isizeH,
+                isizeW,
+                osizeH,
+                osizeW);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          }
+        });
+  }
+ }
 } // at::native
 } // at
