@@ -7,6 +7,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CastTest, GetCastDataType) {
   auto castOp = [](std::string t) {
     // Ensure lowercase.

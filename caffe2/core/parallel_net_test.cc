@@ -23,6 +23,7 @@ class SleepOp final : public Operator<CPUContext> {
  public:
   SleepOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         ms_(OperatorBase::GetSingleArgument<int>("ms", 1000)) {
     DCHECK_GT(ms_, 0);
     DCHECK_LT(ms_, 3600 * 1000) << "Really? This long?";
@@ -45,11 +46,15 @@ class SleepOp final : public Operator<CPUContext> {
   int ms_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Sleep).NumInputs(0, INT_MAX).NumOutputs(0, 1);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Sleep, SleepOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CUDA_OPERATOR(Sleep, SleepOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kSleepNetDefString[] =
     "  name: \"sleepnet\""
     "  type: \"dag\""
@@ -106,6 +111,7 @@ int RunNetAndGetDuration(const string& net_def_str, const string& type) {
 }
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DAGNetTest, TestDAGNetTiming) {
   int ms = RunNetAndGetDuration(string(kSleepNetDefString), "dag");
   EXPECT_NEAR(ms, 200, kTimeThreshold);
@@ -113,6 +119,7 @@ TEST(DAGNetTest, TestDAGNetTiming) {
 
 // For sanity check, we also test the sequential time - it should take 0.35
 // seconds instead since everything has to be sequential.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SimpleNetTest, TestSimpleNetTiming) {
   int ms = RunNetAndGetDuration(string(kSleepNetDefString), "simple");
   EXPECT_NEAR(ms, 350, kTimeThreshold);
@@ -121,6 +128,7 @@ TEST(SimpleNetTest, TestSimpleNetTiming) {
 // This network has two operators reading the same blob at the same time. This
 // should not change anything and the DAG should still make sleep2 and sleep3
 // run in parallel.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kSleepNetDefStringReadAfterRead[] =
     "  name: \"sleepnet\""
     "  type: \"dag\""
@@ -155,6 +163,7 @@ const char kSleepNetDefStringReadAfterRead[] =
     "    }"
     "  }";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DAGNetTest, TestDAGNetTimingReadAfterRead) {
   int ms = RunNetAndGetDuration(string(kSleepNetDefStringReadAfterRead), "dag");
   EXPECT_NEAR(ms, 250, kTimeThreshold);
@@ -162,6 +171,7 @@ TEST(DAGNetTest, TestDAGNetTimingReadAfterRead) {
 
 // For sanity check, we also test the sequential time - it should take 0.35
 // seconds instead since everything has to be sequential.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SimpleNetTest, TestSimpleNetTimingReadAfterRead) {
   int ms =
       RunNetAndGetDuration(string(kSleepNetDefStringReadAfterRead), "simple");
@@ -171,6 +181,7 @@ TEST(SimpleNetTest, TestSimpleNetTimingReadAfterRead) {
 // This network has two operators writing out the sleep2 blob. As a result, the
 // operator sleep2-again creates a write after write dependency and the whole
 // process should be sequential.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kSleepNetDefStringWriteAfterWrite[] =
     "  name: \"sleepnet\""
     "  type: \"dag\""
@@ -204,12 +215,14 @@ const char kSleepNetDefStringWriteAfterWrite[] =
     "    }"
     "  }";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DAGNetTest, TestDAGNetTimingWriteAfterWrite) {
   int ms =
       RunNetAndGetDuration(string(kSleepNetDefStringWriteAfterWrite), "dag");
   EXPECT_NEAR(ms, 350, kTimeThreshold);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SimpleNetTest, TestSimpleNetTimingWriteAfterWrite) {
   int ms =
       RunNetAndGetDuration(string(kSleepNetDefStringWriteAfterWrite), "simple");
@@ -219,6 +232,7 @@ TEST(SimpleNetTest, TestSimpleNetTimingWriteAfterWrite) {
 // This network has an operator writing to sleep1 while another operator is
 // accessing it. As a result, the operator sleep1-again creates a write after
 // read dependency and the whole process should be sequential.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kSleepNetDefStringWriteAfterRead[] =
     "  name: \"sleepnet\""
     "  type: \"dag\""
@@ -252,12 +266,14 @@ const char kSleepNetDefStringWriteAfterRead[] =
     "    }"
     "  }";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DAGNetTest, TestDAGNetTimingWriteAfterRead) {
   int ms =
       RunNetAndGetDuration(string(kSleepNetDefStringWriteAfterRead), "dag");
   EXPECT_NEAR(ms, 350, kTimeThreshold);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SimpleNetTest, TestSimpleNetTimingWriteAfterRead) {
   int ms =
       RunNetAndGetDuration(string(kSleepNetDefStringWriteAfterRead), "simple");
@@ -268,6 +284,7 @@ TEST(SimpleNetTest, TestSimpleNetTimingWriteAfterRead) {
 // operator has a control dependency on it. As a result, the operator
 // sleep1-again creates a write after read dependency and the whole
 // process should be sequential.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kSleepNetDefStringControlDependency[] = R"DOC(
   name: "sleepnet"
   type: "dag"
@@ -302,12 +319,14 @@ const char kSleepNetDefStringControlDependency[] = R"DOC(
   }
 )DOC";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DAGNetTest, TestDAGNetTimingControlDependency) {
   int ms =
       RunNetAndGetDuration(string(kSleepNetDefStringControlDependency), "dag");
   EXPECT_NEAR(ms, 350, kTimeThreshold);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SimpleNetTest, TestSimpleNetTimingControlDependency) {
   int ms = RunNetAndGetDuration(
       string(kSleepNetDefStringControlDependency), "simple");

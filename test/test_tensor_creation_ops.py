@@ -10,7 +10,7 @@ import random
 
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
-    torch_to_numpy_dtype_dict, slowTest, TEST_SCIPY, IS_MACOS, IS_PPC,
+    torch_to_numpy_dtype_dict, slowTest, make_tensor, TEST_SCIPY, IS_MACOS, IS_PPC,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
@@ -831,6 +831,80 @@ class TestTensorCreation(TestCase):
                 for p in permutations(range(t.dim())):
                     tp = t.permute(p)
                     compare_helper_(like_fn, tp)
+
+    def _hvd_split_helper(self, torch_fn, np_fn, op_name, inputs, device, dtype, dim):
+        dimension_error_message = op_name + " requires a tensor with at least "
+        divisibiliy_error_message = op_name + " attempted to split along dimension "
+
+        for shape, arg in inputs:
+            direction = dim - (len(shape) == 1 and dim == 1)
+            bound = dim + 2 * (dim == 0) + (dim == 2)
+            error_expected = len(shape) < bound or (not isinstance(arg, list) and shape[direction] % arg != 0)
+
+            t = make_tensor(shape, device, dtype)
+            t_np = t.cpu().numpy()
+
+            if not error_expected:
+                self.assertEqual(torch_fn(t, arg), np_fn(t_np, arg))
+            else:
+                self.assertRaises(RuntimeError, lambda: torch_fn(t, arg))
+                self.assertRaises(ValueError, lambda: np_fn(t, arg))
+                expected_error_message = dimension_error_message if len(shape) < bound else divisibiliy_error_message
+                self.assertRaisesRegex(RuntimeError, expected_error_message, lambda: torch_fn(t, arg))
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.long, torch.float32, torch.complex64)
+    def test_hsplit(self, device, dtype):
+        inputs = (
+            ((), 3),
+            ((), [2, 4, 6]),
+            ((6,), 2),
+            ((6,), 4),
+            ((6,), [2, 5]),
+            ((6,), [7, 9]),
+            ((3, 8), 4),
+            ((3, 8), 5),
+            ((3, 8), [1, 5]),
+            ((3, 8), [3, 8]),
+            ((5, 5, 5), 2),
+            ((5, 5, 5), [1, 4]),
+            ((5, 0, 5), 3),
+            ((5, 5, 0), [2, 6]),
+        )
+        self._hvd_split_helper(torch.hsplit, np.hsplit, "torch.hsplit", inputs, device, dtype, 1)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.long, torch.float32, torch.complex64)
+    def test_vsplit(self, device, dtype):
+        inputs = (
+            ((6,), 2),
+            ((6,), 4),
+            ((6, 5), 2),
+            ((6, 5), 4),
+            ((6, 5), [1, 2, 3]),
+            ((6, 5), [1, 5, 9]),
+            ((6, 5, 5), 2),
+            ((6, 0, 5), 2),
+            ((5, 0, 5), [1, 5]),
+        )
+        self._hvd_split_helper(torch.vsplit, np.vsplit, "torch.vsplit", inputs, device, dtype, 0)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.long, torch.float32, torch.complex64)
+    def test_dsplit(self, device, dtype):
+        inputs = (
+            ((6,), 4),
+            ((6, 6), 3),
+            ((5, 5, 6), 2),
+            ((5, 5, 6), 4),
+            ((5, 5, 6), [1, 2, 3]),
+            ((5, 5, 6), [1, 5, 9]),
+            ((5, 5, 0), 2),
+            ((5, 0, 6), 4),
+            ((5, 0, 6), [1, 2, 3]),
+            ((5, 5, 6), [1, 5, 9]),
+        )
+        self._hvd_split_helper(torch.dsplit, np.dsplit, "torch.dsplit", inputs, device, dtype, 2)
 
     def _test_special_stacks(self, dim, at_least_dim, torch_fn, np_fn, device, dtype):
         # Test error for non-tuple argument
@@ -3171,16 +3245,17 @@ class TestRandomTensorCreation(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @onlyCUDA
     def test_randperm(self, device):
-        if device == 'cpu':
+        if device == 'cpu' or device == 'meta':
             rng_device = None
         else:
+            # TODO: This won't actually work for non-CUDA device
+            # see https://github.com/pytorch/pytorch/issues/54282
             rng_device = [device]
 
-        # Test core functionality. On CUDA, for small n, randperm is offloaded to CPU instead. For large n, randperm is
-        # executed on GPU.
-        for n in (100, 50000, 100000):
+        # Test core functionality. On CUDA, different value of n has different
+        # code path
+        for n in (5, 100, 50000, 100000):
             # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
             # different from others on CUDA.
             for dtype in (torch.long, torch.half, torch.float):
@@ -3205,7 +3280,8 @@ class TestRandomTensorCreation(TestCase):
         self.assertEqual(res2.numel(), 0)
 
         # Test exceptions when n is too large for a floating point type
-        for dtype, small_n, large_n in ((torch.half, 2**11 + 1, 2**11 + 2),
+        for dtype, small_n, large_n in ((torch.uint8, 2**8, 2**8 + 1),
+                                        (torch.half, 2**11 + 1, 2**11 + 2),
                                         (torch.float, 2**24 + 1, 2**24 + 2),
                                         (torch.double, 2**25,  # 2**53 + 1 is too large to run
                                          2**53 + 2)):

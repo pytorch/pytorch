@@ -224,6 +224,12 @@ class ProcessGroup:
         output_tensors: List[Tensor],
         input_tensor: Tensor,
     ) -> Work: ...
+    def _allgather_base(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts = AllGatherOptions(),
+    ) -> Work: ...
     def allgather_coalesced(
         self,
         output_lists: List[List[Tensor]],
