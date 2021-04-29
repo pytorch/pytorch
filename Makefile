@@ -33,13 +33,25 @@ generate-gha-workflows:
 
 setup_lint:
 	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'flake8-py3' --step 'Install dependencies'
+	 	--job 'flake8-py3' --step 'Install dependencies' --no-quiet
 	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'cmakelint' --step 'Install dependencies'
+	 	--job 'cmakelint' --step 'Install dependencies' --no-quiet
+	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
+	 	--job 'mypy' --step 'Install dependencies' --no-quiet
+
+# TODO: This is broken on MacOS (it downloads a Linux binary)
+	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
+	 	--job 'quick-checks' --step 'Install ShellCheck' --no-quiet
 	pip install jinja2
 
 quick_checks:
-# TODO: This is broken when 'git config submodule.recurse' is 'true'
+	@python tools/actions_local_runner.py \
+		--file .github/workflows/lint.yml \
+		--job 'quick-checks' \
+		--step 'Extract scripts from GitHub Actions workflows'
+
+# TODO: This is broken when 'git config submodule.recurse' is 'true' since the
+# lints will descend into third_party submodules
 	@python tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--job 'quick-checks' \
@@ -50,6 +62,7 @@ quick_checks:
 		--step 'Ensure no unqualified noqa' \
 		--step 'Ensure no unqualified type ignore' \
 		--step 'Ensure no direct cub include' \
+		--step 'Run ShellCheck' \
 		--step 'Ensure correct trailing newlines'
 
 flake8:
@@ -59,8 +72,19 @@ flake8:
 		$(CHANGED_ONLY) \
 		--job 'flake8-py3' \
 		--step 'Run flake8'
+	@python tools/actions_local_runner.py \
+		--file .github/workflows/lint.yml \
+		--file-filter '.py' \
+		$(CHANGED_ONLY) \
+		--job 'flake8-py3' \
+		--step 'Fail if there were any warnings'
 
 mypy:
+	@if [ -z "$(CHANGED_ONLY)" ]; then \
+		python tools/actions_local_runner.py --file .github/workflows/lint.yml --job 'mypy' --step 'Run autogen'; \
+    else \
+        echo "mypy: Skipping typestub generation"; \
+    fi
 	@python tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--file-filter '.py' \
