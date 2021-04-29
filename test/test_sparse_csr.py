@@ -116,7 +116,6 @@ class TestSparseCSR(TestCase):
                     should_be_cuda = (device == 'cuda' or (device is None and values_device == 'cuda'))
                     self.assertEqual(should_be_cuda, t.is_cuda)
 
-    @onlyCPU
     def test_sparse_csr_print(self, device):
         shape_nnz = [
             ((10, 10), 10),

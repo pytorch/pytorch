@@ -58,7 +58,8 @@ Tensor sparse_csr_tensor(
       options.layout());
 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
-    auto crow_indices_accessor = crow_indices.accessor<index_t, 1>();
+    Tensor cpu_crow_indices = crow_indices.to(at::DeviceType::CPU);
+    auto crow_indices_accessor = cpu_crow_indices.accessor<index_t, 1>();
     TORCH_CHECK(
         crow_indices_accessor[crow_indices.numel() - 1] <= col_indices.numel(),
         "last value of crow_indices should be less than length of col_indices.");
@@ -109,10 +110,10 @@ Tensor sparse_csr_tensor(
   TORCH_CHECK(crow_indices.numel() >= 1, "expected crow_indices.numel() >= 1, but got ",
               crow_indices.numel());
   std::array<int64_t, 2> size;
-
   if (col_indices.numel() > 0) {
     size[0] = crow_indices.numel() - 1;
-    Tensor max_col_indices = std::get<0>(col_indices.max(0, false));
+    auto cpu_col_indices = crow_indices.to(at::DeviceType::CPU);
+    Tensor max_col_indices = std::get<0>(cpu_col_indices.max(0, false));
 
     AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
       auto crow_indices_accessor = crow_indices.accessor<index_t, 1>();
