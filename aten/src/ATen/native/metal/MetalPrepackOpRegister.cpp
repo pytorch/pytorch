@@ -48,8 +48,11 @@ TORCH_LIBRARY(metal, m) {
                 std::move(std::get<2>(state)),
                 std::move(std::get<3>(state)),
                 std::move(std::get<4>(state)),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<5>(state)),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<6>(state)),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<7>(state)));
           });
   m.def("copy_to_host(Tensor X) -> Tensor Y");

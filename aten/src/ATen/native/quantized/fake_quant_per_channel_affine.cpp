@@ -12,7 +12,9 @@ namespace at {
 namespace native {
 
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fake_quant_per_channel_cachemask_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fake_quant_grad_learnable_channel_stub);
 
 /* Per channel fake-quantizes the 'inputs' tensor.
@@ -219,6 +221,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
 
   // Create an axis mask for vectorizing and reshaping the scale and zero point tensors
   // into the same shapes as X along the channel axis.
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   int64_t* axis_mask = (int64_t *) calloc(numDimensions, sizeof(int64_t));
   for (int i = 0; i < numDimensions; ++i) {
     axis_mask[i] = (i == axis) ? X.size(axis) : 1;
@@ -244,6 +247,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
 
   // Create a collection of axes that include all but the channel axis for
   // reduction when summing over the dScale and dZeroPoint tensors.
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   int64_t* axis_for_reduction = (int64_t*) calloc(numElements, sizeof(int64_t));
   for (const auto i : c10::irange(axis)) {
     axis_for_reduction[i] = i;
@@ -255,7 +259,9 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   auto dScale = dScale_vec.sum(at::IntArrayRef(axis_for_reduction, numElements));
   auto dZeroPoint = dZeroPoint_vec.sum(at::IntArrayRef(axis_for_reduction, numElements));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(axis_mask);
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(axis_for_reduction);
   return std::make_tuple(dX, dScale, dZeroPoint);
 }

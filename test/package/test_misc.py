@@ -5,7 +5,7 @@ from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
 
-from torch.package import PackageExporter, PackageImporter
+from torch.package import PackageExporter, PackageImporter, is_from_package
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -20,8 +20,8 @@ class TestMisc(PackageTestCase):
 
     def test_file_structure(self):
         """
-        Tests package's Folder structure representation of a zip file. Ensures
-        that the returned Folder prints what is expected and filters
+        Tests package's Directory structure representation of a zip file. Ensures
+        that the returned Directory prints what is expected and filters
         inputs/outputs correctly.
         """
         buffer = BytesIO()
@@ -97,7 +97,7 @@ class TestMisc(PackageTestCase):
 
     def test_file_structure_has_file(self):
         """
-        Test Folder's has_file() method.
+        Test Directory's has_file() method.
         """
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
@@ -109,6 +109,28 @@ class TestMisc(PackageTestCase):
             export_file_structure = he.file_structure()
             self.assertTrue(export_file_structure.has_file("package_a/subpackage.py"))
             self.assertFalse(export_file_structure.has_file("package_a/subpackage"))
+
+    def test_is_from_package(self):
+        """is_from_package should work for objects and modules"""
+        import package_a.subpackage
+
+        buffer = BytesIO()
+        obj = package_a.subpackage.PackageASubpackageObject()
+
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.save_pickle("obj", "obj.pkl", obj)
+
+        buffer.seek(0)
+        pi = PackageImporter(buffer)
+        mod = pi.import_module("package_a.subpackage")
+        loaded_obj = pi.load_pickle("obj", "obj.pkl")
+
+        self.assertFalse(is_from_package(package_a.subpackage))
+        self.assertTrue(is_from_package(mod))
+
+        self.assertFalse(is_from_package(obj))
+        self.assertTrue(is_from_package(loaded_obj))
+
 
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_custom_requires(self):

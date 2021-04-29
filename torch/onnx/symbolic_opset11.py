@@ -256,6 +256,9 @@ def __getitem_(g, self, i):
         from torch.onnx.symbolic_opset9 import __getitem_ as getitem
         return getitem(g, self, i)
 
+def _set_item(g, tensor_list, i, v):
+    tensor_list = g.op("SequenceErase", tensor_list, i)
+    return g.op("SequenceInsert", tensor_list, v, i)
 
 def append(g, self, tensor):
     return g.op("SequenceInsert", self, tensor)
