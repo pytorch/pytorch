@@ -209,7 +209,7 @@ class ReflectionPad1d(_ReflectionPadNd):
                  [7., 6., 5., 4., 5., 6., 7., 6.]]])
 
     """
-    padding: Tuple[int, int] 
+    padding: Tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
         super(ReflectionPad1d, self).__init__()

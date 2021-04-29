@@ -13,6 +13,13 @@ using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::ReadAdapterInterface;
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
+enum MobileModuleLoadOptions {
+  OPERATOR_CHECK = 1,
+};
+
+const uint64_t _default_mobile_module_load_options =
+    MobileModuleLoadOptions::OPERATOR_CHECK;
+
 // The family of methods below load a serialized Mobile Module
 // into a mobile::Module object.
 TORCH_API mobile::Module _load_for_mobile(
@@ -29,6 +36,12 @@ TORCH_API mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files);
+
+TORCH_API mobile::Module _load_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options);
 
 TORCH_API mobile::Module _load_for_mobile(
     std::istream& in,
@@ -58,5 +71,22 @@ void _load_extra_only_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files);
+
+namespace mobile {
+
+/**
+ * Given a torch::jit::mobile::Module, return a set of operator names
+ * (with overload name) that are used by any method in this mobile
+ * Mobile. This method runs through the bytecode for all methods
+ * in the specified model (module), and extracts all the root
+ * operator names. Root operators are operators that are called
+ * directly by the model (as opposed to non-root operators, which
+ * may be called transitively by the root operators).
+ *
+ */
+TORCH_API std::set<std::string> _export_operator_list(
+    torch::jit::mobile::Module& module);
+
+} // namespace mobile
 } // namespace jit
 } // namespace torch

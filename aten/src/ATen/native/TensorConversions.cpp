@@ -54,11 +54,17 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
 
 Tensor to(
   const Tensor& self,
-  const TensorOptions& options_,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
   bool non_blocking,
   bool copy,
   c10::optional<c10::MemoryFormat> optional_memory_format
 ) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   TORCH_CHECK(
     !(options_.has_memory_format() && optional_memory_format.has_value()),
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
@@ -122,6 +128,7 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
     return self;
   }
   auto type_meta = c10::scalarTypeToTypeMeta(dtype);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(self.element_size() == type_meta.itemsize(),
     "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
   Storage storage = self.storage();

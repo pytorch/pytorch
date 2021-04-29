@@ -5,13 +5,18 @@
 #include "caffe2/operators/half_float_ops.h"
 #include "caffe2/utils/conversions.h"
 
+#include <c10/util/irange.h>
+
 #include <gtest/gtest.h>
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Float16, SimpleTest) {
   Workspace ws;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   vector<float> data = {0.1f, 0.23f, 1.6f, 8.2f, -13.9f};
 
   // loading input data
@@ -38,6 +43,7 @@ TEST(Float16, SimpleTest) {
   EXPECT_TRUE(outputBlob->IsType<Tensor>());
   const TensorCPU& outputTensor = outputBlob->Get<Tensor>();
   EXPECT_EQ(outputTensor.numel(), 5);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_NO_THROW(outputTensor.data<at::Half>());
 
   // decode fp16 -> fp32
@@ -57,25 +63,30 @@ TEST(Float16, SimpleTest) {
   const TensorCPU& resultTensor = resultBlob->Get<Tensor>();
   EXPECT_EQ(resultTensor.numel(), 5);
 
-  for (auto i = 0; i < data.size(); ++i) {
+  for (const auto i : c10::irange(data.size())) {
     EXPECT_NEAR(resultTensor.data<float>()[i], data[i], 0.01);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Float16, UniformDistributionTest) {
   Workspace ws;
 
   OperatorDef def;
   def.set_name("test");
   def.set_type("Float16UniformFill");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t size = 5000000L;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> shape = {size, 32};
   long tot_size = shape[0];
-  for (int i = 1; i < shape.size(); i++) {
+  for (const auto i : c10::irange(1, shape.size())) {
     tot_size *= shape[i];
   }
   caffe2::AddArgument<std::vector<int64_t>>("shape", shape, &def);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   caffe2::AddArgument<float>("min", -20.0, &def);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   caffe2::AddArgument<float>("max", 20.0, &def);
   def.add_output("result");
 
@@ -93,7 +104,9 @@ TEST(Float16, UniformDistributionTest) {
     mean += x;
     var += x * x;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   mean /= tot_size;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   var /= tot_size;
   LOG(INFO) << "m " << mean << " " << var;
 

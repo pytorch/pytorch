@@ -572,6 +572,126 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 }
 #endif
 
+template <>
+void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasStrsm(
+      handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb));
+}
+
+template <>
+void trsm<double>(CUDABLAS_TRSM_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDtrsm(
+      handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb));
+}
+
+template <>
+void trsm<c10::complex<float>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCtrsm(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuComplex*>(alpha),
+      reinterpret_cast<const cuComplex*>(A),
+      lda,
+      reinterpret_cast<cuComplex*>(B),
+      ldb));
+}
+
+template <>
+void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZtrsm(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuDoubleComplex*>(alpha),
+      reinterpret_cast<const cuDoubleComplex*>(A),
+      lda,
+      reinterpret_cast<cuDoubleComplex*>(B),
+      ldb));
+}
+
+template <>
+void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasStrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      alpha,
+      A,
+      lda,
+      B,
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      alpha,
+      A,
+      lda,
+      B,
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<c10::complex<float>>(
+    CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuComplex*>(alpha),
+      reinterpret_cast<cuComplex**>(A),
+      lda,
+      reinterpret_cast<cuComplex**>(B),
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<c10::complex<double>>(
+    CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuDoubleComplex*>(alpha),
+      reinterpret_cast<cuDoubleComplex**>(A),
+      lda,
+      reinterpret_cast<cuDoubleComplex**>(B),
+      ldb,
+      batchCount));
+}
+
 /* LEVEL 2 BLAS FUNCTIONS */
 
 #define GEMV_CHECK_ARGVALUES(Dtype)           \
@@ -760,8 +880,48 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
                                    reinterpret_cast<cuDoubleComplex*>(result)));
 }
 
-// This guards blocks use of getrfBatched and getriBatched on platforms other than cuda
+// This guards blocks use of geqrfBatched, getrfBatched, getriBatched on platforms other than cuda
 #ifdef CUDART_VERSION
+
+template <>
+void geqrfBatched<float>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasSgeqrfBatched(
+      handle, m, n, A_array, lda, tau_array, info, batchsize));
+}
+
+template <>
+void geqrfBatched<double>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDgeqrfBatched(
+      handle, m, n, A_array, lda, tau_array, info, batchsize));
+}
+
+template <>
+void geqrfBatched<c10::complex<float>>(
+    CUDABLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCgeqrfBatched(
+      handle,
+      m,
+      n,
+      reinterpret_cast<cuComplex**>(A_array),
+      lda,
+      reinterpret_cast<cuComplex**>(tau_array),
+      info,
+      batchsize));
+}
+
+template <>
+void geqrfBatched<c10::complex<double>>(
+    CUDABLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZgeqrfBatched(
+      handle,
+      m,
+      n,
+      reinterpret_cast<cuDoubleComplex**>(A_array),
+      lda,
+      reinterpret_cast<cuDoubleComplex**>(tau_array),
+      info,
+      batchsize));
+}
 
 template <>
 void getrfBatched<double>(

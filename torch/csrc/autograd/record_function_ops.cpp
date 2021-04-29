@@ -54,7 +54,8 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
         // ensures that profiling callbacks have ran. To ensure that this is
         // transparent, we must make this future propagate the value of the RPC
         // future.
-        return fut->constValue();
+        // Use value() here instead of constValue() to ensure we propagate errors.
+        return fut->value();
       };
   // Define a future that completes after the profiling callbacks are run.
   auto profiledFut = fut->then(at::wrapPropagateTLSState<c10::IValue>(
@@ -75,6 +76,7 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
         "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> Future(t)",

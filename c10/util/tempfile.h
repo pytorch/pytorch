@@ -100,6 +100,6 @@ inline TempFile make_tempfile(std::string name_prefix = "torch-file-") {
   if (auto tempfile = try_make_tempfile(std::move(name_prefix))) {
     return *tempfile;
   }
-  AT_ERROR("Error generating temporary file: ", std::strerror(errno));
+  TORCH_CHECK(false, "Error generating temporary file: ", std::strerror(errno));
 }
 } // namespace c10

@@ -5,7 +5,7 @@ from .activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid
 from .batchnorm import BatchNorm2d, BatchNorm3d
 from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
     InstanceNorm2d, InstanceNorm3d
-from .conv import Conv1d, Conv2d, Conv3d
+from .conv import _ConvNd, Conv1d, Conv2d, Conv3d
 from .conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .linear import Linear
 from .embedding_ops import Embedding, EmbeddingBag
@@ -37,10 +37,13 @@ class Quantize(torch.nn.Module):
     scale: torch.Tensor
     zero_point: torch.Tensor
 
-    def __init__(self, scale, zero_point, dtype):
+    def __init__(self, scale, zero_point, dtype, factory_kwargs=None):
+        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         super(Quantize, self).__init__()
-        self.register_buffer('scale', torch.tensor([scale]))
-        self.register_buffer('zero_point', torch.tensor([zero_point], dtype=torch.long))
+        self.register_buffer('scale', torch.tensor([scale], **factory_kwargs))
+        self.register_buffer('zero_point',
+                             torch.tensor([zero_point], dtype=torch.long,
+                                          **{k: v for k, v in factory_kwargs.items() if k != 'dtype'}))
         self.dtype = dtype
 
     def forward(self, X):
@@ -85,6 +88,7 @@ class DeQuantize(torch.nn.Module):
 __all__ = [
     'BatchNorm2d',
     'BatchNorm3d',
+    '_ConvNd',
     'Conv1d',
     'Conv2d',
     'Conv3d',

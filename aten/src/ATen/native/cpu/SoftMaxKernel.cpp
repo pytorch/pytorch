@@ -30,6 +30,7 @@ inline void _vec_log_softmax_lastdim(
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
   static constexpr int64_t CHUNK_SIZE = (128 / sizeof(scalar_t)) * Vec::size();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   if (grain_size < CHUNK_SIZE)
     grain_size = CHUNK_SIZE;
@@ -40,7 +41,9 @@ inline void _vec_log_softmax_lastdim(
       grain_size,
       [&](int64_t begin, int64_t end) {
         for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
+          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
           scalar_t tmp_sum_scalar[CHUNK_SIZE];
+          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
           scalar_t max_input_arr[CHUNK_SIZE];
           int64_t loop_end = CHUNK_SIZE;
           if (ii + CHUNK_SIZE > end)
@@ -76,7 +79,7 @@ inline void _vec_log_softmax_lastdim(
             scalar_t* output_data = output_data_base + i * dim_size;
             scalar_t tmp_sum = tmp_sum_scalar[j];
             scalar_t max_input = max_input_arr[j];
-            
+
             // It's necessary to keep the order of the operations below.
             // In some cases that input is large digits and the difference
             // is small, if we compute `max_input` plus `tmp_sum` before,
@@ -99,6 +102,7 @@ inline void _vec_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   if (grain_size < 1)
     grain_size = 1;
@@ -140,6 +144,7 @@ inline void _vec_host_softmax_backward_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   if (grain_size < 1)
     grain_size = 1;
@@ -153,6 +158,7 @@ inline void _vec_host_softmax_backward_lastdim(
           scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
           scalar_t* grad_data = grad_data_base + i * dim_size;
           scalar_t* output_data = output_data_base + i * dim_size;
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
           scalar_t sum;
           if (log_softmax) {
             sum = vec256::reduce_all<scalar_t>(
@@ -263,11 +269,15 @@ static void log_softmax_backward_lastdim_kernel_impl(
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(softmax_lastdim_kernel, &softmax_lastdim_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(log_softmax_lastdim_kernel, &log_softmax_lastdim_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     softmax_backward_lastdim_kernel,
     &softmax_backward_lastdim_kernel_impl);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     log_softmax_backward_lastdim_kernel,
     &log_softmax_backward_lastdim_kernel_impl);

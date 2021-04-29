@@ -1,4 +1,5 @@
 #include <c10/util/complex.h>
+#include <c10/util/math_compat.h>
 
 #include <cmath>
 
@@ -9,8 +10,10 @@
 // numerical errors when arg is close to 0, pi/2, pi, or 3pi/4
 // In that case provide a more conservative implementation which is
 // slower but less prone to those kinds of errors
+// In libstdc++ complex square root yield invalid results
+// for -x-0.0j unless C99 csqrt/csqrtf fallbacks are used
 
-#ifdef _LIBCPP_VERSION
+#if defined(_LIBCPP_VERSION) || (defined(__GLIBCXX__) && !defined(_GLIBCXX11_USE_C99_COMPLEX))
 
 namespace {
 template <typename T>

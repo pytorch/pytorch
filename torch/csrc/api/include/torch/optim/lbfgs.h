@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
@@ -17,19 +16,27 @@ namespace optim {
 struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
   LBFGSOptions(double lr = 1);
   TORCH_ARG(double, lr) = 1;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, max_iter) = 20;
   TORCH_ARG(c10::optional<int64_t>, max_eval) = c10::nullopt;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, tolerance_grad) = 1e-7;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, tolerance_change) = 1e-9;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(int64_t, history_size) = 100;
   TORCH_ARG(c10::optional<std::string>, line_search_fn) = c10::nullopt;
  public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const LBFGSOptions& lhs, const LBFGSOptions& rhs);
+  // NOLINTNEXTLINE(modernize-use-override)
   ~LBFGSOptions() = default;
+  double get_lr() const override;
+  void set_lr(const double lr) override;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSParamState> {
   TORCH_ARG(int64_t, func_evals) = 0;
   TORCH_ARG(int64_t, n_iter) = 0;
@@ -47,6 +54,7 @@ struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSPara
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs);
+  // NOLINTNEXTLINE(modernize-use-override)
   ~LBFGSParamState() = default;
 };
 
@@ -56,6 +64,7 @@ class TORCH_API LBFGS : public Optimizer {
        LBFGSOptions defaults = {}) : Optimizer(std::move(param_groups), std::make_unique<LBFGSOptions>(defaults)) {
      TORCH_CHECK(param_groups_.size() == 1, "LBFGS doesn't support per-parameter options (parameter groups)");
      if (defaults.max_eval() == c10::nullopt) {
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        auto max_eval_val = (defaults.max_iter() * 5) / 4;
        static_cast<LBFGSOptions&>(param_groups_[0].options()).max_eval(max_eval_val);
        static_cast<LBFGSOptions&>(*defaults_.get()).max_eval(max_eval_val);
@@ -64,6 +73,7 @@ class TORCH_API LBFGS : public Optimizer {
    }
    explicit LBFGS(
        std::vector<Tensor> params,
+       // NOLINTNEXTLINE(performance-move-const-arg)
        LBFGSOptions defaults = {}) : LBFGS({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   Tensor step(LossClosure closure) override;

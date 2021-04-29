@@ -5,7 +5,6 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 import threading
-import time
 
 import pytest
 import torch
@@ -13,7 +12,6 @@ import torch
 from torch.distributed.pipeline.sync.microbatch import Batch
 from torch.distributed.pipeline.sync.stream import CPUStream
 from torch.distributed.pipeline.sync.worker import Task, spawn_workers
-from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 
 class fake_device:
@@ -23,61 +21,6 @@ class fake_device:
 
     type = "fake"
     index = None
-
-
-@pytest.mark.skipif(TEST_WITH_TSAN, reason="False positive in TSAN")
-def test_join_running_workers():
-    count = 0
-
-    def counter():
-        nonlocal count
-        time.sleep(0.1)
-        count += 1
-        return Batch(())
-
-    with spawn_workers([fake_device() for _ in range(10)]) as (in_queues, out_queues):
-
-        def call_in_worker(i, f):
-            task = Task(CPUStream, compute=f, finalize=None)
-            in_queues[i].put(task)
-
-        for i in range(10):
-            call_in_worker(i, counter)
-
-    # There's no nondeterminism because 'spawn_workers' joins all running
-    # workers.
-    assert count == 10
-
-
-@pytest.mark.skipif(TEST_WITH_TSAN, reason="False positive in TSAN")
-def test_join_running_workers_with_exception():
-    class ExpectedException(Exception):
-        pass
-
-    count = 0
-
-    def counter():
-        nonlocal count
-        time.sleep(0.1)
-        count += 1
-        return Batch(())
-
-    with pytest.raises(ExpectedException):
-        with spawn_workers([fake_device() for _ in range(10)]) as (in_queues, out_queues):
-
-            def call_in_worker(i, f):
-                task = Task(CPUStream, compute=f, finalize=None)
-                in_queues[i].put(task)
-
-            for i in range(10):
-                call_in_worker(i, counter)
-
-            raise ExpectedException
-
-    # There's no nondeterminism because only 1 task can be placed in input
-    # queues.
-    assert count == 10
-
 
 def test_compute_multithreading():
     """Task.compute should be executed on multiple threads."""

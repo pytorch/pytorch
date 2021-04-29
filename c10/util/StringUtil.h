@@ -46,6 +46,7 @@ inline std::ostream& _str(std::ostream& ss) {
 
 template <typename T>
 inline std::ostream& _str(std::ostream& ss, const T& t) {
+  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   ss << t;
   return ss;
 }
@@ -80,7 +81,7 @@ struct _str_wrapper<std::string> final {
 
 template<>
 struct _str_wrapper<const char*> final {
-  static std::string call(const char* str) {
+  static const char* call(const char* str) {
     return str;
   }
 };

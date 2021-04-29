@@ -7,6 +7,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <cuda_runtime_api.h>
 
@@ -25,7 +26,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return DeviceType::CUDA;
   }
   Device exchangeDevice(Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.is_cuda());
     Device old_device = getDevice();
     if (old_device.index() != d.index()) {
       C10_CUDA_CHECK(cudaSetDevice(d.index()));
@@ -47,7 +48,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return Device(DeviceType::CUDA, device);
   }
   void setDevice(Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.is_cuda());
     Device current_device = getDevice();
     if (current_device != d) {
       C10_CUDA_CHECK(cudaSetDevice(d.index()));
@@ -64,6 +65,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   Stream getDefaultStream(Device d) const override {
     return getDefaultCUDAStream(d.index());
+  }
+  Stream getStreamFromPool(Device d, bool isHighPriority) const override {
+    // Use a qualified name to avoid calling ourselves recursively.
+    return c10::cuda::getStreamFromPool(isHighPriority, d.index());
   }
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
@@ -163,6 +168,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       C10_CUDA_CHECK(err);
     }
     return (err == cudaSuccess);
+  }
+
+  void recordDataPtrOnStream(
+    const c10::DataPtr& data_ptr,
+    const Stream& stream) const override {
+    CUDAStream cuda_stream{stream};
+    CUDACachingAllocator::recordStream(data_ptr, cuda_stream);
   }
 };
 

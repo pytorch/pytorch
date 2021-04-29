@@ -15,8 +15,8 @@ struct C10_API Storage {
   Storage(
       use_byte_size_t use_byte_size,
       size_t size_bytes,
-      Allocator* allocator,
-      bool resizable)
+      Allocator* allocator = nullptr,
+      bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             StorageImpl::use_byte_size_t(),
             size_bytes,
@@ -30,8 +30,8 @@ struct C10_API Storage {
       use_byte_size_t use_byte_size,
       size_t size_bytes,
       at::DataPtr data_ptr,
-      at::Allocator* allocator,
-      bool resizable)
+      at::Allocator* allocator = nullptr,
+      bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             StorageImpl::use_byte_size_t(),
             size_bytes,
@@ -134,7 +134,7 @@ struct C10_API Storage {
       size_t capacity,
       DeleterFnPtr d = nullptr) {
     if (!storage_impl_.unique()) {
-      AT_ERROR(
+      TORCH_CHECK(false,
           "UniqueStorageShareExternalPointer can only be called when use_count == 1");
     }
     storage_impl_->UniqueStorageShareExternalPointer(src, capacity, d);
@@ -144,7 +144,7 @@ struct C10_API Storage {
       at::DataPtr&& data_ptr,
       size_t capacity) {
     if (!storage_impl_.unique()) {
-      AT_ERROR(
+      TORCH_CHECK(false,
           "UniqueStorageShareExternalPointer can only be called when use_count == 1");
     }
     storage_impl_->UniqueStorageShareExternalPointer(

@@ -88,30 +88,19 @@ static void upsample_nearest1d_out_cuda_template(
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_nearest1d_out_cuda", {input_arg, output_arg});
 
-  TORCH_CHECK(
-      output_size.size() == 1,
-      "It is expected output_size equals to 1, but got size ",
-      output_size.size());
-
   int output_width = output_size[0];
 
   int nbatch = input_.size(0);
   int channels = input_.size(1);
   int input_width = input_.size(2);
 
-  upsample_1d_shape_check(
-      input_, Tensor(), nbatch, channels, input_width, output_width);
-
-  AT_ASSERT(input_width > 0 && output_width > 0);
-
   Tensor input = input_.contiguous();
-  output.resize_({input.size(0), input.size(1), output_width});
 
   if (input.numel() == 0) {
     return;
   }
 
-  // upsample_1d_shape_check makes sure `nbatch != 0`
+  // upsample_nearest1d meta call makes sure `nbatch != 0`
   unsigned int n = output.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
@@ -146,33 +135,19 @@ static void upsample_nearest1d_backward_out_cuda_template(
       "upsample_nearest1d_backward_out_cuda_template",
       {grad_output_arg, grad_input_arg});
 
-  TORCH_CHECK(
-      output_size.size() == 1,
-      "It is expected output_size equals to 1, but got size ",
-      output_size.size());
-
-  TORCH_CHECK(
-      input_size.size() == 3,
-      "It is expected input_size equals to 3, but got size ",
-      input_size.size());
-
   int output_width = output_size[0];
 
   int nbatch = input_size[0];
   int channels = input_size[1];
   int input_width = input_size[2];
 
-  upsample_1d_shape_check(
-      Tensor(), grad_output_, nbatch, channels, input_width, output_width);
-
   Tensor grad_output = grad_output_.contiguous();
-  grad_input.resize_({nbatch, channels, input_width});
 
   if (grad_input.numel() == 0) {
     return;
   }
 
-  // upsample_1d_shape_check makes sure `nbatch != 0`
+  // upsample_nearest1d meta call makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
@@ -216,33 +191,6 @@ TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_cuda) (
 ) {
   upsample_nearest1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales);
-}
-
-using at::native::upsample::compute_output_size;
-using at::native::upsample_cuda::get_scale_value;
-
-Tensor upsample_nearest1d_cuda(
-    const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_w = get_scale_value(scale_factors, 0);
-  upsample_nearest1d_out_cuda_template(output, input, osize, scale_w);
-  return output;
-}
-
-Tensor upsample_nearest1d_backward_cuda(
-    const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_w = get_scale_value(scale_factors, 0);
-  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_nearest1d_backward_out_cuda_template(
-      grad_input, grad_output, osize, input_size, scale_w);
-  return grad_input;
 }
 
 } // namespace native

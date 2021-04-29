@@ -177,17 +177,33 @@ const Expr* IRMutator::mutate(const Load* v) {
     }
     indices_new.push_back(new_ind);
   }
-  const Expr* mask = v->mask();
   const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
-  const Expr* mask_new = mask->accept_mutator(this);
-  if (buf == buf_new && !any_index_changed && mask == mask_new) {
+  if (buf == buf_new && !any_index_changed) {
     return v;
   }
-  return new Load(dtype, buf_new, indices_new, mask_new);
+  return new Load(dtype, buf_new, indices_new);
 }
 
 const Expr* IRMutator::mutate(const Buf* v) {
-  return v;
+  const Var* var = v->base_handle();
+  const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
+  if (!var_new) {
+    return nullptr;
+  }
+  bool any_change = var_new != var;
+
+  std::vector<const Expr*> dims_old = v->dims();
+  std::vector<const Expr*> dims_new(dims_old.size());
+  for (size_t i = 0; i < dims_old.size(); i++) {
+    dims_new[i] = dims_old[i]->accept_mutator(this);
+    any_change |= (dims_new[i] != dims_old[i]);
+  }
+
+  if (!any_change) {
+    return (Expr*)v;
+  }
+
+  return new Buf(var_new, dims_new, v->dtype());
 }
 
 const Expr* IRMutator::mutate(const Broadcast* v) {
@@ -217,13 +233,20 @@ const Expr* IRMutator::mutate(const IfThenElse* v) {
 }
 
 const Expr* IRMutator::mutate(const Intrinsics* v) {
-  const BaseCallNode* base = v;
-  return this->mutate(base);
-}
-
-const Expr* IRMutator::mutate(const FunctionCall* v) {
-  const BaseCallNode* base = v;
-  return this->mutate(base);
+  std::vector<const Expr*> params(v->nparams());
+  bool any_change = false;
+  for (int i = 0; i < v->nparams(); i++) {
+    const Expr* value = v->param(i);
+    const Expr* value_new = value->accept_mutator(this);
+    if (value != value_new) {
+      any_change = true;
+    }
+    params[i] = value_new;
+  }
+  if (!any_change) {
+    return v;
+  }
+  return new Intrinsics(v->op_type(), params);
 }
 
 const Expr* IRMutator::mutate(const Term* v) {
@@ -288,23 +311,6 @@ const Expr* IRMutator::mutate(const ReduceOp* v) {
   return new ReduceOp(body_new, new_reduce_args, v->reducer());
 }
 
-const Expr* IRMutator::mutate(const BaseCallNode* v) {
-  std::vector<const Expr*> params(v->nparams());
-  bool any_change = false;
-  for (int i = 0; i < v->nparams(); i++) {
-    const Expr* value = v->param(i);
-    const Expr* value_new = value->accept_mutator(this);
-    if (value != value_new) {
-      any_change = true;
-    }
-    params[i] = value_new;
-  }
-  if (!any_change) {
-    return v;
-  }
-  return v->DefaultMutator(params);
-}
-
 Stmt* IRMutator::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
@@ -363,15 +369,12 @@ Stmt* IRMutator::mutate(const Store* v) {
     indices_new.push_back(new_ind);
   }
   const Expr* value = v->value();
-  const Expr* mask = v->mask();
   const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
   const Expr* value_new = value->accept_mutator(this);
-  const Expr* mask_new = mask->accept_mutator(this);
-  if (buf == buf_new && !any_index_changed && value == value_new &&
-      mask == mask_new) {
+  if (buf == buf_new && !any_index_changed && value == value_new) {
     return (Stmt*)v;
   }
-  return new Store(buf_new, indices_new, value_new, mask_new);
+  return new Store(buf_new, indices_new, value_new);
 }
 
 Stmt* IRMutator::mutate(const AtomicAdd* v) {
@@ -425,34 +428,24 @@ Stmt* IRMutator::mutate(const ExternalCall* v) {
 }
 
 Stmt* IRMutator::mutate(const Allocate* v) {
-  const Var* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
-  bool any_change = buffer_var_new != buffer_var_old;
-
-  std::vector<const Expr*> dims_old = v->dims();
-  std::vector<const Expr*> dims_new(dims_old.size());
-  for (size_t i = 0; i < dims_old.size(); i++) {
-    dims_new[i] = dims_old[i]->accept_mutator(this);
-    any_change |= (dims_new[i] != dims_old[i]);
-  }
-
-  if (!any_change) {
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(buf_new);
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
-
-  return new Allocate(buffer_var_new, v->dtype(), dims_new);
+  return new Allocate(buf_new);
 }
 
 Stmt* IRMutator::mutate(const Free* v) {
-  const Expr* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
-  if (buffer_var_new == buffer_var_old) {
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(buf_new);
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
 
-  return new Free(buffer_var_new);
+  return new Free(buf_new);
 }
 
 Stmt* IRMutator::mutate(const Let* v) {
@@ -492,12 +485,6 @@ Stmt* IRMutator::mutate(const Cond* v) {
   return new Cond(cond_new, true_new, false_new);
 }
 
-const Expr* IRMutator::DefaultMutator(
-    const BaseCallNode* v,
-    std::vector<const Expr*>& params) {
-  return v->DefaultMutator(params);
-}
-
 class StmtClone : public IRMutator {
  public:
   Stmt* mutate(const For* v) override;
@@ -526,7 +513,7 @@ Stmt* StmtClone::mutate(const Block* v) {
 }
 
 Stmt* StmtClone::mutate(const Store* v) {
-  return new Store(v->buf(), v->indices(), v->value(), v->mask());
+  return new Store(v->buf(), v->indices(), v->value());
 }
 
 Stmt* StmtClone::mutate(const AtomicAdd* v) {
@@ -534,11 +521,11 @@ Stmt* StmtClone::mutate(const AtomicAdd* v) {
 }
 
 Stmt* StmtClone::mutate(const Allocate* v) {
-  return new Allocate(v->buffer_var(), v->dtype(), v->dims());
+  return new Allocate(v->buf());
 }
 
 Stmt* StmtClone::mutate(const Free* v) {
-  return new Free(v->buffer_var());
+  return new Free(v->buf());
 }
 
 Stmt* StmtClone::mutate(const Let* v) {

@@ -12,6 +12,9 @@
 
 namespace c10 {
 
+// Forward declaration
+class DataPtr;
+
 /**
  * Flags defining the behavior of events.
  *
@@ -110,6 +113,13 @@ struct C10_API DeviceGuardImplInterface {
   }
 
   /**
+   * Get a stream from the global pool for a given device.
+   */
+  virtual Stream getStreamFromPool(Device, bool isHighPriority = false) const {
+    TORCH_CHECK(false, "Backend doesn't support acquiring a stream from pool.")
+  }
+
+  /**
    * Set a stream to be the thread local current stream for its device.
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
@@ -168,11 +178,73 @@ struct C10_API DeviceGuardImplInterface {
    */
   virtual DeviceIndex deviceCount() const noexcept = 0;
 
+
+  /**
+   * Ensure the caching allocator (if any) is aware that the given DataPtr is
+   * being used on the given stream, and that it should thus avoid recycling the
+   * DataPtr until all work on that stream is done.
+   */
+  virtual void recordDataPtrOnStream(const c10::DataPtr&, const Stream&) const { }
+
   /**
    * Intended use of this class is to leak the DeviceGuardImpl at program end.
    * So you better not call the destructor, buster!
    */
   virtual ~DeviceGuardImplInterface() = default;
+};
+
+// A no-op device guard impl that doesn't do anything interesting.  Useful
+// for devices that don't actually have a concept of device index.  Prominent
+// examples are CPU and Meta.
+template <DeviceType D>
+struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
+  NoOpDeviceGuardImpl() {}
+  DeviceType type() const override {
+    return D;
+  }
+  Device exchangeDevice(Device) const override {
+    return Device(D, -1); // no-op
+  }
+  Device getDevice() const override {
+    return Device(D, -1);
+  }
+  void setDevice(Device) const override {
+    // no-op
+  }
+  void uncheckedSetDevice(Device d) const noexcept override {
+    // no-op
+  }
+  Stream getStream(Device d) const noexcept override {
+    // no-op
+    return Stream(Stream::DEFAULT, Device(D, -1));
+  }
+  // NB: These do NOT set the current device
+  Stream exchangeStream(Stream s) const noexcept override {
+    // no-op
+    return Stream(Stream::DEFAULT, Device(D, -1));
+  }
+  DeviceIndex deviceCount() const noexcept override {
+    return 1;
+  }
+
+  // Event-related functions
+  void record(void** event,
+    const Stream& stream,
+    const DeviceIndex device_index,
+    const EventFlag flag) const override {
+    TORCH_CHECK(false, D, " backend doesn't support events.");
+  }
+  void block(
+    void* event,
+    const Stream& stream) const override {
+    TORCH_CHECK(false, D, " backend doesn't support events.")
+  }
+  bool queryEvent(void* event) const override {
+    TORCH_CHECK(false, D, " backend doesn't support events.")
+  }
+  void destroyEvent(
+    void* event,
+    const DeviceIndex device_index) const noexcept override { }
 };
 
 // The registry is NON-owning.  Each stored pointer is std::atomic so

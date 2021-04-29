@@ -46,6 +46,10 @@ bool PrefixStore::deleteKey(const std::string& key) {
   return store_->deleteKey(joinKey(key));
 }
 
+void PrefixStore::watchKey(const std::string& key, WatchKeyCallback callback) {
+  return store_->watchKey(joinKey(key), std::move(callback));
+}
+
 int64_t PrefixStore::getNumKeys() {
   return store_->getNumKeys();
 }
@@ -65,6 +69,14 @@ void PrefixStore::wait(
     const std::chrono::milliseconds& timeout) {
   auto joinedKeys = joinKeys(keys);
   store_->wait(joinedKeys, timeout);
+}
+
+const std::chrono::milliseconds& PrefixStore::getTimeout() const noexcept {
+  return store_->getTimeout();
+}
+
+void PrefixStore::setTimeout(const std::chrono::milliseconds& timeout) {
+  store_->setTimeout(timeout);
 }
 
 } // namespace c10d

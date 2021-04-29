@@ -15,7 +15,7 @@
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
-  auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch.tensor"));
+  auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch._tensor"));
   if (!tensor_module)
     return nullptr;
 
@@ -95,6 +95,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("FPGA", c10::DeviceType::FPGA)
       .value("MSNPU", c10::DeviceType::MSNPU)
       .value("XLA", c10::DeviceType::XLA)
+      .value("MLC", c10::DeviceType::MLC)
+      .value("Meta", c10::DeviceType::Meta)
       .value("Vulkan", c10::DeviceType::Vulkan)
       .value("Metal", c10::DeviceType::Metal);
 
@@ -137,6 +139,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
           return std::vector<std::vector<int64_t>>();
         }
       })
+      .def("dtypes", [](const KinetoEvent& e) {
+        if (e.hasTypes()) {
+          return e.dtypes();
+        } else {
+          return std::vector<std::string>();
+        }
+      })
       // stack traces of the PyTorch CPU events
       .def("stack", [](const KinetoEvent& e) {
         if (e.hasStack()) {
@@ -173,9 +182,16 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
+  m.def("_add_metadata", addMetadata);
 #endif
 
-  m.def("kineto_available", kinetoAvailable);
+  m.def("kineto_available", []() {
+#ifdef USE_KINETO
+    return true;
+#else
+    return false;
+#endif
+  });
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
   py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")

@@ -258,19 +258,8 @@ void IRPrinter::visit(const IfThenElse* v) {
        << *v->false_value() << ")";
 }
 
-void IRPrinter::visit(const BaseCallNode* v) {
+void IRPrinter::visit(const Intrinsics* v) {
   os() << v->func_name() << "(";
-  for (int i = 0; i < v->nparams(); i++) {
-    if (i > 0) {
-      os() << ", ";
-    }
-    os() << *v->param(i);
-  }
-  os() << ")";
-}
-
-void IRPrinter::visit(const FunctionCall* v) {
-  os() << *v->tensor()->buf() << "(";
   for (int i = 0; i < v->nparams(); i++) {
     if (i > 0) {
       os() << ", ";
@@ -429,8 +418,9 @@ void IRPrinter::visit(const Block* v) {
 
 void IRPrinter::visit(const Allocate* v) {
   emitIndent();
-  os() << "Allocate(" << *v->buffer_var() << ", " << v->dtype().ToCppString();
-  os() << ", {";
+  os() << "Allocate(" << *v->buffer_var()
+       << "); // dtype=" << v->dtype().ToCppString();
+  os() << ", dims=[";
   const std::vector<const Expr*>& dims = v->dims();
   for (size_t i = 0; i < dims.size(); i++) {
     if (i != 0) {
@@ -438,7 +428,7 @@ void IRPrinter::visit(const Allocate* v) {
     }
     os() << *dims[i];
   }
-  os() << "});" << std::endl;
+  os() << "]" << std::endl;
 }
 
 void IRPrinter::visit(const Free* v) {

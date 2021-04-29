@@ -22,6 +22,10 @@ inline void parallel_for(
   if (begin >= end) {
     return;
   }
+  if (end - begin == 1) {
+    f(begin, end);
+    return;
+  }
 #ifdef _OPENMP
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;

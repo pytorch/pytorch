@@ -8,6 +8,7 @@
 
 using namespace at;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int test_int;
 
 Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout,
@@ -25,7 +26,7 @@ Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::op
   return Tensor(std::move(tensor_impl));
 }
 
-Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
+Tensor add_override(const Tensor & a, const Tensor & b , const Scalar& c) {
   test_int = 2;
   return a;
 }
@@ -47,7 +48,9 @@ TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
   m.impl("aten::add.Tensor",           add_override);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendExtensionTest, TestRegisterOp) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
   ASSERT_EQ(a.device().index(), 1);
@@ -63,6 +66,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   ASSERT_EQ(test_int, 2);
 
   // Ensure that non-MSNPU operator still works
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor d = empty({5, 5}, at::kCPU);
   ASSERT_EQ(d.device().type(), at::kCPU);
 }

@@ -56,12 +56,14 @@ bool isDecomposableNorm(Node* normalize_op) {
   return false;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_ops(
     {Operator(
          "aten::_ncf_unsqueeze(Tensor(a) self, int ndim) -> Tensor(a)",
          [](Stack* stack) {
            const int64_t ndim = pop(stack).toInt();
            auto self = pop(stack).toTensor();
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            c10::SmallVector<int64_t, 8> sizes(ndim, 1);
            AT_ASSERT(self.dim() == 1);
            sizes.at(1) = self.size(0);
@@ -75,6 +77,7 @@ RegisterOperators reg_ops(
            auto input_shape = pop(stack).toIntList();
            auto self = pop(stack).toTensor();
            const int64_t input_ndim = input_shape.size();
+           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            c10::SmallVector<int64_t, 8> sizes(input_ndim, 1);
            for (int i = 0; i < input_ndim - normalized_ndim; ++i) {
              sizes.at(i) = input_shape.get(i);
@@ -98,8 +101,8 @@ bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
       // and both of those scalars are equal to 1.0, decompose this into an mm
       // followed by an add so that it can go through the existing optimization
       // (batchmm)
-      if (it->get<at::Scalar>(attr::alpha)->toDouble() != 1.0 ||
-          it->get<at::Scalar>(attr::beta)->toDouble() != 1.0) {
+      if (it->get<at::Scalar>(attr::alpha)->toComplexDouble() != 1.0 ||
+          it->get<at::Scalar>(attr::beta)->toComplexDouble() != 1.0) {
         continue;
       }
 

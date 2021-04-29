@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/InferenceMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
@@ -9,7 +10,8 @@
 namespace at {
 
 // Thread local state contains values that are preserved across
-// thread boundaries (e.g. at::launch/JIT fork, autograd, at::parallel_for)
+// thread boundaries (e.g. at::launch/JIT fork, autograd).
+// Note at::parallel_for doesn't preserve TLS across thread boundaries.
 class TORCH_API ThreadLocalState {
  public:
   // Saves the thread local variables' values and
@@ -37,6 +39,9 @@ class TORCH_API ThreadLocalState {
   bool keep_grad_mode_ = true;
   bool grad_mode_enabled_;
 #endif
+
+  // TLS for InferenceMode
+  bool inference_mode_enabled_;
 
   // Whether pre-sampling RecordFunction optimization was enabled
   bool bumped_record_all_functions_ = false;
