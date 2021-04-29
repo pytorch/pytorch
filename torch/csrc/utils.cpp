@@ -147,6 +147,7 @@ void THPUtils_setError(const char *format, ...)
   va_list fmt_args;
 
   va_start(fmt_args, format);
+  // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
   vsnprintf(buffer, ERROR_BUFFER_SIZE, format, fmt_args);
   va_end(fmt_args);
   PyErr_SetString(PyExc_RuntimeError, buffer);
@@ -201,6 +202,7 @@ void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
   va_list option_list;
   va_start(option_list, num_options);
   for (size_t i = 0; i < num_options; i++)
+    // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
     option_strings.emplace_back(va_arg(option_list, const char*));
   va_end(option_list);
 

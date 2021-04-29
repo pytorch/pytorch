@@ -237,6 +237,7 @@ const WorkerInfo& RpcAgent::getWorkerInfo() const {
   return workerInfo_;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::shared_ptr<RpcAgent> RpcAgent::currentRpcAgent_ = nullptr;
 
 bool RpcAgent::isCurrentRpcAgentSet() {

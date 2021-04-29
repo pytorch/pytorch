@@ -10,8 +10,10 @@ namespace rpc {
 const std::string REMOTE_PROFILING_KEY_PREFIX = "#remote_op: ";
 constexpr int kAutoIncrementBits = 48;
 /*static */ thread_local c10::optional<std::string>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     RemoteProfilerManager::currentThreadLocalKey_ = c10::nullopt;
 /*static */ RemoteProfilerManager& RemoteProfilerManager::getInstance() {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static RemoteProfilerManager* handler = new RemoteProfilerManager();
   return *handler;
 }

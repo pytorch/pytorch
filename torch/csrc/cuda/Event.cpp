@@ -12,6 +12,7 @@
 #include <structmember.h>
 #include <cuda_runtime_api.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THCPEventClass = nullptr;
 
 static PyObject * THCPEvent_pynew(
@@ -180,6 +181,7 @@ static PyMethodDef THCPEvent_methods[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THCPEventType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._CudaEventBase",             /* tp_name */

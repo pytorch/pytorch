@@ -17,7 +17,9 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_TRIGGER(cuda_codegen_created);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_TRIGGER(cuda_codegen_executed);
 
 // A RAII wrapper to manage a variable and name pair in the look-up table.
@@ -910,6 +912,7 @@ static const char* device_resource_string = R"(
 
 )";
 #else
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* device_resource_string = R"(
 #define NAN __int_as_float(0x7fffffff)
 #define POS_INFINITY __int_as_float(0x7f800000)
@@ -918,6 +921,7 @@ static const char* device_resource_string = R"(
 )";
 #endif
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* shared_resource_string = R"(
 template<typename T>
 __device__ T maximum(T a, T b) {
@@ -1308,6 +1312,7 @@ void CudaCodeGen::CompileToNVRTC(
 
 CudaCodeGen::~CudaCodeGen() = default;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCodeGen<CudaCodeGen> cuda_codegen_reg("cuda_codegen");
 
 } // namespace tensorexpr

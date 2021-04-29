@@ -549,16 +549,22 @@ void initTensorExprBindings(PyObject* module) {
         std::vector<ArgValue> argInputs;
         for (auto inp : inputs) {
           if (py::isinstance<Placeholder>(inp)) {
+            // NOLINTNEXTLINE(modernize-use-emplace)
             argInputs.push_back(py::cast<Placeholder>(inp).handle());
           } else if (py::isinstance<BufHandle>(inp)) {
+            // NOLINTNEXTLINE(modernize-use-emplace)
             argInputs.push_back(py::cast<BufHandle>(inp));
           } else if (py::isinstance<VarHandle>(inp)) {
+            // NOLINTNEXTLINE(modernize-use-emplace)
             argInputs.push_back(py::cast<VarHandle>(inp));
           } else if (py::isinstance<py::float_>(inp)) {
+            // NOLINTNEXTLINE(modernize-use-emplace)
             argInputs.push_back(py::cast<double>(inp));
           } else if (py::isinstance<py::int_>(inp)) {
+            // NOLINTNEXTLINE(modernize-use-emplace)
             argInputs.push_back(py::cast<int64_t>(inp));
           } else if (py::isinstance<py::none>(inp)) {
+            // NOLINTNEXTLINE(modernize-use-emplace)
             argInputs.push_back(ArgNone());
           } else {
             throw std::runtime_error("nyi");

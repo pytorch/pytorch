@@ -330,6 +330,7 @@ NvrtcFunction nvrtcCompile(
     } else {
       TORCH_WARN_ONCE(
           "acceptable range for PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL is between 0 and 4, but received ",
+          // NOLINTNEXTLINE(clang-diagnostic-uninitialized-const-reference)
           jit_opt_level,
           ", ignoring the option");
     }

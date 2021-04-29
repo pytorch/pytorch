@@ -59,6 +59,7 @@ static const char* VOLATILE_WARNING =
 // there are muliple copies of the python interpreter that
 // can shared Tensors, so rather than use their internal pointer
 // to a PyObject use a library-local map.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_map<void*, PyObject*> impl_to_pyobj;
 
 void set_pyobj(const Variable& self, PyObject* pyobj) {

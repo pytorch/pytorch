@@ -29,7 +29,9 @@
 
 using namespace torch;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THCState *state = nullptr;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool in_bad_fork = false;  // True for children forked after cuda init
 
 #ifndef WIN32
@@ -247,6 +249,7 @@ PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
 // e.g. allocate a new tensor which will cause a deadlock. It's enough to have a
 // single global, because it can be only set once (cudaMutex is not recursive)
 // by the thread that owns the mutex (obviously there can be only one such thread).
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyGILState_STATE cudaMutexGILState;
 
 PyObject * THCPModule_cudaLockMutex(PyObject *module, PyObject *noargs)

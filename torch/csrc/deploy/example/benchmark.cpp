@@ -18,6 +18,7 @@
 
 typedef void (*function_type)(const char*);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool cuda = false;
 
 constexpr auto latency_p = {

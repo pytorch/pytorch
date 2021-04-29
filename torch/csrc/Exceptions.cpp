@@ -132,6 +132,7 @@ static std::string formatMessage(const char *format, va_list fmt_args) {
   static const size_t ERROR_BUF_SIZE = 1024;
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char error_buf[ERROR_BUF_SIZE];
+  // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
   vsnprintf(error_buf, ERROR_BUF_SIZE, format, fmt_args);
 
   // Ensure that the string is null terminated

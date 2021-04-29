@@ -50,6 +50,7 @@ static PyObject * THPStorage_(isPinned)(PyObject *_self, PyObject *noargs)
 static PyObject * THPStorage_(elementSize)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   auto self = (THPStorage*)_self;
   return THPUtils_packInt64(THWStorage_(elementSize)(LIBRARY_STATE_NOARGS));
   END_HANDLE_TH_ERRORS
@@ -58,6 +59,7 @@ static PyObject * THPStorage_(elementSize)(PyObject *_self, PyObject *noargs)
 static PyObject * THPStorage_(new)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   auto self = (THPStorage*)_self;
   THWStoragePtr new_storage(THWStorage_(new)(LIBRARY_STATE_NOARGS));
   PyObject *_ret = THPStorage_(New)(new_storage);

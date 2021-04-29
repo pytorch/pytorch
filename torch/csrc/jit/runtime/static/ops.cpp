@@ -1236,6 +1236,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
   };
 });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     aten::layer_norm,
     aten_layer_norm,
@@ -1298,6 +1299,7 @@ REGISTER_OPERATOR_FUNCTOR(
  *                          ScalarType dtype)
  * norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False)
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
   TORCH_CHECK(
       n->inputs().size() > 2,

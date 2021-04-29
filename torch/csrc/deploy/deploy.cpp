@@ -9,7 +9,9 @@
 // it into a symbol that is then linked into libtorch_deploy.so. This enables us
 // to simply copy the contents of this symbol to disk and dlopen it to create an
 // instance of python.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern "C" char _binary_libtorch_deployinterpreter_so_start[];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern "C" char _binary_libtorch_deployinterpreter_so_end[];
 
 namespace torch {

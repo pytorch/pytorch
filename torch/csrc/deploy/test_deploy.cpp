@@ -33,7 +33,9 @@ void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
   ASSERT_TRUE(ref_output.allclose(output, 1e-03, 1e-05));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* simple = "torch/csrc/deploy/example/generated/simple";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* simple_jit = "torch/csrc/deploy/example/generated/simple_jit";
 
 const char* path(const char* envname, const char* path) {
@@ -41,16 +43,19 @@ const char* path(const char* envname, const char* path) {
   return e ? e : path;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, SimpleModel) {
   compare_torchpy_jit(path("SIMPLE", simple), path("SIMPLE_JIT", simple_jit));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, ResNet) {
   compare_torchpy_jit(
       path("RESNET", "torch/csrc/deploy/example/generated/resnet"),
       path("RESNET_JIT", "torch/csrc/deploy/example/generated/resnet_jit"));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, Movable) {
   torch::deploy::InterpreterManager m(1);
   torch::deploy::ReplicatedObj obj;
@@ -63,6 +68,7 @@ TEST(TorchpyTest, Movable) {
   obj.acquire_session();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, MultiSerialSimpleModel) {
   torch::deploy::InterpreterManager manager(3);
   torch::deploy::Package p = manager.load_package(path("SIMPLE", simple));
@@ -87,6 +93,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, ThreadedSimpleModel) {
   size_t nthreads = 3;
   torch::deploy::InterpreterManager manager(nthreads);

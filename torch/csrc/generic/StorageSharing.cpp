@@ -26,6 +26,7 @@ static PyObject * THPStorage_(sharedDecref)(PyObject *_self, PyObject *noargs)
 static PyObject * THPStorage_(sharedIncref)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   auto self = (THPStorage*)_self;
 #ifndef THC_GENERIC_FILE
   THWStorage *storage = self->cdata;
@@ -236,6 +237,7 @@ static PyObject * THPStorage_(shareCuda)(PyObject *_self, PyObject *noargs)
   }
 
   at::DeviceGuard device_guard(storage->device());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   THPObjectPtr tuple(PyTuple_New(8));
   THPObjectPtr device(THPUtils_packInt32(storage->device().index()));
   THPObjectPtr _handle(Py_None);
