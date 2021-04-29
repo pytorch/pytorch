@@ -378,6 +378,7 @@ class profile(object):
         for i in range(device_count):
             device_prop = torch.cuda.get_device_properties(i)
             devices.append({
+                "id": i,
                 "name": device_prop.name,
                 "multi_processor_count": device_prop.multi_processor_count,
                 "total_memory": device_prop.total_memory
