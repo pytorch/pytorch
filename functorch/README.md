@@ -156,6 +156,10 @@ batched jacobians:
 >>> hessian = jacrev(jacrev(f))(x)
 ```
 
+## Debugging
+`functorch._C.dump_tensor`: Dumps dispatch keys on stack
+`torch._C._debug_only_display_vmap_fallback_warnings(True)`: Shows vmap fallbacks to loop/stack
+
 ## Future Plans
 
 In the end state, we'd like to upstream this into PyTorch once we iron out the
