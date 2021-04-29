@@ -143,10 +143,7 @@ bool InterpreterState::run(Stack& stack) {
           auto userObj = pop(stack).toObject();
           // Mobile only: since the number of slots is not known, resize the
           // numAttributes before setSlot.
-          // clang-tidy complains about size_t compare with int32_t (inst.X)
-          // hence the cast
-          while (static_cast<int32_t>(userObj->type()->numAttributes()) <=
-                 inst.X) {
+          while (userObj->type()->numAttributes() <= inst.X) {
             std::stringstream ss;
             ss << userObj->type()->numAttributes();
             userObj->type()->addAttribute(ss.str(), c10::NoneType::create());
