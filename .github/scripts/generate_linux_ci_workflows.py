@@ -33,6 +33,7 @@ class PyTorchLinuxWorkflow:
             f"workflows/{self.build_environment}.yml"
         )
         with open(output_file_path, "w") as output_file:
+            output_file.writelines(["# @generated DO NOT EDIT MANUALLY\n"])
             output_file.write(
                 workflow_template.render(
                     build_environment=self.build_environment,
