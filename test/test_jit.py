@@ -10393,6 +10393,76 @@ dedent """
         self.assertEqual(w.grad, w_ref.grad)
         self.assertEqual(b.grad, b_ref.grad)
 
+    def test_batch_norm_grad_training(self):
+        with enable_profiling_mode_for_profiling_tests():
+            class MyBatchNorm(torch.nn.Module):
+                def __init__(self, num_features, affine, track_running_stats):
+                    super(MyBatchNorm, self).__init__()
+                    self.bn = torch.nn.BatchNorm2d(num_features, 1e-5, affine=affine, track_running_stats=track_running_stats).float()
+
+                def forward(self, x: torch.Tensor):
+                    o = self.bn(x)
+                    o = torch.nn.functional.relu(o)
+                    return o
+
+            batch = 4
+            c = 2
+            hw = 3
+            # Initialize param and input values
+            x_init = torch.randn(batch, c, hw, hw, dtype=torch.float).cuda()
+            grad = torch.randn(batch, c, hw, hw, dtype=torch.float).cuda()
+
+            for training, affine, track_running_stats in product((True, False), repeat=3):
+                module = torch.jit.script(MyBatchNorm(c, affine, track_running_stats)).cuda()
+                ref_module = MyBatchNorm(c, affine, track_running_stats).cuda()
+
+                if not training:
+                    module.eval()
+                    ref_module.eval()
+
+                jit_module = torch.jit.script(module)
+                ref_module.load_state_dict(module.state_dict())
+
+                x = x_init.detach().clone()
+                x.requires_grad_()
+                x_ref = x_init.detach().clone()
+                x_ref.requires_grad_()
+
+                # Test symbolic differentiation
+                # Run Forward and Backward thrice to trigger autodiff graph
+                for i in range(0, 3):
+                    y = jit_module(x)
+                    y.backward(grad)
+
+                x.grad.zero_()
+
+                if track_running_stats:
+                    module.bn.running_mean.zero_()
+                    module.bn.running_var.fill_(1.0)
+                    ref_module.bn.running_mean.zero_()
+                    ref_module.bn.running_var.fill_(1.0)
+                if affine and training:                                          
+                    module.bn.weight.grad.zero_()                                
+                    module.bn.bias.grad.zero_()                                  
+                    #ref_module.bn.weight.grad.zero_()
+                    #ref_module.bn.bias.grad.zero_()
+
+                # run jitted module
+                y = jit_module(x)
+                y.backward(grad)
+                # reference computation
+                y_ref = ref_module(x_ref)
+                y_ref.backward(grad)
+
+                self.assertEqual(y_ref, y)
+                self.assertEqual(x.grad, x_ref.grad)
+                if track_running_stats:
+                    self.assertEqual(module.bn.running_mean, ref_module.bn.running_mean)
+                    self.assertEqual(module.bn.running_var, ref_module.bn.running_var)
+                if affine and training:
+                    self.assertEqual(module.bn.weight.grad, ref_module.bn.weight.grad)
+                    self.assertEqual(module.bn.bias.grad, ref_module.bn.bias.grad)
+
     def test_zeros(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
