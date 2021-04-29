@@ -92,6 +92,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // then the permuted output is a view of bmm(left, right)
   // finally, opermutation reverts the permutation to the original order of dimensions
   std::vector<int64_t> out_size;
+  // NOLINTNEXTLINE(performance-inefficient-vector-operation)
   for (auto& d : lro) out_size.push_back(left.size(d));
   for (auto& d : lo) out_size.push_back(left.size(d));
   for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warining about not using d
@@ -134,6 +135,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // finally squeeze summed dimensions if desired
   if (! keepdim) {
     auto sizes = result.sizes().vec();
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     for (int i = dim-1; i>=0; i--) {
       if (sum_dims[i]) {
         sizes.erase(sizes.begin() + i);
@@ -658,15 +660,16 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   auto result_dtype = result_tmp.scalar_type();
   auto output_tensor_dtype = result.scalar_type();
   auto output_device = result.device();
-  auto input_device = input1.device();
+  auto input1_device = input1.device();
+  auto input2_device = input2.device();
   // check if the input & output tensors are on the same device.
   TORCH_CHECK(
-    output_device == input_device,
+    (output_device == input1_device) && (input1_device == input2_device),
     "tensordot: Expected the output and input tensors to be on the "
-    "same device, but got output on ", output_device, " and inputs on ",
-    input_device);
+    "same device, but got the output tensor on ", output_device,
+    ", input tensor a on ", input1_device, ", and input tensor b on ", input2_device);
   // check if the computed result has the same dtype as the out tensor
-  //   (because tensordot does not support type promotion)
+  // (because tensordot does not support type promotion)
   TORCH_CHECK(
     result_dtype == output_tensor_dtype, "tensordot",
     ": Expected the output tensor to have dtype ", result_dtype,
