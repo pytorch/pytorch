@@ -3791,7 +3791,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 dtypes=[torch.int],
                                 active_if=IS_WINDOWS),
-                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 dtypes=(torch.float32, )),
                    )),
     OpInfo('resolve_conj',
