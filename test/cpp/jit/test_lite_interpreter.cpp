@@ -610,7 +610,7 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
 }
 
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
-  int64_t runtime_bytecode_version = mobile::_get_runtime_bytecode_version();
+  auto runtime_bytecode_version = _get_runtime_bytecode_version();
   AT_ASSERT(
       runtime_bytecode_version == caffe2::serialize::kProducedBytecodeVersion);
 }

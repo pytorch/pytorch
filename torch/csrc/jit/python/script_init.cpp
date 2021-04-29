@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
-#include <torch/csrc/jit/mobile/runtime_bytecode_version.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
@@ -1685,9 +1684,6 @@ void initJitScriptBindings(PyObject* module) {
         }
         return _load_for_mobile(in, optional_device);
       });
-  m.def("_get_runtime_bytecode_version", []() {
-    return mobile::_get_runtime_bytecode_version();
-  });
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
   });
