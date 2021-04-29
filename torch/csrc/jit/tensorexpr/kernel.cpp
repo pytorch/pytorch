@@ -384,6 +384,41 @@ ExprHandle tensorOrConstant(
   }
   return constant(v);
 }
+ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
+  if (v->node()->kind() == prim::Constant) {
+    const auto val = toIValue(v).value();
+    if (val.isDouble()) {
+      return DoubleImm::make(val.toDouble());
+    } else if (val.isInt()) {
+      return LongImm::make(val.toInt());
+    } else if (val.isBool()) {
+      return BoolImm::make(val.toBool());
+    } else if (val.isNone()) {
+      // This is just a placeholder so we don't throw.  None-handling
+      // is operator-specific and should be handled properly in
+      // the operator-specific lowering code.
+      return IntImm::make(0);
+    } else {
+      throw unsupported_dtype();
+    }
+  }
+
+  if (!scalars_.count(v)) {
+    throw malformed_input("no scalar in Constant");
+  }
+
+  return scalars_.at(v);
+}
+
+ExprHandle TensorExprKernel::tensorOrConstant(
+    const torch::jit::Value* v,
+    const std::vector<ExprHandle>& axes) {
+  auto ti = bufs_.find(v);
+  if (ti != bufs_.end()) {
+    return broadcast(BufHandle(ti->second), axes);
+  }
+  return constant(v);
+}
 
 // Convert boolean to integer, if needed.
 ExprHandle boolToInteger(const ExprHandle& x) {
