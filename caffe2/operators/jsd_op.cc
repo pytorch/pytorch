@@ -5,6 +5,7 @@ namespace caffe2 {
 namespace {
 
 static constexpr float kLOG_THRESHOLD() {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return 1e-20;
 }
 
@@ -12,6 +13,7 @@ inline float logit(float p) {
   // it computes log(p / (1-p))
   // to avoid numeric issue, hard code p log(p) when p approaches 0
   float x = std::min(std::max(p, kLOG_THRESHOLD()), 1 - kLOG_THRESHOLD());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return -log(1. / x - 1.);
 }
 
@@ -38,7 +40,9 @@ bool BernoulliJSDOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < N; i++) {
     auto p_mdl = x_data[i];
     auto p_emp = t_data[i];
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto p_avg = (p_mdl + p_emp) / 2.;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto jsd = entropy(p_avg) - (entropy(p_mdl) + entropy(p_emp)) / 2.;
     l_data[i] = jsd;
   }
@@ -60,16 +64,21 @@ bool BernoulliJSDGradientOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < N; i++) {
     auto p_mdl = x_data[i];
     auto p_emp = t_data[i];
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto p_avg = (p_mdl + p_emp) / 2.;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto g_jsd = (logit(p_mdl) - logit(p_avg)) / 2.;
     gi_data[i] = go_data[i] * g_jsd;
   }
   return true;
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BernoulliJSD, BernoulliJSDOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BernoulliJSDGradient,
     BernoulliJSDGradientOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BernoulliJSD)
     .NumInputs(2)
     .NumOutputs(1)
@@ -80,6 +89,7 @@ where each is parametrized by a single probability.
     .Input(0, "X", "array of probabilities for prediction")
     .Input(0, "T", "array of probabilities for target")
     .Output(0, "L", "array of JSD losses");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BernoulliJSDGradient).NumInputs(3).NumOutputs(1);
 
 class GetBernoulliJSDGradient : public GradientMakerBase {
@@ -92,6 +102,7 @@ class GetBernoulliJSDGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BernoulliJSD, GetBernoulliJSDGradient);
 
 } // namespace caffe2

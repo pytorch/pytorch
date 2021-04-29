@@ -348,7 +348,7 @@
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
   real: at::real(grad)
-  imag: "grad.is_conj() ? at::imag(grad.resolve_conj()) : at::imag(grad)"
+  imag: at::imag(grad.resolve_conj())
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
   abs, angle: polar_backward(grad, result)
@@ -356,13 +356,16 @@
 - name: _conj(Tensor(a) self) -> Tensor(a)
   self: grad.conj()
 
-- name: resolve_conj(Tensor(a) self) -> Tensor(a)
+- name: _resolve_conj(Tensor(a) self) -> Tensor(a)
   self: grad
 
 - name: resolve_conj_(Tensor(a!) self) -> Tensor(a!)
   self: grad
 
-- name: conj_physical(Tensor self) -> Tensor
+- name: _conj_physical(Tensor self) -> Tensor
+  self: grad.conj_physical()
+
+- name: conj_physical_(Tensor(a!) self) -> Tensor(a!)
   self: grad.conj_physical()
 
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
@@ -615,7 +618,7 @@
 
 - name: index_fill_.int_Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
   self: grad.clone().index_fill_(dim, index, 0)
-  value: grad.index_select(dim, index).sum()
+  value: grad.index_select(dim, std::get<0>(at::_unique(index, /*sorted=*/false))).sum()
   index: non_differentiable
 
 - name: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
@@ -627,7 +630,7 @@
   values: grad.index(indices)
 
 - name: index_select(Tensor self, int dim, Tensor index) -> Tensor
-  self: "self.is_conj() ? index_select_backward(grad.conj(), self.sizes(), dim, index) : index_select_backward(grad, self.sizes(), dim, index)"
+  self: index_select_backward(grad, self.sizes(), dim, index)
   index: non_differentiable
 
 - name: inverse(Tensor self) -> Tensor
@@ -713,7 +716,7 @@
   self: not_implemented("lstsq")
   A: not_implemented("lstsq")
 
-- name: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+- name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   self: not_implemented("linalg_lstsq")
   b: not_implemented("linalg_lstsq")
   output_differentiability: [True, True]
@@ -746,7 +749,7 @@
   mask: non_differentiable
 
 - name: masked_select(Tensor self, Tensor mask) -> Tensor
-  self: "self.is_conj() ? masked_select_backward(grad.conj(), self, mask) : masked_select_backward(grad, self, mask)"
+  self: masked_select_backward(grad, self, mask)
   mask: non_differentiable
 
 - name: matrix_exp(Tensor self) -> Tensor
@@ -1264,7 +1267,7 @@
   self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_real(grad.resolve_conj().contiguous()) # [gx, gy]
+  self: at::view_as_real(grad.contiguous().resolve_conj()) # [gx, gy]
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable

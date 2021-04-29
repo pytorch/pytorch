@@ -895,28 +895,28 @@ See :func:`torch.conj`
 
 add_docstr_all('conj_physical',
                r"""
-conj() -> Tensor
+conj_physical() -> Tensor
 
 See :func:`torch.conj_physical`
 """)
 
 add_docstr_all('conj_physical_',
                r"""
-conj() -> Tensor
+conj_physical_() -> Tensor
 
 In-place version of :meth:`~Tensor.conj_physical`
 """)
 
 add_docstr_all('resolve_conj',
                r"""
-conj() -> Tensor
+resolve_conj() -> Tensor
 
 See :func:`torch.resolve_conj`
 """)
 
 add_docstr_all('resolve_conj_',
                r"""
-conj() -> Tensor
+resolve_conj_() -> Tensor
 
 In-place version of :meth:`~Tensor.resolve_conj`
 """)
