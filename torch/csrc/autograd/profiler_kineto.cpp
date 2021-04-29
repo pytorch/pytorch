@@ -58,10 +58,16 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     if (!ctx) {
       return;
     }
+#ifdef USE_KINETO_UPDATED
+    libkineto::GenericTraceActivity op;
+    op.activityType = libkineto::ActivityType::CPU_OP;
+    op.activityName = std::string(fn.name().str());
+#else
     libkineto::ClientTraceActivity op;
+    op.opType = std::string(fn.name().str());
+#endif
     op.startTime = ctx->startUs;
     op.endTime = getTimeUs();
-    op.opType = std::string(fn.name().str());
     op.device = 0;
     op.correlation = ctx->correlationId;
     // optimization - postpone shapesToStr till finalizeCPUTrace
@@ -126,7 +132,7 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   void addTraceEvents(libkineto::ActivityTraceInterface& trace) {
     const auto& events = *(trace.activities());
     for (const auto& ev_ptr : events) {
-      // ClientTraceActivity events are already processed
+      // CPU_OP events are already processed
       if (ev_ptr->type() != libkineto::ActivityType::CPU_OP) {
         kineto_events_.emplace_back();
         kineto_events_.back()
