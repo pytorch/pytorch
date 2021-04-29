@@ -5,6 +5,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/util/LeftRight.h>
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
@@ -20,6 +21,45 @@ C10_DEFINE_int64(
     "tensor sizes is bigger than this then tensor will be reset.");
 
 namespace c10 {
+
+namespace impl {
+namespace {
+
+// There's probably a more efficient lock free data structure we can use
+// here (in particular, we want the reads to be as fast as possible, and
+// LeftRight will incur a strong atomic on reads).  But this is the easiest
+// thing to do given the current state of the codebase.
+c10::LeftRight<std::vector<TorchDeployHook*>> torch_deploy_hooks;
+
+// Number of torch_deploy_hooks.  We don't consult torch_deploy_hooks
+// as that requires a strong write.  The memory ordering here is pretty
+// relaxed; if a Tensor destruction races with the initial interpreter
+// creation/destruction, we don't really care if we lose or spuriously
+// see the hook, as the Tensor MUST NOT have a PyObject in the relevant
+// interpreter.
+std::atomic<int> torch_deploy_hooks_count;
+
+} // anonymous namespace
+
+void AddTorchDeployHook(TorchDeployHook* hook) {
+  torch_deploy_hooks.write([&](std::vector<TorchDeployHook*>& hooks) {
+    hooks.emplace_back(hook);
+  });
+  // race here doesn't matter, because any Tensors destructing here are
+  // guaranteed not to have PyObjects on the freshly created Interpreter
+  // (which doesn't have any PyObjects yet)
+  torch_deploy_hooks_count++;
+}
+void RemoveTorchDeployHook(TorchDeployHook* hook) {
+  torch_deploy_hooks.write([&](std::vector<TorchDeployHook*>& hooks) {
+    hooks.erase(std::remove(hooks.begin(), hooks.end(), hook));
+  });
+  // race here doesn't matter: you'll just uselessly bang on the
+  // (now empty) torch_deploy_hooks vector
+  torch_deploy_hooks_count--;
+}
+
+} // namespace impl
 
 const char * const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "is not allowed on a Tensor created from .data or .detach().\n"
@@ -65,6 +105,7 @@ TensorImpl::TensorImpl(
     // Use std::forward to suppress static analyzer false positive.
     : TensorImpl(std::forward<Storage>(storage), key_set, data_type, storage.device()) {}
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     ImplType type,
     Storage&& storage,
@@ -280,6 +321,17 @@ void TensorImpl::release_resources() {
   autograd_meta_.reset();
   if (storage_) {
     storage_ = {};
+  }
+  if (C10_UNLIKELY(impl::torch_deploy_hooks_count.load(std::memory_order_relaxed))) {
+    impl::torch_deploy_hooks.read([&](const std::vector<impl::TorchDeployHook*> hooks) {
+      for (auto* hook : hooks) {
+        // NB: hook is guaranteed to be live here, because an unloading
+        // interpreter is obligated to wait for RemoveTorchDeployHook
+        // to return, which will wait for LeftRight to quiesce (no more
+        // readers)
+        hook->notify_destruction(this);
+      }
+    });
   }
   if (owns_pyobj_) {
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);

@@ -6,13 +6,13 @@ import torch
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor)
+    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
+     gradcheck, gradgradcheck)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, method_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
-from torch.autograd.gradcheck import gradcheck, gradgradcheck
 
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
@@ -139,16 +139,22 @@ class TestGradients(TestCase):
             if check == 'gradcheck':
                 self.assertTrue(gradcheck(fn, gradcheck_args,
                                           check_batched_grad=op.check_batched_grad,
-                                          check_grad_dtypes=True))
+                                          check_grad_dtypes=True,
+                                          nondet_tol=op.gradcheck_nondet_tol,
+                                          fast_mode=op.gradcheck_fast_mode))
             elif check == 'gradgradcheck':
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=False,
                                               check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True))
+                                              check_grad_dtypes=True,
+                                              nondet_tol=op.gradcheck_nondet_tol,
+                                              fast_mode=op.gradcheck_fast_mode))
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=True,
                                               check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True))
+                                              check_grad_dtypes=True,
+                                              nondet_tol=op.gradcheck_nondet_tol,
+                                              fast_mode=op.gradcheck_fast_mode))
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 
@@ -188,7 +194,20 @@ class TestGradients(TestCase):
     @_gradcheck_ops(op_db)
     def test_fn_gradgrad(self, device, dtype, op):
         self._skip_helper(op, dtype)
+        if not op.supports_gradgrad:
+            self.skipTest("Skipped! Operation does not support gradgrad")
         self._gradgrad_test_helper(device, dtype, op, op.get_op())
+
+    # Test that gradients of gradients are properly raising
+    @_gradcheck_ops(op_db)
+    def test_fn_fail_gradgrad(self, device, dtype, op):
+        self._skip_helper(op, dtype)
+        if op.supports_gradgrad:
+            self.skipTest("Skipped! Operation does support gradgrad")
+
+        err_msg = r"the derivative for '.*' is not implemented\."
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
     # Method gradgrad (and grad, see above) tests are disabled since they're
     #   costly and redundant with function gradgrad (and grad) tests
@@ -344,6 +363,10 @@ class TestCommon(JitCommonTestCase):
     @_variant_ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = op.supports_autograd and (dtype.is_floating_point or op.supports_complex_autograd)
+        # TODO: fix this
+        if _requires_grad and not op.supports_gradgrad:
+            self.skipTest("skipped! This test does not handle ops that don't support gragrad properly")
+
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
 
         for sample in samples:

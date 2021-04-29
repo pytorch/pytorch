@@ -14,16 +14,6 @@ namespace testing {
 
 namespace {
 
-// from https://github.com/pybind/pybind11/issues/1446#issuecomment-406341510
-template <typename T> void destroy_without_gil(T *ptr) {
-  if (Py_IsInitialized() && PyGILState_Check()) {
-    pybind11::gil_scoped_release nogil;
-    delete ptr;
-  } else {
-    delete ptr;
-  }
-}
-
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
@@ -76,25 +66,26 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
   shared_ptr_class_<FaultyProcessGroupAgent>(
       module, "FaultyProcessGroupAgent", rpc_module.attr("ProcessGroupAgent"))
       .def(
-          py::init([](
-              const c10::intrusive_ptr<::c10d::Store> store,
-              std::string name,
-              c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
-              int num_send_recv_threads,
-              std::chrono::milliseconds rpc_timeout,
-              const std::vector<std::string>& messages_to_fail,
-              const std::unordered_map<std::string, float>& messages_to_delay,
-              int failNumSends) {
-            return std::shared_ptr<FaultyProcessGroupAgent>(new FaultyProcessGroupAgent(
-              store,
-              std::move(name),
-              process_group,
-              num_send_recv_threads,
-              rpc_timeout,
-              messages_to_fail,
-              messages_to_delay,
-              failNumSends
-            ), destroy_without_gil<FaultyProcessGroupAgent>);
+          py::init([](const c10::intrusive_ptr<::c10d::Store> store,
+                      std::string name,
+                      c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
+                      int num_send_recv_threads,
+                      std::chrono::milliseconds rpc_timeout,
+                      const std::vector<std::string>& messages_to_fail,
+                      const std::unordered_map<std::string, float>&
+                          messages_to_delay,
+                      int failNumSends) {
+            return std::shared_ptr<FaultyProcessGroupAgent>(
+                new FaultyProcessGroupAgent(
+                    store,
+                    std::move(name),
+                    process_group,
+                    num_send_recv_threads,
+                    rpc_timeout,
+                    messages_to_fail,
+                    messages_to_delay,
+                    failNumSends),
+                impl::destroy_without_gil<FaultyProcessGroupAgent>);
           }),
           py::arg("store"),
           py::arg("name"),

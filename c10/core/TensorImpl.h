@@ -187,6 +187,26 @@ struct C10_API PythonHooksRegisterer {
   }
 };
 
+// Intentionally not pluralized as each torch deploy instance
+// will register its own hook, so there will be "hooks"
+struct C10_API TorchDeployHook {
+  virtual ~TorchDeployHook() = default;
+  virtual void notify_destruction(at::TensorImpl*) const = 0;
+};
+
+C10_API void AddTorchDeployHook(TorchDeployHook*);
+C10_API void RemoveTorchDeployHook(TorchDeployHook*);
+
+struct C10_API TorchDeployHookRegisterer {
+  TorchDeployHook* hook_;
+  explicit TorchDeployHookRegisterer(TorchDeployHook* hook) : hook_(hook) {
+    AddTorchDeployHook(hook_);
+  }
+  ~TorchDeployHookRegisterer() {
+    RemoveTorchDeployHook(hook_);
+  }
+};
+
 } // namespace impl
 
 struct C10_API NamedTensorMetaInterface {
@@ -630,6 +650,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::CPU) ||
         key_set_.has(DispatchKey::SparseCPU) ||
+        key_set_.has(DispatchKey::SparseCsrCPU) ||
         key_set_.has(DispatchKey::QuantizedCPU) ||
         key_set_.has(DispatchKey::MkldnnCPU);
   }
@@ -638,6 +659,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::CUDA) ||
         key_set_.has(DispatchKey::SparseCUDA) ||
+        key_set_.has(DispatchKey::SparseCsrCUDA) ||
         key_set_.has(DispatchKey::QuantizedCUDA);
   }
 
@@ -714,6 +736,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This method is not virtual and avoid dispatches for perf.
     if (is_sparse()) {
       return kSparse;
+    } else if (is_sparse_csr()) {
+      return kSparseCsr;
     } else if (is_mkldnn()) {
       return kMkldnn;
     } else {

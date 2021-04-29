@@ -931,7 +931,11 @@ void initJitScriptBindings(PyObject* module) {
            return py::str("ScriptObject");
          }
          return invokeScriptMethodFromPython(
-             *method, std::move(args), std::move(kwargs));
+             *method,
+             // NOLINTNEXTLINE(performance-move-const-arg)
+             std::move(args),
+             // NOLINTNEXTLINE(performance-move-const-arg)
+             std::move(kwargs));
        }}};
 
   for (const char* mm_name : magic_method_names) {
@@ -946,7 +950,11 @@ void initJitScriptBindings(PyObject* module) {
               throw NotImplementedError();
             }
             return invokeScriptMethodFromPython(
-                *method, std::move(args), std::move(kwargs));
+                *method,
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(args),
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(kwargs));
           });
     }
   }
@@ -1292,7 +1300,11 @@ void initJitScriptBindings(PyObject* module) {
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             Function& callee = *strongPtr.function_;
             py::object result = invokeScriptFunctionFromPython(
-                callee, tuple_slice(std::move(args), 1), std::move(kwargs));
+                callee,
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                tuple_slice(std::move(args), 1),
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(kwargs));
             return result;
             END_HANDLE_TH_ERRORS_PYBIND
           })
@@ -1384,7 +1396,11 @@ void initJitScriptBindings(PyObject* module) {
             Method& method = py::cast<Method&>(args[0]);
 
             return invokeScriptMethodFromPython(
-                method, tuple_slice(std::move(args), 1), std::move(kwargs));
+                method,
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                tuple_slice(std::move(args), 1),
+                // NOLINTNEXTLINE(performance-move-const-arg)
+                std::move(kwargs));
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def_property_readonly("graph", &Method::graph)
@@ -1621,11 +1637,8 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         ExtraFilesMap extra_files_map = extra_files_from_python(extra_files);
-        auto ret = ([&]() {
-          pybind11::gil_scoped_release no_gil;
-          return import_ir_module(
+        auto ret = import_ir_module(
             std::move(cu), filename, optional_device, extra_files_map);
-        })();
         extra_files_to_python(extra_files_map, extra_files);
         return ret;
       });
@@ -1643,11 +1656,8 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         ExtraFilesMap extra_files_map = extra_files_from_python(extra_files);
-        auto ret = ([&]() {
-          pybind11::gil_scoped_release no_gil;
-            return import_ir_module(
-              std::move(cu), in, optional_device, extra_files_map);
-        })();
+        auto ret = import_ir_module(
+            std::move(cu), in, optional_device, extra_files_map);
         extra_files_to_python(extra_files_map, extra_files);
         return ret;
       });

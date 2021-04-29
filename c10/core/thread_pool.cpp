@@ -93,7 +93,6 @@ void ThreadPool::main_loop(std::size_t index) {
     // destructed immediately after running the task.  This is
     // useful in the event that the function contains
     // shared_ptr arguments bound via bind.
-    bool tasks_empty;
     {
       task_element_t tasks = std::move(tasks_.front());
       tasks_.pop();
@@ -115,7 +114,12 @@ void ThreadPool::main_loop(std::size_t index) {
         LOG(ERROR) << "Exception in thread pool task: unknown";
       }
 
-    } // Destruct tasks before taking the lock
+      // Destruct tasks before taking the lock.  As tasks
+      // are user provided std::function, they can run
+      // arbitrary code during destruction, including code
+      // that can reentrantly call into ThreadPool (which would
+      // cause a deadlock if we were holding the lock).
+    }
 
     // Update status of empty, maybe
     // Need to recover the lock first
