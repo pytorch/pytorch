@@ -2343,7 +2343,8 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, 
 
 
   if (gv.defined()) {
-    auto Econj = (lambda.unsqueeze(-2) - lambda.unsqueeze(-1)).conj();
+    const auto lambda_conj = lambda.conj();
+    auto Econj = lambda_conj.unsqueeze(-2) - lambda_conj.unsqueeze(-1);
     if (at::GradMode::is_enabled()) {
       // Avoids differentiating through at infinity when doing gradgrad
       // 1 could be any number, as we are going to overwrite the diagonal
@@ -2374,6 +2375,7 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, 
     if (glambda.defined()) {
 		  // Compute V^-H dL V^H
 			const auto result = at::linalg_solve(vh, glambda.unsqueeze(-1) * vh);
+      // If it is real, we have to project the derivative onto the real numbers
       return self.is_complex() ? result : at::real(result);
     } else {
       // If neither is defined, there's nothing to do

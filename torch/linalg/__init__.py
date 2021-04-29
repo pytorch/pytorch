@@ -354,6 +354,10 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 
 .. note:: {sync_note}
 
+.. warning:: This function assumes that :attr:`A` is `diagonalizable`_ (e.g. when all the
+             eigenvalues are different). If it is not diagonalizable, the returned
+             eigenvalues will be correct but :math:`A \neq V \operatorname{diag}(\Lambda)V^{-1}`.
+
 .. warning:: The eigenvectors of a matrix are not unique, nor are they continuous with respect to
              :attr:`A`. Due to this lack of uniqueness, different hardware and software may compute
              different eigenvectors.
@@ -364,11 +368,11 @@ Also supports batched inputs, and, if the input is batched, the output is batche
              `1` and largest real component.
 """.format(**common_notes) + r"""
 
-.. warning:: This function assumes that :attr:`A` is `diagonalizable`_ (e.g. when all the
-             eigenvalues are different). If it is not diagonalizable, the returned
-             eigenvalues will be correct but :math:`A \neq V \operatorname{diag}(\Lambda)V^{-1}`.
-
-.. warning:: This function does not yet support autograd.
+.. warning:: Gradients computed using `V` will only be finite when :attr:`A` does not have repeated eigenvalues.
+             Furthermore, if the distance between any two eigenvalues is close to zero,
+             the gradient will be numerically unstable, as it depends on the eigenvalues
+             :math:`\lambda_i` through the computation of
+             :math:`\frac{1}{\min_{i \neq j} \lambda_i - \lambda_j}`.
 
 .. seealso::
 
