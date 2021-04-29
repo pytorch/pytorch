@@ -2010,7 +2010,6 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
     FPM.run(FF);
   }
   FPM.doFinalization();
-  PM.run(M);
 }
 
 RegisterCodeGen<LLVMCodeGen> llvm_codegen_reg("llvm_codegen");
