@@ -24,6 +24,9 @@ slogdet_batch_rule(const Tensor& self, optional<int64_t> self_bdim) {
 std::tuple<Tensor, optional<int64_t>> dot_batch_rule(const Tensor& A, optional<int64_t> A_bdim, const Tensor& B, optional<int64_t> B_bdim) {
   auto A_ = moveBatchDimToFront(A, A_bdim);
   auto B_ = moveBatchDimToFront(B, B_bdim);
+  if (A_bdim && B_bdim) {
+    return {at::matmul(A_.unsqueeze(-2), B_.unsqueeze(-1)).squeeze(-1).squeeze(-1), 0};
+  }
   return {at::matmul(A_, B_.t()), 0};
 }
 
