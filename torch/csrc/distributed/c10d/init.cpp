@@ -85,6 +85,7 @@ namespace c10d {
 namespace {
 
 #ifdef USE_C10D_GLOO
+// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable,cppcoreguidelines-avoid-non-const-global-variables)
 constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
 #endif
 
@@ -1242,6 +1243,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             }
 
             options->timeout = timeout;
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             options->threads = options->devices.size() * 2;
             return c10::make_intrusive<::c10d::ProcessGroupGloo>(
                 store, rank, size, options);
