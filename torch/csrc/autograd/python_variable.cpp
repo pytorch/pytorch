@@ -270,28 +270,6 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   return true;
 }
 
-static void THPVariable_dealloc(THPVariable* self)
-{
-  // if (THPVariable_tryResurrect(self)) return;
-
-  // The tensor is definitely dead.  There are two cases that could be
-  // happening here:
-  //  - release_resources() is deallocating the Python object as part
-  //    of shut down
-  //  - We are the sole strong owner of the tensor object, but the last
-  //    Python reference just went dead
-  //
-  // NB: there is a slight race condition here, if there is a weak pointer
-  // in another thread that successfully rezzes the object after we tested
-  // the use_count, but before we actually managed to call the destructor.
-  // I think it doesn't matter.
-  const auto& tensor = THPVariable_Unpack(self);
-  PyObject_GC_UnTrack(self);
-  THPVariable_clear(self);
-  self->cdata.~MaybeOwned<Variable>();
-  Py_TYPE(self)->tp_free((PyObject*)self);
-}
-
 static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
@@ -992,6 +970,7 @@ struct THPVariableMeta {
 };
 
 int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs);
+void THPVariable_subclass_dealloc(PyObject* self);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPVariableMetaType = {
@@ -1036,6 +1015,55 @@ PyTypeObject THPVariableMetaType = {
   nullptr                                      /* tp_new */
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+PyTypeObject THPVariableType = {
+  PyVarObject_HEAD_INIT(&THPVariableMetaType, 0)
+  "torch._C._TensorBase",                      /* tp_name */
+  sizeof(THPVariable),                         /* tp_basicsize */
+  0,                                           /* tp_itemsize */
+  // This is unspecified, because it is illegal to create a THPVariableType
+  // directly.  Subclasses will have their tp_dealloc set appropriately
+  // by the metaclass
+  nullptr,                                     /* tp_dealloc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  0,                                           /* tp_vectorcall_offset */
+  nullptr,                                     /* tp_getattr */
+  nullptr,                                     /* tp_setattr */
+  nullptr,                                     /* tp_reserved */
+  nullptr,                                     /* tp_repr */
+  nullptr,                                     /* tp_as_number */
+  nullptr,                                     /* tp_as_sequence */
+  &THPVariable_as_mapping,                     /* tp_as_mapping */
+  nullptr,                                     /* tp_hash  */
+  nullptr,                                     /* tp_call */
+  nullptr,                                     /* tp_str */
+  nullptr,                                     /* tp_getattro */
+  nullptr,                                     /* tp_setattro */
+  nullptr,                                     /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
+  nullptr,                                     /* tp_doc */
+  (traverseproc)THPVariable_traverse,          /* tp_traverse */
+  (inquiry)THPVariable_clear,                  /* tp_clear */
+  nullptr,                                     /* tp_richcompare */
+  0,                                           /* tp_weaklistoffset */
+  nullptr,                                     /* tp_iter */
+  nullptr,                                     /* tp_iternext */
+  nullptr,                                     /* tp_methods */
+  nullptr,                                     /* tp_members */
+  THPVariable_properties,                      /* tp_getset */
+  nullptr,                                     /* tp_base */
+  nullptr,                                     /* tp_dict */
+  nullptr,                                     /* tp_descr_get */
+  nullptr,                                     /* tp_descr_set */
+  0,                                           /* tp_dictoffset */
+  nullptr,                                     /* tp_init */
+  nullptr,                                     /* tp_alloc */
+  // NB: It is illegal to directly create a _TensorBase.  Instead,
+  // subclass it first (the metaclass will initialize tp_new) and
+  // then construct it
+  nullptr,                                     /* tp_new */
+};
+
 static void
 clear_slots(PyTypeObject *type, PyObject *self)
 {
@@ -1056,6 +1084,9 @@ clear_slots(PyTypeObject *type, PyObject *self)
     }
 }
 
+// NB: this is not the tp_dealloc on THPVariable; instead, its the dealloc
+// on subclasses.  It's never valid to construct a THPVariable so it's not
+// necessary to implement the dealloc for that case
 void THPVariable_subclass_dealloc(PyObject* self) {
   if (THPVariable_tryResurrect((THPVariable*)self)) return;
 
@@ -1114,10 +1145,10 @@ void THPVariable_subclass_dealloc(PyObject* self) {
       }
   }
 
-  // Clear all slots until we get to THPVariable_dealloc
+  // Clear all slots until we get to base class THPVaraibleType
   {
     PyTypeObject* base = type;
-    while (base->tp_dealloc != (destructor)&THPVariable_dealloc) {
+    while (base != &THPVariableType) {
       if (Py_SIZE(base)) {
         clear_slots(base, self);
       }
@@ -1141,9 +1172,10 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   // subtype_dealloc allows for this but we don't
   TORCH_INTERNAL_ASSERT(Py_TYPE(self) == type);
 
-  // TODO: should avoid trying to resurrect again here
-  PyObject_GC_Track(self);
-  THPVariable_dealloc((THPVariable*)self);
+  // Finally clear out the base THPVariable
+  THPVariable_clear((THPVariable*)self);
+  ((THPVariable*)self)->cdata.~MaybeOwned<Variable>();
+  Py_TYPE(self)->tp_free(self);
 
   // Python defined subclasses should always be on the heap
   TORCH_INTERNAL_ASSERT(type->tp_flags & Py_TPFLAGS_HEAPTYPE);
@@ -1154,63 +1186,10 @@ int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
   if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
     return -1;
   }
-  ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPVariable_subclass_dealloc;
-  return 0;
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-PyTypeObject THPVariableType = {
-  PyVarObject_HEAD_INIT(&THPVariableMetaType, 0)
-  "torch._C._TensorBase",                      /* tp_name */
-  sizeof(THPVariable),                         /* tp_basicsize */
-  0,                                           /* tp_itemsize */
-  (destructor)THPVariable_dealloc,             /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  0,                                           /* tp_vectorcall_offset */
-  nullptr,                                     /* tp_getattr */
-  nullptr,                                     /* tp_setattr */
-  nullptr,                                     /* tp_reserved */
-  nullptr,                                     /* tp_repr */
-  nullptr,                                     /* tp_as_number */
-  nullptr,                                     /* tp_as_sequence */
-  &THPVariable_as_mapping,                     /* tp_as_mapping */
-  nullptr,                                     /* tp_hash  */
-  nullptr,                                     /* tp_call */
-  nullptr,                                     /* tp_str */
-  nullptr,                                     /* tp_getattro */
-  nullptr,                                     /* tp_setattro */
-  nullptr,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
-  nullptr,                                     /* tp_doc */
-  (traverseproc)THPVariable_traverse,          /* tp_traverse */
-  (inquiry)THPVariable_clear,                  /* tp_clear */
-  nullptr,                                     /* tp_richcompare */
-  0,                                           /* tp_weaklistoffset */
-  nullptr,                                     /* tp_iter */
-  nullptr,                                     /* tp_iternext */
-  nullptr,                                     /* tp_methods */
-  nullptr,                                     /* tp_members */
-  THPVariable_properties,                      /* tp_getset */
-  nullptr,                                     /* tp_base */
-  nullptr,                                     /* tp_dict */
-  nullptr,                                     /* tp_descr_get */
-  nullptr,                                     /* tp_descr_set */
-  0,                                           /* tp_dictoffset */
-  nullptr,                                     /* tp_init */
-  nullptr,                                     /* tp_alloc */
-  // NB: It is illegal to directly create a _TensorBase.  Instead,
-  // subclass it first (the metaclass will initialize tp_new) and
-  // then construct it
-  nullptr,                                     /* tp_new */
-};
-
-int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
-  if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
-    return -1;
-  }
   if (((PyTypeObject*)cls)->tp_base == &THPVariableType) {
     ((PyTypeObject*)cls)->tp_new = THPVariable_pynew;
   }
+  ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPVariable_subclass_dealloc;
   return 0;
 }
 
