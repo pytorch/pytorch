@@ -22,8 +22,10 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int prefdist_T0 = 16;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const int fused_block_size = block_size + 2;
   int dataInd = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (block_size == 128) {
     // unrolling 16 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -70,81 +72,128 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[48]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop64 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (64)), vop64);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[64]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop72 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (72)), vop72);
         // skip unnecessary prefetch of (&ip_next_T0[72])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop80 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (80)), vop80);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[80]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop88 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (88)), vop88);
         // skip unnecessary prefetch of (&ip_next_T0[88])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop96 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (96)), vop96);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[96]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop104 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (104)), vop104);
         // skip unnecessary prefetch of (&ip_next_T0[104])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop112 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (112)), vop112);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[112]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], vop64);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], vop72);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], vop80);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], vop88);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], vop96);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], vop104);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], vop112);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], _mm256_mul_ps(vop64, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], _mm256_mul_ps(vop72, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], _mm256_mul_ps(vop80, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], _mm256_mul_ps(vop88, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], _mm256_mul_ps(vop96, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], _mm256_mul_ps(vop104, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], _mm256_mul_ps(vop112, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], _mm256_mul_ps(vop120, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 64) {
     // unrolling 8 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -183,45 +232,68 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[48]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 32) {
     // unrolling 4 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -256,27 +328,38 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 16) {
     // unrolling 2 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -309,15 +392,19 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
     }
@@ -326,6 +413,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -356,6 +444,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         }
         const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j],
@@ -369,9 +458,11 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j], _mm256_mul_ps(_mm256_loadu_ps(&op[j]), vlen_inv));
@@ -446,6 +537,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
   const int64_t prefdist_T0 = 16;
   const int64_t fused_block_size = block_size + 2;
   int64_t dataInd = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (block_size == 128) {
     // unrolling 16 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -492,81 +584,128 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[48]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop64 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (64)), vop64);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[64]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop72 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (72)), vop72);
         // skip unnecessary prefetch of (&ip_next_T0[72])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop80 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (80)), vop80);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[80]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop88 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (88)), vop88);
         // skip unnecessary prefetch of (&ip_next_T0[88])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop96 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (96)), vop96);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[96]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop104 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (104)), vop104);
         // skip unnecessary prefetch of (&ip_next_T0[104])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop112 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (112)), vop112);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[112]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], vop64);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], vop72);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], vop80);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], vop88);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], vop96);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], vop104);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], vop112);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], _mm256_mul_ps(vop64, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], _mm256_mul_ps(vop72, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], _mm256_mul_ps(vop80, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], _mm256_mul_ps(vop88, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], _mm256_mul_ps(vop96, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], _mm256_mul_ps(vop104, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], _mm256_mul_ps(vop112, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], _mm256_mul_ps(vop120, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 64) {
     // unrolling 8 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -605,45 +744,68 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[48]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 32) {
     // unrolling 4 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -678,27 +840,38 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 16) {
     // unrolling 2 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -731,15 +904,19 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch(
             reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
     }
@@ -748,6 +925,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -778,6 +956,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         }
         const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j],
@@ -791,9 +970,11 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j], _mm256_mul_ps(_mm256_loadu_ps(&op[j]), vlen_inv));
@@ -866,8 +1047,10 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int prefdist_T0 = 16;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const int fused_block_size = block_size + 4;
   int dataInd = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (block_size == 128) {
     // unrolling 16 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -921,24 +1104,28 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (32)))),
             vop32);
         _mm_prefetch(
@@ -946,24 +1133,28 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (40)))),
             vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (48)))),
             vop48);
         // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (56)))),
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (64)))),
             vop64);
         _mm_prefetch(
@@ -971,24 +1162,28 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
         vop72 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (72)))),
             vop72);
         // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (80)))),
             vop80);
         // skip unnecessary prefetch of (&ip_next_T0[80])
         vop88 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (88)))),
             vop88);
         // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (96)))),
             vop96);
         _mm_prefetch(
@@ -996,59 +1191,94 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
         vop104 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (104)))),
             vop104);
         // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (112)))),
             vop112);
         // skip unnecessary prefetch of (&ip_next_T0[112])
         vop120 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (120)))),
             vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], vop64);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], vop72);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], vop80);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], vop88);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], vop96);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], vop104);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], vop112);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], _mm256_mul_ps(vop64, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], _mm256_mul_ps(vop72, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], _mm256_mul_ps(vop80, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], _mm256_mul_ps(vop88, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], _mm256_mul_ps(vop96, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], _mm256_mul_ps(vop104, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], _mm256_mul_ps(vop112, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], _mm256_mul_ps(vop120, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 64) {
     // unrolling 8 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -1094,24 +1324,28 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (32)))),
             vop32);
         _mm_prefetch(
@@ -1119,43 +1353,62 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (40)))),
             vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (48)))),
             vop48);
         // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (56)))),
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 32) {
     // unrolling 4 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -1197,35 +1450,46 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 16) {
     // unrolling 2 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -1265,25 +1529,31 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
     }
   } else {
     // generic code
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     alignas(64) at::Half vtmp1[8] = {0};
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -1314,6 +1584,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
         }
         const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j],
@@ -1333,9 +1604,11 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j], _mm256_mul_ps(_mm256_loadu_ps(&op[j]), vlen_inv));
@@ -1410,6 +1683,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
   const int64_t prefdist_T0 = 16;
   const int64_t fused_block_size = block_size + 4;
   int64_t dataInd = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (block_size == 128) {
     // unrolling 16 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -1463,24 +1737,28 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (32)))),
             vop32);
         _mm_prefetch(
@@ -1488,24 +1766,28 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (40)))),
             vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (48)))),
             vop48);
         // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (56)))),
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (64)))),
             vop64);
         _mm_prefetch(
@@ -1513,24 +1795,28 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
         vop72 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (72)))),
             vop72);
         // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (80)))),
             vop80);
         // skip unnecessary prefetch of (&ip_next_T0[80])
         vop88 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (88)))),
             vop88);
         // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (96)))),
             vop96);
         _mm_prefetch(
@@ -1538,59 +1824,94 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
         vop104 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (104)))),
             vop104);
         // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (112)))),
             vop112);
         // skip unnecessary prefetch of (&ip_next_T0[112])
         vop120 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (120)))),
             vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], vop64);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], vop72);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], vop80);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], vop88);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], vop96);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], vop104);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], vop112);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], _mm256_mul_ps(vop64, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], _mm256_mul_ps(vop72, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], _mm256_mul_ps(vop80, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], _mm256_mul_ps(vop88, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], _mm256_mul_ps(vop96, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], _mm256_mul_ps(vop104, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], _mm256_mul_ps(vop112, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], _mm256_mul_ps(vop120, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 64) {
     // unrolling 8 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -1636,24 +1957,28 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (32)))),
             vop32);
         _mm_prefetch(
@@ -1661,43 +1986,62 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (40)))),
             vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (48)))),
             vop48);
         // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (56)))),
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 32) {
     // unrolling 4 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -1739,35 +2083,46 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 16) {
     // unrolling 2 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -1807,25 +2162,31 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
     }
   } else {
     // generic code
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     alignas(64) at::Half vtmp1[8] = {0};
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -1856,6 +2217,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
         }
         const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j],
@@ -1875,9 +2237,11 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j], _mm256_mul_ps(_mm256_loadu_ps(&op[j]), vlen_inv));
@@ -1950,8 +2314,10 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int prefdist_T0 = 16;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const int fused_block_size = block_size + 8;
   int dataInd = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (block_size == 128) {
     // unrolling 16 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -1982,6 +2348,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2011,48 +2378,56 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (32))))),
             _mm256_add_ps(vop32, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[32])
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (40))))),
             _mm256_add_ps(vop40, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (48))))),
             _mm256_add_ps(vop48, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (56))))),
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (64))))),
             _mm256_add_ps(vop64, vbio));
         _mm_prefetch(
@@ -2060,83 +2435,122 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         vop72 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (72))))),
             _mm256_add_ps(vop72, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (80))))),
             _mm256_add_ps(vop80, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[80])
         vop88 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (88))))),
             _mm256_add_ps(vop88, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (96))))),
             _mm256_add_ps(vop96, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[96])
         vop104 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (104))))),
             _mm256_add_ps(vop104, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (112))))),
             _mm256_add_ps(vop112, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[112])
         vop120 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (120))))),
             _mm256_add_ps(vop120, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], vop64);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], vop72);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], vop80);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], vop88);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], vop96);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], vop104);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], vop112);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], _mm256_mul_ps(vop64, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], _mm256_mul_ps(vop72, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], _mm256_mul_ps(vop80, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], _mm256_mul_ps(vop88, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], _mm256_mul_ps(vop96, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], _mm256_mul_ps(vop104, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], _mm256_mul_ps(vop112, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], _mm256_mul_ps(vop120, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 64) {
     // unrolling 8 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -2159,6 +2573,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2188,67 +2603,90 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (32))))),
             _mm256_add_ps(vop32, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[32])
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (40))))),
             _mm256_add_ps(vop40, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (48))))),
             _mm256_add_ps(vop48, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (56))))),
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 32) {
     // unrolling 4 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -2267,6 +2705,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2296,35 +2735,46 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 16) {
     // unrolling 2 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -2341,6 +2791,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2370,16 +2821,20 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
     }
@@ -2388,6 +2843,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -2404,6 +2860,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2424,6 +2881,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         }
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j],
@@ -2440,9 +2898,11 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j], _mm256_mul_ps(_mm256_loadu_ps(&op[j]), vlen_inv));
@@ -2517,6 +2977,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
   const int64_t prefdist_T0 = 16;
   const int64_t fused_block_size = block_size + 8;
   int64_t dataInd = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (block_size == 128) {
     // unrolling 16 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -2547,6 +3008,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2576,48 +3038,56 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (32))))),
             _mm256_add_ps(vop32, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[32])
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (40))))),
             _mm256_add_ps(vop40, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (48))))),
             _mm256_add_ps(vop48, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (56))))),
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (64))))),
             _mm256_add_ps(vop64, vbio));
         _mm_prefetch(
@@ -2625,83 +3095,122 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         vop72 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (72))))),
             _mm256_add_ps(vop72, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (80))))),
             _mm256_add_ps(vop80, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[80])
         vop88 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (88))))),
             _mm256_add_ps(vop88, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (96))))),
             _mm256_add_ps(vop96, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[96])
         vop104 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (104))))),
             _mm256_add_ps(vop104, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (112))))),
             _mm256_add_ps(vop112, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[112])
         vop120 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (120))))),
             _mm256_add_ps(vop120, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], vop64);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], vop72);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], vop80);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], vop88);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], vop96);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], vop104);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], vop112);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], vop120);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[64], _mm256_mul_ps(vop64, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[72], _mm256_mul_ps(vop72, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[80], _mm256_mul_ps(vop80, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[88], _mm256_mul_ps(vop88, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[96], _mm256_mul_ps(vop96, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[104], _mm256_mul_ps(vop104, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[112], _mm256_mul_ps(vop112, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[120], _mm256_mul_ps(vop120, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 64) {
     // unrolling 8 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -2724,6 +3233,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2753,67 +3263,90 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (32))))),
             _mm256_add_ps(vop32, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[32])
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (40))))),
             _mm256_add_ps(vop40, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (48))))),
             _mm256_add_ps(vop48, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (56))))),
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], vop32);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], vop40);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], vop48);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], vop56);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[32], _mm256_mul_ps(vop32, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[40], _mm256_mul_ps(vop40, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[48], _mm256_mul_ps(vop48, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[56], _mm256_mul_ps(vop56, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 32) {
     // unrolling 4 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -2832,6 +3365,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2861,35 +3395,46 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], vop16);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], vop24);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[24], _mm256_mul_ps(vop24, vlen_inv));
       }
     }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (block_size == 16) {
     // unrolling 2 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -2906,6 +3451,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2935,16 +3481,20 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], vop8);
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
     }
@@ -2953,6 +3503,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -2969,6 +3520,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2989,6 +3541,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         }
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j],
@@ -3005,9 +3558,11 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         float len_inv = 1.0f / lengths[rangeIndex];
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
               &op[j], _mm256_mul_ps(_mm256_loadu_ps(&op[j]), vlen_inv));

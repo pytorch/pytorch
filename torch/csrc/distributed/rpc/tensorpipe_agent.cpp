@@ -12,6 +12,7 @@
 #include <torch/csrc/distributed/rpc/agent_utils.h>
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #include <c10/core/StreamGuard.h>
 
@@ -482,7 +483,6 @@ TensorPipeAgent::TensorPipeAgent(
       nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       processGroup_(std::move(processGroup)) {
-
   // collect worker names
   prepareNames();
 

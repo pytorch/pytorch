@@ -337,6 +337,7 @@ size_t IValue::hash(const IValue& v) {
       // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
       // the tensor to emulate it
       return c10::get_hash(v.payload.as_tensor.unsafeGetTensorImpl());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case Tag::Storage:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::Int:
@@ -507,6 +508,7 @@ std::ostream& IValue::repr(
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
