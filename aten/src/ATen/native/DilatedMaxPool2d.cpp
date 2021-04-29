@@ -136,7 +136,9 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
   const int64_t nInputPlane = input.size(-3);
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
   const int64_t outputHeight = gradOutput.size(-2);
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
   const int64_t outputWidth = gradOutput.size(-1);
 
   /* XXX preserve the existing shape check behavior */
@@ -259,7 +261,9 @@ Tensor max_pool2d_with_indices_backward_cpu(
   return gradInput;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_pool2d_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_pool2d_backward_kernel);
 
 } // at::native
