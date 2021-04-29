@@ -157,14 +157,14 @@ static PyObject * THCPEvent_ipc_handle(PyObject *_self, PyObject *noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static struct PyGetSetDef THCPEvent_properties[] = {
   {"device", (getter)THCPEvent_get_device, nullptr, nullptr, nullptr},
   {"cuda_event", (getter)THCPEvent_get_cuda_event, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static PyMethodDef THCPEvent_methods[] = {
   {(char*)"from_ipc_handle",
     castPyCFunctionWithKeywords(THCPEvent_from_ipc_handle),

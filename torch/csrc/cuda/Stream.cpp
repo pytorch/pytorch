@@ -108,12 +108,12 @@ static PyObject * THCPStream_eq(PyObject *_self, PyObject *_other) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static struct PyMemberDef THCPStream_members[] = {
   {nullptr}
 };
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static struct PyGetSetDef THCPStream_properties[] = {
   {"cuda_stream",
     (getter)THCPStream_get_cuda_stream, nullptr, nullptr, nullptr},
@@ -121,7 +121,7 @@ static struct PyGetSetDef THCPStream_properties[] = {
   {nullptr}
 };
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef THCPStream_methods[] = {
   {(char*)"query", THCPStream_query, METH_NOARGS, nullptr},
   {(char*)"synchronize",

@@ -85,7 +85,7 @@ namespace c10d {
 namespace {
 
 #ifdef USE_C10D_GLOO
-// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable)
+// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable,cppcoreguidelines-avoid-non-const-global-variables)
 constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
 #endif
 
