@@ -221,6 +221,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.unflatten,
         Tensor.to_sparse_csr,
         Tensor._reduce_ex_internal,
+        Tensor._conj
     }
 
 
@@ -492,6 +493,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.inverse: lambda input, out=None: -1,
         torch.linalg.inv: lambda input, out=None: -1,
         torch.is_complex: lambda input: -1,
+        torch.is_conj: lambda input: -1,
         torch.is_distributed: lambda input: -1,
         torch.is_floating_point: lambda input: -1,
         torch.is_nonzero: lambda input: -1,

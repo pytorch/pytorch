@@ -324,21 +324,32 @@ Tensor& conj_physical_out(const Tensor& self, Tensor& result) {
   return unary_op_impl_out(result, self, conj_physical_stub);
 }
 
+Tensor _conj_physical(const Tensor& self) {
+  if (self.is_conj()) {
+    return self.conj().clone();
+  }
+  return unary_op_impl(self, at::conj_physical_out);
+}
+
 Tensor conj_physical(const Tensor& self) {
   if (!self.is_complex()) return self;
-  return unary_op_impl(self, at::conj_physical_out);
+  return at::_conj_physical(self);
 }
 
 Tensor& conj_physical_(Tensor& self) {
   if (!self.is_complex()) return self;
-  return unary_op_impl_(self, at::conj_physical_out);
+  return unary_op_impl_out(self, self, conj_physical_stub);
+}
+
+Tensor _resolve_conj(const Tensor& self) {
+  auto result = at::empty_like(self, self.options());
+  // conjugation is handled in `copy_()`
+  return result.copy_(self);
 }
 
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
-  auto result = at::empty_like(self, self.options());
-  // conjugation is handled in `copy_()`
-  return result.copy_(self);
+  return at::_resolve_conj(self);
 }
 
 Tensor& resolve_conj_(Tensor& self) {

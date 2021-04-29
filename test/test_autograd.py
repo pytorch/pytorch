@@ -2955,7 +2955,12 @@ class TestAutograd(TestCase):
     def test_sinc(self):
         # The derivative of sinc(x) at x=0 has to be special cased.
         # A naive computation will result in 0/0 -> NaN.
-        a = torch.tensor([0.0, 1.0], dtype=torch.double, requires_grad=True)
+        # We also need to be careful when we are very close to 0, as the
+        # derivative's denominator is squared, and there are some floats
+        # that are positive and whose squares are zero.
+        a = torch.tensor([0.0, torch.finfo(torch.double).tiny, 1.0],
+                         dtype=torch.double,
+                         requires_grad=True)
         gradcheck(torch.sinc, a)
 
     def test_igamma(self):
@@ -3010,16 +3015,12 @@ class TestAutograd(TestCase):
 
         self.assertFalse(torch.autograd._profiler_enabled())
 
-        last_end = 0
-        names = ['aten::mul', 'aten::to', 'aten::empty_strided', 'aten::copy_',
-                 'aten::empty', 'aten::add', 'aten::to', 'aten::empty_strided',
-                 'aten::copy_', 'aten::empty']
-        top_level_names = ['aten::mul', 'aten::add']
+        names = ['aten::mul', 'aten::add']
+        found_indices = set()
         for evt in p.function_events:
-            if evt.time_range.start > last_end:
-                self.assertTrue(evt.name in top_level_names)
-                last_end = evt.time_range.end
-            self.assertTrue(evt.name in names)
+            if evt.name in names:
+                found_indices.add(names.index(evt.name))
+        self.assertEquals(len(found_indices), len(names))
 
     def test_profiler_seq_nr(self):
         with profile(use_kineto=kineto_available()) as p:
@@ -3210,33 +3211,17 @@ class TestAutograd(TestCase):
 
         print(prof.function_events)
 
-        top_level_expected_events_and_shapes = [
-            ('aten::linear', [[128, 20], [30, 20], [30]]),
-            ('aten::linear', [[128, 30], [40, 30], [40]])
+        linear_expected_shapes = [
+            [[128, 20], [30, 20], [30]],
+            [[128, 30], [40, 30], [40]],
         ]
 
-        expected_iter = iter(top_level_expected_events_and_shapes)
-        last_end = 0
-
+        found_indices = set()
         for event in prof.function_events:
-            if event.time_range.start > last_end:
-                name_expected, input_shape_expected = next(expected_iter)
-                if name_expected is not None:
-                    self.assertEqual(event.name, name_expected)
-                self.assertEqual(event.input_shapes, input_shape_expected)
-                last_end = event.time_range.end
-
-    def test_profiler_no_cuda(self):
-        print("")
-        layer = torch.nn.Linear(20, 30)
-        x = torch.randn(128, 20)
-        with profile(use_cuda=False, use_kineto=kineto_available()) as prof:
-            layer(x)
-
-        prof_str = str(prof)
-        print(prof_str)
-        self.assertTrue('cpu' in prof_str.lower())
-        self.assertTrue('cuda' not in prof_str.lower())
+            if event.name == "aten::linear":
+                self.assertTrue(event.input_shapes in linear_expected_shapes)
+                found_indices.add(linear_expected_shapes.index(event.input_shapes))
+        self.assertEqual(len(found_indices), len(linear_expected_shapes))
 
     def test_profiler_aggregation_lstm(self):
         print("")
@@ -5430,7 +5415,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'zero_',
                 '__radd__', 'mul', '__rmul__', 'diagonal', 'fill_', 'sub', 'narrow',
-                'swapaxes', 'swapdims', 'tensor_split'] + separate_complex_tests
+                'swapaxes', 'swapdims', 'tensor_split', 'select', 'clone'] + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
@@ -5555,29 +5540,24 @@ def add_test(
                         # compare grads to inplace grads
                         inplace_name = name + '_'
                         # can't broadcast inplace to left hand side
-                        # complex in-place tests need to skipped since we provide conjugated inputs
-                        # and then zero the grad later. Since the conjugate operation is recorded by the autograd
-                        # when conj is called and not when it is resolved, the tests below would fail.
-                        # We should probably disallow people from zeroing the grad when conj bit is set.
                         skip_inplace = ('broadcast_lhs' in test_name or
-                                        'broadcast_all' in test_name or
-                                        'complex' in test_name)
+                                        'broadcast_all' in test_name)
                         if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
                                 output_variable = (output_variable,)
-                            inplace_self_variable = deepcopy(self_variable)
+                            inplace_self_variable = self_variable.detach().clone().requires_grad_(self_variable.requires_grad)
                             inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                                for i in (inplace_self_variable,))
                             inplace_args_variable = deepcopy(args_variable)
                             inplace_args_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                                for i in inplace_args_variable)
-
                             inplace_output_variable = (
                                 getattr(inplace_self_variable_copy[0], inplace_name)(*inplace_args_variable_copy,
                                                                                      **kwargs_variable))
                             if not isinstance(inplace_output_variable, tuple):
                                 inplace_output_variable = (inplace_output_variable,)
+
                             self.assertEqual(inplace_output_variable, output_variable)
                             # Check that gradient is the same
                             for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
@@ -5585,6 +5565,7 @@ def add_test(
                                 if not isinstance(inp_i, torch.Tensor):
                                     assert not isinstance(i, torch.Tensor)
                                     continue
+
                                 if inp_i.grad is not None:
                                     with torch.no_grad():
                                         inp_i.grad.zero_()
@@ -5599,6 +5580,7 @@ def add_test(
                                     grad = randn_like(i_o).double()
                                 i_o.backward(grad)
                                 o.backward(grad)
+
                             for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
                                                 (self_variable,) + args_variable):
                                 if not isinstance(inp_i, torch.Tensor):
@@ -5713,19 +5695,6 @@ class TestAutogradComplex(TestCase):
         torch.select(z1, z1.dim() - 2, 0).sum().backward()
 
         self.assertEqual(z.grad, z1.grad)
-
-    def test_resolve_conj(self):
-        def func1(x):
-            y = x.clone().conj()
-            return y.resolve_conj_()
-
-        def func2(x):
-            y = x.conj()
-            return y.resolve_conj()
-
-        z = torch.randn(10, dtype=torch.cdouble, requires_grad=True)
-        gradcheck(func1, [z])
-        gradcheck(func2, [z])
 
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):

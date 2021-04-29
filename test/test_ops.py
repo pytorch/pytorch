@@ -717,6 +717,51 @@ class TestCommon(JitCommonTestCase):
             with self.assertRaises(RuntimeError, msg=msg_fail):
                 op_out(out=out)
 
+    # Tests that the operator's output for physically conjugated tensors and conjugate view tensors
+    # produces the same value. Also tests whether the gradients are same in both cases, both for a
+    # conjugated and non-conjugated grad
+    # Note that this also runs for functions that take tensorlists as input
+    @ops(op_db, allowed_dtypes=(torch.cfloat,))
+    def test_conj_view(self, device, dtype, op):
+        if not op.test_conjugated_samples:
+            return
+        # This test only runs for C -> R and C -> C functions
+        # TODO: add tests for `R->C` functions
+        _requires_grad = (op.supports_autograd and op.supports_complex_autograd)
+
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        conjugated_samples = op.conjugated_sample_inputs(samples)
+
+        for sample, conj_sample in zip(samples, conjugated_samples):
+            tensor1 = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
+            tensor1 = tensor1.conj_physical()
+            tensor2 = conj_sample.input if isinstance(conj_sample.input, torch.Tensor) else conj_sample.input[0]
+
+            # Computes function forward and backward values
+            expected_forward = op(sample.input, *sample.args, **sample.kwargs)
+            forward_with_conjview = op(conj_sample.input, *sample.args, **sample.kwargs)
+
+            # TODO: backward consistency only supported for single tensor outputs
+            # TODO: backward consistency only checked on sample.input, not all
+            #   tensor inputs
+            # TODO: update to handle checking grads of all tensor inputs as
+            #   derived from each tensor output
+            if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
+                    and (op.supports_complex_autograd)):
+                expected_forward.sum().backward()
+                forward_with_conjview.sum().backward()
+
+                if tensor1.grad is not None:
+                    self.assertEqual(tensor1.grad, tensor2.grad)
+
+                    tensor1.grad, tensor2.grad = None, None
+
+                    grad = torch.randn_like(tensor1)
+                    expected_forward.backward(grad.conj())
+                    forward_with_conjview.backward(grad.conj())
+
+                    self.assertEqual(tensor1.grad, tensor2.grad)
+
 
 instantiate_device_type_tests(TestOpInfo, globals())
 instantiate_device_type_tests(TestGradients, globals())

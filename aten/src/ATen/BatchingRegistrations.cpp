@@ -146,16 +146,19 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
   auto size_physical = self_physical.getPhysicalShape(size);
   auto self_physical_dim = self_physical.tensor().dim();
 
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(self_physical_dim <= size_physical.size(),
        "expand: the number of sizes provided (", /*logical*/size.size(), ") ",
        "must be greater or equal to the number of dimensions in the tensor (",
        /*logical dim*/self.dim(), ")");
 
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (self_physical_dim == size_physical.size()) {
     auto result = self_physical.tensor().expand(size_physical, implicit);
     return self_physical.getPhysicalToLogicalMap().apply(result);
   }
 
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_INTERNAL_ASSERT(self_physical_dim < size_physical.size());
   // Here, we know we are expanding a (logical) tensor to a larger number
   // of dimensions. We have to be careful because we can't call expand directly
@@ -1181,6 +1184,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   TRIVIAL_OP(conj);
   TRIVIAL_OP(_conj);
   TRIVIAL_OP(resolve_conj);
+  TRIVIAL_OP(_resolve_conj);
   m.impl("view_as_complex", view_as_complex_batching_rule);
 #undef TRIVIAL
 

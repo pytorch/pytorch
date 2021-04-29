@@ -13,6 +13,7 @@ using namespace torch::test;
 
 struct ModuleListTest : torch::test::SeedingFixture {};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, ConstructsFromSharedPointer) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -23,11 +24,13 @@ TEST_F(ModuleListTest, ConstructsFromSharedPointer) {
   ASSERT_EQ(list->size(), 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, ConstructsFromConcreteType) {
   static int copy_count;
 
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     M(const M& other) : torch::nn::Module(other) {
       copy_count++;
     }
@@ -44,6 +47,7 @@ TEST_F(ModuleListTest, ConstructsFromConcreteType) {
   ASSERT_EQ(copy_count, 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, ConstructsFromModuleHolder) {
   struct MImpl : torch::nn::Module {
     explicit MImpl(int value_) : value(value_) {}
@@ -59,6 +63,7 @@ TEST_F(ModuleListTest, ConstructsFromModuleHolder) {
   ASSERT_EQ(list->size(), 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, PushBackAddsAnElement) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -76,6 +81,7 @@ TEST_F(ModuleListTest, PushBackAddsAnElement) {
   ASSERT_EQ(list->size(), 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, Insertion) {
   struct MImpl : torch::nn::Module {
     explicit MImpl(int value_) : value(value_) {}
@@ -102,6 +108,7 @@ TEST_F(ModuleListTest, Insertion) {
     ASSERT_EQ(U[std::stoul(P.key())], P.value()->as<M>()->value);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, AccessWithAt) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -127,6 +134,7 @@ TEST_F(ModuleListTest, AccessWithAt) {
       list->at<M>(modules.size() + 1000000), "Index out of range");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, AccessWithPtr) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -153,16 +161,23 @@ TEST_F(ModuleListTest, AccessWithPtr) {
   ASSERT_THROWS_WITH(list->ptr(modules.size() + 1000000), "Index out of range");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, SanityCheckForHoldingStandardModules) {
   ModuleList list(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Linear(10, 3),
       Conv2d(1, 2, 3),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Dropout(0.5),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       BatchNorm2d(5),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Embedding(4, 10),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       LSTM(4, 5));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, ExtendPushesModulesFromOtherModuleList) {
   struct A : torch::nn::Module {};
   struct B : torch::nn::Module {};
@@ -193,7 +208,9 @@ TEST_F(ModuleListTest, ExtendPushesModulesFromOtherModuleList) {
   ASSERT_TRUE(b[3]->as<A>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, HasReferenceSemantics) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ModuleList first(Linear(2, 3), Linear(4, 4), Linear(4, 5));
   ModuleList second(first);
 
@@ -209,6 +226,7 @@ TEST_F(ModuleListTest, HasReferenceSemantics) {
       }));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, IsCloneable) {
   ModuleList list(Linear(3, 4), Functional(torch::relu), BatchNorm1d(3));
   ModuleList clone = std::dynamic_pointer_cast<ModuleListImpl>(list->clone());
@@ -239,7 +257,9 @@ TEST_F(ModuleListTest, IsCloneable) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, RegistersElementsAsSubmodules) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ModuleList list(Linear(10, 3), Conv2d(1, 2, 3), Dropout2d(0.5));
 
   auto modules = list->children();
@@ -248,12 +268,14 @@ TEST_F(ModuleListTest, RegistersElementsAsSubmodules) {
   ASSERT_TRUE(modules[2]->as<Dropout2d>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, NestingIsPossible) {
   ModuleList list(
       (ModuleList(Dropout(), Dropout())),
       (ModuleList(Dropout(), Dropout()), Dropout()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, CloneToDevice_CUDA) {
   ModuleList list(Linear(3, 4), Functional(torch::relu), BatchNorm1d(3));
   torch::Device device(torch::kCUDA, 0);
@@ -267,13 +289,19 @@ TEST_F(ModuleListTest, CloneToDevice_CUDA) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, PrettyPrintModuleList) {
   ModuleList list(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Linear(10, 3),
       Conv2d(1, 2, 3),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Dropout(0.5),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       BatchNorm2d(5),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Embedding(4, 10),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       LSTM(4, 5));
   ASSERT_EQ(
       c10::str(list),
@@ -287,10 +315,12 @@ TEST_F(ModuleListTest, PrettyPrintModuleList) {
       ")");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, RangeBasedForLoop) {
   torch::nn::ModuleList mlist(
     torch::nn::Linear(3, 4),
     torch::nn::BatchNorm1d(4),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::nn::Dropout(0.5)
   );
 

@@ -352,7 +352,7 @@ class TestViewOps(TestCase):
         t = _make_tensor((4, 5,), dtype, device)
         v = t.conj()
         self.assertTrue(self.is_view_of(t, v))
-        self.assertEqual(v, t.numpy().conj().to(device=device))
+        self.assertEqual(v, torch.from_numpy(t.numpy().conj()).to(device=device))
 
     @onlyOnCPUAndCUDA
     @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
