@@ -889,7 +889,6 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Opt
                             module(*example)
                 else:
                     obj(*example_input)
-        print(type_trace_db.trace_records)
     else:
         warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
                       "to enable Profile-Directed Typing in TorchScript. Refer to "
