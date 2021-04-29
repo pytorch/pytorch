@@ -4932,19 +4932,16 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @staticmethod
-    def _gpu_add_given_gpus(x, y, x_to, y_to, z_to):
-        if all([
-            x.is_cuda,
-            x.device.index == x_to,
-            y.is_cuda,
-            y.device.index == y_to
-        ]):
+    def _gpu_add_given_devices(x, y, x_to, y_to, z_to):
+        x_device = "cpu" if x.device.type == "cpu" else x.device.index
+        y_device = "cpu" if y.device.type == "cpu" else y.device.index
+        if x_device == x_to and y_device == y_to:
             return x.to(z_to) + y.to(z_to)
         else:
             raise ValueError("Wrong device affinity")
 
     def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map, dst=None, fn=None):
-        fn = TensorPipeAgentCudaRpcTest._gpu_add_given_gpus if fn is None else fn
+        fn = TensorPipeAgentCudaRpcTest._gpu_add_given_devices if fn is None else fn
         x_to = device_map[x_from]
         y_to = device_map[y_from]
 
@@ -4973,15 +4970,6 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         self.assertEqual(ret, torch.ones(2).to(z_from))
 
         rpc.shutdown()
-
-    @staticmethod
-    def _gpu_add_given_devices(x, y, x_to, y_to, z_to):
-        x_device = "cpu" if x.device.type == "cpu" else x.device.index
-        y_device = "cpu" if y.device.type == "cpu" else y.device.index
-        if x_device == x_to and y_device == y_to:
-            return x.to(z_to) + y.to(z_to)
-        else:
-            raise ValueError("Wrong device affinity")
 
     def test_device_map_cpu(self):
         self._test_device_maps_gpu(

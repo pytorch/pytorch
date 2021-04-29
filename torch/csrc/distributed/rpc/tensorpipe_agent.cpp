@@ -58,22 +58,14 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
   deviceIndices.reserve(tensors.size());
   bool hasCudaTensor = false;
   for (const auto& t : tensors) {
-    if (t.device().is_cpu()) {
-      deviceIndices.push_back(-1);
-    } else {
-      const auto deviceIter = deviceMap.find(t.device().index());
-      TORCH_CHECK(
-          deviceIter != deviceMap.end(),
-          errStr,
-          " for device ",
-          t.device(),
-          " but received a tensor on that device.");
-      deviceIndices.push_back(deviceIter->second);
-      hasCudaTensor = true;
-    }
-  }
-  if (!hasCudaTensor) {
-    deviceIndices.clear();
+    const auto deviceIter = deviceMap.find(t.device().index());
+    TORCH_CHECK(
+        deviceIter != deviceMap.end(),
+        errStr,
+        " for device ",
+        t.device(),
+        " but received a tensor on that device.");
+    deviceIndices.push_back(deviceIter->second);
   }
   return deviceIndices;
 }
