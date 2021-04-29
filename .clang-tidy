@@ -1,6 +1,5 @@
 ---
 # NOTE there must be no spaces before the '-', so put the comma last.
-InheritParentConfig: true
 Checks: '
 bugprone-*,
 -bugprone-forward-declaration-namespace,
