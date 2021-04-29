@@ -21,9 +21,16 @@ slogdet_batch_rule(const Tensor& self, optional<int64_t> self_bdim) {
   };
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  VMAP_SUPPORT("slogdet", slogdet_batch_rule);
+std::tuple<Tensor, optional<int64_t>> dot_batch_rule(const Tensor& A, optional<int64_t> A_bdim, const Tensor& B, optional<int64_t> B_bdim) {
+  auto A_ = moveBatchDimToFront(A, A_bdim);
+  auto B_ = moveBatchDimToFront(B, B_bdim);
+  return {at::matmul(A_, B_.t()), 0};
 }
 
+
+TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+  VMAP_SUPPORT("slogdet", slogdet_batch_rule);
+  VMAP_SUPPORT("dot", dot_batch_rule);
+}
 }}
 

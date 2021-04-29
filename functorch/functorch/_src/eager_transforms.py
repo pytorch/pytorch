@@ -1,5 +1,5 @@
 import torch
-from functools import partial
+from functools import partial, wraps
 import collections
 import torch.nn as nn
 import torch.nn.functional as F
@@ -133,6 +133,7 @@ def grad_with_value(f, diff_argnums=(0,), has_aux=False):
     return wrapper
 
 def grad(f, diff_argnums=(0,), has_aux=False):
+    @wraps(f)
     def wrapper(*args):
         results = grad_with_value(f, diff_argnums, has_aux=has_aux)(*args)
         if has_aux:
