@@ -265,7 +265,6 @@ bool matmulIsSupported(const torch::jit::Node* node) {
 } // namespace jit
 } // namespace torch
 
-
 size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   if (idx < 0) {
     // Handle negative indexing
@@ -354,9 +353,7 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   return e;
 }
 
-ExprHandle broadcast(
-    BufHandle b,
-    const std::vector<ExprHandle>& axes) {
+ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes) {
   return b.load(computeIndicesToBroadcast(axes, b.dims()));
 }
 
@@ -437,7 +434,6 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
   }
   return scalars_.at(v);
 }
-
 
 std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
     const c10::VaryingShape<int64_t>& shape) {
@@ -674,9 +670,7 @@ ExprHandle promoteHalfToFloat(const ExprHandle& e) {
   }
 }
 
-bool checkTypes(
-    const ScalarType highType,
-    const int typeConstraints) {
+bool checkTypes(const ScalarType highType, const int typeConstraints) {
   if (typeConstraints == kAllTypes) {
     return true;
   }
