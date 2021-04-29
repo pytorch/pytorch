@@ -1117,9 +1117,8 @@ Tensor* computeCat(
       });
 }
 
-Tensor* TensorExprKernel::computeMatmul(
-    const ArgValue& A,
-    const ArgValue& B,
+Tensor* computeMatmul(
+    const std::vector<ArgValue>& inputs,
     std::vector<ExprHandle> outputShape,
     const c10::optional<ScalarType>& outputType) {
   Dtype dtype = kFloat;
@@ -1127,8 +1126,8 @@ Tensor* TensorExprKernel::computeMatmul(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("matmul", outputShape, dtype);
-  const Buf* a = c10::get<BufHandle>(A).node();
-  const Buf* b = c10::get<BufHandle>(B).node();
+  const Buf* a = c10::get<BufHandle>(inputs[0]).node();
+  const Buf* b = c10::get<BufHandle>(inputs[1]).node();
 
   auto size_a = ExprVectorToExprHandleVector(a->dims());
   auto size_b = ExprVectorToExprHandleVector(b->dims());
