@@ -12,10 +12,11 @@ extern "C" {
 
 // out = a * n (doing calculation in the `tmp` buffer)
 int bad_mul_kernel(void** args) {
-  at::Tensor a = at::from_blob(args[0], {128}, at::kFloat);
-  at::Tensor out = at::from_blob(args[1], {128}, at::kFloat);
+  const int size = 128;
+  at::Tensor a = at::from_blob(args[0], {size}, at::kFloat);
+  at::Tensor out = at::from_blob(args[1], {size}, at::kFloat);
   at::Tensor n = at::from_blob(args[2], {1}, at::kInt);
-  at::Tensor tmp = at::from_blob(args[3], {128}, at::kFloat);
+  at::Tensor tmp = at::from_blob(args[3], {size}, at::kFloat);
 
   tmp.zero_();
   for (int i = n.item().toInt(); i > 0; i--) {
@@ -25,7 +26,7 @@ int bad_mul_kernel(void** args) {
   return 0;
 }
 
-int dummy_kernel(void** args) {
+int dummy_kernel(void** /* args */) {
   return 0;
 }
 
@@ -129,7 +130,7 @@ TEST(Function, ValidInput) {
   c10::List<at::Tensor> input({
       at::ones({size}, at::kFloat)
   });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_NO_THROW(
       f.run(c10::impl::toList(input)));
 }
@@ -143,7 +144,7 @@ TEST(Function, InvalidInput) {
   c10::List<at::Tensor> input({
       at::ones({size * 2}, at::kFloat)
   });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(
       f.run(c10::impl::toList(input)),
       c10::Error);
