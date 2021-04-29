@@ -657,6 +657,7 @@ static PyObject * THPModule_are_vmap_fallback_warnings_enabled(PyObject* _unused
 
 //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  THPModule_initExtension,   METH_O,       nullptr},
   {"_autograd_init",  THPAutograd_initExtension, METH_NOARGS,  nullptr},
