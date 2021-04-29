@@ -46,6 +46,7 @@ inline std::ostream& _str(std::ostream& ss) {
 
 template <typename T>
 inline std::ostream& _str(std::ostream& ss, const T& t) {
+  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   ss << t;
   return ss;
 }
