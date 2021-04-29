@@ -72,6 +72,9 @@ Tensor prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_ten
 namespace {
 
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+  // Make sure to keep addmm_cuda below in sync with this code; it
+  // preflights a check to try to avoid actually needing to call
+  // expand().
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
@@ -295,7 +298,8 @@ Tensor& addmm_out_cuda(const Tensor &self,
 
 Tensor addmm_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
                   const Scalar& beta, const Scalar& alpha) {
-  Tensor out = at::empty({0}, self.options());
+  TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
+  Tensor out = at::empty({mat1.sizes()[0], mat2.sizes()[1]}, self.options());
   addmm_out_cuda(self, mat1, mat2, beta, alpha, out);
   return out;
 }
