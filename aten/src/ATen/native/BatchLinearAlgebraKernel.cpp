@@ -484,6 +484,188 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, int64_t n_columns) 
   return result;
 }
 
+// we use `enum class LapackLstsqDriverType` as keys in an unordered_map.
+// Clang5 and Gcc5 do not support std::hash for enum classes, hence
+// we provide our own hash function.
+struct LapackLstsqDriverTypeHash {
+  std::size_t operator()(const LapackLstsqDriverType& driver_type) const {
+    return static_cast<std::size_t>(driver_type);
+  }
+};
+
+/*
+  Solves a least squares problem. That is minimizing ||B - A X||.
+
+  Input args:
+  * 'input' - Tensor containing batches of m-by-n matrix A.
+  * 'other' - Tensor containing batches of max(m, n)-by-nrhs matrix B.
+  * 'cond' - relative tolerance for determining rank of A.
+  * 'driver' - the name of the LAPACK driver that is used to compute the solution.
+  Output args (modified in-place):
+  * 'solution' - Tensor to store the solution matrix X.
+  * 'residuals' - Tensor to store values of ||B - A X||.
+  * 'rank' - Tensor to store the rank of A.
+  * 'singular_values' - Tensor to store the singular values of A.
+  * 'infos' - Tensor to store error codes of linear algebra math library.
+
+  For further details, please see the LAPACK documentation for GELS/GELSY/GELSS/GELSD routines.
+*/
+template <typename scalar_t>
+void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, LapackLstsqDriverType driver_type) {
+#ifndef USE_LAPACK
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.lstsq on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  using driver_t = at::native::LapackLstsqDriverType;
+
+  auto lapack_func = lapackLstsq<driver_t::Gelsd, scalar_t, value_t>;
+  static auto driver_type_to_func
+    = std::unordered_map<driver_t, decltype(lapack_func), LapackLstsqDriverTypeHash>({
+    {driver_t::Gels, lapackLstsq<driver_t::Gels, scalar_t, value_t>},
+    {driver_t::Gelsy, lapackLstsq<driver_t::Gelsy, scalar_t, value_t>},
+    {driver_t::Gelsd, lapackLstsq<driver_t::Gelsd, scalar_t, value_t>},
+    {driver_t::Gelss, lapackLstsq<driver_t::Gelss, scalar_t, value_t>}
+  });
+  lapack_func = driver_type_to_func[driver_type];
+
+  char trans = 'N';
+
+  auto A_data = A.data_ptr<scalar_t>();
+  auto B_data = B.data_ptr<scalar_t>();
+  auto batch_size = batchCount(A);
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+  auto nrhs = B.size(-1);
+  auto lda = std::max<int64_t>(1, m);
+  auto ldb = std::max<int64_t>(1, std::max(m, n));
+  auto infos_data = infos.data_ptr<int>();
+
+  // only 'gels' driver does not compute the rank
+  int rank_32;
+  int64_t* rank_data;
+  int64_t* rank_working_ptr = nullptr;
+  if (driver_t::Gels != driver_type) {
+    rank_data = rank.data_ptr<int64_t>();
+    rank_working_ptr = rank_data;
+  }
+
+  // 'gelsd' and 'gelss' are SVD-based algorithms
+  // so we can get singular values
+  value_t* s_data;
+  value_t* s_working_ptr = nullptr;
+  int64_t s_stride;
+  if (driver_t::Gelsd == driver_type || driver_t::Gelss == driver_type) {
+    s_data = singular_values.data_ptr<value_t>();
+    s_working_ptr = s_data;
+    s_stride = singular_values.size(-1);
+  }
+
+  // 'jpvt' workspace array is used only for 'gelsy' which uses QR factorization with column pivoting
+  Tensor jpvt;
+  int* jpvt_data = nullptr;
+  if (driver_t::Gelsy == driver_type) {
+    jpvt = at::empty({std::max<int64_t>(1, n)}, A.options().dtype(at::kInt));
+    jpvt_data = jpvt.data_ptr<int>();
+  }
+
+  // Run once the driver, first to get the optimal workspace size
+  int lwork = -1; // default value to decide the opt size for workspace arrays
+  scalar_t work_opt;
+  value_t rwork_opt;
+  int iwork_opt;
+  lapack_func(trans, m, n, nrhs,
+    A_data, lda,
+    B_data, ldb,
+    &work_opt, lwork,
+    infos_data,
+    jpvt_data,
+    static_cast<value_t>(rcond),
+    &rank_32,
+    &rwork_opt,
+    s_working_ptr,
+    &iwork_opt);
+
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(work_opt));
+  Tensor work = at::empty({lwork}, A.options());
+  scalar_t* work_data = work.data_ptr<scalar_t>();
+
+  // 'rwork' only used for complex inputs and 'gelsy', 'gelsd' and 'gelss' drivers
+  Tensor rwork;
+  value_t* rwork_data;
+  if (A.is_complex() && driver_t::Gels != driver_type) {
+    int64_t rwork_len;
+    switch (driver_type) {
+      case driver_t::Gelsy:
+        rwork_len = std::max<int64_t>(1, 2 * n);
+        break;
+      case driver_t::Gelss:
+        rwork_len = std::max<int64_t>(1, 5 * std::min(m, n));
+        break;
+      // case driver_t::Gelsd:
+      default:
+        rwork_len = std::max<int64_t>(1, rwork_opt);
+    }
+    rwork = at::empty({rwork_len}, A.options().dtype(c10::toValueType(A.scalar_type())));
+    rwork_data = rwork.data_ptr<value_t>();
+  }
+
+  // 'iwork' workspace array is relevant only for 'gelsd'
+  Tensor iwork;
+  int* iwork_data;
+  if (driver_t::Gelsd == driver_type) {
+    iwork = at::empty({std::max<int>(1, iwork_opt)}, A.options().dtype(at::kInt));
+    iwork_data = iwork.data_ptr<int>();
+  }
+
+  at::native::batch_iterator_with_broadcasting<scalar_t>(A, B,
+    [&](scalar_t* A_working_ptr, scalar_t* B_working_ptr, int64_t A_linear_batch_idx) {
+      rank_working_ptr = rank_working_ptr ? &rank_data[A_linear_batch_idx] : nullptr;
+      s_working_ptr = s_working_ptr ? &s_data[A_linear_batch_idx * s_stride] : nullptr;
+      int* infos_working_ptr = &infos_data[A_linear_batch_idx];
+
+      lapack_func(trans, m, n, nrhs,
+        A_working_ptr, lda,
+        B_working_ptr, ldb,
+        work_data, lwork,
+        infos_working_ptr,
+        jpvt_data,
+        static_cast<value_t>(rcond),
+        &rank_32,
+        rwork_data,
+        s_working_ptr,
+        iwork_data);
+
+      // we want the output `rank` Tensor to be of type int64_t,
+      // however LAPACK accepts int. That is why we use an integer
+      // variable that then gets promoted and written into `rank`.
+      // We use this approach over a tensor cast for better performance.
+      if (rank_working_ptr) {
+        *rank_working_ptr = static_cast<int64_t>(rank_32);
+      }
+    }
+  );
+#endif
+}
+
+// This is a type and driver dispatching helper function for 'apply_lstsq'
+void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
+
+  static auto driver_string_to_type = std::unordered_map<std::string, LapackLstsqDriverType>({
+    {"gels", at::native::LapackLstsqDriverType::Gels},
+    {"gelsy", at::native::LapackLstsqDriverType::Gelsy},
+    {"gelsd", at::native::LapackLstsqDriverType::Gelsd},
+    {"gelss", at::native::LapackLstsqDriverType::Gelss}
+  });
+  auto driver_type = driver_string_to_type[driver_name];
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "linalg_lstsq_cpu", [&]{
+    apply_lstsq<scalar_t>(a, b, rank, singular_values, infos, rcond, driver_type);
+  });
+}
+
 /*
 Solves the matrix equation op(A) X = B
 X and B are n-by-nrhs matrices, A is a unit, or non-unit, upper or lower triangular matrix
@@ -589,6 +771,14 @@ REGISTER_AVX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_VSX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_ARCH_DISPATCH(lstsq_stub, DEFAULT, &lstsq_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX_DISPATCH(lstsq_stub, &lstsq_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX2_DISPATCH(lstsq_stub, &lstsq_kernel);
+REGISTER_VSX_DISPATCH(lstsq_stub, &lstsq_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(triangular_solve_stub, DEFAULT, &triangular_solve_kernel);
