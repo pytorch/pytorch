@@ -3481,7 +3481,7 @@ op_db: List[OpInfo] = [
         "add",
         variant_test_name="with_alpha",
         # numpy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
-        ref=lambda input, other, *, alpha: np.add(input, alpha * other),
+        ref=lambda input, other, *, alpha: np.add(input, np.multiply(alpha, other)),
         sample_inputs_func=partial(sample_inputs_binary, alpha=2),
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         supports_out=True,
@@ -5679,7 +5679,7 @@ op_db: List[OpInfo] = [
         aliases=("subtract",),
         variant_test_name="with_alpha",
         # numpy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
-        ref=lambda input, other, *, alpha: np.subtract(input, alpha * other),
+        ref=lambda input, other, *, alpha: np.subtract(input, np.multiply(alpha, other)),
         sample_inputs_func=partial(sample_inputs_binary, alpha=2),
         supports_out=True,
     ),
