@@ -44,6 +44,7 @@ void StatRegistry::update(const ExportedStatList& data) {
   }
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 StatRegistry::~StatRegistry() {}
 
 StatRegistry& StatRegistry::get() {
