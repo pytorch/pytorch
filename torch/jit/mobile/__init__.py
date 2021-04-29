@@ -73,8 +73,7 @@ def _export_operator_list(module: LiteScriptModule):
         return a set of root operator names (with overload name) that are used by any method
         in this mobile module.
     """
-    # TODO fix mypy here
-    return torch._C._export_operator_list(module._c)  # type: ignore[attr-defined]
+    return torch._C._export_operator_list(module._c)
 
 def _get_model_bytecode_version(f_input) -> int:
     r"""

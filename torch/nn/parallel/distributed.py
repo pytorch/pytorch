@@ -290,15 +290,6 @@ class DistributedDataParallel(Module):
         Using ``DistributedDataParallel`` in conjunction with the
         :ref:`distributed-rpc-framework` is experimental and subject to change.
 
-    .. warning::
-        The ``gradient_as_bucket_view`` mode  does not yet work with Automatic
-        Mixed Precision (AMP). AMP maintains stashed gradients that are used for
-        unscaling gradients. With ``gradient_as_bucket_view=True``, these
-        stashed gradients will point to communication buckets in the first
-        iteration. In the next iteration, the communication buckets are mutated
-        and thus these stashed gradients will be unexpectedly mutated as well,
-        which might lead to wrong results.
-
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices.
@@ -345,8 +336,7 @@ class DistributedDataParallel(Module):
                                unused can be detached from the autograd graph
                                using ``torch.Tensor.detach``. (default: ``False``)
         check_reduction: This argument is deprecated.
-        gradient_as_bucket_view (bool): This is a prototype feature and subject
-                      to changes. When set to ``True``, gradients will be views
+        gradient_as_bucket_view (bool): When set to ``True``, gradients will be views
                       pointing to different offsets of ``allreduce`` communication
                       buckets. This can reduce peak memory usage, where the
                       saved memory size will be equal to the total gradients
