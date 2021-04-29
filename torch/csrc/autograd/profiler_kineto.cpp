@@ -400,6 +400,10 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 }
 
 void addMetadata(const std::string& key, const std::string& value) {
+  if (!libkineto::api().isProfilerInitialized()){
+    throw std::runtime_error("The profiler doesn't get initialized");
+  }
+
   libkineto::api().activityProfiler().addMetadata(key, value);
 }
 
