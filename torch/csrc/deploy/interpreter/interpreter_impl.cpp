@@ -5,8 +5,10 @@
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <iostream>
 
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <assert.h>
 #include <pybind11/embed.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdio.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -294,6 +296,7 @@ struct ConcreteInterpreterImpl : public torch::deploy::InterpreterImpl {
     status = PyConfig_SetString(&config, &config.executable, L"torch_deploy");
     status = PyConfig_SetString(&config, &config.prefix, L"");
     config.module_search_paths_set = 1;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     wchar_t* module_search_paths[0] = {};
     status = PyConfig_SetWideStringList(
         &config, &config.module_search_paths, 0, module_search_paths);
