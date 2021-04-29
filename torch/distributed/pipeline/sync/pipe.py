@@ -342,9 +342,8 @@ class Pipe(Module):
         :class:`~torch.distributed.rpc.RRef` pointing to the output.
         :class:`Pipe` is a fairly transparent module wrapper. It doesn't
         modify the input and output signature of the underlying module. But
-        there's type restriction. Input and output have to be a
-        :class:`~torch.Tensor` or a sequence of tensors. This restriction is
-        applied at partition boundaries too.
+        there's type restriction. Input and output have to contain atleast one
+        tensor. This restriction is applied at partition boundaries too.
 
         The sequence of inputs are fed into the first stage of the pipeline as
         ``*inputs``. As a result the positional args for this function should
@@ -358,14 +357,21 @@ class Pipe(Module):
         size is less than ``chunks``, the number of micro-batches is equal to
         the batch size.
 
+        Only tensors are split into multiple micro-batches, non-Tensor inputs
+        are just replicated as-is in each micro-batch. For non-Tensor outputs
+        in the last stage of the pipeline, they are aggregated as a ``List``
+        and returned the user. For example, if you have 2 micro-batches
+        returning the integer 5, the user would receive the consolidated
+        output of `[5, 5]`
+
         Args:
-            inputs (torch.Tensor or sequence of :class:`~torch.Tensor`): input mini-batch
+            inputs: input mini-batch
 
         Returns:
             :class:`~torch.distributed.rpc.RRef` to the output of the mini-batch
 
         Raises:
-            TypeError: input is not a tensor or sequence of tensors.
+            TypeError: input doesn't contain at least one tensor
 
         """
         microbatch.check(*inputs)

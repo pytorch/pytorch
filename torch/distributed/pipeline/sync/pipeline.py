@@ -42,20 +42,23 @@ else:
 
 
 def _depend(fork_from: Batch, join_to: Batch) -> None:
-    fork_from[0], phony = fork(fork_from[0])
-    join_to[0] = join(join_to[0], phony)
+    fork_from_idx = fork_from.find_tensor_idx()
+    join_to_idx = join_to.find_tensor_idx()
+
+    fork_from[fork_from_idx], phony = fork(fork_from[fork_from_idx])
+    join_to[join_to_idx] = join(join_to[join_to_idx], phony)
 
 
 def _copy(batch: Batch, prev_stream: AbstractStream, next_stream: AbstractStream) -> None:
     batch[:] = Copy.apply(prev_stream, next_stream, *batch)
     # Gradients are only supported for float Tensors.
-    batch[:] = tuple([x if x.is_floating_point() else x.detach() for x in batch])
+    batch[:] = tuple([x.detach() if torch.is_tensor(x) and not x.is_floating_point() else x for x in batch])
 
 
 def _wait(batch: Batch, prev_stream: AbstractStream, next_stream: AbstractStream) -> None:
     batch[:] = Wait.apply(prev_stream, next_stream, *batch)
     # Gradients are only supported for float Tensors.
-    batch[:] = tuple([x if x.is_floating_point() else x.detach() for x in batch])
+    batch[:] = tuple([x.detach() if torch.is_tensor(x) and not x.is_floating_point() else x for x in batch])
 
 
 def _clock_cycles(m: int, n: int) -> Iterable[List[Tuple[int, int]]]:
@@ -194,7 +197,7 @@ class Pipeline:
             if checkpoint:
 
                 def function(
-                    *inputs: TensorOrTensors,
+                    *inputs,
                     partition: nn.Module = partition,
                     skip_tracker: SkipTrackerThroughPotals = skip_trackers[i],
                     chunk_id: int = i,
