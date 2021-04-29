@@ -31,6 +31,9 @@ namespace c10 {
   _(prim, ConstantMKLDNNTensor)      \
   _(prim, BroadcastMKLDNNTensors)    \
   _(prim, MKLDNNGroup)               \
+  _(prim, MKLDNNHardSwish)           \
+  _(prim, MKLDNNHardSigmoid)         \
+  _(prim, MKLDNNHardTanh)            \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
@@ -94,6 +97,8 @@ namespace c10 {
   _(aten, is_pinned)                 \
   _(aten, Delete)                    \
   _(aten, relu_)                     \
+  _(aten, relu6)                     \
+  _(aten, relu6_)                    \
   _(aten, dropout_)                  \
   _(aten, sigmoid_)                  \
   _(prim, device)                    \
@@ -284,6 +289,7 @@ namespace c10 {
   _(aten, fix)                       \
   _(aten, fix_)                      \
   _(aten, to_mkldnn)                 \
+  _(aten, positive)                  \
   _(aten, neg)                       \
   _(aten, neg_)                      \
   _(aten, negative)                  \
@@ -327,7 +333,12 @@ namespace c10 {
   _(aten, special_expm1)             \
   _(aten, exp2)                      \
   _(aten, special_exp2)              \
+  _(aten, special_i0e)               \
   _(aten, has_torch_function)        \
+  _(aten, hardswish)                 \
+  _(aten, hardswish_)                \
+  _(aten, hardsigmoid_)              \
+  _(aten, hardtanh_)                 \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

@@ -43,7 +43,7 @@ import os
 import unittest
 import numpy as np
 from torch.testing import FileCheck
-from typing import Callable, Tuple, Dict, Any
+from typing import Callable, Tuple, Dict, Any, Union
 
 class NodeSpec:
     ''' Used for checking GraphModule Node
@@ -543,7 +543,7 @@ class QuantizationTestCase(TestCase):
         """
         nodes_in_graph = dict()
         node_list = []
-        modules = dict(graph_module.named_modules())
+        modules = dict(graph_module.named_modules(remove_duplicate=False))
         for node in graph_module.graph.nodes:
             n = None
             if node.op == 'call_function' or node.op == 'call_method':
@@ -629,12 +629,14 @@ class QuantizationTestCase(TestCase):
             instance checks.
             """
 
-            def _get_underlying_op_type(node: Node, gm: GraphModule) -> Callable:
+            def _get_underlying_op_type(
+                node: Node, gm: GraphModule
+            ) -> Union[Callable, str]:
                 if node.op == 'call_module':
                     mod = getattr(gm, node.target)
                     return type(mod)
                 else:
-                    assert node.op == 'call_function'
+                    assert node.op in ('call_function', 'call_method')
                     return node.target
 
             self.assertTrue(
@@ -1144,7 +1146,7 @@ class NormalizationTestModel(torch.nn.Module):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.layer_norm(x)
-        x = self.group_norm(x.unsqueeze(-1))
+        x = self.group_norm(x.unsqueeze(-1).repeat(1, 1, 3))
         x = self.instance_norm1d(x)
         x = self.instance_norm2d(x.unsqueeze(-1))
         x = self.instance_norm3d(x.unsqueeze(-1))

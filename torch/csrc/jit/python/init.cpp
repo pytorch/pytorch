@@ -93,9 +93,13 @@
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
 #include <c10/macros/Export.h>
+#include <c10/util/signal_handler.h>
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/core/function_schema.h>
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAFuture.h>
+#endif
 
 #include <pybind11/functional.h>
 #include <pybind11/iostream.h>
@@ -207,7 +211,17 @@ void initJITBindings(PyObject* module) {
             return paramsDict;
           },
           pybind11::return_value_policy::move)
-      .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
+      .def(
+          "_jit_pass_onnx_scalar_type_analysis",
+          [](std::shared_ptr<Graph>& graph,
+             bool lowprecision_cast,
+             int opset_version) {
+            return ScalarTypeAnalysisForONNX(
+                graph, lowprecision_cast, opset_version);
+          },
+          py::arg("graph"),
+          py::arg("lowprecision_cast") = true,
+          py::arg("opset_version"))
       .def(
           "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def(
@@ -631,6 +645,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def("_jit_set_texpr_reductions_enabled", &setTexprReductionsEnabled)
       .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
+      .def("_jit_set_texpr_parallel_cpu_enabled", &setTexprParallelCPUEnabled)
+      .def("_jit_texpr_parallel_cpu_enabled", &texprParallelCPUEnabled)
       .def(
           "_jit_set_te_generate_block_code",
           [](bool gen_block_code) {
@@ -711,13 +727,9 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_optimize_for_mobile",
           [](script::Module& module,
              std::set<MobileOptimizerType>& optimization_blocklist,
-             std::vector<std::string>& preserved_methods,
-             std::vector<std::string>& methods_to_optimize) {
+             std::vector<std::string>& preserved_methods) {
             return optimizeForMobile(
-                module,
-                optimization_blocklist,
-                preserved_methods,
-                methods_to_optimize);
+                module, optimization_blocklist, preserved_methods);
           })
       .def(
           "_jit_pass_vulkan_insert_prepacked_ops",
@@ -1200,9 +1212,22 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
       m, "Future")
-      .def(py::init([]() {
-        return std::make_shared<PythonFutureWrapper>(
-            c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()));
+      .def(py::init([](std::vector<c10::DeviceIndex> devices = {}) {
+        c10::intrusive_ptr<c10::ivalue::Future> fut;
+#ifdef USE_CUDA
+        if (devices.empty()) {
+          fut = c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get());
+        } else {
+          fut = c10::make_intrusive<at::cuda::CUDAFuture>(
+              PyObjectType::get(), std::move(devices));
+        }
+#else
+        TORCH_CHECK_VALUE(
+            devices.empty(),
+            "Tried to instantiate a Future with some devices, but PyTorch was built without CUDA support");
+        fut = c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get());
+#endif
+        return std::make_shared<PythonFutureWrapper>(std::move(fut));
       }))
       .def(
           "done",
@@ -1355,6 +1380,13 @@ void initJITBindings(PyObject* module) {
   m.def("_jit_assert_is_instance", [](py::object obj, const TypePtr& type) {
     toIValue(std::move(obj), type);
   });
+
+#if defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+  m.def("_set_print_stack_traces_on_fatal_signal", [](bool print) {
+    c10::FatalSignalHandler::getInstance().setPrintStackTracesOnFatalSignal(
+        print);
+  });
+#endif // defined(C10_SUPPORTS_SIGNAL_HANDLER)
 
   initPythonCustomClassBindings(module);
   initPythonIRBindings(module);
