@@ -22,6 +22,7 @@ struct CPUGeneratorImplStateLegacy {
   int left;  /* = 1; */
   int seeded; /* = 0; */
   uint64_t next;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   uint64_t state[at::MERSENNE_STATE_N]; /* the array for the state vector  */
 
   /********************************/
@@ -70,6 +71,7 @@ Generator createCPUGenerator(uint64_t seed_val) {
  * and return them as a 64 bit unsigned int
  */
 inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return (static_cast<uint64_t>(hi) << 32) | lo;
 }
 
@@ -140,6 +142,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   auto double_normal_sample = c10::optional<double>();
 
   // Construct the state of at::CPUGeneratorImpl based on input byte tensor size.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CPUGeneratorImplStateLegacy* legacy_pod;
   auto new_state_size = new_state.numel();
   if (new_state_size == size_legacy) {
@@ -154,6 +157,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
     // intermediate values.
     if (legacy_pod->normal_is_valid) {
       auto r = legacy_pod->normal_rho;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       auto theta = 2.0 * c10::pi<double> * legacy_pod->normal_x;
       // we return the sin version of the normal sample when in caching mode
       double_normal_sample = c10::optional<double>(r * ::sin(theta));
@@ -183,6 +187,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   // Note that CPUGeneratorImplStateLegacy stored a state array of 64 bit uints, whereas in our
   // redefined mt19937, we have changed to a state array of 32 bit uints. Hence, we are
   // doing a std::copy.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   at::mt19937_data_pod rng_data;
   std::copy(std::begin(legacy_pod->state), std::end(legacy_pod->state), rng_data.state_.begin());
   rng_data.seed_ = legacy_pod->the_initial_seed;

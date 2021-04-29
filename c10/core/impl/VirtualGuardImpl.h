@@ -40,6 +40,9 @@ public:
   Stream getDefaultStream(Device d) const override {
     return impl_->getDefaultStream(d);
   }
+  Stream getStreamFromPool(Device d, bool isHighPriority) const override {
+    return impl_->getStreamFromPool(d, isHighPriority);
+  }
   Stream exchangeStream(Stream s) const noexcept override {
     return impl_->exchangeStream(s);
   }
@@ -66,6 +69,12 @@ public:
     void* event,
     const DeviceIndex device_index) const noexcept override {
     impl_->destroyEvent(event, device_index);
+  }
+
+  void recordDataPtrOnStream(
+    const c10::DataPtr& data_ptr,
+    const Stream& stream) const override {
+    impl_->recordDataPtrOnStream(data_ptr, stream);
   }
 
 private:
