@@ -45,13 +45,13 @@ Val* IrBuilder::negExpr(Val* val) {
   return result;
 }
 
-Val* IrBuilder::namedSetExpr(const std::string& name, Val* val) {
+Val* IrBuilder::setExprNamedScalar(const std::string& name, Val* val) {
   auto result = create<NamedScalar>(name, val->dtype());
   create<UnaryOp>(UnaryOpType::Set, result, val);
   return result;
 }
 
-Val* IrBuilder::namedAddressExpr(const std::string& name, Val* val) {
+Val* IrBuilder::addressExprNamedScalar(const std::string& name, Val* val) {
   auto result = create<NamedScalar>(name, DataType::Int);
   create<UnaryOp>(UnaryOpType::Address, result, val);
   return result;

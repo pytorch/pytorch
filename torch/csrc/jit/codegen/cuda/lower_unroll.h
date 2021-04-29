@@ -80,7 +80,7 @@ class TORCH_CUDA_CU_API UnrollPass {
   bool canOmitElseClause(kir::ForLoop* fl) const;
 
  private:
-  // We will track which loops in the incomming IR will be replaced and by what
+  // We will track which loops in the incoming IR will be replaced and by what
   std::unordered_map<kir::Expr*, kir::Expr*> loop_replacement_map_;
 
   // Keep all for loops conveniently to make unrolling easier
