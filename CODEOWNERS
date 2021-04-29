@@ -1,9 +1,6 @@
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
 
-/docs/cpp @glaringlee
-/torch/csrc/api/ @glaringlee
-/test/cpp/api/ @glaringlee
 /torch/utils/cpp_extension.py @fmassa @soumith @ezyang
 
 # Not there to strictly require the approval, but to be tagged as a reviewer
