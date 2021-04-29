@@ -199,7 +199,7 @@ inline Tensor cholesky_out(Tensor& result, const Tensor& self) {
 }
 
 /// See the documentation of torch.linalg.det
-inline Tensor det(const Tensor& self) {
+inline Tensor linalg_det(const Tensor& self) {
   return detail::det(self);
 }
 
@@ -273,38 +273,29 @@ inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, cons
   return detail::lstsq(self, b, cond, driver);
 }
 
-inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
-}
-
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.vector_norm
-inline Tensor vector_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return detail::vector_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
-}
-
-inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return detail::vector_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_power
 inline Tensor matrix_power(const Tensor& self, int64_t n) {
-  return detail::matrix_power(self, n);
+  return torch::linalg_matrix_power(self, n);
 }
 
 inline Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
-  return detail::matrix_power_out(self, n, result);
+  return torch::linalg_matrix_power_out(result, self, n);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_rank
@@ -318,11 +309,11 @@ inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<doub
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.multi_dot
 inline Tensor multi_dot(TensorList tensors) {
-  return detail::multi_dot(tensors);
+  return torch::linalg_multi_dot(tensors);
 }
 
 inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
-  return detail::multi_dot_out(tensors, result);
+  return torch::linalg_multi_dot_out(result, tensors);
 }
 
 /// Computes pseudo-inverse
