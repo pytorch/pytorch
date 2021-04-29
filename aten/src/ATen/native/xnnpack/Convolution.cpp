@@ -128,6 +128,7 @@ const Tensor reorder_weights_for_transpose_conv(const Tensor& weight_nhwc,
 
   TORCH_CHECK(weight_nhwc.size(0) % num_groups == 0, "The number of groups cannot be satisfied by the provided weight tensor.");
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int input_channels_per_group = weight_nhwc.size(0) / num_groups;
   int output_channels_per_group = weight_nhwc.size(1);
   int kernel_width = weight_nhwc.size(3);
@@ -202,7 +203,9 @@ ContextConv2D create(
 
 
   xnn_operator_t convolution_op{};
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   xnn_status create_status;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int64_t, 4> weight_sizes;
 
   if (transposed) {
@@ -319,15 +322,20 @@ Tensor run(
       padded_input_nhwc.names());
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   xnn_status setup_status;
   if ((context.cached_input_ptr != padded_input_nhwc.data_ptr<float>()) ||
       (context.cached_output_ptr != output.data_ptr<float>()) ||
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       (padded_input_nhwc.size(Layout::Activation4D::batch) !=
         context.batch_size) ||
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       (padded_input_nhwc.size(Layout::Activation4D::channels) !=
         context.input_channels) ||
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       (padded_input_nhwc.size(Layout::Activation4D::height) !=
         context.input_height) ||
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       (padded_input_nhwc.size(Layout::Activation4D::width) !=
         context.input_width)
       ) {
