@@ -88,19 +88,19 @@ static void codegenOutputQuery(
   if (nvrtc_version.first <= 7) { // 7 supports 2-5.x
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     max_dev_version = CudaVersion(5, 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_version.first <= 8) { // 8 supports 2-6.x
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     max_dev_version = CudaVersion(6, 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_version.first <= 9) { // 9 supports 3-7.2
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     max_dev_version = CudaVersion(7, 2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     max_dev_version = CudaVersion(7, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_version.first == 11 && nvrtc_version.second == 0) {
     // 11.0 supports 3-8.0
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
