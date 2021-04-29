@@ -2,7 +2,9 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/backport.h>
-#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/mobile/model_bytecode_version.h>
+#include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 #include <torch/custom_class.h>
 
@@ -232,6 +234,7 @@ void update_bytecode_version(
 
 } // namespace
 
+namespace mobile {
 // Forward declare so that _backport_for_mobile() overloads can
 // call this method directly.
 bool _backport_for_mobile_impl(
@@ -433,30 +436,6 @@ bool _backport_to_version_for_mobile_impl(
   return backport_success;
 }
 
-int64_t _get_model_bytecode_version(std::istream& in) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  return _get_model_bytecode_version(std::move(rai));
-}
-
-int64_t _get_model_bytecode_version(const std::string& filename) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _get_model_bytecode_version(std::move(rai));
-}
-
-int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
-  if (check_zip_file(rai)) {
-    return -1;
-  }
-  auto mobile_compilation_unit = std::make_shared<mobile::CompilationUnit>();
-  PyTorchStreamReader reader(std::move(rai));
-  auto bvals = get_bytecode_vals(mobile_compilation_unit, reader);
-  if (!bvals.empty() && bvals[0].isInt()) {
-    int64_t model_version = bvals[0].toInt();
-    return model_version;
-  }
-  TORCH_WARN("Fail to get bytecode version.");
-  return -1;
-}
-
+} // namespace mobile
 } // namespace jit
 } // namespace torch
