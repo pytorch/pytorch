@@ -95,17 +95,23 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], importer: Optional[
 
     # Try to retrieve the forward source in a backward-compatible way
     CodeOnlyModule.forward = forward
-
-    from .symbolic_trace import Tracer
-
-    # we shouldn't trace into any of the submodules, they were not
-    # because they were not traced in the original GraphModule
-    class KeepModules(Tracer):
-        def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
-            return True
-
     com = CodeOnlyModule(body)
-    return GraphModule(com, KeepModules().trace(com))
+
+    if 'tracer' not in body:
+        from .symbolic_trace import Tracer
+
+        # we shouldn't trace into any of the submodules, they were not
+        # because they were not traced in the original GraphModule
+        class KeepModules(Tracer):
+            def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
+                return True
+
+        graph = KeepModules().trace(com)
+    else:
+        graph = body['tracer'].trace(com)
+        del body['tracer']
+
+    return GraphModule(com, graph)
 
 # copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -519,6 +525,9 @@ class {module_name}(torch.nn.Module):
         import_block = _format_import_block(python_code.globals, exporter.importer)
         module_code = import_block + self.code
         exporter.save_source_string(generated_module_name, module_code)
+
+        if hasattr(self._graph, 'tracer'):
+            self.tracer = self._graph.tracer
 
         dict_without_graph = self.__dict__.copy()
         del dict_without_graph['_graph']

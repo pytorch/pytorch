@@ -431,7 +431,11 @@ class Tracer(TracerBase):
 
         self.submodule_paths = None
 
-        return self.graph
+        graph = self.graph
+        graph.tracer = self
+        self.graph = None
+
+        return graph
 
 
 # List of pairs of (global dict, function name) functions
