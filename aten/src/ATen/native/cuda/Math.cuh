@@ -122,9 +122,13 @@ static inline C10_HOST_DEVICE scalar_t calc_digamma(scalar_t in) {
       // If the argument is a negative integer, NaN is returned
       return static_cast<scalar_t>(NAN);
     }
-    // Rounding errors in tan's input can really affect the output
-    // for extreme values, so we always perform this computation in double.
-    result = static_cast<accscalar_t>(- PI_f64 / ::tan(PI_f64 * static_cast<double>(x)));
+    // Extracts the fractional part of x as r, since tan(pi * r) is more numerically
+    // accurate than tan(pi * x). While these operations are mathematically equivalent
+    // since both x and r are in radians and tan() has a periodicity of pi, in practice
+    // the computation of pi * x is a source of error (when |x| > 1).
+    double q, r;
+    r = ::modf(static_cast<double>(x), &q);
+    result = static_cast<accscalar_t>(- PI_f64 / ::tan(PI_f64 * r));
     x = 1 - x;
   }
 
