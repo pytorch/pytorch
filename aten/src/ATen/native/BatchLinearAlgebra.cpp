@@ -3207,16 +3207,32 @@ static void linalg_lstsq_out_info(
   // now the actual call that computes the result in-place (apply_lstsq)
   at::_lstsq_helper_(solution, rank, singular_values, infos, input_working_copy, rcond, driver);
 
+  // residuals are available only if m > n and drivers other than gelsy used
   if (m > n && driver != "gelsy") {
-    // LAPACK stores residuals data for postprocessing in rows n:(m-n)
-    auto raw_residuals = solution.narrow(/*dim=*/-2, /*start=*/n, /*length*/m - n);
-    if (raw_residuals.is_complex()) {
-      raw_residuals.mul_(raw_residuals.conj());
-      raw_residuals = at::real(raw_residuals);
-    } else {
-      raw_residuals.pow_(2);
+    // if the driver is gelss or gelsd then the residuals are available only if rank == n
+    bool compute_residuals = true;
+    if (driver == "gelss" || driver == "gelsd") {
+      if (input.dim() == 2) {
+        compute_residuals = (rank.item().toInt() == n);
+      } else {
+        // it is not clear what to do if some matrices have rank < n in case of batched input
+        // For now let's compute the residuals only if all matrices have rank equal to n
+        // This behaviour may be changed in the future
+        // See https://github.com/pytorch/pytorch/issues/56483
+        compute_residuals = at::all(rank == n).item().toBool();
+      }
     }
-    at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
+    if (compute_residuals) {
+      // LAPACK stores residuals data for postprocessing in rows n:(m-n)
+      auto raw_residuals = solution.narrow(/*dim=*/-2, /*start=*/n, /*length*/m - n);
+      if (raw_residuals.is_complex()) {
+        raw_residuals.mul_(raw_residuals.conj());
+        raw_residuals = at::real(raw_residuals);
+      } else {
+        raw_residuals.pow_(2);
+      }
+      at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
+    }
   }
   solution = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
   if (m == 0) {
