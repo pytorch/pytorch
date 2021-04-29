@@ -11,6 +11,7 @@ from torch.fx.graph import (
 )
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union
+import operator
 from .quantization_types import QuantizerCls
 
 # turn foo.bar -> ['foo', 'bar']
@@ -367,6 +368,8 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
             result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == 'call_module':
         result = False
+    elif node.op == 'call_function' and node.target is operator.getitem:
+        result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == 'get_attr':
         result = False
     elif node.target is getattr and node.args[1] in ['ndim', 'shape']:
