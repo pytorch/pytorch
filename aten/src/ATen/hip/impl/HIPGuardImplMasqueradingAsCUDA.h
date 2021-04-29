@@ -12,6 +12,7 @@
 
 #include <c10/hip/impl/HIPGuardImpl.h>
 
+#include <ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 
 // Use of c10::hip namespace here makes hipification easier, because
@@ -187,6 +188,13 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     const hipError_t err = hipEventQuery(hip_event);
     if (err != hipErrorNotReady) C10_HIP_CHECK(err);
     return (err == hipSuccess);
+  }
+
+  void recordDataPtrOnStream(
+    const c10::DataPtr& data_ptr,
+    const Stream& stream) const override {
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA(data_ptr, hip_stream);
   }
 };
 
