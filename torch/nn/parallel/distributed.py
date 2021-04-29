@@ -757,7 +757,7 @@ class DistributedDataParallel(Module):
                     should_throw_stop_iteration = zeros.item()
                     if should_throw_stop_iteration:
                         raise RuntimeError(
-                            "Detected at least one rank that exhausted inputs. Throwing StopIteration across all ranks."
+                            "Detected at least one rank that exhausted inputs. Throwing across all ranks."
                         )
 
             # Calling _rebuild_buckets before forward compuation,
@@ -987,7 +987,7 @@ class DistributedDataParallel(Module):
                 in ``enable=False`` to disable in cases where you know that
                 inputs are even across participating processes. Default is
                 ``True``.
-            throw_on_early_termination (bool): Whether to throw a StopIteration
+            throw_on_early_termination (bool): Whether to throw an error
                 or continue training when at least one rank has exhausted
                 inputs. If ``True``, will throw upon the first rank reaching end
                 of data. If ``False``, will continue training with a smaller

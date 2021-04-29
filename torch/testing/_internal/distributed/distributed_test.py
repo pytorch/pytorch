@@ -4426,7 +4426,7 @@ class DistributedTest:
 
             # Determine num iters for this rank via the passed in mapping.
             num_iters = iteration_mapping[rank]
-            # If we throw StopIteration when earliest rank terminates, we should ensure
+            # If we throw when earliest rank terminates, we should ensure
             # that we iterate for that minimum number of times.
             num_iters_tensor = torch.tensor([num_iters], device=torch.cuda.current_device())
             dist.all_reduce(num_iters_tensor, op=dist.ReduceOp.MIN)
@@ -4476,7 +4476,7 @@ class DistributedTest:
 
             # Ensure completion of all GPU kernels.
             torch.cuda.synchronize(device=rank)
-            # When throwing StopIteration on early rank termination, we do not
+            # When throwing on early rank termination, we do not
             # broadcast model state from an authoritative rank. All models
             # should already be in sync.
             if not test_case.throw_on_early_termination:
