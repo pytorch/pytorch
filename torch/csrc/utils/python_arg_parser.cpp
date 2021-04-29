@@ -382,6 +382,7 @@ bool is_scalar_list(PyObject* obj) {
   }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t idx = 0; idx < size; idx++) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!THPUtils_checkScalar(iobj)) {

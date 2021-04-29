@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import \
      torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_warn_once,
      GRADCHECK_NONDET_TOL,)
 
-from distutils.version import LooseVersion
+from setuptools import distutils
 
 if TEST_SCIPY:
     import scipy.special
@@ -1393,6 +1393,10 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad, **kwargs):
     samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor(0), 2)))
     samples.append(SampleInput(make_arg(()), args=(0, index_tensor([0]), 2)))
     samples.append(SampleInput(make_arg(()), args=(0, index_tensor(0), 2)))
+
+    # Duplicate indices
+    samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor([0, 0]), 2)))
+    samples.append(SampleInput(make_arg((S, S)), args=(0, index_tensor([0, 0, 2]), make_arg(()))))
 
     return samples
 
@@ -5466,11 +5470,11 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                active_if=TEST_SCIPY and distutils.version.LooseVersion(scipy.__version__) < "1.4.0"),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                active_if=TEST_SCIPY and distutils.version.LooseVersion(scipy.__version__) < "1.4.0"),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
+                                active_if=TEST_SCIPY and distutils.version.LooseVersion(scipy.__version__) < "1.4.0"),
                    )),
     UnaryUfuncInfo('lgamma',
                    ref=reference_lgamma if TEST_SCIPY else _NOTHING,
