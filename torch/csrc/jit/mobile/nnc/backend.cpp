@@ -52,7 +52,7 @@ class NNCBackend : public PyTorchBackendInterface {
 };
 
 namespace {
-static auto cls = torch::jit::backend<NNCBackend>("nnc");
+static const auto cls = torch::jit::backend<NNCBackend>("nnc");
 } // namespace
 
 } // namespace nnc
