@@ -36,7 +36,9 @@ class Store : public torch::CustomClassHolder {
   virtual std::vector<uint8_t> compareSet(
       const std::string& key,
       const std::vector<uint8_t>& currentValue,
-      const std::vector<uint8_t>& newValue) = 0;
+      const std::vector<uint8_t>& newValue) {
+    TORCH_INTERNAL_ASSERT(false, "Not implemented.");
+  }
 
   virtual std::vector<uint8_t> get(const std::string& key) = 0;
 
