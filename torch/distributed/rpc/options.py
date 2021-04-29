@@ -90,11 +90,11 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         _transports: List = None,
         _channels: List = None,
     ):
-        device_maps = (
+        full_device_maps = (
             {} if device_maps is None else
             {k : _to_device_map(v) for k, v in device_maps.items()}
         )
-        device_list = (
+        full_device_list = (
             [] if devices is None else
             _to_device_list(devices)
         )
@@ -104,8 +104,8 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             _channels,
             rpc_timeout,
             init_method,
-            device_maps,
-            device_list,
+            full_device_maps,
+            full_device_list,
         )
 
     def set_device_map(self, to: str, device_map: Dict[DeviceType, DeviceType]):
@@ -152,11 +152,11 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             >>> print(rets[0])  # tensor([2., 2.], device='cuda:0')
             >>> print(rets[1])  # tensor([2., 2.], device='cuda:1')
         """
-        device_map = _to_device_map(device_map)
+        full_device_map = _to_device_map(device_map)
         curr_device_maps = super().device_maps
 
         if to in curr_device_maps:
-            for k, v in device_map.items():
+            for k, v in full_device_map.items():
                 if k in curr_device_maps[to] and v != curr_device_maps[to][k]:
                     raise ValueError(
                         "`set_device_map` only supports 1-to-1 mapping, trying"
