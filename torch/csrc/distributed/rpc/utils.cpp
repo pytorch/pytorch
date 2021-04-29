@@ -488,6 +488,7 @@ std::vector<at::IValue> readWrappedPayload(
     std::vector<char>& payload,
     const rpc::Message& message) {
   // Read the additional payload remove it from the payload.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t additionalPayloadSize;
   size_t indexToRead = payload.size() - sizeof(int64_t);
   TORCH_INTERNAL_ASSERT(indexToRead >= 0);
@@ -499,6 +500,7 @@ std::vector<at::IValue> readWrappedPayload(
   payload.resize(indexToRead);
 
   TORCH_INTERNAL_ASSERT(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       payload.size() > additionalPayloadSize,
       "Wrong payload sizes: payload.size() is ",
       payload.size(),
@@ -584,6 +586,7 @@ FutureFactoryRegistry& FutureFactoryRegistry::getInstance() {
 void FutureFactoryRegistry::registerFutureFactory(
     c10::DeviceType type,
     future_factory_t factory) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   factories_[static_cast<size_t>(type) & 0xFF] = std::move(factory);
 }
 
@@ -595,6 +598,7 @@ std::shared_ptr<JitFuture> FutureFactoryRegistry::createFuture(
       "Using FutureFactory for device type ",
       DeviceTypeName(type),
       " before registration.")
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return factories_[static_cast<size_t>(type) & 0xFF](devices);
 }
 
