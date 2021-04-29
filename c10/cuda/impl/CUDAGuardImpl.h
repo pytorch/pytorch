@@ -7,6 +7,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <cuda_runtime_api.h>
 
@@ -167,6 +168,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       C10_CUDA_CHECK(err);
     }
     return (err == cudaSuccess);
+  }
+
+  void recordDataPtrOnStream(
+    const c10::DataPtr& data_ptr,
+    const Stream& stream) const override {
+    CUDAStream cuda_stream{stream};
+    CUDACachingAllocator::recordStream(data_ptr, cuda_stream);
   }
 };
 
