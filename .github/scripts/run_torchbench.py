@@ -28,7 +28,7 @@ start: {control}
 end: {treatment}
 threshold: 100
 direction: decrease
-timeout: 360
+timeout: 720
 tests:"""
 
 def gen_abtest_config(control: str, treatment: str, models: List[str]):
