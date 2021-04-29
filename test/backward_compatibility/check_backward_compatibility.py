@@ -41,6 +41,7 @@ allow_list = [
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
+    ("aten::linalg_lstsq", datetime.date(2021, 5, 1)),
     ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
     ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
