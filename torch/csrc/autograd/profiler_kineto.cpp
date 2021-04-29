@@ -328,7 +328,7 @@ std::string stacksToStr(const std::vector<std::string>& stacks) {
   std::copy(stacks.begin(), stacks.end(), std::ostream_iterator<std::string>(oss, ";"));
   auto rc = oss.str();
   rc.pop_back();
-  return rc;
+  return "\"" + rc + "\"";
 }
 
 } // namespace
