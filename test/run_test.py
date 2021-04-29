@@ -65,6 +65,7 @@ TESTS = [
     'test_linalg',
     'test_logging',
     'test_mkldnn',
+    'test_model_dump',
     'test_module_init',
     'test_multiprocessing',
     'test_multiprocessing_spawn',
@@ -150,6 +151,14 @@ TESTS = [
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
     'distributed/optim/test_zero_redundancy_optimizer',
+    'distributed/elastic/timer/api_test',
+    'distributed/elastic/timer/local_timer_example',
+    'distributed/elastic/timer/local_timer_test',
+    'distributed/elastic/events/lib_test',
+    'distributed/elastic/metrics/api_test',
+    'distributed/elastic/utils/logging_test',
+    'distributed/elastic/utils/util_test',
+    'distributed/elastic/utils/distributed_test',
 ]
 
 # Tests need to be run with pytest.
