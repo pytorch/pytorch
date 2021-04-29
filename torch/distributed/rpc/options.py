@@ -163,7 +163,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
                         f" to map {k} to {v} and {curr_device_maps[to][k]}"
                     )
 
-        super()._set_device_map(to, device_map)
+        super()._set_device_map(to, full_device_map)
 
     def set_devices(self, devices: List[DeviceType]):
         r"""
