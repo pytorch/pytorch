@@ -61,6 +61,7 @@ ProcessGroup::Work::Work(
   if (profilingTitle != nullptr) {
     auto recordingFunction =
         std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
+    recordingFunction->_setAsync();
     if (recordingFunction->isActive()) {
       // Passing input tensor to recordFunction allows for shape information in
       // profiling output.
