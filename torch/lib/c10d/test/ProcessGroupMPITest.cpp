@@ -82,7 +82,7 @@ void testBroadcast(int iter = 10000) {
 
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (auto& tensors : allTensors) {
-    // Kick off work
+    // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
         pg->broadcast(tensors);
     works.push_back(std::move(work));
@@ -116,7 +116,7 @@ void testReduce(int iter = 10000) {
 
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (auto& tensors : allTensors) {
-    // Kick off work
+    // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work = pg->reduce(tensors);
     works.push_back(std::move(work));
   }
@@ -164,6 +164,7 @@ void testAllgather(int iter = 10000) {
 
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (size_t i = 0; i < allTensors.size(); ++i) {
+    // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
         pg->allgather(allOutputTensors[i], allTensors[i]);
     works.push_back(std::move(work));
@@ -213,7 +214,7 @@ void testGather(int iter = 1000) {
 
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (size_t i = 0; i < allTensors.size(); ++i) {
-    // Kick off work
+    // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
         pg->gather(allOutputTensors[i], allTensors[i]);
     works.push_back(std::move(work));
@@ -272,7 +273,7 @@ void testScatter(int iter = 1) {
 
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (size_t i = 0; i < allTensors.size(); ++i) {
-    // Kick off work
+    // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
         pg->scatter(allTensors[i], allInputTensors[i]);
     works.push_back(std::move(work));
@@ -314,7 +315,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
   if (rank == 0) {
     std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
     for (auto& tensors : allTensors) {
-      // Kick off work
+      // Queue the work.
       c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
           pg->send(tensors, 1, 0);
       works.push_back(std::move(work));
@@ -325,7 +326,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
     std::vector<int> srcRanks;
     size_t i = 0;
     for (auto& tensors : allTensors) {
-      // Kick off work
+      // Queue the work.
       if (!recvAnysource) {
         c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
             pg->recv(tensors, 0, 0);
