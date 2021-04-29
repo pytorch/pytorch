@@ -5852,7 +5852,9 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_not_cuda(self):
-        with self.assertRaisesRegex(ValueError, "Expected CUDA devices, got "):
+        with self.assertRaisesRegex(
+            ValueError, "Expected devices to have indices, got cpu"
+        ):
             fut = Future(devices=["cpu"])
 
     def _test_cuda_future_extraction(self, wrapper, unwrapper):

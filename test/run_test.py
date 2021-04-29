@@ -190,6 +190,7 @@ USE_PYTEST_LIST = [
     'distributions/test_utils',
     'test_typing',
     "distributed/elastic/events/lib_test",
+    "distributed/elastic/agent/server/test/api_test",
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -223,6 +224,7 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
     'distributed/optim/test_zero_redundancy_optimizer',
+    "distributed/elastic/agent/server/test/api_test",
 ]
 
 ROCM_BLOCKLIST = [
