@@ -111,7 +111,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
 
     native_yaml_path = os.path.join(pytorch_root, 'aten/src/ATen/native/native_functions.yaml')
     native_functions, backend_indices = parse_native_yaml(native_yaml_path)
-    grouped_native_functions = get_grouped_native_functions(native_functions, backend_indices)
+    grouped_native_functions = get_grouped_native_functions(native_functions)
     backend_key, autograd_key, cpp_namespace, backend_indices = parse_backend_yaml(
         source_yaml, grouped_native_functions, backend_indices)
 

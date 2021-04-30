@@ -479,10 +479,7 @@ class NativeFunctionsGroup:
             yield self.inplace
 
     @staticmethod
-    def from_dict(
-            d: Dict[SchemaKind, NativeFunction],
-            backend_indices: Dict[DispatchKey, 'BackendIndex']
-    ) -> Optional['NativeFunctionsGroup']:
+    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['NativeFunctionsGroup']:
         assert d
         if len(d) == 1:
             return None
