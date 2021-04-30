@@ -14,9 +14,7 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-#ifdef USE_CUDA_NOT_ROCM
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
-#endif
+#include <c10/core/StreamGuard.h>
 
 #if TENSORPIPE_HAS_SHM_TRANSPORT
 // Needed for ::getpid(), which is used to create a unique address.
@@ -189,22 +187,25 @@ constexpr int64_t kIbvTransportPriority = 100;
 // The UV transport just uses TCP and should work everywhere, thus keep it last.
 constexpr int64_t kUvTransportPriority = 0;
 
-constexpr int64_t kCmaChannelPriority = 200;
-constexpr int64_t kMultiplexedUvChannelPriority = 100;
+constexpr int64_t kCmaChannelPriority = 1200;
+constexpr int64_t kMultiplexedUvChannelPriority = 1100;
 // The basic channel reuses a transport as a channel, and is thus our fallback.
-constexpr int64_t kBasicChannelPriority = 0;
+constexpr int64_t kBasicChannelPriority = 1000;
 
+// CPU channel have higher priority than CUDA channels, since the latter might
+// handle CPU-to-CPU transfers, but will always be less efficient than their
+// CPU-only counterparts.
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaIpcChannelPriority = 301;
+constexpr int64_t kCudaIpcChannelPriority = 300;
 #endif
 
 #if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaGdrChannelPriority = 201;
+constexpr int64_t kCudaGdrChannelPriority = 200;
 #endif
 
 #ifdef USE_CUDA_NOT_ROCM
-constexpr int64_t kCudaXthChannelPriority = 401;
-constexpr int64_t kCudaBasicChannelPriority = 101;
+constexpr int64_t kCudaXthChannelPriority = 400;
+constexpr int64_t kCudaBasicChannelPriority = 0;
 #endif
 
 std::unique_ptr<TransportRegistration> makeUvTransport() {
@@ -399,41 +400,6 @@ C10_REGISTER_CREATOR(
 
 } // namespace
 
-namespace {
-
-// This is a wrapper of CUDAMultiStreamGuard to run in both CUDA-enabled and
-// CPU-only environments. When CUDA is not available, all methods are no-ops.
-struct MultiStreamGuard {
-  MultiStreamGuard(const MultiStreamGuard& other) = delete;
-  MultiStreamGuard(MultiStreamGuard&& other) = delete;
-  MultiStreamGuard& operator=(const MultiStreamGuard& rhs) = delete;
-  MultiStreamGuard& operator=(MultiStreamGuard&& rhs) = delete;
-
-#ifndef USE_CUDA_NOT_ROCM
-  explicit MultiStreamGuard(
-      const std::shared_ptr<LazyStreamContext>& /* unused */) {}
-#else
-  static inline std::vector<at::cuda::CUDAStream> toCUDAStreams(
-      const std::vector<c10::Stream>& streams) {
-    std::vector<at::cuda::CUDAStream> cudaStreams;
-    cudaStreams.reserve(streams.size());
-    std::transform(
-        streams.begin(),
-        streams.end(),
-        std::back_inserter(cudaStreams),
-        [](c10::Stream s) { return at::cuda::CUDAStream(s); });
-    return cudaStreams;
-  }
-  explicit MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& ctx)
-      : guard(toCUDAStreams(ctx->getReservedStreams())) {}
-
- private:
-  at::cuda::CUDAMultiStreamGuard guard;
-#endif
-};
-
-} // namespace
-
 //////////////////////////  MetricsTracker  /////////////////////////////////
 
 TensorPipeAgent::TimeSeriesMetricsTracker::TimeSeriesMetricsTracker(
@@ -517,6 +483,7 @@ TensorPipeAgent::TensorPipeAgent(
       nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       processGroup_(std::move(processGroup)) {
+  // collect worker names
   prepareNames();
 
   {
@@ -895,7 +862,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                          requestMessage{std::move(requestMessage)},
                          ctx{std::move(ctx)}]() mutable {
           // create guards again as this function runs on a different thread
-          MultiStreamGuard guard(ctx);
+          c10::MultiStreamGuard guard(ctx->getReservedStreams());
           VLOG(1) << "RPC agent for " << workerInfo_.name_
                   << " is running request #" << messageId << " from "
                   << pipe->getRemoteName() << " in thread pool";
@@ -979,8 +946,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   }
   ClientPipe& clientPipe = it->second;
 
-  auto futureResponseMessage = std::make_shared<AtomicJitFuture>(
-      devices_, reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
+  auto futureResponseMessage = std::make_shared<AtomicJitFuture>(devices_);
   uint64_t messageId = nextMessageID_++;
   requestMessage.setId(messageId);
 
@@ -1414,7 +1380,7 @@ void TensorPipeAgent::markFutureAsComplete(
                      atomicFuture{std::move(atomicFuture)},
                      message{std::move(message)},
                      ctx{std::move(ctx)}]() mutable {
-      MultiStreamGuard guard(ctx);
+      c10::MultiStreamGuard guard(ctx->getReservedStreams());
       std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
       for (const auto& tensor : message.tensors()) {
         data_ptrs.emplace_back(tensor.storage().data_ptr());
@@ -1480,7 +1446,8 @@ std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForRemote(
   }
 }
 
-tensorpipe::DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dest) {
+tensorpipe::DeviceMap TensorPipeAgent::getDeviceMap(
+    const WorkerInfo& dest) const {
   auto it = opts_.deviceMaps.find(dest.name_);
   if (it == opts_.deviceMaps.end()) {
     return {};
