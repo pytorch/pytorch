@@ -10399,7 +10399,8 @@ dedent """
             class MyBatchNorm(torch.nn.Module):
                 def __init__(self, num_features, affine, track_running_stats):
                     super(MyBatchNorm, self).__init__()
-                    self.bn = torch.nn.BatchNorm2d(num_features, 1e-5, affine=affine, track_running_stats=track_running_stats).float()
+                    self.bn = torch.nn.BatchNorm2d(
+                        num_features, 1e-5, affine=affine, track_running_stats=track_running_stats).float()
 
                 def forward(self, x: torch.Tensor):
                     o = self.bn(x)
