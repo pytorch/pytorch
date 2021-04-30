@@ -172,6 +172,24 @@ TEST(StaticRuntime, IndividualOps_Binary) {
   testStaticRuntime(tuple_construct_script_2, args);
 }
 
+TEST(StaticRuntime, IndividualOps_Binary_MatMul) {
+  // 1-D, 1-D
+  std::vector<IValue> args{at::randn({3}), at::randn({3})};
+  testStaticRuntime(aten_matmul, args);
+  // 2-D, 2-D
+  args = {at::randn({3, 2}), at::randn({2, 3})};
+  testStaticRuntime(aten_matmul, args);
+  // 1-D, 2-D
+  args = {at::randn({3}), at::randn({3, 5})};
+  testStaticRuntime(aten_matmul, args);
+  // 2-D, 1-D
+  args = {at::randn({3, 5}), at::randn({5})};
+  testStaticRuntime(aten_matmul, args);
+  // > 2-D , > 2-D
+  args = {at::randn({3, 1, 4, 5}), at::randn({2, 5, 6})};
+  testStaticRuntime(aten_matmul, args);
+}
+
 TEST(StaticRuntime, IndividualOps_Div) {
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
