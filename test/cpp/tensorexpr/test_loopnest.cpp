@@ -28,15 +28,23 @@ void checkIR(Stmt* s, const std::string& pattern) {
   torch::jit::testing::FileCheck().run(pattern, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSimple01) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
-      "f", {{16, "X"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "f",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{16, "X"}, {5, "y"}},
+      [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_outer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_inner;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
 
@@ -44,10 +52,15 @@ TEST(LoopNest, ExprSimple01) {
   l.splitWithTail(x_outer, 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprLower01) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
-      "f", {{16, "x"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "f",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{16, "x"}, {5, "y"}},
+      [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -58,11 +71,13 @@ TEST(LoopNest, ExprLower01) {
   ASSERT_LT(oss.str().size(), 200);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSimple02) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{26, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
@@ -81,8 +96,10 @@ TEST(LoopNest, ExprSimple02) {
     VarHandle x_inner("x_inner", kInt);
     VarHandle y("y", kInt);
     VarHandle x_tail("x_tail", kInt);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BufHandle f("f", {26, 5}, kFloat);
     ExprHandle x_1 = x_outer * 4 + x_inner;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle x_outer_end = (ExprHandle(26) - 0) / 4;
     For* stmt1 = For::make(
         x_outer,
@@ -92,12 +109,15 @@ TEST(LoopNest, ExprSimple02) {
             x_inner,
             0,
             4,
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y)))));
     ExprHandle x_2 = x_tail + x_outer_end * 4;
     For* stmt2 = For::make(
         x_tail,
         0,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (ExprHandle(26) - 0) % 4,
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         For::make(y, 0, 5, Store::make(f, {x_2, y}, func(x_2, y))));
     Stmt* stmt = Block::make({stmt1, stmt2});
 
@@ -107,19 +127,24 @@ TEST(LoopNest, ExprSimple02) {
   }
 
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<float> f_v(26, 5, "f_v");
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<float> f_ref(26, 5, "f_res");
 
     stmt = FlattenIndexes(stmt);
     SimpleIREvaluator ir_eval(stmt, {tensor});
     ir_eval(f_v);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int x = 0; x < 26; x++) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (int y = 0; y < 5; y++) {
         f_ref(x, y) = 1 + x * x + y * y;
       }
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExpectAllNear(f_v, f_ref, 1e-5);
   }
 }
@@ -152,20 +177,25 @@ void assertForRanges(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSliceHeadWithLoopOptions) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* head;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
   l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
   l.sliceHead(loops[0], 2, &head, &tail);
 
   Block* body = getSimplifiedBody(l);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(body, {{0, 2}, {0, 8}});
 
   ASSERT_TRUE(tail->loop_options().is_gpu_block_index());
@@ -174,24 +204,31 @@ TEST(LoopNest, ExprSliceHeadWithLoopOptions) {
   ASSERT_TRUE(head->loop_options().isDefault());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSliceTailWithLoopOptions) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* head;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
   l.sliceTail(loops[0], 4, &head, &tail);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail_head;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail_tail;
   l.setGPUBlockIndex(tail, LoopOptions::IDX_Y);
   l.sliceTail(tail, 2, &tail_head, &tail_tail);
 
   Block* body = getSimplifiedBody(l);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(body, {{0, 6}, {0, 2}, {8, 10}});
 
   ASSERT_TRUE(tail_head->loop_options().is_gpu_block_index());
@@ -201,6 +238,7 @@ TEST(LoopNest, ExprSliceTailWithLoopOptions) {
   ASSERT_TRUE(tail_tail->loop_options().isDefault());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSliceHeadWhenFactorEqualsSize) {
   // When factor equals the For loop's original size, keep using the original
   // For loop.
@@ -208,47 +246,62 @@ TEST(LoopNest, ExprSliceHeadWhenFactorEqualsSize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* head;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.sliceHead(loops[0], 10, &head, &tail);
 
   ASSERT_EQ(head, loops[0]);
   ASSERT_EQ(tail, nullptr);
 
   Block* body = getSimplifiedBody(l);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(body, {{0, 10}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSliceHeadWhenFactorLargerThanSize) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* head;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.sliceHead(loops[0], 100, &head, &tail);
 
   ASSERT_EQ(head, loops[0]);
   ASSERT_EQ(tail, nullptr);
 
   Block* body = getSimplifiedBody(l);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(body, {{0, 10}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSliceHead) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* head;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
   l.sliceHead(loops[0], 4, &head, &tail);
@@ -259,19 +312,24 @@ TEST(LoopNest, ExprSliceHead) {
   ASSERT_NE(tail, loops[0]);
 
   Block* body = getSimplifiedBody(l);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(body, {{0, 4}, {4, 10}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSliceHeadWithNonZeroStart) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* head;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   l.sliceTail(loops[0], 4, &head, &tail);
   // head: [0, 6)
@@ -282,9 +340,11 @@ TEST(LoopNest, ExprSliceHeadWithNonZeroStart) {
   // tail_tail: [8, 10)
 
   Block* body = getSimplifiedBody(l);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(body, {{0, 6}, {6, 8}, {8, 10}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSliceTailWhenFactorEqualsSize) {
   // When factor equals the For loop's original size, keep using the original
   // For loop.
@@ -292,20 +352,26 @@ TEST(LoopNest, ExprSliceTailWhenFactorEqualsSize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* head;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.sliceTail(loops[0], 10, &head, &tail);
 
   ASSERT_EQ(head, nullptr);
   ASSERT_EQ(tail, loops[0]);
 
   Block* body = getSimplifiedBody(l);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(body, {{0, 10}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSliceTailWhenFactorLargerThanSize) {
   // When factor equals the For loop's original size, keep using the original
   // For loop.
@@ -313,28 +379,37 @@ TEST(LoopNest, ExprSliceTailWhenFactorLargerThanSize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* head;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.sliceTail(loops[0], 100, &head, &tail);
 
   ASSERT_EQ(head, nullptr);
   ASSERT_EQ(tail, loops[0]);
 
   Block* body = getSimplifiedBody(l);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(body, {{0, 10}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSliceTail) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* head;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
   l.sliceTail(loops[0], 4, &head, &tail);
@@ -345,9 +420,11 @@ TEST(LoopNest, ExprSliceTail) {
   ASSERT_NE(tail, loops[0]);
 
   Block* body = getSimplifiedBody(l);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(body, {{0, 6}, {6, 10}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSplitAndSlice) {
   // 0: splitWithTail
   // 1: sliceTail on inner loop
@@ -356,16 +433,21 @@ TEST(LoopNest, ExprSplitAndSlice) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{100, "x"}}, func);
   LoopNest l({tensor});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* outer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* inner;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
   // outer: [0, 4)
   // inner: [0, 21)
   // tail:  [84, 100)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.splitWithTail(loops[0], 21, &outer, &inner, &tail);
   l.sliceTail(inner, 2);
   l.sliceHead(outer, 2);
@@ -390,17 +472,21 @@ TEST(LoopNest, ExprSplitAndSlice) {
   //   f[x_tail + 84] = 1.f + float(x_tail + 84);
   // }
   Block* body = getSimplifiedBody(l);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(body, {{0, 2}, {2, 4}, {0, 16}});
 
   auto biter = body->begin();
 
   For* loop = dynamic_cast<For*>(*biter++);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(loop->body(), {{0, 19}, {19, 21}});
 
   loop = dynamic_cast<For*>(*biter);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(loop->body(), {{0, 19}, {19, 21}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSliceAndNormalize) {
   // 0: sliceHead
   // 1: normalize tail
@@ -408,21 +494,24 @@ TEST(LoopNest, ExprSliceAndNormalize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{10, "x"}}, func);
   LoopNest l({tensor});
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* head;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   l.sliceHead(loops[0], 2, &head, &tail);
   // head: [0, 2)
   // tail: [2, 10)
 
-  For* normalized_tail;
-  LoopNest::normalize(tail, &normalized_tail);
+  LoopNest::normalize(tail);
   // normalized_tail: [0, 8)
 
   Block* body = getSimplifiedBody(l);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRanges(body, {{0, 2}, {0, 8}});
 }
 
@@ -432,6 +521,7 @@ T evalExpr(const ExprHandle& expr, const VarHandle& var, T value) {
   return eval.value<T>(value);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSliceWithVariableDimension) {
   auto testWithDimension =
       [](int dimension,
@@ -444,7 +534,9 @@ TEST(LoopNest, ExprSliceWithVariableDimension) {
         std::vector<For*> loops =
             l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
 
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* head;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* tail;
         l.sliceHead(loops[0], 2, &head, &tail);
 
@@ -466,22 +558,31 @@ TEST(LoopNest, ExprSliceWithVariableDimension) {
   testWithDimension(2, {{0, 2}, {2, 2}, {2, 2}});
   testWithDimension(3, {{0, 2}, {2, 2}, {2, 3}});
   testWithDimension(4, {{0, 2}, {2, 2}, {2, 4}});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   testWithDimension(5, {{0, 2}, {2, 3}, {3, 5}});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   testWithDimension(10, {{0, 2}, {2, 8}, {8, 10}});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSplitWithTail) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{199, "x"}}, func);
   LoopNest l({tensor});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_outer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_inner;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.splitWithTail(loops[0], 17, &x_outer, &x_inner, &x_tail);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   l.splitWithTail(x_outer, 7);
 
   Stmt* stmt = l.root_stmt();
@@ -492,24 +593,31 @@ TEST(LoopNest, ExprSplitWithTail) {
 
   // Verify that the split loops are ordered correctly.
   For* loop = dynamic_cast<For*>(*biter++);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRange(loop, 0, 7);
 
   loop = dynamic_cast<For*>(*biter++);
   assertForRange(loop, 0, 4);
 
   loop = dynamic_cast<For*>(*biter);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertForRange(loop, 0, 12);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSplitWithTailNone) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Compute("f", {{24, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_outer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_inner;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_tail;
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
   l.splitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
@@ -526,8 +634,10 @@ TEST(LoopNest, ExprSplitWithTailNone) {
     VarHandle x_inner("x_inner", kInt);
     VarHandle y("y", kInt);
     VarHandle x_tail("x_tail", kInt);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks,cppcoreguidelines-avoid-magic-numbers)
     BufHandle f("f", {24, 5}, kFloat);
     ExprHandle x_1 = x_outer * 4 + x_inner;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExprHandle x_outer_end = (ExprHandle(24) - 0) / 4;
     Stmt* stmt = new Block({For::make(
         x_outer,
@@ -537,6 +647,7 @@ TEST(LoopNest, ExprSplitWithTailNone) {
             x_inner,
             0,
             4,
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y)))))});
 
     std::ostringstream oss_ref;
@@ -545,22 +656,28 @@ TEST(LoopNest, ExprSplitWithTailNone) {
   }
 
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<float> f_v(24, 5, "f_v");
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<float> f_ref(24, 5, "f_res");
 
     SimpleIREvaluator ir_eval(stmt, {tensor});
     ir_eval(f_v);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int x = 0; x < 24; x++) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (int y = 0; y < 5; y++) {
         f_ref(x, y) = 1 + x * x + y * y;
       }
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExpectAllNear(f_v, f_ref, 1e-5);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSplitWithMask01) {
   KernelScope kernel_scope;
   const int M = 26;
@@ -592,11 +709,13 @@ TEST(LoopNest, ExprSplitWithMask01) {
 
   SimpleIREvaluator(stmt, {a_buf, b_buf, tensor})(a_v, b_v, c_v);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
 // Tests the case where we split a loop cleanly multiple times, we should not
 // insert any masks.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
   KernelScope kernel_scope;
   const int M = 64;
@@ -608,6 +727,7 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
 
   LoopNest l({tensor});
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *outer, *mid, *inner;
   l.splitWithMask(loops[0], 4, &outer, &inner);
   l.splitWithMask(outer, 4);
@@ -625,6 +745,7 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
 # CHECK:       f[)IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, SplitWithTailWithLoopOptions) {
   KernelScope kernel_scope;
   const int M = 21;
@@ -633,6 +754,7 @@ TEST(LoopNest, SplitWithTailWithLoopOptions) {
   Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *outer, *inner, *tail;
 
   LoopNest l({tensor});
@@ -655,6 +777,7 @@ TEST(LoopNest, SplitWithTailWithLoopOptions) {
   ASSERT_TRUE(tail->loop_options().isDefault());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, SplitWithMaskWithLoopOptions) {
   KernelScope kernel_scope;
   const int M = 21;
@@ -663,6 +786,7 @@ TEST(LoopNest, SplitWithMaskWithLoopOptions) {
   Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *outer, *inner;
 
   LoopNest l({tensor});
@@ -678,6 +802,7 @@ TEST(LoopNest, SplitWithMaskWithLoopOptions) {
   ASSERT_TRUE(inner->loop_options().isDefault());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleBroadcastAddBuffer) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -697,6 +822,7 @@ TEST(LoopNest, ScheduleBroadcastAddBuffer) {
   PaddedBuffer<float> a_v(M, N, "a_v");
   for (int m = 0; m < M; m++) {
     for (int n = 0; n < N; n++) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       a_v(m, n) = 7 * m * n;
     }
   }
@@ -705,6 +831,7 @@ TEST(LoopNest, ScheduleBroadcastAddBuffer) {
   PaddedBuffer<float> b_v(N, K, "b_v");
   for (int n = 0; n < N; n++) {
     for (int k = 0; k < K; k++) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       b_v(n, k) = 11 * n * k;
     }
   }
@@ -720,13 +847,16 @@ TEST(LoopNest, ScheduleBroadcastAddBuffer) {
   for (int m = 0; m < M; m++) {
     for (int n = 0; n < N; n++) {
       for (int k = 0; k < K; k++) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         c_ref(m, n, k) = 7 * m * n + 11 * n * k;
       }
     }
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleFunctionCall01) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -744,7 +874,7 @@ TEST(LoopNest, ScheduleFunctionCall01) {
       "d",
       {{M, "m"}, {N, "n"}, {K, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c->call(m, n, k) + 1;
+        return c->load(m, n, k) + 1;
       });
 
   LoopNest l({d}, {c, d});
@@ -781,9 +911,11 @@ TEST(LoopNest, ScheduleFunctionCall01) {
   SimpleIREvaluator eval(stmt, {a_buf, b_buf, d});
   eval(a_v, b_v, d_v);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(d_v, d_ref, 1e-5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineSimple) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -804,7 +936,7 @@ TEST(LoopNest, ScheduleInlineSimple) {
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf.load(m, n) * d_buf.load(m, k) + x->call(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x->load(m, n, k);
       });
 
   LoopNest l1({y}, {x, y});
@@ -851,6 +983,7 @@ TEST(LoopNest, ScheduleInlineSimple) {
 
   eval1(a_v, b_v, c_v, d_v, y_1);
   eval2(a_v, b_v, c_v, d_v, y_2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(y_1, y_2, 1e-5);
   std::ostringstream oss1, oss2;
   oss1 << *stmt1;
@@ -885,13 +1018,13 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf.load(m, n) * d_buf.load(m, k) + x->call(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x->load(m, n, k);
       });
   Tensor* z = Compute(
       "z",
       {{M, "m3"}, {N, "n3"}, {K, "k3"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->call(m, n, k) + y->call(m, n, k);
+        return x->load(m, n, k) + y->load(m, n, k);
       });
 
   LoopNest l({z}, {x, y, z});
@@ -950,6 +1083,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
 
     SimpleIREvaluator eval(stmt, {a_buf, b_buf, c_buf, d_buf, z});
     eval(a_v, b_v, c_v, d_v, z_v);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExpectAllNear(z_v, z_ref, 1e-5);
   }
 
@@ -975,6 +1109,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineFunc01) {
   InlineFunc01Helper({"x", "y"});
   InlineFunc01Helper({"y", "x"});
@@ -984,6 +1119,7 @@ TEST(LoopNest, ScheduleInlineFunc01) {
 }
 
 // Make sure we cache random vars if we should.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineRandom) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -994,13 +1130,14 @@ TEST(LoopNest, ScheduleInlineRandom) {
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return Mod::make(Intrinsics::make(kRand, kInt), 5);
       });
   Tensor* y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->call(m, n, k) + x->call(m, n, k);
+        return x->load(m, n, k) + x->load(m, n, k);
       });
 
   LoopNest l1({y}, {x, y});
@@ -1020,6 +1157,7 @@ TEST(LoopNest, ScheduleInlineRandom) {
 }
 
 // Make sure we don't cache random vars that are not being inlined.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineRandomUnrelated) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -1036,7 +1174,7 @@ TEST(LoopNest, ScheduleInlineRandomUnrelated) {
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->call(m, n, k) + Intrinsics::make(kRand, kInt) +
+        return x->load(m, n, k) + Intrinsics::make(kRand, kInt) +
             Intrinsics::make(kRand, kInt);
       });
 
@@ -1057,6 +1195,7 @@ TEST(LoopNest, ScheduleInlineRandomUnrelated) {
 
 // Make sure we generate the right number of random values == the dimensionality
 // of the production tensor.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineRandomLowerDimensions) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -1064,13 +1203,14 @@ TEST(LoopNest, ScheduleInlineRandomLowerDimensions) {
   const int K = 6;
 
   Tensor* x = Compute("x", {{M, "m1"}}, [&](const VarHandle& m) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return Mod::make(Intrinsics::make(kRand, kInt), 5);
   });
   Tensor* y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->call(m) + x->call(m);
+        return x->load(m) + x->load(m);
       });
 
   LoopNest l1({y}, {x, y});
@@ -1090,6 +1230,7 @@ TEST(LoopNest, ScheduleInlineRandomLowerDimensions) {
 }
 
 // Make sure we don't screw up intrinsics thinking they're rand.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineIntrinsics) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -1108,7 +1249,7 @@ TEST(LoopNest, ScheduleInlineIntrinsics) {
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return Intrinsics::make(kSqrt, x->call(m, n, k));
+        return Intrinsics::make(kSqrt, x->load(m, n, k));
       });
 
   PaddedBuffer<float> a_v(M, N);
@@ -1143,6 +1284,7 @@ TEST(LoopNest, ScheduleInlineIntrinsics) {
 
   eval1(a_v, b_v, y_1);
   eval2(a_v, b_v, y_2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(y_1, y_2, 1e-5);
   std::ostringstream oss1, oss2;
   oss1 << *stmt1;
@@ -1151,6 +1293,7 @@ TEST(LoopNest, ScheduleInlineIntrinsics) {
 }
 
 // Make sure we can handle rand and non-rand intrinsics.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineRandWithIntrinsics) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -1167,7 +1310,7 @@ TEST(LoopNest, ScheduleInlineRandWithIntrinsics) {
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return Intrinsics::make(kSqrt, x->call(m, n, k));
+        return Intrinsics::make(kSqrt, x->load(m, n, k));
       });
 
   LoopNest l1({y}, {x, y});
@@ -1185,12 +1328,15 @@ TEST(LoopNest, ScheduleInlineRandWithIntrinsics) {
 }
 
 // Split a Compute then inline it into another compute.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleSplitAThenInline) {
   KernelScope kernel_scope;
   Tensor* a =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
   Tensor* b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
-    return a->call(j + ExprHandle(8));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    return a->load(j + ExprHandle(8));
   });
 
   LoopNest l({b}, {a, b});
@@ -1200,12 +1346,16 @@ TEST(LoopNest, ScheduleSplitAThenInline) {
 }
 
 // Split a Compute then inline another Compute into it.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleSplitBThenInline) {
   KernelScope kernel_scope;
   Tensor* a =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->call(j + ExprHandle(8));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    return a->load(j + ExprHandle(8));
   });
 
   LoopNest l({b}, {a, b});
@@ -1215,24 +1365,31 @@ TEST(LoopNest, ScheduleSplitBThenInline) {
   l.prepareForCodegen();
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> output(6, 0);
   SimpleIREvaluator eval(s, {b});
   eval(output);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 6; ++i) {
     ASSERT_EQ(output[i], (i + 8) * (i + 8));
   }
 }
 
 // Split a Compute twice then inline it.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleSplitTwiceThenInline) {
   KernelScope kernel_scope;
   Tensor* a =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
   Tensor* b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
-    return a->call(j + ExprHandle(8));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    return a->load(j + ExprHandle(8));
   });
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* i_outer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* i_inner;
 
   LoopNest l({b}, {a, b});
@@ -1243,12 +1400,16 @@ TEST(LoopNest, ScheduleSplitTwiceThenInline) {
 }
 
 // Inline a Compute, then split.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineThenSplit) {
   KernelScope kernel_scope;
   Tensor* a =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->call(j + ExprHandle(8));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    return a->load(j + ExprHandle(8));
   });
 
   LoopNest l({b}, {a, b});
@@ -1258,22 +1419,28 @@ TEST(LoopNest, ScheduleInlineThenSplit) {
   l.splitWithMask(loops.back(), 3);
   l.prepareForCodegen();
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> output(6, 0);
   SimpleIREvaluator eval(s, {b});
   eval(output);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 6; ++i) {
     ASSERT_EQ(output[i], (i + 8) * (i + 8));
   }
 }
 
 // Split a Compute, inline it, then split the result.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleSplitInlineThenSplit) {
   KernelScope kernel_scope;
   Tensor* a =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* b = Compute("b", {{16, "j"}}, [&](const VarHandle& j) {
-    return a->call(j + ExprHandle(8));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    return a->load(j + ExprHandle(8));
   });
 
   LoopNest l({b}, {a, b});
@@ -1285,23 +1452,27 @@ TEST(LoopNest, ScheduleSplitInlineThenSplit) {
   l.splitWithMask(loops.front(), 2);
   l.prepareForCodegen();
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> output(16, 0);
   SimpleIREvaluator eval(s, {b});
   eval(output);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; ++i) {
     ASSERT_EQ(output[i], (i + 8) * (i + 8));
   }
 }
 
 // Oversplit a loop that is simplified out after inlining.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleSplitInlineSimplify) {
   KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* a = Compute("a", {{18, "i"}}, [&](const VarHandle& i) {
     return ExprHandle(4) * i - ExprHandle(2) * i;
   });
   Tensor* b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
-    return a->call(j) - ExprHandle(1);
+    return a->load(j) - ExprHandle(1);
   });
 
   LoopNest l({b}, {a, b});
@@ -1311,16 +1482,20 @@ TEST(LoopNest, ScheduleSplitInlineSimplify) {
 }
 
 // Inline a Compute with two consumers.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineThreeMixedOnce) {
   KernelScope kernel_scope;
   Tensor* a =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->call(j + ExprHandle(8));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    return a->load(j + ExprHandle(8));
   });
   Tensor* c = Compute(
       "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a->call(k) * b->call(l);
+        return a->load(k) * b->load(l);
       });
 
   LoopNest l({c}, {a, b, c});
@@ -1341,16 +1516,20 @@ TEST(LoopNest, ScheduleInlineThreeMixedOnce) {
 }
 
 // Inline Compute A into B, then inline B into C.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineThreeMixedTwice) {
   KernelScope kernel_scope;
   Tensor* a =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->call(j + ExprHandle(8));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    return a->load(j + ExprHandle(8));
   });
   Tensor* c = Compute(
       "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a->call(k) * b->call(l);
+        return a->load(k) * b->load(l);
       });
 
   LoopNest l({c}, {a, b, c});
@@ -1372,16 +1551,20 @@ TEST(LoopNest, ScheduleInlineThreeMixedTwice) {
 }
 
 // Inline a Compute that is both a producer and consumer.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineThreeMixedInner) {
   KernelScope kernel_scope;
   Tensor* a =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->call(j + ExprHandle(8));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    return a->load(j + ExprHandle(8));
   });
   Tensor* c = Compute(
       "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a->call(k) * b->call(l);
+        return a->load(k) * b->load(l);
       });
 
   LoopNest l({c}, {a, b, c});
@@ -1402,16 +1585,20 @@ TEST(LoopNest, ScheduleInlineThreeMixedInner) {
 }
 
 // Split 3 Computes, then inline the first two into the last.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
   KernelScope kernel_scope;
   Tensor* a =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a->call(j + ExprHandle(8));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    return a->load(j + ExprHandle(8));
   });
   Tensor* c = Compute(
       "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a->call(k) * b->call(l);
+        return a->load(k) * b->load(l);
       });
 
   LoopNest l({c}, {a, b, c});
@@ -1426,6 +1613,7 @@ TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
 }
 
 // Check that inlining works for output tensors too
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleInlineOutputTensors) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -1442,7 +1630,7 @@ TEST(LoopNest, ScheduleInlineOutputTensors) {
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->call(m, n, k) + m;
+        return x->load(m, n, k) + m;
       });
 
   LoopNest l1({x, y});
@@ -1464,6 +1652,7 @@ TEST(LoopNest, ScheduleInlineOutputTensors) {
 # CHECK:       y[m2, n2, k2] = (n2 * m2) * k2 + m2;)IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleFuserStyle) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
@@ -1474,18 +1663,20 @@ TEST(LoopNest, ScheduleFuserStyle) {
 
   Tensor* b = Compute(
       "f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         return a_buf.load(axes[0]) + 11.0f;
       });
 
   Tensor* c = Compute(
       "g", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
-        return b->call(axes[0]) + 1.0f;
+        return b->load(axes[0]) + 1.0f;
       });
 
   LoopNest l({b, c});
   l.prepareForCodegen();
   Stmt* s = l.root_stmt();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> a_data(kTotalSize, 7.0f);
   std::vector<float> b_data(kTotalSize, 0.0f);
   std::vector<float> c_data(kTotalSize, 0.0f);
@@ -1497,6 +1688,7 @@ TEST(LoopNest, ScheduleFuserStyle) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleFuserThreeArg) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
@@ -1512,10 +1704,10 @@ TEST(LoopNest, ScheduleFuserThreeArg) {
     return a.load(i) + b.load(i);
   });
   Tensor* f = Compute("f", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
-    return e->call(i) + c.load(i);
+    return e->load(i) + c.load(i);
   });
   Tensor* g = Compute("g", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
-    return f->call(i) + d.load(i);
+    return f->load(i) + d.load(i);
   });
 
   LoopNest l({g}, {e, f, g});
@@ -1525,8 +1717,11 @@ TEST(LoopNest, ScheduleFuserThreeArg) {
   Stmt* s = l.root_stmt();
 
   std::vector<float> a_data(kTotalSize, 1.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> b_data(kTotalSize, 2.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> c_data(kTotalSize, 3.0f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> d_data(kTotalSize, 4.0f);
   std::vector<float> g_data(kTotalSize, 0.0f);
   SimpleIREvaluator(s, {a, b, c, d, g})(a_data, b_data, c_data, d_data, g_data);
@@ -1536,6 +1731,7 @@ TEST(LoopNest, ScheduleFuserThreeArg) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ScheduleDynamicShape2D) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
@@ -1551,16 +1747,22 @@ TEST(LoopNest, ScheduleDynamicShape2D) {
     Stmt* s = l.root_stmt();
     SimpleIREvaluator cg(s, {a, b, c, m, n});
     std::vector<float> aData(M * N, 1.0f);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> bData(M * N, 2.0f);
     std::vector<float> cData(M * N, 0.0f);
     cg.call({aData, bData, cData, M, N});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExpectAllNear(cData, std::vector<float>(M * N, 3.0f), 1e-7);
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   testWithSize(1, 8);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   testWithSize(16, 32);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   testWithSize(37, 11);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestComputeAt_1) {
   // Verify that compute_at works on the following example:
   //
@@ -1581,7 +1783,7 @@ TEST(LoopNest, LoopNestComputeAt_1) {
   Tensor* A = Compute(
       "A", {{N, "i_a"}}, [&](const VarHandle& i_a) { return i_a * i_a; });
   Tensor* B = Compute(
-      "B", {{N, "i_b"}}, [&](const VarHandle& i_b) { return A->call(i_b); });
+      "B", {{N, "i_b"}}, [&](const VarHandle& i_b) { return A->load(i_b); });
   LoopNest l({B}, {A, B});
   std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(B->buf()).at(0);
   l.computeAt(l.getLoopBodyFor(A), loops[0]);
@@ -1597,17 +1799,22 @@ TEST(LoopNest, LoopNestComputeAt_1) {
 # CHECK:   Free(temp))IR");
 
   // Now check that the loop still produces the correct result.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_data(100, 0);
   SimpleIREvaluator cg(s, {B, N});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   cg.call({b_data, 100});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_ref(100, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 100; i++) {
     b_ref[i] = i * i;
   }
   assertAllEqual(b_data, b_ref);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestComputeAt_2) {
   // Verify that compute_at works on the following example:
   //
@@ -1635,8 +1842,8 @@ TEST(LoopNest, LoopNestComputeAt_2) {
       "cons",
       {{H, "cy"}, {W, "cx"}},
       [&](const VarHandle& y, const VarHandle& x) {
-        return p->call(y, x) + p->call(y + 1, x) + p->call(y, x + 1) +
-            p->call(y + 1, x + 1);
+        return p->load(y, x) + p->load(y + 1, x) + p->load(y, x + 1) +
+            p->load(y + 1, x + 1);
       });
 
   std::vector<int> c_ref(kW * kH, 0);
@@ -1701,6 +1908,7 @@ TEST(LoopNest, LoopNestComputeAt_2) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestComputeAt_3) {
   // Verify that compute_at works on the following example:
   //
@@ -1723,19 +1931,19 @@ TEST(LoopNest, LoopNestComputeAt_3) {
       "B",
       {{H + 1, "by"}, {W + 1, "bx"}},
       [&](const VarHandle& by, const VarHandle& bx) {
-        return A->call(by, bx);
+        return A->load(by, bx);
       });
   Tensor* C = Compute(
       "C",
       {{H, "cy"}, {W, "cx"}},
       [&](const VarHandle& cy, const VarHandle& cx) {
-        return B->call(cy, cx + 1);
+        return B->load(cy, cx + 1);
       });
   Tensor* D = Compute(
       "D",
       {{H, "dy"}, {W, "dx"}},
       [&](const VarHandle& dy, const VarHandle& dx) {
-        return A->call(dy + 1, dx) + C->call(dy, dx);
+        return A->load(dy + 1, dx) + C->load(dy, dx);
       });
 
   std::vector<int> c_ref(kW * kH, 0);
@@ -1812,6 +2020,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 
 using Axis = const VarHandle&;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, Reduce2dComputeAt) {
   KernelScope kernel_scope;
 
@@ -1827,7 +2036,7 @@ TEST(LoopNest, Reduce2dComputeAt) {
       "cons",
       {{H, "cy"}, {W, "cx"}},
       Sum(),
-      [&](Axis y, Axis x, Axis r, Axis s) { return p->call(y + r, x + s); },
+      [&](Axis y, Axis x, Axis r, Axis s) { return p->load(y + r, x + s); },
       {{2, "r"}, {2, "s"}});
 
   std::vector<int> c_ref(kW * kH, 0);
@@ -1929,6 +2138,7 @@ TEST(LoopNest, Reduce2dComputeAt) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, DISABLED_Conv1d_NH) {
   // Lots of stuff is broken here.  The computeAt swaps the axes for some odd
   // reason.  Even without that, the index flattener fails due to "dimensions
@@ -1936,6 +2146,7 @@ TEST(LoopNest, DISABLED_Conv1d_NH) {
   KernelScope kernel_scope;
 
   int N = 4;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int H = 256;
   int R = 3;
   int Pad = 1;
@@ -1951,7 +2162,7 @@ TEST(LoopNest, DISABLED_Conv1d_NH) {
       "B",
       {{N, "n"}, {H, "h"}},
       Sum(),
-      [&](Axis n, Axis h, Axis r) { return A->call(n, h + r); },
+      [&](Axis n, Axis h, Axis r) { return A->load(n, h + r); },
       {{R, "r"}});
   LoopNest l({B});
   checkIR(l.root_stmt(), R"IR(
@@ -2019,12 +2230,14 @@ class LoopOrderHelper : public IRVisitor {
     return ordering.str();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-explicit-virtual-functions,modernize-use-override)
   void visit(const For* v) {
     ordering << v->var()->name_hint() << ",";
     IRVisitor::visit(v);
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestReorderAxis1) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
@@ -2034,6 +2247,7 @@ TEST(LoopNest, LoopNestReorderAxis1) {
   LoopNest l({tensor});
   Stmt* stmt1 = Stmt::clone(l.root_stmt());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> stmt1_output(6, 0);
   SimpleIREvaluator cg(stmt1, {tensor});
   cg.call({stmt1_output});
@@ -2050,10 +2264,12 @@ TEST(LoopNest, LoopNestReorderAxis1) {
   ASSERT_EQ(order1, "x,y,");
   ASSERT_EQ(order2, "y,x,");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> stmt2_output(6, 0);
   SimpleIREvaluator cg2(stmt2, {tensor});
   cg.call({stmt2_output});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 6; ++i) {
     ASSERT_EQ(stmt1_output[i], stmt2_output[i]);
   }
@@ -2074,6 +2290,7 @@ TEST(LoopNest, LoopNestReorderAxis1) {
   ASSERT_EQ(oss1.str(), oss2.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestReorderPartialAxes) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
@@ -2089,6 +2306,7 @@ TEST(LoopNest, LoopNestReorderPartialAxes) {
   Stmt* stmt1 = Stmt::clone(l.root_stmt());
   ASSERT_EQ(loopOrderHelper.getOrder(stmt1), "x,y,z,");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> stmt1_output(24, 0);
   SimpleIREvaluator cg(stmt1, {tensor});
   cg.call({stmt1_output});
@@ -2099,10 +2317,12 @@ TEST(LoopNest, LoopNestReorderPartialAxes) {
 
   Stmt* stmt2 = Stmt::clone(l.root_stmt());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> stmt2_output(24, 0);
   SimpleIREvaluator cg2(stmt2, {tensor});
   cg2.call({stmt2_output});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 24; ++i) {
     ASSERT_EQ(stmt1_output[i], stmt2_output[i]);
   }
@@ -2113,15 +2333,18 @@ TEST(LoopNest, LoopNestReorderPartialAxes) {
 
   Stmt* stmt3 = Stmt::clone(l.root_stmt());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> stmt3_output(24, 0);
   SimpleIREvaluator cg3(stmt3, {tensor});
   cg3.call({stmt3_output});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 24; ++i) {
     ASSERT_EQ(stmt1_output[i], stmt3_output[i]);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestReorderInternalAxis) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
@@ -2140,6 +2363,7 @@ TEST(LoopNest, LoopNestReorderInternalAxis) {
   Stmt* stmt1 = Stmt::clone(l.root_stmt());
   ASSERT_EQ(loopOrderHelper.getOrder(stmt1), "w,x,y,z,");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> stmt1_output(24, 0);
   SimpleIREvaluator cg(stmt1, {tensor});
   cg.call({stmt1_output});
@@ -2150,15 +2374,18 @@ TEST(LoopNest, LoopNestReorderInternalAxis) {
 
   Stmt* stmt2 = l.root_stmt();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> stmt2_output(24, 0);
   SimpleIREvaluator cg2(stmt2, {tensor});
   cg2.call({stmt2_output});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 24; ++i) {
     ASSERT_EQ(stmt1_output[i], stmt2_output[i]);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestReorderEnclosingAxis) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
@@ -2176,6 +2403,7 @@ TEST(LoopNest, LoopNestReorderEnclosingAxis) {
   LoopOrderHelper loopOrderHelper;
   Stmt* stmt1 = Stmt::clone(l.root_stmt());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> stmt1_output(24, 0);
   SimpleIREvaluator cg(stmt1, {tensor});
   cg.call({stmt1_output});
@@ -2186,15 +2414,18 @@ TEST(LoopNest, LoopNestReorderEnclosingAxis) {
 
   Stmt* stmt2 = l.root_stmt();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> stmt2_output(24, 0);
   SimpleIREvaluator cg2(stmt2, {tensor});
   cg2.call({stmt2_output});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 24; ++i) {
     ASSERT_EQ(stmt1_output[i], stmt2_output[i]);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestReorderSameAxis) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
@@ -2214,6 +2445,7 @@ TEST(LoopNest, LoopNestReorderSameAxis) {
   ASSERT_EQ(oss.str(), oss2.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestReorderExtraStatements) {
   /* We're going for a structure like this:
    * for x in ...
@@ -2236,6 +2468,7 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
       });
   LoopNest l({tensor});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder extra(BufHandle("res", {6, 3}, kFloat));
 
   auto loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
@@ -2243,8 +2476,10 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
   VarHandle i = VarHandle(loops[0]->var());
 
   Stmt* store_1 = Store::make(BufHandle(extra.data()), {i, 0}, ExprHandle(1.f));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Stmt* store_2 = Store::make(BufHandle(extra.data()), {i, 1}, ExprHandle(2.f));
   // stmt 3 is the Function body.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Stmt* store_3 = Store::make(BufHandle(extra.data()), {i, 2}, ExprHandle(4.f));
 
   loops[0]->body()->prepend_stmt(store_1);
@@ -2252,7 +2487,9 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
   loops[1]->body()->append_stmt(store_3);
   Stmt* stmt1 = Stmt::clone(l.root_stmt());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> extra1(6, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> res1(24, 0);
   SimpleIREvaluator cg(stmt1, {tensor, extra});
   cg.call({res1, extra1});
@@ -2290,14 +2527,18 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
 # CHECK:     res[x, 2] = 4
 )IR");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> extra2(6, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> res2(24, 0);
   SimpleIREvaluator cg2(stmt2, {tensor, extra});
   cg2.call({res2, extra2});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 24; ++i) {
     ASSERT_EQ(res1[i], res2[i]);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 6; ++i) {
     ASSERT_EQ(extra1[i], extra2[i]);
   }
@@ -2340,14 +2581,18 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
 # CHECK:     res[x, 2] = 4
 )IR");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> extra3(6, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> res3(24, 0);
   SimpleIREvaluator cg3(stmt3, {tensor, extra});
   cg3.call({res3, extra3});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 24; ++i) {
     ASSERT_EQ(res1[i], res3[i]);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 6; ++i) {
     ASSERT_EQ(extra1[i], extra3[i]);
   }
@@ -2366,6 +2611,7 @@ void LoopNestReorderTestHelper(
       [](const std::vector<VarHandle>&) { return -1; });
   LoopNest l({c});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder extra(BufHandle("extra", {5}, kInt));
 
   auto loops = l.getAllLoopNestsWritingToBuf(c->buf()).at(0);
@@ -2373,9 +2619,9 @@ void LoopNestReorderTestHelper(
   for (auto* l : loops) {
     // Add an increment at each layer of the loop which counts the number of
     // times the loop executes.
-    Load* load = new Load(extra.data(), {new IntImm(j)}, new IntImm(1));
+    Load* load = new Load(extra.data(), {new IntImm(j)});
     Add* add = new Add(load, new IntImm(1));
-    Stmt* store = new Store(extra.data(), {new IntImm(j)}, add, new IntImm(1));
+    Stmt* store = new Store(extra.data(), {new IntImm(j)}, add);
     if (prepend) {
       l->body()->prepend_stmt(store);
     }
@@ -2388,6 +2634,7 @@ void LoopNestReorderTestHelper(
 
   Stmt* stmt1 = Stmt::clone(l.root_stmt());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> extra1(5, 0);
   std::vector<int> res1(2 * 3 * 2 * 3 * 2, 0);
   SimpleIREvaluator cg(stmt1, {c, extra});
@@ -2402,6 +2649,7 @@ void LoopNestReorderTestHelper(
   if (append) {
     expected_loops++;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 5; ++i) {
     expected_loops *= loopExtents[i];
     ASSERT_EQ(extra1[i], expected_loops);
@@ -2416,6 +2664,7 @@ void LoopNestReorderTestHelper(
   oss2 << *stmt2;
   ASSERT_NE(oss.str(), oss2.str());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> extra2(5, 0);
   std::vector<int> res2(2 * 3 * 2 * 3 * 2, 0);
   SimpleIREvaluator cg2(stmt2, {c, extra});
@@ -2429,6 +2678,7 @@ void LoopNestReorderTestHelper(
     expected_loops++;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 5; ++i) {
     expected_loops *= loopExtents[i];
     ASSERT_EQ(extra2[i], expected_loops);
@@ -2439,8 +2689,11 @@ void LoopNestReorderTestHelper(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestReorderLongStringOfPreOrphans) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 5; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 5; ++j) {
       // skip noops, since we check the loop isn't the same after reordering.
       if (i != j) {
@@ -2450,8 +2703,11 @@ TEST(LoopNest, LoopNestReorderLongStringOfPreOrphans) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestReorderLongStringOfPostOrphans) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 5; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 5; ++j) {
       // skip noops, since we check the loop isn't the same after reordering.
       if (i != j) {
@@ -2461,8 +2717,11 @@ TEST(LoopNest, LoopNestReorderLongStringOfPostOrphans) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestReorderLongStringFull) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 5; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 5; ++j) {
       // skip noops, since we check the loop isn't the same after reordering.
       if (i != j) {
@@ -2472,6 +2731,7 @@ TEST(LoopNest, LoopNestReorderLongStringFull) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, LoopNestReorderInternalLoopNest) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -2492,13 +2752,13 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf.load(m, n) * d_buf.load(m, k) + x->call(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x->load(m, n, k);
       });
   Tensor* z = Compute(
       "z",
       {{M, "m3"}, {N, "n3"}, {K, "k3"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return x->call(m, n, k) + y->call(m, n, k);
+        return x->load(m, n, k) + y->load(m, n, k);
       });
 
   LoopNest l({z}, {x, y, z});
@@ -2569,14 +2829,20 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
 
     SimpleIREvaluator eval(stmt, {a_buf, b_buf, c_buf, d_buf, z});
     eval(a_v, b_v, c_v, d_v, z_v);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExpectAllNear(z_v, z_ref, 1e-5);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, OuterLoopVectorization) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
-      "f", {{8, "X"}, {8, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "f",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{8, "X"}, {8, "y"}},
+      [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -2618,6 +2884,7 @@ std::string constantUpperBoundLoopIR(int upper_bound_val) {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, Unroll) {
   const std::string actual = constantUpperBoundLoopIR(3);
   const std::string& verification_pattern =
@@ -2629,6 +2896,7 @@ TEST(LoopNest, Unroll) {
   torch::jit::testing::FileCheck().run(verification_pattern, actual);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, UnrollOuter) {
   KernelScope kernel_scope;
   ExprHandle outer_bound(3);
@@ -2653,6 +2921,7 @@ TEST(LoopNest, UnrollOuter) {
 # CHECK: })IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, UnrollInner) {
   KernelScope kernel_scope;
   ExprHandle outer_bound(3);
@@ -2675,6 +2944,7 @@ TEST(LoopNest, UnrollInner) {
 # CHECK: })IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, UnrollMultipleStatements) {
   KernelScope kernel_scope;
   const int kTotalSize = 3;
@@ -2701,6 +2971,7 @@ TEST(LoopNest, UnrollMultipleStatements) {
 # CHECK: B[2] = A[2];)IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, UnrollNonLiteralConstantBounds) {
   KernelScope kernel_scope;
 
@@ -2718,8 +2989,10 @@ TEST(LoopNest, UnrollNonLiteralConstantBounds) {
   auto outer_for = For::make(
       i,
       IntImm::make(2) - IntImm::make(1),
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       IntImm::make(12) / IntImm::make(3),
       inner_for);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto b = Block::make({outer_for});
 
   std::vector<For*> loops = {outer_for, inner_for};
@@ -2737,6 +3010,7 @@ TEST(LoopNest, UnrollNonLiteralConstantBounds) {
 # CHECK: })IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, UnrollEmpty) {
   const std::string actual = constantUpperBoundLoopIR(0);
   const std::string& verification_pattern = R"IR(
@@ -2746,6 +3020,7 @@ TEST(LoopNest, UnrollEmpty) {
   torch::jit::testing::FileCheck().run(verification_pattern, actual);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, NoUnroll) {
   KernelScope kernel_scope;
   VarHandle upper_bound("N", kInt);
@@ -2758,6 +3033,7 @@ TEST(LoopNest, NoUnroll) {
       LoopNest::unroll(loops[0], &unrolled), "non-constant loop");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, UnrollWithLet) {
   KernelScope kernel_scope;
   const int kTotalSize = 3;
@@ -2771,6 +3047,7 @@ TEST(LoopNest, UnrollWithLet) {
       0,
       kTotalSize,
       Block::make(
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {Let::make(e, 7),
            Store::make(a_buf, {x}, e),
            Store::make(b_buf, {x}, e + 1)}));
@@ -2801,6 +3078,7 @@ TEST(LoopNest, UnrollWithLet) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, NormalizeStartPositive) {
   KernelScope kernel_scope;
 
@@ -2816,13 +3094,13 @@ TEST(LoopNest, NormalizeStartPositive) {
   auto for_body = Block::make(
       {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x})),
        Store::make(b_buf, {x}, x * 2)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto for_stmt = For::make(x, 50, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2834,6 +3112,7 @@ TEST(LoopNest, NormalizeStartPositive) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, NormalizeStartNegative) {
   KernelScope kernel_scope;
 
@@ -2847,15 +3126,17 @@ TEST(LoopNest, NormalizeStartNegative) {
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
   auto for_body = Block::make(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {Store::make(a_buf, {x + 50}, Load::make(kInt, b_buf, {x + 50})),
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        Store::make(b_buf, {x + 50}, x * 2)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto for_stmt = For::make(x, -50, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2867,6 +3148,7 @@ TEST(LoopNest, NormalizeStartNegative) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, NormalizeStartZero) {
   KernelScope kernel_scope;
 
@@ -2884,13 +3166,13 @@ TEST(LoopNest, NormalizeStartZero) {
   auto for_body = Block::make(
       {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x})),
        Store::make(b_buf, {x}, x * 2)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto for_stmt = For::make(x, 0, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2902,6 +3184,7 @@ TEST(LoopNest, NormalizeStartZero) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, NormalizeStartVariable) {
   KernelScope kernel_scope;
 
@@ -2919,13 +3202,13 @@ TEST(LoopNest, NormalizeStartVariable) {
   auto for_body = Block::make(
       {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x})),
        Store::make(b_buf, {x}, x * 2)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto for_stmt = For::make(x, y, 100, for_body);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
@@ -2937,6 +3220,7 @@ TEST(LoopNest, NormalizeStartVariable) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, NormalizeOnNestedOuterLoop) {
   KernelScope kernel_scope;
 
@@ -2947,31 +3231,35 @@ TEST(LoopNest, NormalizeOnNestedOuterLoop) {
   //     }
   //   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {ExprHandle(50)}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {ExprHandle(100)}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   auto inner_for_body = Store::make(
       a_buf, {x}, Load::make(a_buf, {x}) + Load::make(b_buf, {y}) + y * 2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for = For::make(y, 10, 100, inner_for_body);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto for_stmt = For::make(x, 50, 100, inner_for);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
-  auto result = IRSimplifier::simplify(normalized);
+  auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
       R"IR(
         # CHECK: for (int x = 0; x < 50; x++) {
         # CHECK:   for (int y = 10; y < 100; y++) {
-        # CHECK:     A[x + 50] = ((B[y]) + (A[x + 50])) + 2 * y;
+        # CHECK:     A[x + 50] = ((A[x + 50]) + (B[y])) + 2 * y;
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, NormalizeOnNestedInnerLoop) {
   KernelScope kernel_scope;
 
@@ -2982,18 +3270,21 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
   //     }
   //   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {ExprHandle(50)}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {ExprHandle(100)}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   auto inner_for_body = Store::make(
       a_buf, {x}, Load::make(a_buf, {x}) + Load::make(b_buf, {y}) + y * 2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for = For::make(y, 10, 100, inner_for_body);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto for_stmt = For::make(x, 50, 100, inner_for);
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(inner_for, &normalized);
+  LoopNest::normalize(inner_for);
 
   auto result = IRSimplifier::simplify(for_stmt);
   std::ostringstream oss;
@@ -3002,15 +3293,17 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
       R"IR(
         # CHECK: for (int x = 50; x < 100; x++) {
         # CHECK:   for (int y = 0; y < 90; y++) {
-        # CHECK:     A[x] = (((B[y + 10]) + (A[x])) + 2 * y) + 20;
+        # CHECK:     A[x] = (((B[y + 10]) + 2 * y) + (A[x])) + 20;
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, NormalizeAndSplitWithTail) {
   KernelScope kernel_scope;
 
   // Create a dummy tensor to construct LoopNest.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
@@ -3024,16 +3317,20 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
   const int kTotalSize = 5;
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto for_stmt = For::make(x, 5, 10, Store::make(a_buf, {x}, x * 2));
   Block::make({for_stmt});
 
-  For* normalized = nullptr;
-  LoopNest::normalize(for_stmt, &normalized);
+  LoopNest::normalize(for_stmt);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_outer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_inner;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* x_tail;
-  l.splitWithTail(normalized, 10, &x_outer, &x_inner, &x_tail);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  l.splitWithTail(for_stmt, 10, &x_outer, &x_inner, &x_tail);
 
   auto x_outer_result = IRSimplifier::simplify(x_outer);
   std::ostringstream oss_outer;
@@ -3056,6 +3353,7 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
   torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, FlattenSimpleLoopNest2D) {
   KernelScope kernel_scope;
 
@@ -3065,11 +3363,14 @@ TEST(LoopNest, FlattenSimpleLoopNest2D) {
   //       A[i,j] = i * j;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {10, 5}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for = For::make(j, 0, 5, for_body);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outer_for = For::make(i, 0, 10, inner_for);
   Block::make({outer_for});
 
@@ -3090,15 +3391,19 @@ TEST(LoopNest, FlattenSimpleLoopNest2D) {
 
   {
     SimpleIREvaluator eval1(loops[0], {a_buf});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<int> inp1(10, 5);
     eval1(inp1);
     SimpleIREvaluator eval2(flattened, {a_buf});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<int> inp2(10, 5);
     eval2(inp2);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExpectAllNear(inp1, inp2, 1e-5);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, FlattenSimpleLoopNest3D) {
   KernelScope kernel_scope;
 
@@ -3110,13 +3415,17 @@ TEST(LoopNest, FlattenSimpleLoopNest3D) {
   //       }
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {10, 5, 7}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
   auto for_body = Block::make({Store::make(a_buf, {i, j, k}, i + j * k)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto for1 = For::make(k, 0, 7, for_body);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto for2 = For::make(j, 0, 5, for1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto for3 = For::make(i, 0, 10, for2);
   Block::make({for3});
 
@@ -3137,15 +3446,19 @@ TEST(LoopNest, FlattenSimpleLoopNest3D) {
 
   {
     SimpleIREvaluator eval1(loops[0], {a_buf});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<int> inp1(10, 5, 7);
     eval1(inp1);
     SimpleIREvaluator eval2(flattened, {a_buf});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<int> inp2(10, 5, 7);
     eval2(inp2);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExpectAllNear(inp1, inp2, 1e-5);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, FlattenLoopNestAfterNormalize) {
   KernelScope kernel_scope;
 
@@ -3155,11 +3468,14 @@ TEST(LoopNest, FlattenLoopNestAfterNormalize) {
   //       A[i - 2,j - 3] = i * j;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {8, 12}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   auto for_body = Block::make({Store::make(a_buf, {i - 2, j - 3}, i * j)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for = For::make(j, 3, 15, for_body);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outer_for = For::make(i, 2, 10, inner_for);
   Block::make({outer_for});
 
@@ -3180,15 +3496,19 @@ TEST(LoopNest, FlattenLoopNestAfterNormalize) {
 
   {
     SimpleIREvaluator eval1(loops[0], {a_buf});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<int> inp1(8, 12);
     eval1(inp1);
     SimpleIREvaluator eval2(flattened, {a_buf});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<int> inp2(8, 12);
     eval2(inp2);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExpectAllNear(inp1, inp2, 1e-5);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, FlattenLoopNestWithNonLiteralConstantBounds) {
   KernelScope kernel_scope;
 
@@ -3198,14 +3518,18 @@ TEST(LoopNest, FlattenLoopNestWithNonLiteralConstantBounds) {
   //       A[i,j] = i * j;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {10, 5}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
   auto inner_for =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       For::make(j, 0, IntImm::make(20) / IntImm::make(4), for_body);
   auto outer_for =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       For::make(i, 0, IntImm::make(15) - IntImm::make(5), inner_for);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto b = Block::make({outer_for});
 
   std::vector<For*> loops = {outer_for, inner_for};
@@ -3221,15 +3545,19 @@ TEST(LoopNest, FlattenLoopNestWithNonLiteralConstantBounds) {
 
   {
     SimpleIREvaluator eval1(loops[0], {a_buf});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<int> inp1(10, 5);
     eval1(inp1);
     SimpleIREvaluator eval2(flattened, {a_buf});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     PaddedBuffer<int> inp2(10, 5);
     eval2(inp2);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExpectAllNear(inp1, inp2, 1e-5);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, FlattenImperfectLoopNest) {
   KernelScope kernel_scope;
 
@@ -3242,13 +3570,20 @@ TEST(LoopNest, FlattenImperfectLoopNest) {
   //   }
   // Do not flatten.
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {10, 15}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for = For::make(j, 0, 15, for_body);
   auto outer_for = For::make(
-      i, 0, 10, Block::make({Store::make(a_buf, {i, i}, 0), inner_for}));
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      i,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      10,
+      Block::make({Store::make(a_buf, {i, i}, 0), inner_for}));
   Block::make({outer_for});
 
   std::vector<For*> loops = {outer_for, inner_for};
@@ -3265,6 +3600,7 @@ TEST(LoopNest, FlattenImperfectLoopNest) {
       )IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, FlattenReductionLoopNest) {
   KernelScope kernel_scope;
 
@@ -3277,14 +3613,18 @@ TEST(LoopNest, FlattenReductionLoopNest) {
   //   }
   // Do not flatten.
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {10, 15}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle s_buf("S", {10}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   auto for_body = Block::make({Store::make(
       s_buf, {i}, Load::make(s_buf, {i}) + Load::make(a_buf, {i, j}))});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for = For::make(j, 0, 15, for_body);
   auto outer_for =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       For::make(i, 0, 10, Block::make({Store::make(s_buf, {i}, 0), inner_for}));
   Block::make({outer_for});
 
@@ -3302,6 +3642,7 @@ TEST(LoopNest, FlattenReductionLoopNest) {
       )IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
   KernelScope kernel_scope;
   const int M = 3;
@@ -3312,6 +3653,7 @@ TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
   Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}});
   LoopNest loop({c});
   auto loops = loop.getAllLoopNestsWritingToBuf(c->buf())[0];
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* flattened;
   bool success = LoopNest::flatten(loops, &flattened);
   ASSERT_FALSE(success);
@@ -3325,6 +3667,7 @@ TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
       )IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, FlattenIncorrectLoopsAsInput) {
   KernelScope kernel_scope;
 
@@ -3341,17 +3684,22 @@ TEST(LoopNest, FlattenIncorrectLoopsAsInput) {
   //   }
   // Flatten({For_i, For_y}) => should not succeed
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {10, 5}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for1 = For::make(j, 0, 5, for_body1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outer_for1 = For::make(i, 0, 10, inner_for1);
   auto for_body2 = Block::make(
       {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}) + x + y)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for2 = For::make(y, 0, 5, for_body2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   Block::make({outer_for1, outer_for2});
 
@@ -3368,6 +3716,7 @@ TEST(LoopNest, FlattenIncorrectLoopsAsInput) {
       )IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, DetectInlineRankMismatch) {
   KernelScope kernel_scope;
   const int kTotalSize = 8;
@@ -3379,27 +3728,40 @@ TEST(LoopNest, DetectInlineRankMismatch) {
   Tensor* reshape = Compute(
       "reshape",
       {{kTotalSize / 2, "i"}, {2, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) { return a->call(i, j); });
+      [&](const VarHandle& i, const VarHandle& j) { return a->load(i, j); });
   LoopNest l({reshape}, {a, reshape});
   ASSERT_THROWS_WITH(
       l.computeInline(l.getLoopBodyFor(a)),
       "Placeholder indexed access is inconsistent with its rank");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, CacheReadsSimple) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   Tensor* B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 30, j + 3);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        return A->load(i + 30, j + 3);
       });
   Tensor* C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "C",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
   LoopNest l({B, C}, {A, B, C});
@@ -3435,17 +3797,25 @@ TEST(LoopNest, CacheReadsSimple) {
 #CHECK: Free(A);
       )IR");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_data(200, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> c_data(200, 0);
   SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_ref(200, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> c_ref(200, 0);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 20; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 10; ++j) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       b_ref[i * 10 + j] = (i + 30) * (j + 3);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
     }
   }
@@ -3454,20 +3824,33 @@ TEST(LoopNest, CacheReadsSimple) {
   assertAllEqual(c_data, c_ref);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, CacheReadsOuter) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   Tensor* B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 30, j + 40) + A->call(i + 31, j + 41);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "C",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
   LoopNest l({B, C}, {A, B, C});
@@ -3483,17 +3866,25 @@ TEST(LoopNest, CacheReadsOuter) {
 #CHECK: B[10 * i_2 + j_2] = (A_local[(j_2 + 11 * i_2) + 12]) + (A_local[j_2 + 11 * i_2]);
       )IR");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_data(200, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> c_data(200, 0);
   SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_ref(200, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> c_ref(200, 0);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 20; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 10; ++j) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       b_ref[i * 10 + j] = (i + 30) * (j + 40) + (i + 31) * (j + 41);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
     }
   }
@@ -3502,20 +3893,33 @@ TEST(LoopNest, CacheReadsOuter) {
   assertAllEqual(c_data, c_ref);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, CacheReadsInternal) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   Tensor* B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 30, j + 40) + A->call(i + 31, j + 41);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "C",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
   LoopNest l({B, C}, {A, B, C});
@@ -3527,20 +3931,28 @@ TEST(LoopNest, CacheReadsInternal) {
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[2, 11]
 #CHECK: A_local[j_1 + 11 * i_2] =
-#CHECK: B[10 * i_1 + j_2] = (A_local[j_2]) + (A_local[j_2 + 12]);
+#CHECK: B[10 * i_1 + j_2] = (A_local[j_2 + 12]) + (A_local[j_2]);
       )IR");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_data(200, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> c_data(200, 0);
   SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_ref(200, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> c_ref(200, 0);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 20; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 10; ++j) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       b_ref[i * 10 + j] = (i + 30) * (j + 40) + (i + 31) * (j + 41);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
     }
   }
@@ -3549,21 +3961,34 @@ TEST(LoopNest, CacheReadsInternal) {
   assertAllEqual(c_data, c_ref);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, CacheReadsInner) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   // note im changing the offset of the first arg of the first call to A.
   Tensor* B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 34, j + 40) + A->call(i + 30, j + 41);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        return A->load(i + 34, j + 40) + A->load(i + 30, j + 41);
       });
   Tensor* C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "C",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
   LoopNest l({B, C}, {A, B, C});
@@ -3575,20 +4000,28 @@ TEST(LoopNest, CacheReadsInner) {
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[5, 2]
 #CHECK: A_local[2 * i_2 + j_2] =
-#CHECK: B[10 * i_1 + j_1] = (A_local[8]) + (A_local[1]);
+#CHECK: B[10 * i_1 + j_1] = (A_local[1]) + (A_local[8]);
       )IR");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_data(200, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> c_data(200, 0);
   SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_ref(200, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> c_ref(200, 0);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 20; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 10; ++j) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       b_ref[i * 10 + j] = (i + 34) * (j + 40) + (i + 30) * (j + 41);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
     }
   }
@@ -3597,20 +4030,33 @@ TEST(LoopNest, CacheReadsInner) {
   assertAllEqual(c_data, c_ref);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, CacheWritesSimple) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "A",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{64, "i"}, {64, "j"}},
+      [](const VarHandle& i, const VarHandle& j) { return i * j; });
   Tensor* B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 30, j + 40) + A->call(i + 31, j + 41);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        return A->load(i + 30, j + 40) + A->load(i + 31, j + 41);
       });
   Tensor* C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "C",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{20, "i"}, {10, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        return A->load(i + 10, j + 20) + A->load(i + 30, j + 40);
       });
 
   LoopNest l({B, C}, {A, B, C});
@@ -3630,17 +4076,25 @@ TEST(LoopNest, CacheWritesSimple) {
 #CHECK-NOT: A_local
       )IR");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_data(200, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> c_data(200, 0);
   SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_ref(200, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> c_ref(200, 0);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 20; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 10; ++j) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       b_ref[i * 10 + j] = (i + 30) * (j + 40) + (i + 31) * (j + 41);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
     }
   }
@@ -3649,21 +4103,27 @@ TEST(LoopNest, CacheWritesSimple) {
   assertAllEqual(c_data, c_ref);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, DeadStoreElimination) {
   KernelScope kernel_scope;
   VarHandle y("y", kInt);
   VarHandle x("x_tail", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle f("f", {26, 5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle g("g", {26, 5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle x_outer_end = 5;
   ExprHandle x_2 = x + x_outer_end * 4;
   For* stmt1 = For::make(
       x,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5,
       For::make(
           y,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           5,
           Block::make({
               Store::make(f, {x_2, y}, (x_2 + y)),
@@ -3690,25 +4150,34 @@ TEST(LoopNest, DeadStoreElimination) {
       )IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle f("f", {26 * 5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle g("g", {26 * 5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle h("h", {26, 5}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle x_outer_end = 5;
   ExprHandle x_2 = x + x_outer_end * 4;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   For* stmt1 = For::make(x, 0, 26 * 5, Store::make(f, {x}, x));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   For* stmt2 = For::make(z, 0, 26 * 5, Store::make(g, {z}, z + 1));
   For* stmt3 = For::make(
       x,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       5,
       For::make(
           y,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           5,
           Block::make({
               Store::make(h, {x, y}, Load::make(f, {x * y})),
@@ -3737,20 +4206,26 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
       )IR");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, CompoundTensorSimple) {
   KernelScope kernel_scope;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {10, 5}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for1 = For::make(j, 0, 5, for_body1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outer_for1 = For::make(i, 0, 10, inner_for1);
   auto for_body2 = Block::make(
       {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}) + x + y)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for2 = For::make(y, 0, 5, for_body2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   Block* body = Block::make({outer_for1, outer_for2});
 
@@ -3759,15 +4234,20 @@ TEST(LoopNest, CompoundTensorSimple) {
   LoopNest l({A});
   l.prepareForCodegen();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> a_data(50, 0);
 
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
   SimpleIREvaluator cg(s, {A});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> a_ref(50, 0);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 10; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 5; ++j) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       a_ref[i * 5 + j] = (i * j) + i + j;
     }
   }
@@ -3776,6 +4256,7 @@ TEST(LoopNest, CompoundTensorSimple) {
   assertAllEqual(a_data, a_ref);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, InlineConstantIndex) {
   KernelScope kernel_scope;
   const int N = 10;
@@ -3790,7 +4271,7 @@ TEST(LoopNest, InlineConstantIndex) {
       "f",
       {{1, "m"}, {N, "n"}, {1, "o"}},
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
-        return y->call(m, n, o);
+        return y->load(m, n, o);
       });
 
   LoopNest l({z}, {y, z});
@@ -3798,42 +4279,56 @@ TEST(LoopNest, InlineConstantIndex) {
   ASSERT_TRUE(l.computeInline(y->buf()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, CompoundTensorUsed) {
   KernelScope kernel_scope;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {10, 5}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for1 = For::make(j, 0, 5, for_body1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outer_for1 = For::make(i, 0, 10, inner_for1);
   auto for_body2 = Block::make(
       {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}) + x + y)});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto inner_for2 = For::make(y, 0, 5, for_body2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   Block* body = Block::make({outer_for1, outer_for2});
 
   Tensor* A = new Tensor(a_buf.node(), body);
   Tensor* B = Compute(
-      "B", {{10, "i"}, {3, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A->call(i, j + 1) + A->call(i, j + 2);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "B",
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {{10, "i"}, {3, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        return A->load(i, j + 1) + A->load(i, j + 2);
       });
 
   LoopNest l({B}, {A, B});
   ASSERT_FALSE(l.computeInline(A->buf()));
   l.prepareForCodegen();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> a_data(50, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_data(50, 0);
 
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
   SimpleIREvaluator cg(s, {B});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> b_ref(50, 0);
 
   auto AT = [](int i, int j) { return i * j + i + j; };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 10; ++i) {
     for (int j = 0; j < 3; ++j) {
       b_ref[i * 3 + j] = AT(i, j + 1) + AT(i, j + 2);
@@ -3844,18 +4339,17 @@ TEST(LoopNest, CompoundTensorUsed) {
   assertAllEqual(b_data, b_ref);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, InlineFromLoad) {
   KernelScope kernel_scope;
 
   constexpr int N = 1024;
   BufHandle a("A", {N}, kInt);
   BufHandle b("B", {N}, kInt);
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto store_a = For::make(i, 0, N, Store::make(a, {i}, i, mask));
-  auto store_b =
-      For::make(j, 0, N, Store::make(b, {j}, Load::make(a, {j}, mask), mask));
+  auto store_a = For::make(i, 0, N, Store::make(a, {i}, i));
+  auto store_b = For::make(j, 0, N, Store::make(b, {j}, Load::make(a, {j})));
   LoopNest l(Block::make({store_a, store_b}), {b.node()});
 
   l.computeInline(a.node());
@@ -3942,12 +4436,15 @@ static void checkColReduce(Stmt* s, Placeholder& p, Tensor* t) {
     b(i) = 0.0f;
   }
   for (int i = 0; i < N; i++) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ref(i) = 76.0f;
   }
   SimpleIREvaluator(s, {p, t}).call({a, b});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(b, ref, 1e-5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ColReduceSplitTailEvenReorder) {
   KernelScope kernel_scope;
   constexpr int M = 76, N = 128;
@@ -3971,6 +4468,7 @@ TEST(LoopNest, ColReduceSplitTailEvenReorder) {
   checkColReduce(s, *p.first, p.second);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ColReduceSplitTailUnevenReorder) {
   KernelScope kernel_scope;
   constexpr int M = 76, N = 100;
@@ -3997,6 +4495,7 @@ TEST(LoopNest, ColReduceSplitTailUnevenReorder) {
   checkColReduce(s, *p.first, p.second);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, ColReduceSplitMaskEvenReorder) {
   KernelScope kernel_scope;
   constexpr int M = 76, N = 128;
@@ -4005,7 +4504,8 @@ TEST(LoopNest, ColReduceSplitMaskEvenReorder) {
   checkColReduce(s, *p.first, p.second);
 }
 
-TEST(LoopNest, DISABLED_ColReduceSplitMaskUnevenReorder) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, ColReduceSplitMaskUnevenReorder) {
   KernelScope kernel_scope;
   constexpr int M = 76, N = 100;
   auto p = colReduce(M, N);
@@ -4013,20 +4513,73 @@ TEST(LoopNest, DISABLED_ColReduceSplitMaskUnevenReorder) {
   checkColReduce(s, *p.first, p.second);
 }
 
-TEST(LoopNest, DISABLED_VectorizeUse) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, ReorderAxisWithMultipleConds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     if i > 5 {
+  //       if i < 10 {
+  //         for (int j = 0; j < 100; j++) {
+  //           A[i] = i * j;
+  //         }
+  //       }
+  //     }
+  //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 100, Store::make(a_buf, {i}, Mul::make(i, j)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto inner_cond = Cond::make(CompareSelect::make(i, 10, kLT), forJ, nullptr);
+  auto outer_cond =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      Cond::make(CompareSelect::make(i, 5, kGT), inner_cond, nullptr);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, outer_cond);
+  Stmt* par = Block::make({forI});
+  LoopNest l(par, {a_buf.node()});
+  l.reorderAxis(forI, forJ);
+  ASSERT_EQ(par, l.root_stmt());
+  par = IRSimplifier::simplify(par);
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int j
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: if (i>5
+# CHECK-NEXT: if (i<10
+# CHECK-NEXT: A[i] = i * j
+# CHECK-NOT: for (
+      )IR";
+  std::ostringstream oss;
+  oss << *par;
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, VectorizeUse) {
   KernelScope kernel_scope;
   constexpr int N = 8;
   Placeholder a("a", kFloat, {N});
   Tensor* b = Compute(
       "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
   Tensor* c = Compute(
-      "c", {{N, "n"}}, [&](const VarHandle& n) { return b->call(n) + 2.0f; });
-  LoopNest nest({c});
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      "c",
+      {{N, "n"}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      [&](const VarHandle& n) { return b->load(n) + 2.0f; });
+  LoopNest nest({c}, {b, c});
   auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
   nest.vectorize(loops[0]);
   loops = nest.getAllLoopNestsWritingToBuf(c->buf())[0];
   nest.vectorize(loops[0]);
   nest.prepareForCodegen();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   Stmt* s = nest.root_stmt();
   std::ostringstream oss;
   oss << *nest.root_stmt();
@@ -4037,6 +4590,7 @@ TEST(LoopNest, DISABLED_VectorizeUse) {
       oss.str());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* int64Loop = R"IR(
 {
   for (int64_t n = 0; n < 12; n++) {
@@ -4045,6 +4599,7 @@ const char* int64Loop = R"IR(
 }
 )IR";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, DISABLED_Int64Direct) {
   KernelScope kernel_scope;
 
@@ -4059,6 +4614,7 @@ TEST(LoopNest, DISABLED_Int64Direct) {
   ASSERT_EQ(oss.str(), int64Loop);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, DISABLED_Int64Compute) {
   KernelScope kernel_scope;
 
@@ -4075,6 +4631,7 @@ TEST(LoopNest, DISABLED_Int64Compute) {
   ASSERT_EQ(oss.str(), int64Loop);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, DistributeLoopWithAllStmtsAsPivots) {
   KernelScope kernel_scope;
 
@@ -4089,7 +4646,9 @@ TEST(LoopNest, DistributeLoopWithAllStmtsAsPivots) {
   //       B[i] = B[i] + i * k;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -4098,6 +4657,7 @@ TEST(LoopNest, DistributeLoopWithAllStmtsAsPivots) {
   auto forJ = For::make(
       j,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
       Store::make(
           a_buf, {i}, Add::make(Load::make(a_buf, {i}), Mul::make(i, j))));
@@ -4105,9 +4665,11 @@ TEST(LoopNest, DistributeLoopWithAllStmtsAsPivots) {
   auto forK = For::make(
       k,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       50,
       Store::make(
           b_buf, {i}, Add::make(Load::make(b_buf, {i}), Mul::make(i, k))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 20, Block::make({initA, forJ, initB, forK}));
   auto par = Block::make({forI});
 
@@ -4137,6 +4699,7 @@ TEST(LoopNest, DistributeLoopWithAllStmtsAsPivots) {
   ASSERT_EQ(new_loops.front(), forI);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, DistributeLoopWithOneStmtAsPivot) {
   KernelScope kernel_scope;
 
@@ -4151,7 +4714,9 @@ TEST(LoopNest, DistributeLoopWithOneStmtAsPivot) {
   //       B[i] = B[i] + i * k;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -4160,6 +4725,7 @@ TEST(LoopNest, DistributeLoopWithOneStmtAsPivot) {
   auto forJ = For::make(
       j,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
       Store::make(
           a_buf, {i}, Add::make(Load::make(a_buf, {i}), Mul::make(i, j))));
@@ -4167,9 +4733,11 @@ TEST(LoopNest, DistributeLoopWithOneStmtAsPivot) {
   auto forK = For::make(
       k,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       50,
       Store::make(
           b_buf, {i}, Add::make(Load::make(b_buf, {i}), Mul::make(i, k))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 20, Block::make({initA, forJ, initB, forK}));
   auto par = Block::make({forI});
 
@@ -4196,6 +4764,7 @@ TEST(LoopNest, DistributeLoopWithOneStmtAsPivot) {
   ASSERT_EQ(new_loops.front(), forI);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, DistributeLoopWithoutAnyPivot) {
   KernelScope kernel_scope;
 
@@ -4210,7 +4779,9 @@ TEST(LoopNest, DistributeLoopWithoutAnyPivot) {
   //       B[i] = B[i] + i * k;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -4219,6 +4790,7 @@ TEST(LoopNest, DistributeLoopWithoutAnyPivot) {
   auto forJ = For::make(
       j,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
       Store::make(
           a_buf, {i}, Add::make(Load::make(a_buf, {i}), Mul::make(i, j))));
@@ -4226,9 +4798,11 @@ TEST(LoopNest, DistributeLoopWithoutAnyPivot) {
   auto forK = For::make(
       k,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       50,
       Store::make(
           b_buf, {i}, Add::make(Load::make(b_buf, {i}), Mul::make(i, k))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 20, Block::make({initA, forJ, initB, forK}));
   auto par = Block::make({forI});
 
@@ -4258,6 +4832,7 @@ TEST(LoopNest, DistributeLoopWithoutAnyPivot) {
   ASSERT_EQ(new_loops.front(), forI);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, DistributeLoopOverInnerLoops) {
   KernelScope kernel_scope;
 
@@ -4272,7 +4847,9 @@ TEST(LoopNest, DistributeLoopOverInnerLoops) {
   //       B[i] = B[i] + i * k;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -4281,6 +4858,7 @@ TEST(LoopNest, DistributeLoopOverInnerLoops) {
   auto forJ = For::make(
       j,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
       Store::make(
           a_buf, {i}, Add::make(Load::make(a_buf, {i}), Mul::make(i, j))));
@@ -4288,9 +4866,11 @@ TEST(LoopNest, DistributeLoopOverInnerLoops) {
   auto forK = For::make(
       k,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       50,
       Store::make(
           b_buf, {i}, Add::make(Load::make(b_buf, {i}), Mul::make(i, k))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 20, Block::make({initA, forJ, initB, forK}));
   auto par = Block::make({forI});
 
@@ -4317,6 +4897,7 @@ TEST(LoopNest, DistributeLoopOverInnerLoops) {
   ASSERT_EQ(new_loops.front(), forI);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsSimple) {
   KernelScope kernel_scope;
 
@@ -4327,14 +4908,20 @@ TEST(LoopNest, fuseLoopsSimple) {
   //   for (int k = 0; k < 100; k++) {
   //     B[k] = 20 * k;
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forK = For::make(k, 0, 100, Store::make(b_buf, {k}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
-  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4351,6 +4938,7 @@ TEST(LoopNest, fuseLoopsSimple) {
   ASSERT_EQ(fused_loop, forJ);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsMultiple) {
   KernelScope kernel_scope;
 
@@ -4364,17 +4952,24 @@ TEST(LoopNest, fuseLoopsMultiple) {
   //   for (int k = 0; k < 100; k++) {
   //     B[k] = 20 * k;
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {200}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
   auto forI =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       For::make(i, 0, 100, Store::make(a_buf, {i + 100}, Add::make(20, i)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forK = For::make(k, 0, 100, Store::make(b_buf, {k}, Mul::make(20, k)));
   auto par = Block::make({forI, forJ, forK});
-  auto fused_loop = LoopNest::fuseLoops({forI, forJ, forK});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forI, forJ, forK}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4392,6 +4987,7 @@ TEST(LoopNest, fuseLoopsMultiple) {
   ASSERT_EQ(fused_loop, forI);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsNested) {
   KernelScope kernel_scope;
 
@@ -4408,7 +5004,9 @@ TEST(LoopNest, fuseLoopsNested) {
   //       B[n] = B[n] + n * k;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20, 100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20, 100}, kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
@@ -4418,6 +5016,7 @@ TEST(LoopNest, fuseLoopsNested) {
   auto forJ = For::make(
       j,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
       Store::make(
           a_buf, {m}, Add::make(Load::make(a_buf, {m}), Mul::make(m, j))));
@@ -4425,13 +5024,18 @@ TEST(LoopNest, fuseLoopsNested) {
   auto forK = For::make(
       k,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       50,
       Store::make(
           b_buf, {n}, Add::make(Load::make(b_buf, {n}), Mul::make(n, k))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forM = For::make(m, 0, 20, Block::make({initA, forJ}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forN = For::make(n, 0, 20, Block::make({initB, forK}));
   auto par = Block::make({forM, forN});
-  auto fused_loop = LoopNest::fuseLoops({forM, forN});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forM, forN}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4452,6 +5056,7 @@ TEST(LoopNest, fuseLoopsNested) {
   ASSERT_EQ(fused_loop, forM);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsNested2D) {
   KernelScope kernel_scope;
 
@@ -4466,7 +5071,9 @@ TEST(LoopNest, fuseLoopsNested2D) {
   //       B[m,n] = m + n * 100;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20, 100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20, 100}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -4475,23 +5082,31 @@ TEST(LoopNest, fuseLoopsNested2D) {
   auto forI = For::make(
       i,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       20,
       For::make(
           j,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           100,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500))));
   auto forM = For::make(
       m,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       20,
       For::make(
           n,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           50,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           Store::make(b_buf, {m, n}, Add::make(m, Mul::make(n, 100)))));
   auto par = Block::make({forI, forM});
-  auto fused_loop = LoopNest::fuseLoops({forI, forM});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4510,6 +5125,7 @@ TEST(LoopNest, fuseLoopsNested2D) {
   ASSERT_EQ(fused_loop, forI);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsNested2DInner) {
   KernelScope kernel_scope;
 
@@ -4522,17 +5138,34 @@ TEST(LoopNest, fuseLoopsNested2DInner) {
   //       B[i,n] = m + n * 100;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20, 100}, kInt);
-  BufHandle b_buf("B", {2, 100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {20, 100}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle n("n", kInt);
   auto forJ = For::make(
-      j, 0, 100, Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      j,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      100,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
   auto forN = For::make(
-      n, 0, 100, Store::make(b_buf, {i, n}, Add::make(i, Mul::make(n, 100))));
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      n,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      100,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      Store::make(b_buf, {i, n}, Add::make(i, Mul::make(n, 100))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 20, Block::make({forJ, forN}));
-  auto fused_loop = LoopNest::fuseLoops({forJ, forN});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forN}, &fused_loop));
 
   std::ostringstream oss;
   oss << *forI;
@@ -4550,6 +5183,7 @@ TEST(LoopNest, fuseLoopsNested2DInner) {
   ASSERT_EQ(fused_loop, forJ);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsDifferentStopBounds) {
   KernelScope kernel_scope;
 
@@ -4560,17 +5194,24 @@ TEST(LoopNest, fuseLoopsDifferentStopBounds) {
   //   for (int k = 0; k < 50; k++) {
   //     B[k] = 20 * k;
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forK = For::make(k, 0, 50, Store::make(b_buf, {j}, Mul::make(20, k)));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forJ, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}), "Loops with different stop bounds");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsDifferentStartBounds) {
   KernelScope kernel_scope;
 
@@ -4581,17 +5222,24 @@ TEST(LoopNest, fuseLoopsDifferentStartBounds) {
   //   for (int k = 50; k < 100; k++) {
   //     B[k] = 20 * k;
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forK = For::make(k, 50, 100, Store::make(b_buf, {j}, Mul::make(20, k)));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forJ, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}), "Loops with different start bounds");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsNotContiguous) {
   KernelScope kernel_scope;
 
@@ -4603,18 +5251,25 @@ TEST(LoopNest, fuseLoopsNotContiguous) {
   //   for (int k = 50; k < 100; k++) {
   //     B[k] = 20 * k;
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto initB = Store::make(b_buf, {0}, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forK = For::make(k, 50, 100, Store::make(b_buf, {j}, Mul::make(20, k)));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forJ, initB, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}), "Only contiguous loops can be fused");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsWithDifferentParents) {
   KernelScope kernel_scope;
 
@@ -4628,20 +5283,28 @@ TEST(LoopNest, fuseLoopsWithDifferentParents) {
   //   for (int k = 50; k < 100; k++) {
   //     B[k] = 20 * k;
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {50, 100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {i, j}, Mul::make(i, j)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 50, forJ);
   auto initB = Store::make(b_buf, {0}, 0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forK = For::make(k, 50, 100, Store::make(b_buf, {j}, Mul::make(20, k)));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forI, initB, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}), "loops with different parents");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsWithVariableBounds) {
   KernelScope kernel_scope;
 
@@ -4652,15 +5315,21 @@ TEST(LoopNest, fuseLoopsWithVariableBounds) {
   //   for (int k = 0; k < N; k++) {
   //     B[k] = 20 * k;
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
   VarHandle N("N", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, N, Store::make(a_buf, {j}, Mul::make(10, j)));
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks,cppcoreguidelines-avoid-magic-numbers)
   auto forK = For::make(k, 0, N, Store::make(b_buf, {j}, Mul::make(20, k)));
   auto par = Block::make({forJ, forK});
-  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4677,6 +5346,93 @@ TEST(LoopNest, fuseLoopsWithVariableBounds) {
   ASSERT_EQ(fused_loop, forJ);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, fuseLoopsWithExprBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int j = 0; j < M + N; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  //   for (int k = 0; k < M + N; k++) {
+  //     B[k] = 20 * k;
+  //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {20}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  VarHandle M("M", kInt);
+  VarHandle N("N", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, M + N, Store::make(a_buf, {j}, Mul::make(10, j)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forK = For::make(k, 0, M + N, Store::make(b_buf, {j}, Mul::make(20, k)));
+  auto par = Block::make({forJ, forK});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int j
+# CHECK-NEXT: A[j] =
+# CHECK-NEXT: B[j] =
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The fused loop must be the same as the first loop.
+  ASSERT_EQ(fused_loop, forJ);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, fuseLoopsWithDifferentExprBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int j = M; j < N * 2; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  //   for (int k = M; k < N + N; k++) {
+  //     B[k] = 20 * k;
+  //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {20}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  VarHandle M("M", kInt);
+  VarHandle N("N", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, M, N * 2, Store::make(a_buf, {j}, Mul::make(10, j)));
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks,cppcoreguidelines-avoid-magic-numbers)
+  auto forK = For::make(k, M, N + N, Store::make(b_buf, {j}, Mul::make(20, k)));
+  auto par = Block::make({forJ, forK});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int j
+# CHECK-NEXT: A[j] =
+# CHECK-NEXT: B[j] =
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The fused loop must be the same as the first loop.
+  ASSERT_EQ(fused_loop, forJ);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsWithNonOverlappingBufferAccesses) {
   KernelScope kernel_scope;
 
@@ -4687,15 +5443,20 @@ TEST(LoopNest, fuseLoopsWithNonOverlappingBufferAccesses) {
   //   for (int k = 10; k < 100; k++) {
   //     A[k+100] = 30 * k
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {200}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       For::make(k, 10, 100, Store::make(a_buf, {k + 100}, Mul::make(30, k)));
   auto par = Block::make({forJ, forK});
 
-  auto fused_loop = LoopNest::fuseLoops({forJ, forK});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4712,6 +5473,7 @@ TEST(LoopNest, fuseLoopsWithNonOverlappingBufferAccesses) {
   ASSERT_EQ(fused_loop, forJ);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsWithNonOverlapping2DBufferAccesses) {
   KernelScope kernel_scope;
 
@@ -4726,22 +5488,32 @@ TEST(LoopNest, fuseLoopsWithNonOverlapping2DBufferAccesses) {
   //       A[m+20,n+100] = m + n * 100;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20, 100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20, 50}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto storeA1 = Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 0, 100, storeA1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 20, forJ);
   auto storeA2 =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Store::make(a_buf, {m + 20, n + 100}, Add::make(m, Mul::make(n, 100)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forN = For::make(n, 0, 50, storeA2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forM = For::make(m, 0, 20, forN);
   auto par = Block::make({forI, forM});
 
-  auto fused_loop = LoopNest::fuseLoops({forI, forM});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
 
   std::ostringstream oss;
   oss << *par;
@@ -4760,6 +5532,62 @@ TEST(LoopNest, fuseLoopsWithNonOverlapping2DBufferAccesses) {
   ASSERT_EQ(fused_loop, forI);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, fuseLoopsWithReductions) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = 0
+  //     for (int j = 0; j < 100; j++) {
+  //       A[i] = A[i] + B[i,j];
+  //     }
+  //   }
+  //   for (int m = 0; m < 20; m++) {
+  //     C[m] = A[m];
+  //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle b_buf("B", {20, 100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle c_buf("C", {20}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle m("m", kInt);
+  auto initA = Store::make(a_buf, {i}, 0);
+  auto sumA = Store::make(
+      a_buf, {i}, Add::make(Load::make(a_buf, {i}), Load::make(b_buf, {i, j})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 100, sumA);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, Block::make({initA, forJ}));
+  auto forM =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      For::make(m, 0, 20, Store::make(c_buf, {m}, Load::make(a_buf, {m})));
+  auto par = Block::make({forI, forM});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: A[i] =
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i] = (A[i]) +
+# CHECK-NOT: for (
+# CHECK: C[i] = A[i]
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The fused loop must be the same as the first loop.
+  ASSERT_EQ(fused_loop, forI);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsThatViolateDependencies1) {
   KernelScope kernel_scope;
 
@@ -4770,18 +5598,23 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies1) {
   //   for (int k = 10; k < 100; k++) {
   //     A[k-1] = 20 * k;
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       For::make(k, 10, 100, Store::make(a_buf, {k - 1}, Mul::make(20, k)));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forJ, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}),
-      "not valid since it results in a loop carried dependence");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsThatViolateDependencies2) {
   KernelScope kernel_scope;
 
@@ -4792,18 +5625,23 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies2) {
   //   for (int k = 10; k < 100; k++) {
   //     A[k+50] = 20 * k;
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {150}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       For::make(k, 10, 100, Store::make(a_buf, {k + 50}, Mul::make(20, k)));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forJ, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}),
-      "not valid since it results in a loop carried dependence");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsThatViolateDependencies3) {
   KernelScope kernel_scope;
 
@@ -4820,7 +5658,9 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies3) {
   //       B[n] = B[n] + n * k;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {25, 100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {20, 50}, kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
@@ -4830,6 +5670,7 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies3) {
   auto forJ = For::make(
       j,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
       Store::make(
           a_buf, {m}, Add::make(Load::make(a_buf, {m}), Mul::make(m, j))));
@@ -4837,17 +5678,22 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies3) {
   auto forK = For::make(
       k,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       50,
       Store::make(
           b_buf, {n}, Add::make(Load::make(b_buf, {n}), Mul::make(n, k))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forM = For::make(m, 0, 20, Block::make({initA, forJ}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto forN = For::make(n, 0, 20, Block::make({initB, forK}));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forM, forN});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forM, forN}),
-      "not valid since it results in a loop carried dependence");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forM, forN}, &fused_loop));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsThatViolateDependencies4) {
   KernelScope kernel_scope;
 
@@ -4862,6 +5708,7 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies4) {
   //       A[m+1,n] = m + n * 100;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {30, 100}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -4870,27 +5717,35 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies4) {
   auto forI = For::make(
       i,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       20,
       For::make(
           j,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           100,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500))));
   auto forM = For::make(
       m,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       20,
       For::make(
           n,
           0,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           50,
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           Store::make(a_buf, {m + 1, n}, Add::make(m, Mul::make(n, 100)))));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forI, forM});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forI, forM}),
-      "not valid since it results in a loop carried dependence");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsThatViolateDependencies5) {
   KernelScope kernel_scope;
 
@@ -4903,23 +5758,34 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies5) {
   //       A[i,n+1] = m + n * 100;
   //     }
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {20, 200}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle n("n", kInt);
   auto forJ = For::make(
-      j, 0, 100, Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      j,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      100,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500)));
   auto forN = For::make(
       n,
       0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Store::make(a_buf, {i, n + 1}, Add::make(i, Mul::make(n, 100))));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,cppcoreguidelines-avoid-magic-numbers)
   auto forI = For::make(i, 0, 20, Block::make({forJ, forN}));
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forN}),
-      "not valid since it results in a loop carried dependence");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forN}, &fused_loop));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
   KernelScope kernel_scope;
 
@@ -4930,23 +5796,33 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies6) {
   //   for (int k = 0; k < 100; k++) {
   //     B[k] = 20 * A[99-k];
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
-  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto forK = For::make(
       k,
-      10,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
       Store::make(
-          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          b_buf,
+          {k},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forJ, forK});
-  ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forJ, forK}),
-      "not valid since it results in a loop carried dependence");
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forJ, forK}, &fused_loop));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
   KernelScope kernel_scope;
 
@@ -4957,21 +5833,707 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
   //   for (int j = 0; j < 100; j++) {
   //     A[j] = 10 * j;
   //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle a_buf("A", {100}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BufHandle b_buf("B", {100}, kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
   auto forK = For::make(
       k,
-      10,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       100,
       Store::make(
-          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
-  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          b_buf,
+          {k},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forK, forJ});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forK, forJ}, &fused_loop));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, areLoopsPerfectlyNested) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       for (int k = 0; k < 40; k++) {
+  //         A[i,j,k] = i * j * k;
+  //       }
+  //     }
+  //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store = Store::make(a_buf, {i, j, k}, Mul::make(Mul::make(i, j), k));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forK = For::make(k, 0, 40, store);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 30, forK);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, forJ);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+  auto par = Block::make({forI});
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forI, forJ, forK}));
+
+  // Specifying the loops in any other order fails.
+  ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forJ, forI, forK}));
+  ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forI, forK, forJ}));
+  ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forK, forJ, forI}));
+
+  // Adding a statment to forK body should be OK.
+  auto init = Store::make(a_buf, {i, j}, 0);
+  forK->body()->insert_stmt_before(init, store);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forI, forJ, forK}));
+
+  // Adding a statement in forJ body should fail this test.
+  forK->body()->remove_stmt(init);
+  forJ->body()->insert_stmt_before(init, forK);
+  ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forI, forJ, forK}));
+
+  // Similarly, adding a statement in forI body should fail this test.
+  forJ->body()->remove_stmt(init);
+  forI->body()->insert_stmt_before(init, forJ);
+  ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forI, forJ, forK}));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, reorderNestedLoops2D) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto store = Store::make(a_buf, {i, j}, Mul::make(i, j));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 30, store);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, forJ);
+  auto par = Block::make({forI});
+
+  auto reordered = LoopNest::reorder({forI, forJ}, {1, 0});
+
+  ASSERT_EQ(reordered[0], forJ);
+  ASSERT_EQ(reordered[1], forI);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forJ, forI}));
+  ASSERT_EQ(forJ->get_parent(), par);
+  ASSERT_EQ(store->get_parent(), forI->body());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, reorderNestedLoops3D) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       for (int k = 0; k < 40; k++) {
+  //         A[i,j,k] = i * j * k;
+  //       }
+  //     }
+  //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store = Store::make(a_buf, {i, j, k}, Mul::make(Mul::make(i, j), k));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forK = For::make(k, 0, 40, store);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 30, forK);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, forJ);
+  auto par = Block::make({forI});
+
+  auto reordered = LoopNest::reorder({forI, forJ, forK}, {2, 1, 0});
+
+  ASSERT_EQ(reordered[0], forK);
+  ASSERT_EQ(reordered[1], forJ);
+  ASSERT_EQ(reordered[2], forI);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forJ, forI}));
+  ASSERT_EQ(forK->get_parent(), par);
+  ASSERT_EQ(store->get_parent(), forI->body());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, reorderNestedLoops4D) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       for (int k = 0; k < 40; k++) {
+  //         for (int l = 0; l < 50; l++) {
+  //           A[i,j,k,l] = i * j * k * l * 500;
+  //         }
+  //       }
+  //     }
+  //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20, 30, 40, 50}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  VarHandle l("l", kInt);
+  auto store = Store::make(
+      a_buf,
+      {i, j, k, l},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      Mul::make(Mul::make(Mul::make(Mul::make(i, j), k), l), 500));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forL = For::make(l, 0, 50, store);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forK = For::make(k, 0, 40, forL);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 30, forK);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, forJ);
+  auto par = Block::make({forI});
+
+  auto reordered = LoopNest::reorder({forI, forJ, forK, forL}, {2, 3, 0, 1});
+
+  ASSERT_EQ(reordered[0], forK);
+  ASSERT_EQ(reordered[1], forL);
+  ASSERT_EQ(reordered[2], forI);
+  ASSERT_EQ(reordered[3], forJ);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forL, forI, forJ}));
+  ASSERT_EQ(forK->get_parent(), par);
+  ASSERT_EQ(store->get_parent(), forJ->body());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, reorderTrivialPermutation) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       for (int k = 0; k < 40; k++) {
+  //         A[i,j,k] = i * j * k;
+  //       }
+  //     }
+  //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store = Store::make(a_buf, {i, j, k}, Mul::make(Mul::make(i, j), k));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forK = For::make(k, 0, 40, store);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 30, forK);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, forJ);
+  auto par = Block::make({forI});
+
+  auto reordered = LoopNest::reorder({forI, forJ, forK}, {0, 1, 2});
+
+  ASSERT_EQ(reordered[0], forI);
+  ASSERT_EQ(reordered[1], forJ);
+  ASSERT_EQ(reordered[2], forK);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forI, forJ, forK}));
+  ASSERT_EQ(forI->get_parent(), par);
+  ASSERT_EQ(store->get_parent(), forK->body());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, reorderInvalidPermutations) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       for (int k = 0; k < 40; k++) {
+  //         A[i,j,k] = i * j * k;
+  //       }
+  //     }
+  //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store = Store::make(a_buf, {i, j, k}, Mul::make(Mul::make(i, j), k));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forK = For::make(k, 0, 40, store);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 30, forK);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, forJ);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+  auto par = Block::make({forI});
+
   ASSERT_THROWS_WITH(
-      LoopNest::fuseLoops({forK, forJ}),
-      "not valid since it results in a loop carried dependence");
+      LoopNest::reorder({forI, forJ, forK}, {0, 1, 2, 3}),
+      "invalid permutation size");
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {1, 2}),
+      "invalid permutation size");
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {2, 1, 3}),
+      "invalid permutation for reorder");
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {1, 1, 0}),
+      "invalid permutation for reorder");
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {0, 0, 0}),
+      "invalid permutation for reorder");
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, reorderInvalidLoopNest) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       A[i,j] = 0
+  //       for (int k = 0; k < 40; k++) {
+  //         A[i,j,k] = i * j * k;
+  //       }
+  //     }
+  //   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store = Store::make(a_buf, {i, j, k}, Mul::make(Mul::make(i, j), k));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forK = For::make(k, 0, 40, store);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 30, forK);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 20, forJ);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+  auto par = Block::make({forI});
+
+  // Specifying the loops in incorrect order fails.
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forK, forI, forJ}, {1, 0, 2}),
+      "reorder is only allowed on perfectly nested loops");
+
+  // Adding a statement to forJ loop fails.
+  auto init = Store::make(a_buf, {i}, 0);
+  forJ->body()->insert_stmt_before(init, forK);
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {1, 0, 2}),
+      "reorder is only allowed on perfectly nested loops");
+
+  // Moving that statement to forI loop also fails.
+  forJ->body()->remove_stmt(init);
+  forI->body()->insert_stmt_before(init, forJ);
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {1, 0, 2}),
+      "reorder is only allowed on perfectly nested loops");
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, compressBufferSimple) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[i,j] = sin(i*j)
+  //   }
+  //   for (int j = 0; j < 199; ++j) {
+  //     B[i,j] = A[i,j] + A[i, j+1]
+  //   }
+  // }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {i, j}, sin(i * j)));
+  auto forJ2 = For::make(
+      j,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      199,
+      Store::make(
+          b_buf,
+          {i, j},
+          Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j + 1}))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 100, Block::make({forJ1, forJ2}));
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[0, j] =
+# CHECK: for (int j
+# CHECK-NEXT: B[i, j] = (A[0, j]) + (A[0, j + 1])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, compressBufferMultipleDims) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[i,j] = sin(i*j)
+  //     B[i,j] = A[i,j] + A[i,j]
+  //   }
+  // }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto store1 = Store::make(a_buf, {i, j}, sin(i * j));
+  auto store2 = Store::make(
+      b_buf,
+      {i, j},
+      Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 200, Block::make({store1, store2}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 100, forJ);
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[0, 0] =
+# CHECK-NEXT: B[i, j] = (A[0, 0]) + (A[0, 0])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 1);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, compressBufferMultipleDims2) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     for (int k = 0; k < 300; ++k) {
+  //       A[i,j,k] = sin(i*j*k)
+  //     }
+  //     for (int k = 0; k < 299; ++j) {
+  //       B[i,j,k] = A[i,j,k] + A[i,j,k+1]
+  //     }
+  //   }
+  // }
+  Buf* A =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      new Buf("A", {new IntImm(100), new IntImm(200), new IntImm(300)}, kInt);
+  Buf* B =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      new Buf("B", {new IntImm(100), new IntImm(200), new IntImm(300)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store1 = Store::make(a_buf, {i, j, k}, sin(i * j * k));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forK1 = For::make(k, 0, 300, store1);
+  auto store2 = Store::make(
+      b_buf,
+      {i, j, k},
+      Add::make(
+          Load::make(a_buf, {i, j, k}), Load::make(a_buf, {i, j, k + 1})));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forK2 = For::make(k, 0, 299, store2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ = For::make(j, 0, 200, Block::make({forK1, forK2}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 100, forJ);
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: for (int k
+# CHECK-NEXT: A[0, 0, k] =
+# CHECK: for (int k
+# CHECK-NEXT: B[i, j, k] = (A[0, 0, k]) + (A[0, 0, k + 1])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 3);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(2))->value(), 300);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, compressBufferDifferentOrderIndices) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[j, i] = sin(i*j)
+  //   }
+  //   for (int j = 0; j < 99; ++j) {
+  //     B[i, j] = A[j, i] + A[j+1, 0]
+  //   }
+  // }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {j, i}, sin(i * j)));
+  auto forJ2 = For::make(
+      j,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      99,
+      Store::make(
+          b_buf,
+          {i, j},
+          Add::make(Load::make(a_buf, {j, i}), Load::make(a_buf, {j + 1, i}))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 100, Block::make({forJ1, forJ2}));
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[j, 0] =
+# CHECK: for (int j
+# CHECK-NEXT: B[i, j] = (A[j, 0]) + (A[j + 1, 0])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 100);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 1);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, compressBufferVariableBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < M; ++i) {
+  //   for (int j = 0; j < N; ++j) {
+  //     A[i,j] = sin(i*j)
+  //   }
+  //   for (int j = 0; j < N-1; ++j) {
+  //     B[i,j] = A[i,j] + A[i, j+1]
+  //   }
+  // }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle M("M", kInt);
+  VarHandle N("N", kInt);
+  auto forJ1 = For::make(j, 0, N, Store::make(a_buf, {i, j}, sin(i * j)));
+  auto forJ2 = For::make(
+      j,
+      0,
+      N - 1,
+      Store::make(
+          b_buf,
+          {i, j},
+          Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j + 1}))));
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+  auto forI = For::make(i, 0, M, Block::make({forJ1, forJ2}));
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[0, j] =
+# CHECK: for (int j
+# CHECK-NEXT: B[i, j] = (A[0, j]) + (A[0, j + 1])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, compressBufferNoCommonParentLoops) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[i,j] = sin(i*j)
+  //   }
+  // }
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 199; ++j) {
+  //     B[i,j] = A[i,j] + A[i, j+1]
+  //   }
+  // }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {i, j}, sin(i * j)));
+  auto forJ2 = For::make(
+      j,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      199,
+      Store::make(
+          b_buf,
+          {i, j},
+          Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j + 1}))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI1 = For::make(i, 0, 100, forJ1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI2 = For::make(i, 0, 100, forJ2);
+  auto par = Block::make({forI1, forI2});
+  LoopNest::compressBuffer(A, par);
+
+  // There should be no change in the buffer or code.
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i, j] =
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: B[i, j] = (A[i, j]) + (A[i, j + 1])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 100);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, compressBufferIndicesMixed) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[i + j, j] = sin(i*j)
+  //   }
+  //   for (int j = 0; j < 199; ++j) {
+  //     B[i,j] = A[i + j, j] + A[i + j, j+1]
+  //   }
+  // }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* A = new Buf("A", {new IntImm(300), new IntImm(200)}, kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {i + j, j}, sin(i * j)));
+  auto forJ2 = For::make(
+      j,
+      0,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      199,
+      Store::make(
+          b_buf,
+          {i, j},
+          Add::make(
+              Load::make(a_buf, {i + j, j}),
+              Load::make(a_buf, {i + j, j + 1}))));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto forI = For::make(i, 0, 100, Block::make({forJ1, forJ2}));
+  auto par = Block::make({forI});
+  LoopNest::compressBuffer(A, par);
+
+  // There should be no change in the buffer or code.
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i + j, j] =
+# CHECK: for (int j
+# CHECK-NEXT: B[i, j] = (A[i + j, j]) + (A[i + j, j + 1])
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 300);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
 }
 
 } // namespace jit

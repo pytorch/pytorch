@@ -15,6 +15,8 @@
 namespace at {
 namespace native {
 
+void geqrf_batched_cublas(const Tensor& input, const Tensor& tau, int64_t m, int64_t n);
+
 void triangular_solve_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
 void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
 
@@ -30,8 +32,10 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
 // entrance of calculations of `cholesky` using cusolver potrf and potrfBatched
 Tensor _cholesky_helper_cuda_cusolver(const Tensor& self, bool upper);
 Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A, bool upper);
+Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, bool upper);
 
-Tensor& orgqr_helper_cuda_lib(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns);
+void geqrf_cusolver(const Tensor& input, const Tensor& tau, int64_t m, int64_t n);
+Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau, int64_t n_columns);
 
 void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors);
 

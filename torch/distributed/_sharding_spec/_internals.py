@@ -3,7 +3,7 @@ from torch.distributed.utils import _parse_remote_device
 
 def is_valid_device(device):
     """
-    Checks if this is a valid remote/local device.
+    Checks if this is a valid local/remote device.
     """
     # Check for torch.device
     try:

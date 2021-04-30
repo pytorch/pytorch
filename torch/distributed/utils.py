@@ -18,6 +18,10 @@ def _parse_remote_device(remote_device: str):
     Returns:
         A workername/rank and a device.
     """
+
+    PARSE_ERROR = f"Could not parse remote_device: {remote_device}. The valid format is "
+    "'<workername>/<device>' or 'rank:<rank>/<device>"
+
     fields = remote_device.split("/")
     if len(fields) == 2:
         [on, device] = fields
@@ -25,10 +29,7 @@ def _parse_remote_device(remote_device: str):
         on = fields[0]
         device = "cpu"
     else:
-        raise ValueError(
-            f"Could not parse remote_device: {remote_device}. The valid format is "
-            "'<workername>/<device>' or 'rank:<rank>/<device>"
-        )
+        raise ValueError(PARSE_ERROR)
 
     # Validate the device.
     try:
@@ -40,10 +41,7 @@ def _parse_remote_device(remote_device: str):
     # only do some very basic sanity check on workername at the module creation time.
     # As currently there is no regex to describe the format of workername, just check whether the workername is empty.
     if not on:
-        raise ValueError(
-            f"Could not parse remote_device: {remote_device}. The valid format is "
-            "'<workername>/<device>' or 'rank:<rank>/<device>"
-        )
+        raise ValueError(PARSE_ERROR)
 
     # Check for rank based format
     fields = on.split(':')
@@ -52,14 +50,8 @@ def _parse_remote_device(remote_device: str):
         if fields[0] == 'rank' and fields[1].isdigit():
             on = int(fields[1])
         else:
-            raise ValueError(
-                f"Could not parse remote_device: {remote_device}. The valid format is "
-                "'<workername>/<device>' or 'rank:<rank>/<device>"
-            )
+            raise ValueError(PARSE_ERROR)
     elif len(fields) > 2:
-        raise ValueError(
-            f"Could not parse remote_device: {remote_device}. The valid format is "
-            "'<workername>/<device>' or 'rank:<rank>/<device>"
-        )
+        raise ValueError(PARSE_ERROR)
 
     return on, device

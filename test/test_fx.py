@@ -2,6 +2,7 @@ import builtins
 import contextlib
 import copy
 import functools
+import inspect
 import math
 import numbers
 import operator
@@ -19,7 +20,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
-import torch._C._fx  # type: ignore
+import torch._C._fx
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -29,7 +30,6 @@ from copy import deepcopy
 
 from torch.fx.proxy import TraceError
 
-from fx.quantization import Quantizer
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
@@ -41,7 +41,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 from fx.named_tup import MyNamedTup
 
 try:
-    from torchvision.models import resnet18
+    from torchvision import models as torchvision_models
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
@@ -360,37 +360,6 @@ class TestFX(JitTestCase):
             assert node.name not in seen_names
             seen_names.add(node.name)
 
-    @skipIfNoTorchVision
-    def test_resnet(self):
-        resnet = resnet18()
-        resnet.train()
-
-        res_graph = symbolic_trace(resnet)
-        res_script = torch.jit.script(res_graph)
-
-        ip = torch.rand(1, 3, 224, 224)
-
-        a = resnet(ip)
-        b = res_graph(ip)
-        c = res_script(ip)
-        self.assertEqual(a, b)
-        self.assertEqual(a, c)
-
-        quantizer = Quantizer(res_graph)
-
-        for i in range(10):
-            quantizer.observe((torch.rand(1, 3, 224, 224),))
-
-        qgraph = quantizer.quantize()
-        qgraph.graph.lint()
-        qgraph_script = torch.jit.script(qgraph)
-
-        d = qgraph(ip)
-        e = qgraph_script(ip)
-
-        assert (a - d).abs().max() < 2
-        self.assertEqual(d, e)
-
     def test_unpack(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -469,7 +438,7 @@ class TestFX(JitTestCase):
                             # Pull out constants. These constants will later be
                             # fed to the interpreter C++ object via add_constant()
                             arg_name = f'constant_{constant_idx}'
-                            constants[arg_name] = torch.Tensor(
+                            constants[arg_name] = torch.tensor(
                                 [arg] if isinstance(arg, numbers.Number) else arg)
                             arg_names.append(arg_name)
                             constant_idx += 1
@@ -1054,14 +1023,99 @@ class TestFX(JitTestCase):
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
             if node.op == 'output':
-                output_shape = node.args[0].meta['shape']
-                output_stride = node.args[0].meta['stride']
+                output_shape = node.args[0].meta['tensor_meta'].shape
+                output_stride = node.args[0].meta['tensor_meta'].stride
         self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
                                        'call_module', 'output']))
 
         # Test shape propogation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
         self.assertEqual(output_stride, ref_out.stride())
+
+    def test_shape_prop_layout(self):
+        class ConvTest(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_mod = torch.nn.Conv2d(5, 5, 3)
+
+            def forward(self, x):
+                return self.conv_mod(x)
+
+        # contiguous layout
+        test_mod = ConvTest()
+        traced = symbolic_trace(test_mod)
+        x = torch.randn(5, 5, 224, 224)
+        shape_prop.ShapeProp(traced).propagate(x)
+
+        assert(all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
+                   for node in traced.graph.nodes))
+
+        x_channels_last = x.contiguous(memory_format=torch.channels_last)
+        traced.to(memory_format=torch.channels_last)
+        shape_prop.ShapeProp(traced).propagate(x_channels_last)
+        for node in traced.graph.nodes:
+            # NB: the implementation of conv may not preserve the memory format,
+            # unfortunately. The best we can do is just check that the placeholder
+            # node is channels-last
+            if node.op in {'placeholder'}:
+                self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last)
+
+    def test_shape_prop_aggregate(self):
+        class ReturnTwo(torch.nn.Module):
+            def forward(self, x):
+                return (3, torch.sum(x))
+
+        class UnderTest(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rt = ReturnTwo()
+
+            def forward(self, x):
+                return self.rt(x)
+
+        ut = UnderTest()
+
+        class RTTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m, module_qualified_name):
+                return type(m) is ReturnTwo
+
+        graph = RTTracer().trace(ut)
+        mod = torch.fx.GraphModule(ut, graph)
+
+        shape_prop.ShapeProp(mod).propagate(torch.rand(3, 4))
+
+        for node in mod.graph.nodes:
+            if node.op == 'call_module':
+                assert 'tensor_meta' in node.meta
+                tensor_meta = node.meta['tensor_meta']
+                assert tensor_meta[0] == 3
+                assert tensor_meta[1].shape == torch.Size([])
+
+    def test_shape_prop_layout_3d(self):
+        class ConvTest3d(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_mod = torch.nn.Conv3d(5, 5, 3)
+
+            def forward(self, x):
+                return self.conv_mod(x)
+
+        test_mod_3d = ConvTest3d()
+        traced_3d = symbolic_trace(test_mod_3d)
+        x_3d = torch.randn(5, 5, 224, 224, 15)
+        shape_prop.ShapeProp(traced_3d).propagate(x_3d)
+        assert(all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
+                   for node in traced_3d.graph.nodes))
+
+        x_channels_last_3d = x_3d.contiguous(memory_format=torch.channels_last_3d)
+        traced_3d.to(memory_format=torch.channels_last_3d)
+        shape_prop.ShapeProp(traced_3d).propagate(x_channels_last_3d)
+        for node in traced_3d.graph.nodes:
+            # NB: the implementation of conv may not preserve the memory format,
+            # unfortunately. The best we can do is just check that the placeholder
+            # node is channels-last
+            if node.op in {'placeholder'}:
+                self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last_3d)
 
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
@@ -1164,14 +1218,14 @@ class TestFX(JitTestCase):
 
     @skipIfNoTorchVision
     def test_interpreter_noop_resnet18(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
         transformed = torch.fx.Transformer(symbolic_trace(rn18)).transform()
         inp = torch.randn(5, 3, 224, 224)
         self.assertEqual(transformed(inp), rn18(inp))
 
     @skipIfNoTorchVision
     def test_interpreter_gc_values(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
         interp = Interpreter(symbolic_trace(rn18))
         inp = torch.rand(5, 3, 224, 224)
         out = interp.run(inp)
@@ -1361,7 +1415,7 @@ class TestFX(JitTestCase):
 
     @skipIfNoTorchVision
     def test_replace_uses(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
 
         class LowerReluTracer(torch.fx.Tracer):
             def is_leaf_module(self, m : torch.nn.Module, qualname : str):
@@ -1385,6 +1439,22 @@ class TestFX(JitTestCase):
 
         for node in to_erase:
             rn18_traced.graph.erase_node(node)
+
+
+    def test_replace_input(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        y : torch.fx.Node = graph.create_node('placeholder', 'y')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        b.replace_input_with(x, y)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        input_x = torch.randn(33, 44)
+        input_y = torch.randn(11, 22)
+        self.assertEqual(gm(input_x, input_y), torch.relu(input_y))
 
     def test_insertion_point(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -2197,8 +2267,7 @@ class TestFX(JitTestCase):
 
 
         import torch
-        from torchvision.models.resnet import resnet18
-        rn = resnet18()
+        rn = torchvision_models.resnet18()
 
         try:
             sys.setprofile(trace_func)
@@ -2234,8 +2303,8 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot'}
-
+        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot',
+                           'polygamma', 'cdist', 'einsum'}
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
             schemas = get_signature_for_torch_op(op.op)
@@ -2258,7 +2327,364 @@ class TestOperatorSignatures(JitTestCase):
         except Exception as e:
             assert op.name in known_no_schema
 
+
+class TestFunctionalTracing(JitTestCase):
+    IGNORE_FUNCS = ("has_torch_function", "has_torch_function_unary",
+                    "has_torch_function_variadic", "handle_torch_function",
+                    "boolean_dispatch")
+    TO_PATCH = {"has_torch_function": None,
+                "has_torch_function_unary": None,
+                "has_torch_function_variadic": None}
+
+    BUILT_IN_FUNC = (AssertionError, "")
+    PROXY_ITERABLE = (TypeError, r"argument of type 'Proxy' is not iterable")
+    PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
+    LEN_ERROR = (RuntimeError, r"'len' is not supported in symbolic tracing by default")
+    ARG_TYPE_MISMATCH = (TypeError, r", not Proxy$")
+    CONTROL_FLOW = (TraceError, r"symbolically traced variables cannot be used as inputs to control flow")
+    INTERPOLATE_ARGS_CONFLICT = (ValueError, r"only one of size or scale_factor should be defined")
+
+    UNTRACEABLE_FUNCTIONALS = {
+        "adaptive_avg_pool1d": BUILT_IN_FUNC,
+        "avg_pool1d": BUILT_IN_FUNC,
+        "avg_pool2d": BUILT_IN_FUNC,
+        "avg_pool3d": BUILT_IN_FUNC,
+        "celu_": BUILT_IN_FUNC,
+        "channel_shuffle": BUILT_IN_FUNC,
+        "conv1d": BUILT_IN_FUNC,
+        "conv2d": BUILT_IN_FUNC,
+        "conv3d": BUILT_IN_FUNC,
+        "conv_tbc": BUILT_IN_FUNC,
+        "conv_transpose1d": BUILT_IN_FUNC,
+        "conv_transpose2d": BUILT_IN_FUNC,
+        "conv_transpose3d": BUILT_IN_FUNC,
+        "cosine_similarity": BUILT_IN_FUNC,
+        "elu_": BUILT_IN_FUNC,
+        "hardtanh_": BUILT_IN_FUNC,
+        "leaky_relu_": BUILT_IN_FUNC,
+        "logsigmoid": BUILT_IN_FUNC,
+        "one_hot": BUILT_IN_FUNC,
+        "pdist": BUILT_IN_FUNC,
+        "pixel_shuffle": BUILT_IN_FUNC,
+        "pixel_unshuffle": BUILT_IN_FUNC,
+        "relu_": BUILT_IN_FUNC,
+        "rrelu_": BUILT_IN_FUNC,
+        "selu_": BUILT_IN_FUNC,
+        "softplus": BUILT_IN_FUNC,
+        "softshrink": BUILT_IN_FUNC,
+        "threshold_": BUILT_IN_FUNC,
+
+        "adaptive_avg_pool2d": LEN_ERROR,
+        "adaptive_avg_pool3d": LEN_ERROR,
+        "adaptive_max_pool2d_with_indices": LEN_ERROR,
+        "adaptive_max_pool3d_with_indices": LEN_ERROR,
+        "instance_norm": CONTROL_FLOW,
+        "pad": LEN_ERROR,
+
+        "adaptive_max_pool1d": PROXY_ITERABLE,
+        "adaptive_max_pool2d": PROXY_ITERABLE,
+        "adaptive_max_pool3d": PROXY_ITERABLE,
+        "fractional_max_pool2d": PROXY_ITERABLE,
+        "fractional_max_pool3d": PROXY_ITERABLE,
+        "max_pool1d": PROXY_ITERABLE,
+        "max_pool2d": PROXY_ITERABLE,
+        "max_pool3d": PROXY_ITERABLE,
+
+        "group_norm": PROXY_ITERATED,
+        "lp_pool2d": PROXY_ITERATED,
+        "max_unpool1d": PROXY_ITERATED,
+        "max_unpool2d": PROXY_ITERATED,
+        "max_unpool3d": PROXY_ITERATED,
+
+        "adaptive_max_pool1d_with_indices": ARG_TYPE_MISMATCH,
+        "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
+        "fractional_max_pool3d_with_indices": ARG_TYPE_MISMATCH,
+        "hardshrink": ARG_TYPE_MISMATCH,
+        "layer_norm": ARG_TYPE_MISMATCH,
+        "lp_pool1d": ARG_TYPE_MISMATCH,
+        "max_pool1d_with_indices": ARG_TYPE_MISMATCH,
+        "max_pool2d_with_indices": ARG_TYPE_MISMATCH,
+        "max_pool3d_with_indices": ARG_TYPE_MISMATCH,
+        "pairwise_distance": ARG_TYPE_MISMATCH,
+
+        "affine_grid": CONTROL_FLOW,
+        "alpha_dropout": CONTROL_FLOW,
+        "batch_norm": CONTROL_FLOW,
+        "binary_cross_entropy": CONTROL_FLOW,
+        "binary_cross_entropy_with_logits": CONTROL_FLOW,
+        "celu": CONTROL_FLOW,
+        "cosine_embedding_loss": CONTROL_FLOW,
+        "cross_entropy": CONTROL_FLOW,
+        "ctc_loss": CONTROL_FLOW,
+        "dropout": CONTROL_FLOW,
+        "dropout2d": CONTROL_FLOW,
+        "dropout3d": CONTROL_FLOW,
+        "elu": CONTROL_FLOW,
+        "embedding": CONTROL_FLOW,
+        "embedding_bag": CONTROL_FLOW,
+        "feature_alpha_dropout": CONTROL_FLOW,
+        "fold": CONTROL_FLOW,
+        "gaussian_nll_loss": CONTROL_FLOW,
+        "glu": CONTROL_FLOW,
+        "grid_sample": CONTROL_FLOW,
+        "gumbel_softmax": CONTROL_FLOW,
+        "hardsigmoid": CONTROL_FLOW,
+        "hardswish": CONTROL_FLOW,
+        "hardtanh": CONTROL_FLOW,
+        "hinge_embedding_loss": CONTROL_FLOW,
+        "huber_loss": CONTROL_FLOW,
+        "interpolate": CONTROL_FLOW,
+        "kl_div": CONTROL_FLOW,
+        "l1_loss": CONTROL_FLOW,
+        "leaky_relu": CONTROL_FLOW,
+        "local_response_norm": CONTROL_FLOW,
+        "margin_ranking_loss": CONTROL_FLOW,
+        "mse_loss": CONTROL_FLOW,
+        "multi_head_attention_forward": CONTROL_FLOW,
+        "multi_margin_loss": CONTROL_FLOW,
+        "multilabel_margin_loss": CONTROL_FLOW,
+        "multilabel_soft_margin_loss": CONTROL_FLOW,
+        "nll_loss": CONTROL_FLOW,
+        "poisson_nll_loss": CONTROL_FLOW,
+        "relu": CONTROL_FLOW,
+        "relu6": CONTROL_FLOW,
+        "rrelu": CONTROL_FLOW,
+        "selu": CONTROL_FLOW,
+        "silu": CONTROL_FLOW,
+        "smooth_l1_loss": CONTROL_FLOW,
+        "soft_margin_loss": CONTROL_FLOW,
+        "threshold": CONTROL_FLOW,
+        "triplet_margin_loss": CONTROL_FLOW,
+        "triplet_margin_with_distance_loss": CONTROL_FLOW,
+        "unfold": CONTROL_FLOW,
+        "upsample": CONTROL_FLOW,
+
+        "upsample_bilinear": INTERPOLATE_ARGS_CONFLICT,
+        "upsample_nearest": INTERPOLATE_ARGS_CONFLICT,
+    }
+
+    # List of nn.functionals with Tensor inputs but not with type annotation
+    FUNCTIONALS_WITHOUT_ANNOTATION = (
+        "adaptive_max_pool1d",
+        "adaptive_max_pool2d",
+        "adaptive_max_pool3d",
+        "fractional_max_pool2d",
+        "fractional_max_pool3d",
+        "max_pool1d",
+        "max_pool2d",
+        "max_pool3d",
+        "gaussian_nll_loss",
+        "upsample",
+        "upsample_bilinear",
+        "upsample_nearest",
+    )
+
+    # Inconsistent behavior between Python 3.8 and other Python versions:
+    # - Python 3.8: Re-raise internal exception like `PROXY_ITERATED`
+    # - Other Python: Raise `argument of type 'Proxy' is not iterable` due to the same
+    #                 internal exception above
+    # Use the following map to override the expected exception for Python 3.8
+    UNTRACEABLE_FUNCTIONALS_PY38 = {
+        "adaptive_max_pool1d": PROXY_ITERATED,
+        "adaptive_max_pool2d": PROXY_ITERATED,
+        "adaptive_max_pool3d": PROXY_ITERATED,
+        "fractional_max_pool2d": PROXY_ITERATED,
+        "fractional_max_pool3d": PROXY_ITERATED,
+        "max_pool1d": PROXY_ITERATED,
+        "max_pool2d": PROXY_ITERATED,
+        "max_pool3d": PROXY_ITERATED,
+
+        "group_norm": LEN_ERROR
+    }
+
+    @classmethod
+    def _get_functional(cls):
+        functional_list = []
+        for f in dir(torch.nn.functional):
+            if not f.islower():
+                continue
+            # Ignore internal functions
+            if f.startswith('_'):
+                continue
+            # Ignore supporting functions
+            if f in cls.IGNORE_FUNCS:
+                continue
+            fn = getattr(torch.nn.functional, f)
+            # Ignore non-callable object like modules
+            if not isinstance(fn, Callable):
+                continue
+            if f not in cls.FUNCTIONALS_WITHOUT_ANNOTATION:
+                try:
+                    sig = inspect.signature(fn)
+                    has_tensor_arg = False
+                    for arg, param in sig.parameters.items():
+                        if isinstance(param.annotation, type) and issubclass(param.annotation, torch.Tensor):
+                            has_tensor_arg = True
+                    if not has_tensor_arg:
+                        continue
+                # No signature or Object is not supported
+                except ValueError:
+                    pass
+            functional_list.append((f, fn))
+        return functional_list
+
+    @classmethod
+    def generate_test_func(cls, func_name, fn):
+
+        def functional_test(self):
+            if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 9):
+                exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
+                with self.assertRaisesRegex(exc, err):
+                    symbolic_trace(fn)
+            elif func_name in self.UNTRACEABLE_FUNCTIONALS:
+                exc, err = self.UNTRACEABLE_FUNCTIONALS[func_name]
+                with self.assertRaisesRegex(exc, err):
+                    symbolic_trace(fn)
+            else:
+                symbolic_trace(fn)
+        return functional_test
+
+    @classmethod
+    def generate_tests(cls):
+        functional_list = cls._get_functional()
+        for func_name, fn in functional_list:
+            test_name = "test_nn_functional_" + func_name
+            functional_test = cls.generate_test_func(func_name, fn)
+            setattr(cls, test_name, functional_test)
+
+    @classmethod
+    def setUpClass(cls):
+
+        def no(*args, **kwargs):
+            return False
+
+        for name in cls.TO_PATCH.keys():
+            cls.TO_PATCH[name] = getattr(torch.nn.functional, name)
+            setattr(torch.nn.functional, name, no)
+
+    @classmethod
+    def tearDownClass(cls):
+        for name in cls.TO_PATCH.keys():
+            setattr(torch.nn.functional, name, cls.TO_PATCH[name])
+
+TestFunctionalTracing.generate_tests()
+
+
 instantiate_device_type_tests(TestOperatorSignatures, globals())
+
+@skipIfNoTorchVision
+class TestVisionTracing(JitTestCase):
+    PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
+    INCONSISTENT_TYPE = (
+        RuntimeError,
+        r"Return value was annotated as having type __torch__.torchvision.models[.\w]+ but is actually of type Tensor"
+    )
+
+    UNTRACEABLE_MODELS = {
+        "fasterrcnn_resnet50_fpn": PROXY_ITERATED,
+        "fasterrcnn_mobilenet_v3_large_320_fpn": PROXY_ITERATED,
+        "fasterrcnn_mobilenet_v3_large_fpn": PROXY_ITERATED,
+        "maskrcnn_resnet50_fpn": PROXY_ITERATED,
+        "keypointrcnn_resnet50_fpn": PROXY_ITERATED,
+        "retinanet_resnet50_fpn": PROXY_ITERATED,
+    }
+    UNSCRIPTABLE_MODELS = {
+        "googlenet": INCONSISTENT_TYPE,
+        "inception_v3": INCONSISTENT_TYPE,
+    }
+
+    output_transform = {
+        "fcn_resnet50": lambda x: x["out"],
+        "fcn_resnet101": lambda x: x["out"],
+        "deeplabv3_resnet50": lambda x: x["out"],
+        "deeplabv3_resnet101": lambda x: x["out"],
+        "deeplabv3_mobilenet_v3_large": lambda x: x["out"],
+        "lraspp_mobilenet_v3_large": lambda x: x["out"],
+        "fasterrcnn_resnet50_fpn": lambda x: x[1],
+        "fasterrcnn_mobilenet_v3_large_fpn": lambda x: x[1],
+        "fasterrcnn_mobilenet_v3_large_320_fpn": lambda x: x[1],
+        "maskrcnn_resnet50_fpn": lambda x: x[1],
+        "keypointrcnn_resnet50_fpn": lambda x: x[1],
+        "retinanet_resnet50_fpn": lambda x: x[1],
+    }
+
+    @classmethod
+    def generate_test_fn(cls, name, model_fn, x, kwargs):
+        def run_test(self):
+            model = model_fn(**kwargs)
+            model = model.eval()
+            if name in self.UNTRACEABLE_MODELS:
+                err, exc = self.UNTRACEABLE_MODELS[name]
+                with self.assertRaisesRegex(err, exc):
+                    graph = symbolic_trace(model)
+            else:
+                out_transform = self.output_transform.get(name, lambda x: x)
+                graph : torch.fx.GraphModule = symbolic_trace(model)
+                a = out_transform(model(x))
+                b = out_transform(graph(x))
+                self.assertEqual(a, b)
+
+                if name in self.UNSCRIPTABLE_MODELS:
+                    err, exc = self.UNSCRIPTABLE_MODELS[name]
+                    with self.assertRaisesRegex(err, exc):
+                        script = torch.jit.script(graph)
+                else:
+                    script = torch.jit.script(graph)
+                    c = out_transform(script(x))
+                    self.assertEqual(a, c)
+
+        return run_test
+
+    @classmethod
+    def generate_classification_tests(cls):
+        for k, v in torchvision_models.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_' + k
+                x = torch.rand(1, 3, 299, 299) if k in ['inception_v3'] else torch.rand(1, 3, 224, 224)
+                kwargs = dict(num_classes=50)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_segmentation_tests(cls):
+        for k, v in torchvision_models.segmentation.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_segmentation_' + k
+                x = torch.rand(1, 3, 32, 32)
+                kwargs = dict(num_classes=10, pretrained_backbone=False)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_detection_tests(cls):
+        for k, v in torchvision_models.detection.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_detection_' + k
+                x = [torch.rand(3, 300, 300)]
+                kwargs = dict(num_classes=10, pretrained_backbone=False)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_video_tests(cls):
+        for k, v in torchvision_models.video.__dict__.items():
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+                test_name = 'test_torchvision_models_video_' + k
+                x = torch.rand(1, 3, 4, 112, 112)
+                kwargs = dict(num_classes=50)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
+                setattr(cls, test_name, model_test)
+
+    @classmethod
+    def generate_tests(cls):
+        cls.generate_classification_tests()
+        cls.generate_detection_tests()
+        cls.generate_segmentation_tests()
+        cls.generate_video_tests()
+
+if HAS_TORCHVISION:
+    TestVisionTracing.generate_tests()
 
 if __name__ == '__main__':
     run_tests()

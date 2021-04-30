@@ -102,8 +102,12 @@ class _RemoteModule(nn.Module):
 
         Args:
             remote_device (str): Device on the destination worker where we'd like to place this module.
-                The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
-                E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".
+                The device can be a local device or a remote device specified by one of the following remote
+                formats:
+
+                    1. "rank:<rank>/<device>" (ex: "rank:0/cuda:0").
+                    2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
+
                 In addition, the device field can be optional and the default value is "cpu".
             module_cls (nn.Module): For example,
                 >>> class MyModule(nn.Module):
@@ -310,7 +314,7 @@ class _RemoteModule(nn.Module):
     def modules(self) -> Iterator[Module]:  # type: ignore[return]
         _raise_not_supported(self.modules.__name__)
 
-    def named_modules(self, memo: Optional[Set[Module]] = None, prefix: str = ""):
+    def named_modules(self, memo: Optional[Set[Module]] = None, prefix: str = "", remove_duplicate: bool = True):
         _raise_not_supported(self.named_modules.__name__)
 
     def train(self: T, mode: bool = True) -> T:  # type: ignore[return]
