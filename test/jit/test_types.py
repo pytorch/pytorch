@@ -21,6 +21,15 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestTypesAndAnnotation(JitTestCase):
+    def test_pep585_type(self):
+        def fn(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            xl: list[torch.Tensor] = []
+            xd: dict[str, torch.Tensor] = {}
+            xl.append(x)
+            xd['foo'] = x
+            return xl.pop(), xd['foo']
+        self.checkScript(fn, [torch.randn(2, 2)])
+
     def test_types_as_values(self):
         def fn(m: torch.Tensor) -> torch.device:
             return m.device
