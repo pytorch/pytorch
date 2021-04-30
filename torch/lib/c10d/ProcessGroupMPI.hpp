@@ -41,8 +41,7 @@ struct WorkEntry {
   // For input and output tensors (in-place), we will always use src
   std::vector<at::Tensor> src;
 
-  // We use `dst` for returning resulting vectors in WorkMPI::result, so we need to
-  // keep it alive.
+  // Copy of user provided outputs, we also make a copy of it in
   const std::vector<at::Tensor> dst;
 
   // src rank returned, for recv only
@@ -103,7 +102,7 @@ class ProcessGroupMPI : public ProcessGroup {
    public:
     AsyncWork(
         MPI_Request request,
-        const std::vector<at::Tensor>* outputTensors,
+        const std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
@@ -125,7 +124,7 @@ class ProcessGroupMPI : public ProcessGroup {
    protected:
     void populateException();
 
-    const std::vector<at::Tensor>* outputTensors_;
+    const std::vector<at::Tensor> outputTensors_;
     MPI_Request request_;
     MPI_Status status_;
   };

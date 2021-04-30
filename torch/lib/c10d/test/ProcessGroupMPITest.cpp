@@ -12,10 +12,10 @@
 #define STR(x) STR_HELPER(x)
 
 // Wait for work to complete
-void waitWork(
+std::vector<std::vector<at::Tensor>> waitWork(
     c10::intrusive_ptr<::c10d::ProcessGroupMPI> pg,
-    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works,
-    std::vector<std::vector<at::Tensor>>* outputTensors) {
+    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
+  std::vector<std::vector<at::Tensor>> outputTensors;
   for (auto& work : works) {
     try {
       work->wait();
@@ -23,11 +23,9 @@ void waitWork(
       std::cerr << "Exception received: " << ex.what() << std::endl;
       pg->abort();
     }
-    if (outputTensors) {
-      auto outputs = work->result();
-      outputTensors->emplace_back(outputs);
-    }
+    outputTensors.emplace_back(work->result());
   }
+  return outputTensors;
 }
 
 void testAllreduce(int iter = 1000) {
@@ -48,8 +46,7 @@ void testAllreduce(int iter = 1000) {
     works.push_back(std::move(work));
   }
 
-  std::vector<std::vector<at::Tensor>> outputTensors;
-  waitWork(pg, works, &outputTensors);
+  auto outputTensors = waitWork(pg, works);
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -89,9 +86,7 @@ void testBroadcast(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  std::vector<std::vector<at::Tensor>> outputTensors;
-
-  waitWork(pg, works, &outputTensors);
+  auto outputTensors = waitWork(pg, works);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
@@ -122,9 +117,7 @@ void testReduce(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  std::vector<std::vector<at::Tensor>> outputTensors;
-
-  waitWork(pg, works, &outputTensors);
+  auto outputTensors = waitWork(pg, works);
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -171,9 +164,7 @@ void testAllgather(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  std::vector<std::vector<at::Tensor>> outputTensors;
-
-  waitWork(pg, works, &outputTensors);
+  auto outputTensors = waitWork(pg, works);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
@@ -221,9 +212,7 @@ void testGather(int iter = 1000) {
     works.push_back(std::move(work));
   }
 
-  std::vector<std::vector<at::Tensor>> outputTensors;
-
-  waitWork(pg, works, &outputTensors);
+  auto outputTensors = waitWork(pg, works);
 
   // Verify outputs
   if (rank == 0) {
@@ -280,9 +269,7 @@ void testScatter(int iter = 1) {
     works.push_back(std::move(work));
   }
 
-  std::vector<std::vector<at::Tensor>> outputTensors;
-
-  waitWork(pg, works, &outputTensors);
+  auto outputTensors = waitWork(pg, works);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
@@ -321,7 +308,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
           pg->send(tensors, 1, 0);
       works.push_back(std::move(work));
     }
-    waitWork(pg, works, nullptr);
+    waitWork(pg, works);
   } else if (rank == 1) {
     std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
     std::vector<int> srcRanks;
@@ -340,9 +327,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
       ++i;
     }
 
-    std::vector<std::vector<at::Tensor>> outputTensors;
-
-    waitWork(pg, works, &outputTensors);
+    auto outputTensors = waitWork(pg, works);
 
     for (const auto& work : works) {
       srcRanks.push_back(work->sourceRank());

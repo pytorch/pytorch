@@ -100,7 +100,7 @@ std::vector<at::Tensor> ProcessGroupMPI::WorkMPI::result() {
 
 ProcessGroupMPI::AsyncWork::AsyncWork(
     MPI_Request request,
-    const std::vector<at::Tensor>* outputTensors,
+    const std::vector<at::Tensor> outputTensors,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors)
     : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
@@ -187,11 +187,7 @@ void ProcessGroupMPI::AsyncWork::abort() {
 }
 
 std::vector<at::Tensor> ProcessGroupMPI::AsyncWork::result() {
-  if (outputTensors_) {
-    return *outputTensors_;
-  } else {
-    return std::vector<at::Tensor>();
-  }
+  return outputTensors_;
 }
 
 void ProcessGroupMPI::AsyncWork::populateException() {
@@ -830,7 +826,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
 
   return c10::make_intrusive<AsyncWork>(
       request,
-      nullptr,
+      std::vector<at::Tensor>(),
       "mpi:send",
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
@@ -859,7 +855,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
 
   return c10::make_intrusive<AsyncWork>(
       request,
-      &tensors,
+      tensors,
       "mpi:recv",
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
@@ -887,7 +883,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
 
   return c10::make_intrusive<AsyncWork>(
       request,
-      &tensors,
+      tensors,
       "mpi:recvAnySource",
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
