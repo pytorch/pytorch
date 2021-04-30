@@ -210,6 +210,45 @@ class PackageExporter:
         self._unique_id += 1
         return ret
 
+    def _get_dependencies(
+        self, src: str, module_name: str, is_package: bool
+    ) -> List[str]:
+        """Return all modules that this source code depends on.
+
+        Dependencies are found by scanning the source code for import-like statements.
+
+        Arguments:
+            src: The Python source code to analyze for dependencies.
+            module_name: The name of the module that ``src`` corresponds to.
+            is_package: Whether this module should be treated as a package.
+                See :py:meth:`save_source_string` for more info.
+
+        Returns:
+            A list containing modules detected as direct dependencies in
+            ``src``.  The items in the list are guaranteed to be unique.
+        """
+        package_name = (
+            module_name if is_package else module_name.rsplit(".", maxsplit=1)[0]
+        )
+        dep_pairs = find_files_source_depends_on(src, package_name)
+        # Use a dict to get uniquing but also deterministic order
+        dependencies = {}
+        for dep_module_name, dep_module_obj in dep_pairs:
+            # handle the case where someone did something like `from pack import sub`
+            # where `sub` is a submodule. In this case we don't have to save pack, just sub.
+            # this ensures we don't pick up additional dependencies on pack.
+            # However, in the case where `sub` is not a submodule but an object, then we do have
+            # to save pack.
+            if dep_module_obj is not None:
+                possible_submodule = f"{dep_module_name}.{dep_module_obj}"
+                if self._module_exists(possible_submodule):
+                    dependencies[possible_submodule] = True
+                    # we don't need to save `pack`
+                    continue
+            if self._module_exists(dep_module_name):
+                dependencies[dep_module_name] = True
+        return list(dependencies.keys())
+
     def save_source_string(
         self,
         module_name: str,
@@ -234,31 +273,12 @@ class PackageExporter:
         filename = module_name.replace(".", "/") + extension
         self._write(filename, src)
         if dependencies:
-            package = (
-                module_name if is_package else module_name.rsplit(".", maxsplit=1)[0]
-            )
-            dep_pairs = find_files_source_depends_on(src, package)
-            dep_list = {}
-            for dep_module_name, dep_module_obj in dep_pairs:
-                # handle the case where someone did something like `from pack import sub`
-                # where `sub` is a submodule. In this case we don't have to save pack, just sub.
-                # this ensures we don't pick up additional dependencies on pack.
-                # However, in the case where `sub` is not a submodule but an object, then we do have
-                # to save pack.
-                if dep_module_obj is not None:
-                    possible_submodule = f"{dep_module_name}.{dep_module_obj}"
-                    if self._module_exists(possible_submodule):
-                        dep_list[possible_submodule] = True
-                        # we don't need to save `pack`
-                        continue
-                if self._module_exists(dep_module_name):
-                    dep_list[dep_module_name] = True
-
-            for dep in dep_list.keys():
+            deps = self._get_dependencies(src, module_name, is_package)
+            for dep in deps:
                 self.debug_deps.append((module_name, dep))
 
             if self.verbose:
-                dep_str = "".join(f"  {dep}\n" for dep in dep_list.keys())
+                dep_str = "".join(f"  {dep}\n" for dep in deps)
                 file_info = (
                     f"(from file {orig_file_name}) "
                     if orig_file_name is not None
@@ -266,7 +286,7 @@ class PackageExporter:
                 )
                 print(f"{module_name} {file_info}depends on:\n{dep_str}\n")
 
-            for dep in dep_list.keys():
+            for dep in deps:
                 self.require_module_if_not_provided(dep)
 
     def _import_module(self, module_name: str):
