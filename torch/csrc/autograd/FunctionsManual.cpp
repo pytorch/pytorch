@@ -2970,9 +2970,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> layernorm_double_backward(
 
   // for half inputs, save_mean, save_invstd are float
   // (ideally, we would cast everything else, but not now)
-  auto mu = unsqueeze_inner(toLegacyTensor(save_mean).to(input.scalar_type()), input_ndim);
+  auto mu = unsqueeze_inner(toNonOptTensor(save_mean).to(input.scalar_type()), input_ndim);
   auto input_sub_mu = input - mu;
-  auto sigma2_eps_neg_1_2 = unsqueeze_inner(toLegacyTensor(save_invstd).to(input.scalar_type()), input_ndim);
+  auto sigma2_eps_neg_1_2 = unsqueeze_inner(toNonOptTensor(save_invstd).to(input.scalar_type()), input_ndim);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
 
