@@ -12,9 +12,15 @@ import unittest.mock as mock
 import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic.timer.api import TimerRequest
 from torch.distributed.elastic.timer.local_timer import MultiprocessingRequestQueue
-from torch.testing._internal.common_utils import TEST_WITH_TSAN
+from torch.testing._internal.common_utils import (
+    TEST_WITH_TSAN,
+    run_tests,
+    IS_WINDOWS,
+    IS_MACOS,
+)
 
 
+@unittest.skipIf(IS_WINDOWS or IS_MACOS, "timer is not supported on windows or macos")
 class LocalTimerTest(unittest.TestCase):
     def setUp(self):
         self.mp_queue = mp.Queue()
@@ -115,6 +121,7 @@ def _enqueue_on_interval(mp_queue, n, interval, sem):
         time.sleep(interval)
 
 
+@unittest.skipIf(IS_WINDOWS or IS_MACOS, "timer is not supported on windows or macos")
 class MultiprocessingRequestQueueTest(unittest.TestCase):
     def test_get(self):
         mp_queue = mp.Queue()
@@ -172,6 +179,7 @@ class MultiprocessingRequestQueueTest(unittest.TestCase):
         self.assertLessEqual(n / 2, len(requests))
 
 
+@unittest.skipIf(IS_WINDOWS or IS_MACOS, "timer is not supported on windows or macos")
 class LocalTimerServerTest(unittest.TestCase):
     def setUp(self):
         self.mp_queue = mp.Queue()
@@ -265,3 +273,7 @@ class LocalTimerServerTest(unittest.TestCase):
         self.assertTrue((-2, "test1") in self.server._timers)
         self.assertTrue((-2, "test2") in self.server._timers)
         mock_os_kill.assert_not_called()
+
+
+if __name__ == "__main__":
+    run_tests()

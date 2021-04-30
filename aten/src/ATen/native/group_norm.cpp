@@ -25,10 +25,17 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     int64_t group,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& gamma = c10::value_or_else(gamma_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> gamma_maybe_owned = at::borrow_from_optional_tensor(gamma_opt);
+  const Tensor& gamma = *gamma_maybe_owned;
   const Tensor& beta = c10::value_or_else(beta_opt, [] {return Tensor();});
 
-  Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor Y = at::native::empty_like(
+      X,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mean = at::empty({N, group}, X.options());
   Tensor rstd = at::empty({N, group}, X.options());
   GroupNormKernel(
@@ -47,19 +54,38 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     int64_t group,
     std::array<bool, 3> grad_input_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& gamma = c10::value_or_else(gamma_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> gamma_maybe_owned = at::borrow_from_optional_tensor(gamma_opt);
+  const Tensor& gamma = *gamma_maybe_owned;
 
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;
   if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dX = at::native::empty_like(
+        X,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dgamma = at::native::empty_like(
+        gamma,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dbeta = at::native::empty_like(
+        gamma,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   GroupNormBackwardKernel(
       X.device().type(),
@@ -84,7 +110,8 @@ Tensor group_norm(
     double eps,
     bool /* cudnn_enabled, deprecated */) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   const int64_t N = input.size(0);
@@ -126,7 +153,9 @@ Tensor group_norm(
       at::native_group_norm(X, gamma, beta, N, C, HxW, num_groups, eps));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GroupNormKernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GroupNormBackwardKernel);
 
 // Ported from pytorch/xla repo
@@ -138,7 +167,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     int64_t group,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   auto input_shape = input.sizes();

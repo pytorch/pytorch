@@ -24,6 +24,7 @@ inline std::string THPUtils_unpackString(PyObject* obj) {
     return std::string(PyBytes_AS_STRING(obj), size);
   }
   if (PyUnicode_Check(obj)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t size;
     const char* data = PyUnicode_AsUTF8AndSize(obj, &size);
     if (!data) {
@@ -75,6 +76,7 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
  *
  */
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 static py::object PyObject_FastGetAttrString(PyObject *obj, char *name)
 {
     PyTypeObject *tp = Py_TYPE(obj);

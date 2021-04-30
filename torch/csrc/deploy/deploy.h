@@ -1,4 +1,5 @@
 #pragma once
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <assert.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <fstream>
@@ -19,6 +20,7 @@ struct TORCH_API InterpreterSession {
       InterpreterManager* manager) noexcept
       : impl_(impl), manager_(manager) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Obj self; // when retreived from a PythonMovable this will be set.
   InterpreterSession(InterpreterSession&&) noexcept = default;
   ~InterpreterSession();
@@ -73,8 +75,10 @@ class TORCH_API Interpreter {
 struct Package;
 
 struct TORCH_API LoadBalancer {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   LoadBalancer(size_t n) : uses_(new uint64_t[8 * n]), allocated_(n), n_(n) {
     // 8*... to avoid false sharing of atomics on the same cache line
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     memset(uses_.get(), 0, 8 * n_ * sizeof(uint64_t));
   }
   void setResourceLimit(size_t n) {
@@ -85,6 +89,7 @@ struct TORCH_API LoadBalancer {
   void free(int where);
 
  private:
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   std::unique_ptr<uint64_t[]>
       uses_; // the approximate count of the number of users of interpreter
   size_t allocated_;
@@ -121,6 +126,7 @@ struct TORCH_API InterpreterManager {
     resources_.setResourceLimit(N);
   }
   Package load_package(const std::string& uri);
+  Package load_package(std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader);
   InterpreterManager(const InterpreterManager&) = delete;
   InterpreterManager& operator=(const InterpreterManager&) = delete;
   InterpreterManager& operator=(InterpreterManager&&) = delete;
@@ -136,6 +142,7 @@ struct TORCH_API InterpreterManager {
 struct TORCH_API ReplicatedObjImpl {
   ReplicatedObjImpl(
       size_t object_id,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       PickledObject data,
       InterpreterManager* manager)
       : object_id_(object_id), data_(data), manager_(manager) {}
@@ -149,11 +156,17 @@ struct TORCH_API ReplicatedObjImpl {
 struct TORCH_API ReplicatedObj {
   ReplicatedObj() : pImpl_(nullptr) {}
   InterpreterSession acquire_session(
-      const Interpreter* on_this_interpreter = nullptr);
-  at::IValue operator()(at::ArrayRef<at::IValue> args) {
+      const Interpreter* on_this_interpreter = nullptr) const;
+  at::IValue operator()(at::ArrayRef<at::IValue> args) const {
     auto I = acquire_session();
     return I.self(args).toIValue();
   }
+
+  at::IValue call_kwargs(std::vector<std::tuple<std::string, at::IValue>> kwargs) const {
+    auto I = acquire_session();
+    return I.self.call_kwargs(std::move(kwargs)).toIValue();
+  }
+
   void unload(const Interpreter* on_this_interpreter = nullptr);
 
  private:
@@ -174,6 +187,14 @@ struct TORCH_API Package {
     return I.create_movable(loaded);
   }
 
+  std::string load_text(
+      const std::string& module,
+      const std::string& file) {
+    auto I = acquire_session();
+    auto loaded = I.self.attr("load_text")({module, file});
+    return loaded.toIValue().toStringRef();
+  }
+
   InterpreterSession acquire_session() {
     auto I = manager_->acquire_one();
     I.self = I.impl_->create_or_get_package_importer_from_container_file(
@@ -189,6 +210,13 @@ struct TORCH_API Package {
       : manager_(pm),
         container_file_(
             std::make_shared<caffe2::serialize::PyTorchStreamReader>(uri)) {}
+    Package(
+      std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader,
+      InterpreterManager*
+          pm) // or really any of the constructors to our zip file format
+      : manager_(pm),
+        container_file_(
+            std::make_shared<caffe2::serialize::PyTorchStreamReader>(reader)) {}
   friend struct ReplicatedObj;
   friend struct InterpreterManager;
   InterpreterManager* manager_;

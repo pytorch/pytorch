@@ -401,6 +401,11 @@ Utility functions in other modules
     nn.utils.rnn.pad_sequence
     nn.utils.rnn.pack_sequence
 
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
     nn.Flatten
     nn.Unflatten
 

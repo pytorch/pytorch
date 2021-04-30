@@ -17,7 +17,9 @@ import unittest
 from itertools import product
 from typing import Dict, List
 from unittest import mock
+from unittest.mock import patch
 
+import torch
 import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing import ProcessFailure, start_processes
 from torch.distributed.elastic.multiprocessing.api import (
@@ -53,7 +55,8 @@ class RunProcResultsTest(unittest.TestCase):
         pr_fail = RunProcsResult(failures={0: fail0})
         self.assertTrue(pr_fail.is_failed())
 
-    def test_get_failures(self):
+    @patch("torch.distributed.elastic.multiprocessing.errors.log")
+    def test_get_failures(self, log_mock):
         with mock.patch("time.time", side_effect=[3, 2, 1]):
             error_file0 = os.path.join(self.test_dir, "error0.json")
             error_file1 = os.path.join(self.test_dir, "error1.json")
@@ -144,6 +147,13 @@ def echo_large(size: int) -> Dict[int, str]:
     return out
 
 
+def dummy_compute() -> torch.Tensor:
+    """
+    returns a predefined size random Tensor
+    """
+    return torch.rand(100, 100)
+
+
 def redirects() -> List[Std]:
     return [
         Std.NONE,
@@ -205,6 +215,7 @@ class StartProcessesTest(unittest.TestCase):
 
         for stdout_redir, stderr_redir in redirs:
             queue = multiprocessing.SimpleQueue()
+            worker_finished_event_mock = mock.Mock()
             _wrap(
                 local_rank=0,
                 fn=echo1,
@@ -213,12 +224,14 @@ class StartProcessesTest(unittest.TestCase):
                 stdout_redirects={0: stdout_redir},
                 stderr_redirects={0: stderr_redir},
                 ret_vals={0: queue},
+                queue_finished_reading_event=worker_finished_event_mock,
             )
             self.assertEqual("hello_0", queue.get())
             if stdout_redir:
                 self.assert_in_file(["hello stdout from 0"], stdout_log)
             if stderr_redir:
                 self.assert_in_file(["hello stderr from 0"], stderr_log)
+            worker_finished_event_mock.wait.assert_called_once()
 
     def test_invalid_log_dir(self):
         with tempfile.NamedTemporaryFile(dir=self.test_dir) as not_a_dir:
@@ -338,6 +351,26 @@ class StartProcessesTest(unittest.TestCase):
                         self.assert_in_file(
                             [f"hello stderr from {i}"], results.stderrs[i]
                         )
+
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
+    def test_function_with_tensor(self):
+        for start_method in self._start_methods:
+            pc = start_processes(
+                name="dummy_compute",
+                entrypoint=dummy_compute,
+                args={},
+                envs={},
+                log_dir=self.log_dir(),
+                start_method=start_method,
+            )
+
+            results = pc.wait()
+            self.assert_pids_noexist(pc.pids())
+            for return_value in results.return_values.values():
+                self.assertIsInstance(return_value, torch.Tensor)
+                self.assertEqual((100, 100), return_value.shape)
 
     @unittest.skipIf(
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"

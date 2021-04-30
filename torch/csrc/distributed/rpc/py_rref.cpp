@@ -85,6 +85,21 @@ TypePtr tryInferTypeWithTypeHint(
         "type_hint should only be specified when the RRef being created contains a ScriptModule.");
   }
 
+  // Check if value is an instance of a ScriptClass. If not, skip type inference
+  // because it will try to script the class that value is in instance of, and
+  // this should be avoided.
+  py::bool_ can_compile = py::module::import("torch._jit_internal")
+                              .attr("can_compile_class")(value.get_type());
+
+  if (py::cast<bool>(can_compile)) {
+    py::object existing_ty = py::module::import("torch.jit._state")
+                                 .attr("_get_script_class")(value.get_type());
+
+    if (existing_ty.is_none()) {
+      return PyObjectType::get();
+    }
+  }
+
   // NB: `jit::tryToInferType(..)` infers types including ScriptClass, but
   // excluding ScripModule.
   jit::InferredType type_inferred = jit::tryToInferType(value);
@@ -108,10 +123,14 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
-PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
-    : PyRRef([&value, &type_hint]() {
+PyRRef::PyRRef(
+    const py::object& value,
+    const py::object& type_hint,
+    std::vector<c10::DeviceIndex> devices)
+    : PyRRef([&value, &type_hint, devices{std::move(devices)}]() mutable {
         TypePtr elem_type = tryInferTypeWithTypeHint(value, type_hint);
-        auto rref = RRefContext::getInstance().createOwnerRRef(elem_type);
+        auto rref = RRefContext::getInstance().createOwnerRRef(
+            elem_type, std::move(devices));
         // jit::toIValue takes a py::handle as the first argument, and it calls
         // py::handle.cast<py::object>() to incref of provided value. The
         // returned ivalue will keep the reference alive.

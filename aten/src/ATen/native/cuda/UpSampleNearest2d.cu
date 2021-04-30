@@ -121,6 +121,11 @@ static void upsample_nearest2d_out_cuda_template(
   checkAllSameGPU(
       "upsample_nearest2d_out_cuda_template", {input_arg, output_arg});
 
+  // TODO: remove this when the cuda kernel is updated to support the channels_last memory format.
+  // This is a temporary hack to prevent a silence correctness issue when calling this kernel
+  // with tensors in channels_last format.
+  auto output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
+
   int output_height = output_size[0];
   int output_width = output_size[1];
 
@@ -172,7 +177,7 @@ static void upsample_nearest2d_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = input.data_ptr<scalar_t>();
-        auto odata = output.data_ptr<scalar_t>();
+        auto odata = output_c.data_ptr<scalar_t>();
 
         const float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
         const float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
@@ -190,6 +195,10 @@ static void upsample_nearest2d_out_cuda_template(
                 width_scale);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
+
+  if (!output.is_contiguous()) {
+      output.copy_(output_c);
+  }
 }
 
 static void upsample_nearest2d_backward_out_cuda_template(

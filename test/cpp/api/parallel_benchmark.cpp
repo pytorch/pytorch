@@ -79,10 +79,12 @@ void AtLaunch_WithData(int32_t numIters, int32_t vecSize) {
 }
 
 int main(int argc, char** argv) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int32_t N = 1000000;
   AtLaunch_Base(N);
   AtLaunch_WithData(N, 0);
   AtLaunch_WithData(N, 4);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AtLaunch_WithData(N, 256);
   return 0;
 }
