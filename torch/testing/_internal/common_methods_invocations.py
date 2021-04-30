@@ -5968,7 +5968,10 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
             return tensor if not non_contiguous else make_non_contiguous(tensor)
 
         def maybe_conj(tensor):
-            return tensor if not dtype.is_complex else tensor.conj()
+            if dtype.is_complex:
+                with torch.no_grad():
+                    tensor = tensor.conj()
+            return tensor
 
         if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
             return arg
