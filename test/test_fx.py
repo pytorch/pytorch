@@ -1911,8 +1911,9 @@ class TestFX(JitTestCase):
         mod = Foo()
         mod_true = symbolic_trace(mod, concrete_args={'y': True})
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
-        print(mod_true.code)
         self.assertEqual(mod_true(3, True), 6)
+        assert(any([i.target == torch._assert for i in mod_true.graph.nodes]))
+        print(mod_true.code)
         with self.assertRaises(AssertionError):
             mod_true(3, False)
         self.assertEqual(mod_false(3, False), 3)
