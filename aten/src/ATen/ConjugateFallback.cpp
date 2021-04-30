@@ -138,7 +138,6 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("real", torch::CppFunction::makeFallthrough());
   m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
-  m.impl("select", torch::CppFunction::makeFallthrough());
   // TODO: need to hit the view functions
 }
 
