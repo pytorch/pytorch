@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functorch import make_functional, grad_with_value, vmap
+from functorch import make_functional, grad_and_value, vmap
 
 # Adapted from http://willwhitney.com/parallel-training-jax.html
 # GOAL: Demonstrate that it is possible to use eager-mode vmap
@@ -58,7 +58,7 @@ def train_step_fn(weights, batch, targets, lr=0.2):
         loss = loss_fn(output, targets)
         return loss
 
-    grad_weights, loss = grad_with_value(compute_loss)(weights, batch, targets)
+    grad_weights, loss = grad_and_value(compute_loss)(weights, batch, targets)
 
     # NB: PyTorch is missing a "functional optimizer API" (possibly coming soon)
     # so we are going to re-implement SGD here.
