@@ -2115,46 +2115,6 @@ class TestAutograd(TestCase):
         for _ in range(10):
             CollectOnDelete().forward(torch.randn(1, requires_grad=True)).backward()
 
-    # Delete this test when legacy custom autograd functions are deleted.
-    def test_naughty_legacy_variable_grad_fn(self):
-        class Id(Function):
-            def forward(self, x):
-                return x
-
-            def backward(self, grad_x):
-                return grad_x
-
-        self.assertRaises(RuntimeError, lambda: Variable(torch.zeros(1), _grad_fn=Id()))
-
-    # Delete this test when legacy custom autograd functions are deleted.
-    def test_naughty_legacy_function_backward_before_forward(self):
-        class Id(Function):
-            def forward(self, x):
-                return x
-
-            def backward(self, grad_x):
-                return grad_x
-
-        f = Id()
-        self.assertRaises(RuntimeError, lambda: f._do_backward((torch.zeros(0), ), False))
-
-    # Delete this test when legacy custom autograd functions are deleted.
-    def test_naughty_legacy_function_early_access(self):
-        class Id(Function):
-            def forward(self, x):
-                return x
-
-            def backward(self, grad_x):
-                return grad_x
-
-        f = Id()
-        # A legacy autograd function is not fully initialized until you actually
-        # apply it.  That means a lot of accessors on them don't actually work.
-        # Test that we properly error in this case.
-        self.assertRaises(RuntimeError, lambda: f.register_hook(lambda x, y: None))
-        self.assertRaises(RuntimeError, lambda: f.next_functions)
-        self.assertRaises(RuntimeError, lambda: f.metadata)
-
     @unittest.expectedFailure
     def test_naughty_anomaly_access(self):
         class MyFunction(Function):
