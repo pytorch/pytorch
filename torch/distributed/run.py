@@ -22,7 +22,7 @@ with the following additional functionalities:
 
 ::
 
-    >>> python -m torch.distributed.elastic_launch
+    >>> python -m torch.distributed.run
         --standalone
         --nnodes=1
         --nproc_per_node=$NUM_TRAINERS
@@ -32,7 +32,7 @@ with the following additional functionalities:
 
 ::
 
-    >>> python -m torch.distributed.elastic_launch
+    >>> python -m torch.distributed.run
         --nnodes=$NUM_NODES
         --nproc_per_node=$NUM_TRAINERS
         --rdzv_id=$JOB_ID
@@ -44,7 +44,7 @@ with the following additional functionalities:
 
 ::
 
-    >>> python -m torch.distributed.elastic_launch
+    >>> python -m torch.distributed.run
         --nnodes=1:4
         --nproc_per_node=$NUM_TRAINERS
         --rdzv_id=$JOB_ID
@@ -116,7 +116,7 @@ script:
         role. The role of the worker is specified in the ``WorkerSpec``.
 
 5. ``LOCAL_WORLD_SIZE`` - local world size (e.g. number of workers running locally).
-       Equal to ``--nproc_per_node`` specified on ``torch.distributed.elastic_launch``.
+       Equal to ``--nproc_per_node`` specified on ``torch.distributed.run``.
 
 6. ``WORLD_SIZE`` - world size (total number of workers in the job).
 
@@ -556,7 +556,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, List[str]]:
     cmd.append(args.training_script)
     if not args.use_env:
         log.warning(
-            "`torch.distributed.launch` is Deprecated. Use torch.distributed.elastic_launch"
+            "`torch.distributed.launch` is Deprecated. Use torch.distributed.run"
         )
         cmd.append(f"--local_rank={macros.local_rank}")
     cmd.extend(args.training_script_args)
@@ -601,5 +601,5 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO, format="[%(levelname)s] %(asctime)s %(module)s: %(message)s"
     )
-    log.info(f"Running torch.distributed.elastic_launch with args: {sys.argv}")
+    log.info(f"Running torch.distributed.run with args: {sys.argv}")
     main()
