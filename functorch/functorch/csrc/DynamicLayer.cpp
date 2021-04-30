@@ -212,7 +212,7 @@ constexpr DispatchKeySet all_dynlayer_keyset = DispatchKeySet({
 
 static void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto num_args = op.schema().arguments().size();
-  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), 
+  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(),
       [](const Tensor& tensor) {
         auto* wrapper = maybeGetTensorWrapper(tensor);
         TORCH_INTERNAL_ASSERT(wrapper == nullptr);
@@ -366,7 +366,7 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
     for (int64_t arg_idx = 0; arg_idx < args_size; arg_idx++) {
       auto& ivalue = (*stack)[args_front + arg_idx];
       if (!ivalue.isTensor()) {
-        continue; 
+        continue;
       }
       auto maybe_tensor_wrapper = maybeGetTensorWrapper(ivalue.toTensor());
       if (!maybe_tensor_wrapper) {
