@@ -46,7 +46,7 @@ class TestE2EBase : public ::testing::Test {
             return c10::StrongTypePtr(
                 nullptr,
                 c10::DictType::create(
-                    c10::IntType::create(), c10::IntType::create()));
+                    c10::IntType::get(), c10::IntType::get()));
           }
           return c10::StrongTypePtr(
               nullptr, c10::TensorType::create(at::Tensor()));
