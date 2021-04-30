@@ -25,6 +25,7 @@ class IDEEPInt8SumReluOp final : public IDEEPOperator {
 
     Y_scales_ = ConvertScales({scale_});
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default,modernize-use-override)
   virtual ~IDEEPInt8SumReluOp() {}
 
   bool RunOnDevice() override {
@@ -67,10 +68,14 @@ class IDEEPInt8SumReluOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Sum, DNNLOWP, IDEEPInt8SumReluOp<false>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Add, DNNLOWP, IDEEPInt8SumReluOp<false>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8SumRelu, DNNLOWP, IDEEPInt8SumReluOp<true>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8AddRelu, DNNLOWP, IDEEPInt8SumReluOp<true>);
 
 } // namespace
