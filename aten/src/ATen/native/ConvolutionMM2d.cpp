@@ -419,6 +419,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(const Tensor& 
       false);
 
   const Tensor input = self.contiguous();
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
   const int64_t ndim = input.dim();
   const int64_t dim_planes = 1;
   const int64_t dim_height = 2;
@@ -522,6 +523,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(const Tensor&
         self,
         weight,
         finput,
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<Tensor&>(fgrad_input),   // cast away auto-generated const of buffer
         kernel_size,
         stride,
