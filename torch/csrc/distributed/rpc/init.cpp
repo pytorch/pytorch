@@ -582,13 +582,13 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "_get_device_map",
           (std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>(
-              ProcessGroupAgent::*)(const WorkerInfo& dest) const) &
+              ProcessGroupAgent::*)(const WorkerInfo& dst) const) &
               ProcessGroupAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "join",
           &ProcessGroupAgent::join,
-          py::call_guard<py::gil_scoped_release>(),
+        py::call_guard<py::gil_scoped_release>(),
           py::arg("shutdown") = false)
       .def(
           "shutdown",
@@ -696,7 +696,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_device_map",
-          (tensorpipe::DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dest)
+          (tensorpipe::DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst)
                const) &
               TensorPipeAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
