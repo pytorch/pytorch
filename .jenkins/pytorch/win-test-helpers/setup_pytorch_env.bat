@@ -14,18 +14,23 @@ if "%BUILD_ENVIRONMENT%"=="" (
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     IF EXIST %CONDA_PARENT_DIR%\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\Miniconda3 )
     curl --retry 3 https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe
-    if %errorlevel% neq 0 ( exit /b %errorlevel% )
+    if errorlevel 1 exit /b
+    if not errorlevel 0 exit /b
     %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\Miniconda3
-    if %errorlevel% neq 0 ( exit /b %errorlevel% )
+    if errorlevel 1 exit /b
+    if not errorlevel 0 exit /b
 )
+
 call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
     :: Numba is pinned to 0.44.0 to avoid https://github.com/numba/numba/issues/4352
     call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba==0.44.0 scipy==1.5.0 typing_extensions dataclasses
-    if %errorlevel% neq 0 ( exit /b %errorlevel% )
+    if errorlevel 1 exit /b
+    if not errorlevel 0 exit /b
     call conda install -y -q -c conda-forge cmake
-    if %errorlevel% neq 0 ( exit /b %errorlevel% )
+    if errorlevel 1 exit /b
+    if not errorlevel 0 exit /b
 )
 
 pushd .
@@ -34,7 +39,8 @@ if "%VC_VERSION%" == "" (
 ) else (
     call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%VC_VERSION%
 )
-if %errorlevel% neq 0 ( exit /b %errorlevel% )
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
 @echo on
 popd
 
@@ -46,7 +52,8 @@ pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" p
 python -mpip install coverage==5.5
 python -mpip install -e tools/coverage_plugins_package
 
-if %errorlevel% neq 0 ( exit /b %errorlevel% )
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
 
 set DISTUTILS_USE_SDK=1
 
