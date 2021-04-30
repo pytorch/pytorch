@@ -27,7 +27,7 @@ struct WorkEntry {
       std::vector<at::Tensor>* dstPtr,
       std::function<void(std::unique_ptr<WorkEntry>&)> run)
       : dst(dstPtr ? *dstPtr : std::vector<at::Tensor>()),
-        run(run) {
+        run(std::move(run)) {
     if (srcPtr) {
       src = *srcPtr;
     }
