@@ -294,3 +294,8 @@ const auto norm_5arg = R"JIT(
   def forward(self, a: Tensor, p: int, dim: List[int], keepdim: bool, dtype: int):
       return torch.norm(a, p, dim, keepdim, dtype=dtype)
 )JIT";
+
+const auto aten_matmul = R"JIT(
+  def forward(self, a: Tensor, b: Tensor):
+      return torch.matmul(a, b)
+)JIT";
