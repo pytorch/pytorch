@@ -26,7 +26,7 @@ at::Tensor& reshape_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
     const std::vector<int64_t>& proposed_shape,
-    bool infer_size = true) {
+    bool infer_size) {
   auto shape = infer_size ? at::infer_size(proposed_shape, self.numel())
                           : proposed_shape;
   at::native::resize_(out, shape, c10::nullopt);

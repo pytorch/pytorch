@@ -4,6 +4,16 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
+namespace at {
+namespace native {
+at::Tensor& reshape_copy_out(
+    at::Tensor& out,
+    const at::Tensor& self,
+    const std::vector<int64_t>& proposed_shape,
+    bool infer_size = true);
+} // namespace native
+} // namespace at
+
 namespace torch {
 namespace jit {
 
