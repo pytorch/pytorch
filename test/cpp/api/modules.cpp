@@ -16,8 +16,11 @@ using namespace torch::test;
 class TestModel : public torch::nn::Module {
  public:
   TestModel()
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       : l1(register_module("l1", Linear(10, 3))),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         l2(register_module("l2", Linear(3, 5))),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         l3(register_module("l3", Linear(5, 100))) {}
 
   Linear l1, l2, l3;
@@ -26,7 +29,9 @@ class TestModel : public torch::nn::Module {
 class NestedModel : public torch::nn::Module {
  public:
   NestedModel()
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       : param_(register_parameter("param", torch::empty({3, 2, 21}))),
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         l1(register_module("l1", Linear(5, 20))),
         t(register_module("test", std::make_shared<TestModel>())) {}
 
@@ -37,15 +42,22 @@ class NestedModel : public torch::nn::Module {
 
 struct ModulesTest : torch::test::SeedingFixture {};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv1d) {
   Conv1d model(Conv1dOptions(3, 2, 3).stride(1).bias(false));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   model->weight.set_data(torch::arange(18, torch::dtype(torch::kFloat)).reshape({2, 3, 3}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(30, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 5});
   auto y = model(x);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{{ 312.,  348.,  384.},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   { 798.,  915., 1032.}},
 
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {{ 852.,  888.,  924.},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {2553., 2670., 2787.}}}, torch::kFloat);
   ASSERT_TRUE(torch::allclose(y, expected));
 
@@ -55,6 +67,7 @@ TEST_F(ModulesTest, Conv1d) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv1dSameStrided) {
   auto options = Conv1dOptions(3, 2, 3);
   options.stride(1).padding(torch::kSame);
@@ -64,17 +77,26 @@ TEST_F(ModulesTest, Conv1dSameStrided) {
     "padding='same' is not supported for strided convolutions");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv2dEven) {
   Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   model->weight.set_data(torch::arange(54, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 3}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(75, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 5});
   auto y = model(x);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{{{15219., 15570., 15921.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {16974., 17325., 17676.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {18729., 19080., 19431.}},
 
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{37818., 38898., 39978.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {43218., 44298., 45378.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {48618., 49698., 50778.}}}}, torch::kFloat);
   ASSERT_TRUE(torch::allclose(y, expected));
 
@@ -84,17 +106,26 @@ TEST_F(ModulesTest, Conv2dEven) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv2dUneven) {
   Conv2d model(Conv2dOptions(3, 2, {3, 2}).stride({1, 1}).bias(false));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   model->weight.set_data(torch::arange(36, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 2}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(60, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 4});
   auto y = model(x);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{{{ 5289.,  5442.,  5595.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 5901.,  6054.,  6207.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 6513.,  6666.,  6819.}},
 
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{13227., 13704., 14181.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {15135., 15612., 16089.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {17043., 17520., 17997.}}}}, torch::kFloat);
   ASSERT_TRUE(torch::allclose(y, expected));
 
@@ -104,6 +135,7 @@ TEST_F(ModulesTest, Conv2dUneven) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv2dSameStrided) {
   auto options = Conv2dOptions(3, 2, {3, 4});
   options.stride(1).padding(torch::kSame);
@@ -116,33 +148,54 @@ TEST_F(ModulesTest, Conv2dSameStrided) {
     "padding='same' is not supported for strided convolutions");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv3d) {
   Conv3d model(Conv3dOptions(3, 2, 3).stride(1).bias(false));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   model->weight.set_data(torch::arange(162, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 3, 3}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(375, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 5, 5});
   auto y = model(x);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{{{{ 700704.,  703944.,  707184.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 716904.,  720144.,  723384.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 733104.,  736344.,  739584.}},
 
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 781704.,  784944.,  788184.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 797904.,  801144.,  804384.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 814104.,  817344.,  820584.}},
 
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 862704.,  865944.,  869184.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 878904.,  882144.,  885384.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 895104.,  898344.,  901584.}}},
 
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{1724220., 1734021., 1743822.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {1773225., 1783026., 1792827.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {1822230., 1832031., 1841832.}},
 
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{1969245., 1979046., 1988847.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {2018250., 2028051., 2037852.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {2067255., 2077056., 2086857.}},
 
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{2214270., 2224071., 2233872.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {2263275., 2273076., 2282877.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {2312280., 2322081., 2331882.}}}}}, torch::kFloat);
   ASSERT_TRUE(torch::allclose(y, expected));
 
@@ -152,7 +205,9 @@ TEST_F(ModulesTest, Conv3d) {
   ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Conv3dSameStrided) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto options = Conv3dOptions(3, 2, {3, 4, 5});
   options.stride(1).padding(torch::kSame);
   Conv3d model_valid(options);
@@ -164,16 +219,25 @@ TEST_F(ModulesTest, Conv3dSameStrided) {
     "padding='same' is not supported for strided convolutions");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConvTranspose1d) {
   ConvTranspose1d model(ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   model->weight.set_data(torch::arange(18.).view({2, 3, 3}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(20.).reshape({2, 2, 5});
   auto y = model(x);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{{  45.,  104.,  179.,  212.,  245.,  188.,  107.},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {  60.,  140.,  242.,  293.,  344.,  260.,  146.},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {  75.,  176.,  305.,  374.,  443.,  332.,  185.}},
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {{ 135.,  304.,  509.,  542.,  575.,  428.,  237.},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   { 210.,  460.,  752.,  803.,  854.,  620.,  336.},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   { 285.,  616.,  995., 1064., 1133.,  812.,  435.}}});
   ASSERT_TRUE(torch::allclose(y, expected));
 
@@ -183,31 +247,55 @@ TEST_F(ModulesTest, ConvTranspose1d) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConvTranspose2dEven) {
   ConvTranspose2d model(ConvTranspose2dOptions(3, 2, 3).stride(1).bias(false));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   model->weight.set_data(torch::arange(54.).view({2, 3, 3, 3}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(50.).view({1, 2, 5, 5});
   auto y = model(x);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{{{  675.,  1402.,  2183.,  2270.,  2357.,  1634.,   849.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 1560.,  3240.,  5044.,  5236.,  5428.,  3760.,  1952.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 2685.,  5574.,  8673.,  8988.,  9303.,  6438.,  3339.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 3180.,  6594., 10248., 10563., 10878.,  7518.,  3894.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 3675.,  7614., 11823., 12138., 12453.,  8598.,  4449.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 2820.,  5832.,  9040.,  9268.,  9496.,  6544.,  3380.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 1605.,  3314.,  5129.,  5252.,  5375.,  3698.,  1907.}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{  900.,  1870.,  2912.,  3053.,  3194.,  2210.,  1146.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 2100.,  4356.,  6772.,  7072.,  7372.,  5092.,  2636.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 3630.,  7518., 11670., 12147., 12624.,  8706.,  4500.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 4395.,  9078., 14055., 14532., 15009., 10326.,  5325.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 5160., 10638., 16440., 16917., 17394., 11946.,  6150.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 3900.,  8028., 12388., 12724., 13060.,  8956.,  4604.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 2190.,  4502.,  6938.,  7115.,  7292.,  4994.,  2564.}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{ 1125.,  2338.,  3641.,  3836.,  4031.,  2786.,  1443.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 2640.,  5472.,  8500.,  8908.,  9316.,  6424.,  3320.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 4575.,  9462., 14667., 15306., 15945., 10974.,  5661.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 5610., 11562., 17862., 18501., 19140., 13134.,  6756.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 6645., 13662., 21057., 21696., 22335., 15294.,  7851.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 4980., 10224., 15736., 16180., 16624., 11368.,  5828.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 2775.,  5690.,  8747.,  8978.,  9209.,  6290.,  3221.}}}});
   ASSERT_TRUE(torch::allclose(y, expected));
 
@@ -217,31 +305,55 @@ TEST_F(ModulesTest, ConvTranspose2dEven) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConvTranspose2dUneven) {
   ConvTranspose2d model(ConvTranspose2dOptions(3, 2, {3, 2}).stride({1, 1}).bias(false));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   model->weight.set_data(torch::arange(36.).view({2, 3, 3, 2}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(40.).view({1, 2, 5, 4});
   auto y = model(x);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{{{ 360.,  758.,  796.,  834.,  440.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 832., 1752., 1836., 1920., 1012.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {1432., 3014., 3152., 3290., 1732.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {1696., 3566., 3704., 3842., 2020.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {1960., 4118., 4256., 4394., 2308.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {1504., 3152., 3252., 3352., 1756.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 856., 1790., 1844., 1898.,  992.}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{ 480., 1010., 1072., 1134.,  596.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {1120., 2352., 2484., 2616., 1372.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {1936., 4058., 4268., 4478., 2344.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {2344., 4898., 5108., 5318., 2776.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {2752., 5738., 5948., 6158., 3208.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {2080., 4328., 4476., 4624., 2404.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {1168., 2426., 2504., 2582., 1340.}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{ 600., 1262., 1348., 1434.,  752.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {1408., 2952., 3132., 3312., 1732.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {2440., 5102., 5384., 5666., 2956.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {2992., 6230., 6512., 6794., 3532.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {3544., 7358., 7640., 7922., 4108.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {2656., 5504., 5700., 5896., 3052.},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {1480., 3062., 3164., 3266., 1688.}}}});
   ASSERT_TRUE(torch::allclose(y, expected));
 
@@ -251,28 +363,49 @@ TEST_F(ModulesTest, ConvTranspose2dUneven) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConvTranspose3d) {
   ConvTranspose3d model(ConvTranspose3dOptions(2, 2, 2).stride(1).bias(false));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   model->weight.set_data(torch::arange(32.).reshape({2, 2, 2, 2, 2}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(16.).reshape({1, 2, 2, 2, 2});
   auto y = model(x);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{{{{ 128.,  280.,  154.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 304.,  664.,  364.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 184.,  400.,  218.}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 352.,  768.,  420.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 832., 1808.,  984.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 496., 1072.,  580.}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 256.,  552.,  298.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 592., 1272.,  684.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 344.,  736.,  394.}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{ 192.,  424.,  234.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 464., 1016.,  556.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 280.,  608.,  330.}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 544., 1184.,  644.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {1280., 2768., 1496.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 752., 1616.,  868.}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 384.,  824.,  442.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 880., 1880., 1004.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 504., 1072.,  570.}}}}});
   ASSERT_TRUE(torch::allclose(y, expected));
 
@@ -282,8 +415,10 @@ TEST_F(ModulesTest, ConvTranspose3d) {
   ASSERT_TRUE(model->weight.grad().numel() == 2 * 2 * 2 * 2 * 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool1d) {
   MaxPool1d model(MaxPool1dOptions(3).stride(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({1, 1, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -295,8 +430,10 @@ TEST_F(ModulesTest, MaxPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool1dReturnIndices) {
   MaxPool1d model(MaxPool1dOptions(3).stride(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({1, 1, 5}, torch::requires_grad());
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
@@ -309,8 +446,10 @@ TEST_F(ModulesTest, MaxPool1dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool2dEven) {
   MaxPool2d model(MaxPool2dOptions(3).stride(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -322,8 +461,10 @@ TEST_F(ModulesTest, MaxPool2dEven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool2dUneven) {
   MaxPool2d model(MaxPool2dOptions({3, 2}).stride({2, 2}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 4}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -335,8 +476,10 @@ TEST_F(ModulesTest, MaxPool2dUneven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool2dReturnIndices) {
   MaxPool2d model(MaxPool2dOptions(3).stride(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
@@ -353,8 +496,10 @@ TEST_F(ModulesTest, MaxPool2dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool3d) {
   MaxPool3d model(MaxPool3dOptions(3).stride(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -366,8 +511,10 @@ TEST_F(ModulesTest, MaxPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool3dReturnIndices) {
   MaxPool3d model(MaxPool3dOptions(3).stride(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
@@ -389,8 +536,10 @@ TEST_F(ModulesTest, MaxPool3dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AvgPool1d) {
   AvgPool1d model(AvgPool1dOptions(3).stride(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({1, 1, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -402,8 +551,10 @@ TEST_F(ModulesTest, AvgPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AvgPool2dEven) {
   AvgPool2d model(AvgPool2dOptions(3).stride(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -415,8 +566,10 @@ TEST_F(ModulesTest, AvgPool2dEven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AvgPool2dUneven) {
   AvgPool2d model(AvgPool2dOptions({3, 2}).stride({2, 2}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 4}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -428,8 +581,10 @@ TEST_F(ModulesTest, AvgPool2dUneven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AvgPool3d) {
   AvgPool3d model(AvgPool3dOptions(3).stride(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -441,8 +596,10 @@ TEST_F(ModulesTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FractionalMaxPool2d) {
   FractionalMaxPool2d model(FractionalMaxPool2dOptions(3).output_size(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -454,8 +611,10 @@ TEST_F(ModulesTest, FractionalMaxPool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FractionalMaxPool2dReturnIndices) {
   FractionalMaxPool2d model(FractionalMaxPool2dOptions(3).output_size(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
@@ -472,8 +631,10 @@ TEST_F(ModulesTest, FractionalMaxPool2dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FractionalMaxPool3d) {
   FractionalMaxPool3d model(FractionalMaxPool3dOptions(3).output_size(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -485,8 +646,10 @@ TEST_F(ModulesTest, FractionalMaxPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FractionalMaxPool3dReturnIndices) {
   FractionalMaxPool3d model(FractionalMaxPool3dOptions(3).output_size(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
@@ -508,12 +671,14 @@ TEST_F(ModulesTest, FractionalMaxPool3dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LPPool1d) {
   int norm_type = 2;
   int stride = 2;
   int kernel_size = 3;
 
   LPPool1d model(LPPool1dOptions(norm_type, kernel_size).stride(stride));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({1, 1, 5});
   auto y = model(x);
   auto expected = (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) * kernel_size).pow(1. / norm_type);
@@ -523,12 +688,14 @@ TEST_F(ModulesTest, LPPool1d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LPPool2d) {
   int norm_type = 2;
   int stride = 2;
   std::vector<int64_t> kernel_size({2, 3});
 
   LPPool2d model(LPPool2dOptions(norm_type, kernel_size).stride(stride));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::ones({1, 2, 5});
   auto y = model(x);
   auto expected = (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) * (kernel_size[0] * kernel_size[1])).pow(1. / norm_type);
@@ -538,6 +705,7 @@ TEST_F(ModulesTest, LPPool2d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Identity) {
   Identity identity;
   auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -550,10 +718,13 @@ TEST_F(ModulesTest, Identity) {
   ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Flatten) {
   Flatten flatten;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = flatten->forward(input);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::kFloat);
   auto s = output.sum();
 
@@ -564,13 +735,17 @@ TEST_F(ModulesTest, Flatten) {
   // Testing with optional arguments start_dim and end_dim
   Flatten flatten_optional_dims(FlattenOptions().start_dim(2).end_dim(3));
   input = torch::tensor({
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{1, 2}, {3, 4}}, {{5, 6}, {7, 8}}},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{9, 10}, {11, 12}}, {{13, 14}, {15, 16}}}
    }, torch::dtype(torch::kFloat).requires_grad(true)); // Tensor with sizes (2, 2, 2, 2)
 
   output = flatten_optional_dims->forward(input);
   expected = torch::tensor({
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{1, 2, 3, 4}, {5, 6, 7, 8}},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{9, 10, 11, 12}, {13, 14, 15, 16}}
    }, torch::kFloat); // Tensor with sizes (2, 2, 4)
 
@@ -580,6 +755,7 @@ TEST_F(ModulesTest, Flatten) {
   ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Unflatten) {
   // Non-named tensor
   Unflatten unflatten(UnflattenOptions(0, {2, 2}));
@@ -590,7 +766,9 @@ TEST_F(ModulesTest, Unflatten) {
   // Named tensor
   auto make_dimnames = [](std::vector<std::string> names) {
     std::vector<torch::Dimname> dimnames;
+    // NOLINTNEXTLINE(performance-for-range-copy)
     for (auto name : names) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       dimnames.push_back(
           torch::Dimname::fromSymbol(torch::Symbol::dimname(name)));
     }
@@ -608,8 +786,10 @@ TEST_F(ModulesTest, Unflatten) {
   ASSERT_TRUE(torch::equal(output, expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool1d) {
   AdaptiveMaxPool1d model(3);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -621,8 +801,10 @@ TEST_F(ModulesTest, AdaptiveMaxPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool1dReturnIndices) {
   AdaptiveMaxPool1d model(3);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
@@ -634,9 +816,12 @@ TEST_F(ModulesTest, AdaptiveMaxPool1dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool2dEven) {
   AdaptiveMaxPool2d model(3);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0., 50);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   x.resize_({2, 5, 5}).set_requires_grad(true);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -655,9 +840,12 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dEven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool2dUneven) {
   AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0., 40);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   x.resize_({2, 5, 4}).set_requires_grad(true);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -676,9 +864,12 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dUneven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesEven) {
   AdaptiveMaxPool2d model(3);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0., 50);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   x.resize_({2, 5, 5}).set_requires_grad(true);
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
@@ -710,9 +901,12 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesEven) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesUneven) {
   AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0., 40);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   x.resize_({2, 5, 4}).set_requires_grad(true);
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
@@ -744,8 +938,10 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesUneven) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 3, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool3d) {
   AdaptiveMaxPool3d model(3);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0., 64);
   x.resize_({1, 4, 4, 4}).set_requires_grad(true);
   auto y = model(x);
@@ -769,8 +965,10 @@ TEST_F(ModulesTest, AdaptiveMaxPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
   AdaptiveMaxPool3d model(3);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0., 64);
   x.resize_({1, 4, 4, 4}).set_requires_grad(true);
   torch::Tensor y, indices;
@@ -809,8 +1007,10 @@ TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveAvgPool1d) {
   AdaptiveAvgPool1d model(3);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -823,9 +1023,12 @@ TEST_F(ModulesTest, AdaptiveAvgPool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveAvgPool2dEven) {
   AdaptiveAvgPool2d model(3);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0., 50);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   x.resize_({2, 5, 5}).set_requires_grad(true);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -845,9 +1048,12 @@ TEST_F(ModulesTest, AdaptiveAvgPool2dEven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveAvgPool2dUneven) {
   AdaptiveAvgPool2d model(AdaptiveAvgPool2dOptions({3, 2}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0., 40);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   x.resize_({2, 5, 4}).set_requires_grad(true);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -867,8 +1073,10 @@ TEST_F(ModulesTest, AdaptiveAvgPool2dUneven) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 2}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveAvgPool3d) {
   AdaptiveAvgPool3d model(3);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::arange(0., 64);
   x.resize_({1, 4, 4, 4}).set_requires_grad(true);
   auto y = model(x);
@@ -892,8 +1100,10 @@ TEST_F(ModulesTest, AdaptiveAvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxUnpool1d) {
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool1d{3};
   auto y = model->forward(x, indices);
@@ -904,8 +1114,10 @@ TEST_F(ModulesTest, MaxUnpool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 9}));
 
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   model = MaxUnpool1d{MaxUnpool1dOptions(3).stride(2).padding(1)};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   y = model->forward(x, indices, std::vector<int64_t>({1, 1, 5}));
 
   ASSERT_EQ(y.dim(), 3);
@@ -914,9 +1126,11 @@ TEST_F(ModulesTest, MaxUnpool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 5}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
   MaxPool1d pool {MaxPool1dOptions(2).stride(2)};
   MaxUnpool1d unpool {MaxUnpool1dOptions(2).stride(2)};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({{{1, 2, 3, 4, 5, 6, 7, 8}}}, torch::kFloat);
   torch::Tensor output, indices;
   std::tie(output, indices) = pool->forward_with_indices(input);
@@ -925,6 +1139,7 @@ TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
     torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8}}} , torch::kFloat)));
 
   // Example showcasing the use of output_size
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   input = torch::tensor({{{1, 2, 3, 4, 5, 6, 7, 8, 9}}}, torch::kFloat);
   std::tie(output, indices) = pool->forward_with_indices(input);
   ASSERT_TRUE(torch::allclose(
@@ -935,20 +1150,33 @@ TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
     torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8}}} , torch::kFloat)));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxUnpool2d) {
   auto indices = torch::tensor({
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   {{{ 6,  8,  9},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {16, 18, 19},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {21, 23, 24}}},
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   {{{ 6,  8,  9},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {16, 18, 19},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {21, 23, 24}}}}, torch::kLong);
   auto x = torch::tensor({
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   {{{ 6,  8,  9},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {16, 18, 19},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {21, 23, 24}}},
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   {{{31, 33, 34},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {41, 43, 44},
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {46, 48, 49}}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool2d{MaxUnpool2dOptions(3).stride(2).padding(1)};
   auto y = model->forward(x, indices);
@@ -968,12 +1196,16 @@ TEST_F(ModulesTest, MaxUnpool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 5, 5}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool2d_MaxUnpool2d) {
   MaxPool2d pool {MaxPool2dOptions(2).stride(2)};
   MaxUnpool2d unpool {MaxUnpool2dOptions(2).stride(2)};
   auto input = torch::tensor({{{{ 1,  2,  3,  4},
+                                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                 { 5,  6,  7,  8},
+                                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                 { 9, 10, 11, 12},
+                                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                 {13, 14, 15, 16}}}}, torch::kFloat);
   torch::Tensor output, indices;
   std::tie(output, indices) = pool->forward_with_indices(input);
@@ -993,8 +1225,11 @@ TEST_F(ModulesTest, MaxPool2d_MaxUnpool2d) {
                      { 0, 0, 0,  0, 0}}}}, torch::kFloat)));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxUnpool3d) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto indices = torch::tensor({{{{{26}}}}}, torch::kLong);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::tensor({{{{{26}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool3d{3};
   auto y = model->forward(x, indices);
@@ -1013,16 +1248,25 @@ TEST_F(ModulesTest, MaxUnpool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3, 3, 3}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxUnpool3dOutputSize) {
   auto indices = torch::tensor(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{{{21, 23},
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {29, 31}},
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {{53, 55},
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {61, 63}}}}}, torch::kLong);
     auto x = torch::tensor(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{{{21, 23},
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {29, 31}},
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {{53, 55},
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {61, 63}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool3d{MaxUnpool3dOptions(3).stride(2).padding(1)};
   auto y = model->forward(x, indices, std::vector<int64_t>({1, 1, 4, 4, 4}));
@@ -1048,9 +1292,11 @@ TEST_F(ModulesTest, MaxUnpool3dOutputSize) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 4, 4, 4}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
   MaxPool3d pool {MaxPool3dOptions(3).stride(2)};
   MaxUnpool3d unpool {MaxUnpool3dOptions(3).stride(2)};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::randn({20, 16, 51, 33, 15});
   torch::Tensor output, indices;
   std::tie(output, indices) = pool->forward_with_indices(input);
@@ -1058,9 +1304,12 @@ TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
   ASSERT_EQ(unpooled_output.sizes(), std::vector<int64_t>({20, 16, 51, 33, 15}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Linear) {
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Linear model(5, 2);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::randn({10, 5}, torch::requires_grad());
     auto y = model(x);
     torch::Tensor s = y.sum();
@@ -1077,7 +1326,9 @@ TEST_F(ModulesTest, Linear) {
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Linear model(LinearOptions(5, 2).bias(false));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::randn({10, 5}, torch::requires_grad());
     auto y = model(x);
     torch::Tensor s = y.sum();
@@ -1095,6 +1346,7 @@ TEST_F(ModulesTest, Linear) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LocalResponseNorm) {
   {
     LocalResponseNorm model(LocalResponseNormOptions(2));
@@ -1136,10 +1388,13 @@ TEST_F(ModulesTest, LocalResponseNorm) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LayerNorm) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   LayerNorm model(LayerNormOptions({2, 2}).eps(2e-5));
   auto x = torch::randn({2, 2}, torch::requires_grad());
   auto y = model(x);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto y_exp = torch::layer_norm(x, {2, 2}, model->weight, model->bias, 2e-5);
   torch::Tensor s = y.sum();
 
@@ -1154,10 +1409,13 @@ TEST_F(ModulesTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, GroupNorm) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   GroupNorm model(GroupNormOptions(2, 2).eps(2e-5));
   auto x = torch::randn({2, 2}, torch::requires_grad());
   auto y = model(x);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto y_exp = torch::group_norm(x, 2, model->weight, model->bias, 2e-5);
   torch::Tensor s = y.sum();
 
@@ -1172,9 +1430,13 @@ TEST_F(ModulesTest, GroupNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Bilinear) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Bilinear model(5, 3, 2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x1 = torch::randn({10, 5}, torch::requires_grad());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x2 = torch::randn({10, 3}, torch::requires_grad());
   auto y = model(x1, x2);
   torch::Tensor s = y.sum();
@@ -1188,14 +1450,18 @@ TEST_F(ModulesTest, Bilinear) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5 * 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Fold) {
   {
     Fold model(FoldOptions({3, 2}, {2, 2}));
     auto input = torch::ones({1, 3 * 2 * 2, 2}, torch::requires_grad());
     auto output = model(input);
     auto expected = torch::tensor(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}}}},
         torch::kFloat);
     auto s = output.sum();
@@ -1207,6 +1473,7 @@ TEST_F(ModulesTest, Fold) {
   }
   {
     // input wrong dimension
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Fold model(FoldOptions({8, 8}, {3, 3}));
     ASSERT_THROWS_WITH(
         model(torch::randn({1, 3, 16, 16})),
@@ -1214,19 +1481,29 @@ TEST_F(ModulesTest, Fold) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Unfold) {
   {
     Unfold model(UnfoldOptions({2, 2}).padding(1).stride(2));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(2., 14, torch::requires_grad()).view({1, 2, 2, 3});
     auto output = model(input);
     auto expected = torch::tensor(
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{{0.0, 0.0, 0.0, 6.0},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {0.0, 0.0, 5.0, 7.0},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {0.0, 3.0, 0.0, 0.0},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {2.0, 4.0, 0.0, 0.0},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {0.0, 0.0, 0.0, 12.0},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {0.0, 0.0, 11.0, 13.0},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {0.0, 9.0, 0.0, 0.0},
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {8.0, 10.0, 0.0, 0.0}}},
         torch::kFloat);
     auto s = output.sum();
@@ -1254,12 +1531,17 @@ TEST_F(ModulesTest, Unfold) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SimpleContainer) {
   auto model = std::make_shared<SimpleContainer>();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto l1 = model->add(Linear(10, 3), "l1");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto l2 = model->add(Linear(3, 5), "l2");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto l3 = model->add(Linear(5, 100), "l3");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({1000, 10}, torch::requires_grad());
   x = l1(x).clamp_min(0);
   x = l2(x).clamp_min(0);
@@ -1272,6 +1554,7 @@ TEST_F(ModulesTest, SimpleContainer) {
   ASSERT_EQ(x.min().item<float>(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, EmbeddingBasic) {
   const int64_t dict_size = 10;
   Embedding model(dict_size, 2);
@@ -1282,6 +1565,7 @@ TEST_F(ModulesTest, EmbeddingBasic) {
 
   // Cannot get gradients to change indices (input) - only for embedding
   // params
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::full({10}, dict_size - 1, torch::kInt64);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -1295,8 +1579,11 @@ TEST_F(ModulesTest, EmbeddingBasic) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * dict_size);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, EmbeddingList) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Embedding model(6, 4);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::full({2, 3}, 5, torch::kInt64);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -1308,14 +1595,18 @@ TEST_F(ModulesTest, EmbeddingList) {
   ASSERT_EQ(y.size(2), 4);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, EmbeddingFromPretrained) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
   Embedding embedding = torch::nn::Embedding::from_pretrained(weight);
   auto input = torch::tensor({1}, torch::kLong);
   ASSERT_TRUE(torch::allclose(embedding(input), torch::tensor({4.0000, 5.1000, 6.3000})));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, EmbeddingBagFromPretrained) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
   EmbeddingBag embeddingbag = torch::nn::EmbeddingBag::from_pretrained(weight);
   auto input = torch::zeros({{1, 2}}, torch::kLong);
@@ -1323,8 +1614,11 @@ TEST_F(ModulesTest, EmbeddingBagFromPretrained) {
   ASSERT_TRUE(torch::allclose(embeddingbag(input), torch::tensor({2.5000, 3.7000, 4.6500})));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AlphaDropout) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AlphaDropout alpha_dropout(0.5);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::Tensor x = torch::ones(100, torch::requires_grad());
   torch::Tensor y = alpha_dropout(x);
 
@@ -1341,8 +1635,11 @@ TEST_F(ModulesTest, AlphaDropout) {
   ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FeatureAlphaDropout) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   FeatureAlphaDropout feature_alpha_dropout(0.5);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
   torch::Tensor y = feature_alpha_dropout(x);
 
@@ -1360,9 +1657,12 @@ TEST_F(ModulesTest, FeatureAlphaDropout) {
   ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Dropout) {
   for (const auto inplace : {false, true}) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Dropout dropout(DropoutOptions(0.5).inplace(inplace));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor x = torch::ones(100);
     if (!inplace) {
       x.requires_grad_(true);
@@ -1380,14 +1680,18 @@ TEST_F(ModulesTest, Dropout) {
     }
 
     dropout->eval();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     y = dropout(torch::ones(100));
     ASSERT_EQ(y.sum().item<float>(), 100);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Dropout2d) {
   for (const auto inplace : {false, true}) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Dropout2d dropout(Dropout2dOptions(0.5).inplace(inplace));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor x = torch::ones({10, 10});
     if (!inplace) {
       x.requires_grad_(true);
@@ -1406,14 +1710,18 @@ TEST_F(ModulesTest, Dropout2d) {
     }
 
     dropout->eval();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     y = dropout(torch::ones({10, 10}));
     ASSERT_EQ(y.sum().item<float>(), 100);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Dropout3d) {
   for (const auto inplace : {false, true}) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Dropout3d dropout(Dropout3dOptions(0.5).inplace(inplace));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::Tensor x = torch::ones({4, 5, 5});
     if (!inplace) {
       x.requires_grad_(true);
@@ -1433,11 +1741,13 @@ TEST_F(ModulesTest, Dropout3d) {
     }
 
     dropout->eval();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     y = dropout(torch::ones({4, 5, 5}));
     ASSERT_EQ(y.sum().item<float>(), 100);
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Parameters) {
   auto model = std::make_shared<NestedModel>();
   auto parameters = model->named_parameters();
@@ -1458,23 +1768,27 @@ TEST_F(ModulesTest, Parameters) {
   ASSERT_EQ(parameters["test.l3.weight"].size(1), 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FunctionalCallsSuppliedFunction) {
   bool was_called = false;
   auto functional = Functional([&was_called](torch::Tensor input) {
     was_called = true;
     return input;
   });
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto output = functional(torch::ones(5, torch::requires_grad()));
   ASSERT_TRUE(was_called);
   ASSERT_TRUE(output.equal(torch::ones(5, torch::requires_grad())));
 
   was_called = false;
   // Use the call operator overload here.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   output = functional(torch::ones(5, torch::requires_grad()));
   ASSERT_TRUE(was_called);
   ASSERT_TRUE(output.equal(torch::ones(5, torch::requires_grad())));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FunctionalWithTorchFunction) {
   auto functional = Functional(torch::relu);
   ASSERT_EQ(functional(torch::ones({})).item<float>(), 1);
@@ -1482,13 +1796,16 @@ TEST_F(ModulesTest, FunctionalWithTorchFunction) {
   ASSERT_EQ(functional(torch::ones({}) * -1).item<float>(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, FunctionalArgumentBinding) {
   auto functional =
       Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
   ASSERT_EQ(functional(torch::ones({})).item<float>(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm1dStateful) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BatchNorm1d bn(5);
 
   ASSERT_TRUE(bn->options.track_running_stats());
@@ -1515,7 +1832,9 @@ TEST_F(ModulesTest, BatchNorm1dStateful) {
   ASSERT_EQ(bn->bias.size(0), 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm1dStateless) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BatchNorm1d bn(BatchNorm1dOptions(5).track_running_stats(false).affine(false));
 
   ASSERT_FALSE(bn->running_mean.defined());
@@ -1525,21 +1844,33 @@ TEST_F(ModulesTest, BatchNorm1dStateless) {
   ASSERT_FALSE(bn->bias.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm1d) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BatchNorm1d bn(5);
   bn->eval();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::arange(2. * 5 * 2).view({2, 5, 2}).requires_grad_();
   auto output = bn->forward(input);
   auto expected = torch::tensor({{{ 0.0000,  1.0000},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   { 2.0000,  3.0000},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   { 4.0000,  5.0000},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   { 6.0000,  7.0000},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   { 8.0000,  9.0000}},
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {{10.0000, 10.9999},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {11.9999, 12.9999},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {13.9999, 14.9999},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {15.9999, 16.9999},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {17.9999, 18.9999}}});
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
@@ -1548,7 +1879,9 @@ TEST_F(ModulesTest, BatchNorm1d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm2dStateful) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BatchNorm2d bn(5);
 
   ASSERT_TRUE(bn->options.track_running_stats());
@@ -1575,7 +1908,9 @@ TEST_F(ModulesTest, BatchNorm2dStateful) {
   ASSERT_EQ(bn->bias.size(0), 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm2dStateless) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BatchNorm2d bn(BatchNorm2dOptions(5).track_running_stats(false).affine(false));
 
   ASSERT_FALSE(bn->running_mean.defined());
@@ -1585,31 +1920,53 @@ TEST_F(ModulesTest, BatchNorm2dStateless) {
   ASSERT_FALSE(bn->bias.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm2d) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BatchNorm2d bn(5);
   bn->eval();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::arange(2. * 5 * 2 * 2).view({2, 5, 2, 2}).requires_grad_();
   auto output = bn->forward(input);
   auto expected = torch::tensor({{{{ 0.0000,  1.0000},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 2.0000,  3.0000}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{ 4.0000,  5.0000},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 6.0000,  7.0000}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{ 8.0000,  9.0000},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {10.0000, 10.9999}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{11.9999, 12.9999},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {13.9999, 14.9999}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{15.9999, 16.9999},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {17.9999, 18.9999}}},
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {{{19.9999, 20.9999},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {21.9999, 22.9999}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{23.9999, 24.9999},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {25.9999, 26.9999}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{27.9999, 28.9999},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {29.9998, 30.9998}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{31.9998, 32.9998},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {33.9998, 34.9998}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{35.9998, 36.9998},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {37.9998, 38.9998}}}});
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
@@ -1618,7 +1975,9 @@ TEST_F(ModulesTest, BatchNorm2d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm3dStateful) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BatchNorm3d bn(5);
 
   ASSERT_TRUE(bn->options.track_running_stats());
@@ -1645,7 +2004,9 @@ TEST_F(ModulesTest, BatchNorm3dStateful) {
   ASSERT_EQ(bn->bias.size(0), 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm3dStateless) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BatchNorm3d bn(BatchNorm3dOptions(5).track_running_stats(false).affine(false));
 
   ASSERT_FALSE(bn->running_mean.defined());
@@ -1655,51 +2016,93 @@ TEST_F(ModulesTest, BatchNorm3dStateless) {
   ASSERT_FALSE(bn->bias.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BatchNorm3d) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   BatchNorm3d bn(5);
   bn->eval();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::arange(2. * 5 * 2 * 2 * 2).view({2, 5, 2, 2, 2}).requires_grad_();
   auto output = bn->forward(input);
   auto expected = torch::tensor({{{{{ 0.0000,  1.0000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 2.0000,  3.0000}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 4.0000,  5.0000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 6.0000,  7.0000}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{ 8.0000,  9.0000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {10.0000, 10.9999}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{11.9999, 12.9999},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {13.9999, 14.9999}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{15.9999, 16.9999},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {17.9999, 18.9999}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{19.9999, 20.9999},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {21.9999, 22.9999}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{23.9999, 24.9999},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {25.9999, 26.9999}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{27.9999, 28.9999},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {29.9998, 30.9998}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{31.9998, 32.9998},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {33.9998, 34.9998}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{35.9998, 36.9998},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {37.9998, 38.9998}}}},
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {{{{39.9998, 40.9998},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {41.9998, 42.9998}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{43.9998, 44.9998},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {45.9998, 46.9998}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{47.9998, 48.9998},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {49.9997, 50.9997}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{51.9997, 52.9997},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {53.9997, 54.9997}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{55.9997, 56.9997},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {57.9997, 58.9997}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{59.9997, 60.9997},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {61.9997, 62.9997}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{63.9997, 64.9997},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {65.9997, 66.9997}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{67.9997, 68.9997},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {69.9996, 70.9996}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{71.9996, 72.9996},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {73.9996, 74.9996}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{75.9996, 76.9996},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {77.9996, 78.9996}}}}});
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
@@ -1708,7 +2111,9 @@ TEST_F(ModulesTest, BatchNorm3d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm1dStateful) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   InstanceNorm1d instance_norm(InstanceNorm1dOptions(5).track_running_stats(true).affine(true));
 
   ASSERT_TRUE(instance_norm->options.track_running_stats());
@@ -1735,7 +2140,9 @@ TEST_F(ModulesTest, InstanceNorm1dStateful) {
   ASSERT_EQ(instance_norm->bias.size(0), 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm1dStateless) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   InstanceNorm1d instance_norm(InstanceNorm1dOptions(5).track_running_stats(false).affine(false));
 
   ASSERT_FALSE(instance_norm->running_mean.defined());
@@ -1745,10 +2152,13 @@ TEST_F(ModulesTest, InstanceNorm1dStateless) {
   ASSERT_FALSE(instance_norm->bias.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm1d) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   InstanceNorm1d instance_norm(5);
   instance_norm->eval();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::arange(2. * 5 * 2).view({2, 5, 2}).requires_grad_();
   auto output = instance_norm->forward(input);
   auto expected = torch::tensor({{{-1.0000, 1.0000},
@@ -1768,7 +2178,9 @@ TEST_F(ModulesTest, InstanceNorm1d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm2dStateful) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   InstanceNorm2d instance_norm(InstanceNorm2dOptions(5).track_running_stats(true).affine(true));
 
   ASSERT_TRUE(instance_norm->options.track_running_stats());
@@ -1795,7 +2207,9 @@ TEST_F(ModulesTest, InstanceNorm2dStateful) {
   ASSERT_EQ(instance_norm->bias.size(0), 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm2dStateless) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   InstanceNorm2d instance_norm(InstanceNorm2dOptions(5).track_running_stats(false).affine(false));
 
   ASSERT_FALSE(instance_norm->running_mean.defined());
@@ -1805,31 +2219,54 @@ TEST_F(ModulesTest, InstanceNorm2dStateless) {
   ASSERT_FALSE(instance_norm->bias.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm2d) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   InstanceNorm2d instance_norm(5);
   instance_norm->eval();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::arange(2. * 5 * 2 * 2).view({2, 5, 2, 2}).requires_grad_();
   auto output = instance_norm->forward(input);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{{{-1.3416, -0.4472},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 0.4472,  1.3416}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{-1.3416, -0.4472},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 0.4472,  1.3416}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{-1.3416, -0.4472},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 0.4472,  1.3416}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{-1.3416, -0.4472},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 0.4472,  1.3416}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{-1.3416, -0.4472},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 0.4472,  1.3416}}},
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {{{-1.3416, -0.4472},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 0.4472,  1.3416}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{-1.3416, -0.4472},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 0.4472,  1.3416}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{-1.3416, -0.4472},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 0.4472,  1.3416}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{-1.3416, -0.4472},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 0.4472,  1.3416}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{-1.3416, -0.4472},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    { 0.4472,  1.3416}}}});
   ASSERT_TRUE(output.allclose(expected, 1e-3));
   auto s = output.sum();
@@ -1838,7 +2275,9 @@ TEST_F(ModulesTest, InstanceNorm2d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm3dStateful) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   InstanceNorm3d instance_norm(InstanceNorm3dOptions(5).track_running_stats(true).affine(true));
 
   ASSERT_TRUE(instance_norm->options.track_running_stats());
@@ -1865,7 +2304,9 @@ TEST_F(ModulesTest, InstanceNorm3dStateful) {
   ASSERT_EQ(instance_norm->bias.size(0), 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm3dStateless) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   InstanceNorm3d instance_norm(InstanceNorm3dOptions(5).track_running_stats(false).affine(false));
 
   ASSERT_FALSE(instance_norm->running_mean.defined());
@@ -1875,51 +2316,94 @@ TEST_F(ModulesTest, InstanceNorm3dStateless) {
   ASSERT_FALSE(instance_norm->bias.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, InstanceNorm3d) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   InstanceNorm3d instance_norm(5);
   instance_norm->eval();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::arange(2. * 5 * 2 * 2 * 2).view({2, 5, 2, 2, 2}).requires_grad_();
   auto output = instance_norm->forward(input);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{{{{-1.5275, -1.0911},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.6547, -0.2182}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 0.2182,  0.6547},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 1.0911,  1.5275}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{-1.5275, -1.0911},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.6547, -0.2182}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 0.2182,  0.6547},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 1.0911,  1.5275}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{-1.5275, -1.0911},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.6547, -0.2182}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 0.2182,  0.6547},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 1.0911,  1.5275}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{-1.5275, -1.0911},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.6547, -0.2182}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 0.2182,  0.6547},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 1.0911,  1.5275}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{-1.5275, -1.0911},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.6547, -0.2182}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 0.2182,  0.6547},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 1.0911,  1.5275}}}},
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {{{{-1.5275, -1.0911},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.6547, -0.2182}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 0.2182,  0.6547},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 1.0911,  1.5275}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{-1.5275, -1.0911},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.6547, -0.2182}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 0.2182,  0.6547},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 1.0911,  1.5275}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{-1.5275, -1.0911},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.6547, -0.2182}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 0.2182,  0.6547},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 1.0911,  1.5275}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{-1.5275, -1.0911},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.6547, -0.2182}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 0.2182,  0.6547},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 1.0911,  1.5275}}},
+                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                   {{{-1.5275, -1.0911},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.6547, -0.2182}},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {{ 0.2182,  0.6547},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     { 1.0911,  1.5275}}}}});
   ASSERT_TRUE(output.allclose(expected, 1e-3));
   auto s = output.sum();
@@ -1928,10 +2412,13 @@ TEST_F(ModulesTest, InstanceNorm3d) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Linear_CUDA) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Linear model(5, 2);
   model->to(torch::kCUDA);
   auto x =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       torch::randn({10, 5}, torch::device(torch::kCUDA).requires_grad(true));
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -1945,10 +2432,13 @@ TEST_F(ModulesTest, Linear_CUDA) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Linear2_CUDA) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Linear model(5, 2);
   model->to(torch::kCUDA);
   model->to(torch::kCPU);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn({10, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -1962,9 +2452,12 @@ TEST_F(ModulesTest, Linear2_CUDA) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, L1Loss) {
   L1Loss loss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::randn({5,6}, torch::requires_grad());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target = torch::empty({5,6}).random_(2);
   auto output = loss->forward(torch::sigmoid(input), target);
   auto s = output.sum();
@@ -1974,9 +2467,12 @@ TEST_F(ModulesTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MSELoss) {
   MSELoss loss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::randn({5,6}, torch::requires_grad());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target = torch::empty({5,6}).random_(2);
   auto output = loss->forward(torch::sigmoid(input), target);
   auto s = output.sum();
@@ -1986,9 +2482,12 @@ TEST_F(ModulesTest, MSELoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BCELoss) {
   BCELoss loss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::randn({5,6}, torch::requires_grad());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target = torch::empty({5,6}).random_(2);
   auto output = loss->forward(torch::sigmoid(input), target);
   auto s = output.sum();
@@ -1998,9 +2497,12 @@ TEST_F(ModulesTest, BCELoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, KLDivLoss) {
   KLDivLoss loss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::randn({5,6}, torch::requires_grad());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target = torch::empty({5,6}).random_(2);
   auto output = loss->forward(torch::sigmoid(input), target);
   auto s = output.sum();
@@ -2010,11 +2512,15 @@ TEST_F(ModulesTest, KLDivLoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, HingeEmbeddingLoss) {
   HingeEmbeddingLoss loss(HingeEmbeddingLossOptions().margin(2));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::dtype(torch::kFloat).requires_grad(true));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target = torch::tensor({{2, 6, 4}, {1, 10, 0}}, torch::kFloat);
   auto output = loss->forward(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({10}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2023,12 +2529,16 @@ TEST_F(ModulesTest, HingeEmbeddingLoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiMarginLoss) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto weight = torch::tensor({0.3, 0.3, 0.4}, torch::kFloat);
   MultiMarginLoss loss(MultiMarginLossOptions().margin(2).weight(weight));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({2, 1, 0}, torch::kLong);
   auto output = loss->forward(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({0.305556}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2037,12 +2547,17 @@ TEST_F(ModulesTest, MultiMarginLoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CosineEmbeddingLoss) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   CosineEmbeddingLoss cos(CosineEmbeddingLossOptions().margin(0.5));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}}, torch::dtype(torch::kFloat).requires_grad(true));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input2 = torch::tensor({{2, 3, 5}, {9, 12, 0}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({1, -1});
   auto output = cos(input1, input2, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({0.1004}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2052,11 +2567,15 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
   ASSERT_EQ(input2.sizes(), input2.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SmoothL1LossDefaultOptions) {
   SmoothL1Loss loss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output = loss(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor(0.0233335, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2065,11 +2584,15 @@ TEST_F(ModulesTest, SmoothL1LossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, HuberLossDefaultOptions) {
   HuberLoss loss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output = loss(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor(0.0233335, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2078,11 +2601,14 @@ TEST_F(ModulesTest, HuberLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
   MultiLabelMarginLoss loss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({0.8500}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2091,11 +2617,15 @@ TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SmoothL1LossNoReduction) {
   SmoothL1Loss loss(/*reduction=*/torch::kNone);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output = loss(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2104,11 +2634,15 @@ TEST_F(ModulesTest, SmoothL1LossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, HuberLossNoReduction) {
   HuberLoss loss(/*reduction=*/torch::kNone);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output = loss(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2117,11 +2651,14 @@ TEST_F(ModulesTest, HuberLossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
   MultiLabelMarginLoss loss(torch::kNone);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({0.8500}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2130,12 +2667,17 @@ TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SmoothL1LossBeta) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto options = SmoothL1LossOptions().beta(0.2);
   SmoothL1Loss loss(options);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output = loss(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor(0.108333, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2144,12 +2686,17 @@ TEST_F(ModulesTest, SmoothL1LossBeta) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, HuberLossDelta) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto options = HuberLossOptions().delta(0.2);
   HuberLoss loss(options);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output = loss(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor(0.0216666, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2158,9 +2705,12 @@ TEST_F(ModulesTest, HuberLossDelta) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, TripletMarginLoss) {
   TripletMarginLoss loss(TripletMarginLossOptions().margin(1.0));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto anchor = torch::tensor({{3., 3.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto positive = torch::tensor({{2., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto negative = torch::tensor({{0., 0.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = loss->forward(anchor, positive, negative);
@@ -2172,6 +2722,7 @@ TEST_F(ModulesTest, TripletMarginLoss) {
   ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, TripletMarginWithDistanceLossDefaultParity) {
   // Check that if we use torch::pairwise_distance with the default
   // TripletMarginLoss options as our distance function, the outputs
@@ -2179,6 +2730,7 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossDefaultParity) {
 
   std::vector<TripletMarginWithDistanceLossOptions::reduction_t>
       reductions = {torch::kSum, torch::kMean, torch::kNone};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> margins = {0.5, 1.0, 1.5};
   std::vector<bool> swaps = {true, false};
 
@@ -2186,10 +2738,13 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossDefaultParity) {
     for (auto& margin : margins) {
       for (const auto swap : swaps) {
         auto anchor =
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
         auto positive =
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
         auto negative =
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
 
         auto basicOptions = TripletMarginLossOptions()
@@ -2224,6 +2779,7 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossDefaultParity) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, TripletMarginWithDistanceLossFunctionalParity) {
   // Check for parity between F::triplet_margin_with_distance_loss and
   // TripletMarginWithDistanceLoss.
@@ -2239,6 +2795,7 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossFunctionalParity) {
 
   std::vector<TripletMarginWithDistanceLossOptions::reduction_t>
       reductions = {torch::kSum, torch::kMean, torch::kNone};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> margins = {0.5, 1.0, 1.5};
   std::vector<bool> swaps = {true, false};
 
@@ -2260,10 +2817,13 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossFunctionalParity) {
                   .swap(swap);
 
           auto anchor = torch::randn(
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
           auto positive = torch::randn(
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
           auto negative = torch::randn(
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
 
           TripletMarginWithDistanceLoss distanceLoss(moduleOptions);
@@ -2281,14 +2841,19 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossFunctionalParity) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, NLLLoss) {
   NLLLoss loss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({{-0.1315, -3.1315, -2.5315},
+                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                               {-3.7038, -0.1038, -2.6038},
+                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                               {-2.3422, -1.3422, -0.4422}},
                              torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({1, 0, 2}, torch::kLong);
   auto output = loss->forward(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor(2.4258, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2299,11 +2864,14 @@ TEST_F(ModulesTest, NLLLoss) {
       ->forward(input, target).allclose(expected, 1e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CrossEntropyLoss) {
   CrossEntropyLoss loss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0, 1}, torch::kLong);
   auto output = loss->forward(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor(0.6931, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2315,11 +2883,15 @@ TEST_F(ModulesTest, CrossEntropyLoss) {
       ->forward(input, target).allclose(expected, 1e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = cos->forward(input1, input2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({0.8078, 0.8721}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2328,11 +2900,14 @@ TEST_F(ModulesTest, CosineSimilarity) {
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SoftMarginLossDefaultOptions) {
   SoftMarginLoss loss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({2., 4., 1., 3.}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output = loss->forward(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({1.3767317}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2341,11 +2916,14 @@ TEST_F(ModulesTest, SoftMarginLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
   MultiLabelSoftMarginLoss loss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto output = loss->forward(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({0.7608436}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2354,11 +2932,14 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SoftMarginLossNoReduction) {
   SoftMarginLoss loss(torch::kNone);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({2., 4., 1., 3.}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output = loss->forward(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({2.1269281, 0.01814993, 0.3132617, 3.0485873}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2367,13 +2948,17 @@ TEST_F(ModulesTest, SoftMarginLossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
   auto options = MultiLabelSoftMarginLossOptions().reduction(torch::kNone).weight(weight);
   MultiLabelSoftMarginLoss loss = MultiLabelSoftMarginLoss(options);
   auto output = loss->forward(input, target);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2382,11 +2967,15 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PairwiseDistance) {
   PairwiseDistance dist(PairwiseDistanceOptions().p(1));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = dist->forward(input1, input2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({6, 6}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -2395,11 +2984,13 @@ TEST_F(ModulesTest, PairwiseDistance) {
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ELU) {
   const auto size = 3;
   for (const auto alpha : {0.0, 0.42, 1.0, 4.2, 42.42}) {
     for (const auto inplace : {false, true}) {
       ELU model {ELUOptions().alpha(alpha).inplace(inplace)};
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       auto x = torch::linspace(-10.0, 10.0, size * size * size);
       x.resize_({size, size, size});
       if (!inplace) {
@@ -2425,9 +3016,11 @@ TEST_F(ModulesTest, ELU) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, SELU) {
   for (const auto inplace : {false, true}) {
     SELU model(inplace);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::randn({5, 5});
     if (!inplace) {
       input.requires_grad_(true);
@@ -2452,10 +3045,12 @@ TEST_F(ModulesTest, SELU) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Hardshrink) {
   const auto size = 3;
   for (const auto lambda : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
     Hardshrink model {HardshrinkOptions().lambda(lambda)};
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::linspace(-10.0, 10.0, size * size * size);
     x.resize_({size, size, size}).set_requires_grad(true);
     auto y = model(x);
@@ -2470,12 +3065,14 @@ TEST_F(ModulesTest, Hardshrink) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Hardtanh) {
   const auto size = 3;
   for (const auto min_val : {-4.2, -1.0, -0.42, 0.0}) {
     for (const auto max_val : {0.42, 1.0, 4.2}) {
       for (const auto inplace : {false, true}) {
         Hardtanh model {HardtanhOptions().min_val(min_val).max_val(max_val).inplace(inplace)};
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto x = torch::linspace(-10.0, 10.0, size * size * size);
         x.resize_({size, size, size});
         if (!inplace) {
@@ -2502,24 +3099,32 @@ TEST_F(ModulesTest, Hardtanh) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, HardtanhMinValGEMaxVal) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ASSERT_THROWS_WITH(Hardtanh{HardtanhOptions().min_val(0.42).max_val(0.42)},
                      "max_val must be greater than min_val");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ASSERT_THROWS_WITH(Hardtanh{HardtanhOptions().min_val(0.42).max_val(-0.42)},
                      "max_val must be greater than min_val");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Hardtanh ht {HardtanhOptions().min_val(-0.42).max_val(0.42)};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ht->options.min_val(0.42);
   ASSERT_THROWS_WITH(ht->reset(), "max_val must be greater than min_val");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ht->options.max_val(-0.42);
   ASSERT_THROWS_WITH(ht->reset(), "max_val must be greater than min_val");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LeakyReLU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
     for (const auto negative_slope : {0.0, 0.42, 1.0}) {
       LeakyReLU model {LeakyReLUOptions().negative_slope(negative_slope).inplace(inplace)};
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       auto x = torch::linspace(-10.0, 10.0, size * size * size);
       x.resize_({size, size, size});
       if (!inplace) {
@@ -2543,9 +3148,11 @@ TEST_F(ModulesTest, LeakyReLU) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LogSigmoid) {
   const auto size = 3;
   LogSigmoid model;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::linspace(-10.0, 10.0, size * size * size);
   x.resize_({size, size, size}).set_requires_grad(true);
   auto y = model(x);
@@ -2560,8 +3167,10 @@ TEST_F(ModulesTest, LogSigmoid) {
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softmax) {
   Softmax m(/*dim=*/1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
   auto output = m(input);
   auto sum = torch::sum(torch::exp(input), 1);
@@ -2572,8 +3181,10 @@ TEST_F(ModulesTest, Softmax) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softmin) {
   Softmin m(/*dim=*/1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
   auto output = m(input);
   auto sum = torch::sum(torch::exp(-input), 1);
@@ -2584,8 +3195,10 @@ TEST_F(ModulesTest, Softmin) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LogSoftmax) {
   LogSoftmax m(/*dim=*/1);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
   auto output = m(input);
   auto sum = torch::sum(torch::exp(input), 1);
@@ -2596,17 +3209,22 @@ TEST_F(ModulesTest, LogSoftmax) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
   {
     // log_probs actually returns log_proba
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::randn({4, 8});
     auto logprob_out = asfm->log_prob(x);
     ASSERT_TRUE(torch::allclose(torch::exp(logprob_out).data().sum(1), torch::ones(4)));
   }
   {
     // test predict
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 10, {4, 8}).div_value(2.).head_bias(true));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::randn({64, 8});
     auto logprob_out = asfm->log_prob(x);
     auto predict_out = asfm->predict(x);
@@ -2614,15 +3232,20 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
   }
   {
     // cluster sizes
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(2.));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::arange(100, 132, torch::kFloat).reshape({2, 16});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto y = torch::tensor({0, 17}, torch::kLong);
     auto asm_out = asfm(x, y);
     ASSERT_EQ(asm_out.output.sizes(), std::vector<int64_t>({2}));
   }
   {
     // forward returns the same thing as log_probs
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::randn({4, 8});
     auto logprob_out = asfm->log_prob(x);
     NLLLoss nll_loss;
@@ -2640,8 +3263,10 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softmax2d) {
   Softmax2d m;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::arange(24, torch::kFloat).reshape({1, 2, 3, 4});
   auto output = m(input);
   auto sum = torch::sum(torch::exp(input), 1);
@@ -2658,6 +3283,7 @@ TEST_F(ModulesTest, Softmax2d) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PReLU) {
   const auto num_parameters = 42;
   const auto init = 0.42;
@@ -2681,10 +3307,12 @@ TEST_F(ModulesTest, PReLU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReLU) {
   for (const auto inplace : {false, true}) {
     const auto size = 3;
     ReLU model(inplace);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::linspace(-10.0, 10.0, size * size * size);
     x.resize_({size, size, size});
     if (!inplace) {
@@ -2707,10 +3335,12 @@ TEST_F(ModulesTest, ReLU) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReLU6) {
   for (const auto inplace : {false, true}) {
     const auto size = 3;
     ReLU6 model(inplace);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::linspace(-10.0, 10.0, size * size * size);
     x.resize_({size, size, size});
     if (!inplace) {
@@ -2723,6 +3353,7 @@ TEST_F(ModulesTest, ReLU6) {
     ASSERT_EQ(s.ndimension(), 0);
     ASSERT_EQ(y.ndimension(), 3);
     ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto y_exp = (x_orig < 0) * 0 + ((x_orig >= 0) * (x_orig <= 6)) * x_orig + (x_orig > 6) * 6;
     ASSERT_TRUE(torch::allclose(y, y_exp));
     if (inplace) {
@@ -2733,12 +3364,14 @@ TEST_F(ModulesTest, ReLU6) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, RReLU) {
   const auto size = 3;
   for (const auto lower : {0.01, 0.1, 0.2}) {
     for (const auto upper : {0.3, 0.4, 0.5}) {
       for (const auto inplace : {false, true}) {
         RReLU model {RReLUOptions().lower(lower).upper(upper).inplace(inplace)};
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto x = torch::linspace(-10.0, 10.0, size * size * size);
         x.resize_({size, size, size});
         if (!inplace) {
@@ -2764,11 +3397,13 @@ TEST_F(ModulesTest, RReLU) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CELU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
     for (const auto alpha : {0.42, 1.0, 4.2, 42.42}) {
       CELU model {CELUOptions().alpha(alpha).inplace(inplace)};
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       auto x = torch::linspace(-10.0, 10.0, size * size * size);
       x.resize_({size, size, size});
       if (!inplace) {
@@ -2793,6 +3428,7 @@ TEST_F(ModulesTest, CELU) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, GLU) {
   int64_t dim = 1;
   GLU model(dim);
@@ -2812,6 +3448,7 @@ TEST_F(ModulesTest, GLU) {
   ASSERT_TRUE(model_default_options->forward(input).allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, GELU) {
   GELU model;
   const auto x = torch::linspace(-3.0, 3.0, 100);
@@ -2820,8 +3457,10 @@ TEST_F(ModulesTest, GELU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Sigmoid) {
   Sigmoid model;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn(100) * 10;
   auto y_exp = 1 / (1 + torch::exp(-x));
   auto y = model(x);
@@ -2829,17 +3468,25 @@ TEST_F(ModulesTest, Sigmoid) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PixelShuffle) {
   PixelShuffle module(/*upscale_factor=*/2);
   auto x = torch::tensor(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{{-17, 19}, {-1, 2}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{7, 14}, {-3, 1}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{0, -2}, {-12, 14}},
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{-15, 0}, {-3, 9}}}}, torch::kFloat);
   auto y_exp = torch::tensor(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     {{{{-17, 7, 19, 14},
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {0, -15, -2, 0},
        {-1, -3, 2, 1},
+       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        {-12, -3, 14, 9}}}}, torch::kFloat);
   auto y = module(x);
 
@@ -2848,15 +3495,21 @@ TEST_F(ModulesTest, PixelShuffle) {
   ASSERT_TRUE(y.allclose(y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PixelUnshuffle) {
   PixelUnshuffle module(/*downscale_factor=*/2);
   auto x = torch::tensor(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{{{-17, 7, 19, 14}, {0, -15, -2, 0}, {-1, -3, 2, 1}, {-12, -3, 14, 9}}}},
       torch::kFloat);
   auto y_exp = torch::tensor(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{{{-17, 19}, {-1, 2}},
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{7, 14}, {-3, 1}},
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{0, -2}, {-12, 14}},
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         {{-15, 0}, {-3, 9}}}},
       torch::kFloat);
   auto y = module(x);
@@ -2866,11 +3519,13 @@ TEST_F(ModulesTest, PixelUnshuffle) {
   ASSERT_TRUE(y.allclose(y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softplus) {
   const auto size = 3;
   for (const auto beta : {0.5, 1.0, 2.0}) {
     for (const auto threshold : {1.0, 3.0, 5.0}) {
       Softplus model {SoftplusOptions().beta(beta).threshold(threshold)};
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       auto x = torch::linspace(-3.0, 3.0, 61);
       x.resize_({size, size, size});
       auto y_exp =
@@ -2885,10 +3540,12 @@ TEST_F(ModulesTest, Softplus) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softshrink) {
   const auto size = 3;
   for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
     Softshrink model {/*lambda=*/lambda};
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto x = torch::linspace(-10.0, 10.0, size * size * size);
     x.resize_({size, size, size}).set_requires_grad(true);
     auto y = model(x);
@@ -2904,8 +3561,10 @@ TEST_F(ModulesTest, Softshrink) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Softsign) {
   Softsign model;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn(100) * 10;
   auto y_exp = x / (1 + x.abs());
   auto y = model(x);
@@ -2913,8 +3572,10 @@ TEST_F(ModulesTest, Softsign) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Tanh) {
   Tanh model;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn(100) * 10;
   auto y_exp = (x.exp() - (-x).exp()) / (x.exp() + (-x).exp());
   auto y = model(x);
@@ -2922,8 +3583,10 @@ TEST_F(ModulesTest, Tanh) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Tanhshrink) {
   Tanhshrink model;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = torch::randn(100) * 10;
   auto y_exp = x - x.tanh();
   auto y = model(x);
@@ -2931,12 +3594,14 @@ TEST_F(ModulesTest, Tanhshrink) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Threshold) {
   const auto size = 3;
   for (const auto threshold : {0.5, 1.0, 2.0}) {
     for (const auto value : {0.5, 1.0, 2.0}) {
       for (const auto inplace : {false, true}) {
         Threshold model {ThresholdOptions(threshold, value).inplace(inplace)};
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto x = torch::linspace(-3.0, 3.0, 61);
         x.resize_({size, size, size});
         auto x_orig = x.clone();
@@ -2954,6 +3619,7 @@ TEST_F(ModulesTest, Threshold) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Upsampling1D) {
   {
     Upsample model(UpsampleOptions()
@@ -2995,15 +3661,18 @@ TEST_F(ModulesTest, Upsampling1D) {
                        .scale_factor(std::vector<double>({3}))
                        .mode(torch::kLinear)
                        .align_corners(false));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::zeros({1, 1, 9});
     input.narrow(2, 0, 4).normal_();
     auto output = model->forward(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = model->forward(input.narrow(2, 0, 5));
 
     ASSERT_TRUE(torch::allclose(output.narrow(2, 0, 15), expected));
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Upsampling2D) {
   {
     Upsample model(UpsampleOptions()
@@ -3062,6 +3731,7 @@ TEST_F(ModulesTest, Upsampling2D) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Upsampling3D) {
   {
     Upsample model(UpsampleOptions()
@@ -3101,6 +3771,7 @@ TEST_F(ModulesTest, Upsampling3D) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CTCLoss) {
   CTCLoss loss {CTCLossOptions().reduction(torch::kNone)};
   const auto target_lengths = torch::tensor({0, 0, 0});
@@ -3116,6 +3787,7 @@ TEST_F(ModulesTest, CTCLoss) {
     -log_probs.sum(0).slice(1, 0, 1).view_as(output), output));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PoissonNLLLoss) {
   const auto input = torch::tensor({0.5, 1.5, 2.5});
   const auto target = torch::tensor({1., 2., 3.});
@@ -3143,6 +3815,7 @@ TEST_F(ModulesTest, PoissonNLLLoss) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MarginRankingLoss) {
   {
     MarginRankingLoss loss;
@@ -3155,6 +3828,7 @@ TEST_F(ModulesTest, MarginRankingLoss) {
     ));
   }
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     MarginRankingLoss loss {MarginRankingLossOptions().margin(0.5).reduction(torch::kSum)};
     const auto input1 = torch::randn(15) * 10;
     const auto input2 = torch::randn(15) * 10;
@@ -3166,6 +3840,7 @@ TEST_F(ModulesTest, MarginRankingLoss) {
     ));
   }
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     MarginRankingLoss loss {MarginRankingLossOptions().margin(0.5).reduction(torch::kMean)};
     const auto input1 = torch::randn(15) * 10;
     const auto input2 = torch::randn(15) * 10;
@@ -3178,6 +3853,7 @@ TEST_F(ModulesTest, MarginRankingLoss) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, BCEWithLogitsLoss) {
   { // test BCE with logits raises if target and input are different size
     {
@@ -3200,7 +3876,9 @@ TEST_F(ModulesTest, BCEWithLogitsLoss) {
   { // test BCE with logits gives same result as sigmoid and bce loss
     auto sigmoid = Sigmoid();
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto target = torch::rand({64, 4});
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto output = torch::rand({64, 4}) - 0.5;
 
     ASSERT_TRUE(torch::allclose(
@@ -3219,6 +3897,7 @@ TEST_F(ModulesTest, BCEWithLogitsLoss) {
     ));
 
     target = torch::zeros({4, 1}, torch::kFloat);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     output = torch::empty({4, 1}, torch::kFloat).fill_(-100);
 
     ASSERT_TRUE(torch::allclose(
@@ -3262,6 +3941,7 @@ TEST_F(ModulesTest, BCEWithLogitsLoss) {
       BCEWithLogitsLossOptions().weight(weight)
     )(output, target);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     weight = weight.expand({16, 4}).contiguous();
     auto out2 = BCEWithLogitsLoss(
       BCEWithLogitsLossOptions().weight(weight)
@@ -3269,11 +3949,13 @@ TEST_F(ModulesTest, BCEWithLogitsLoss) {
 
     ASSERT_TRUE(torch::allclose(out1, out2));
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     weight = torch::rand({16, 1});
     out1 = BCEWithLogitsLoss(
       BCEWithLogitsLossOptions().weight(weight)
     )(output, target);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     weight = weight.expand({16, 4}).contiguous();
     out2 = BCEWithLogitsLoss(
       BCEWithLogitsLossOptions().weight(weight)
@@ -3322,6 +4004,7 @@ TEST_F(ModulesTest, BCEWithLogitsLoss) {
       BCEWithLogitsLossOptions().pos_weight(pos_weight).reduction(torch::kSum)
     )(output, target).backward();
     const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     const auto grad = output.grad();
     ASSERT_TRUE(torch::allclose(grad, expected_grad));
   }
@@ -3400,6 +4083,7 @@ namespace detail {
     }
     auto reference = _softmax(QKT);
     auto ref_attn_weight = reference;
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     ref_attn_weight = torch::sum(ref_attn_weight, /*axis=*/1) / b2;
     reference = _batchmatmul(reference, V);
     return std::tie(reference, ref_attn_weight);
@@ -3418,7 +4102,9 @@ namespace detail {
   }
 
   torch::Tensor _fc(torch::Tensor X, torch::Tensor X_weight, torch::Tensor X_bias) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto X_fc_b = X_bias;
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto X_fc_w = X_weight;
     return torch::matmul(X, torch::t(X_fc_w)) + X_fc_b;
   }
@@ -3428,19 +4114,24 @@ namespace detail {
     bool saved_kv = false, bool same_embed_dim = false) {
     std::random_device device;
     std::mt19937 generator(device());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::uniform_int_distribution<int> d_2_10(2, 10);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::uniform_int_distribution<int> d_3_10(3, 10);
     bool registration_checked = false;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int i = 0; i < 100; i++) {
       const auto batch_sz = d_2_10(generator);
       const auto seq_len = d_2_10(generator);
       const auto d_head = d_3_10(generator);
       const auto nheads = d_3_10(generator);
       const auto d_model = d_head * nheads;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int kv_dim;
       if (same_embed_dim) {
         kv_dim = d_model;
       } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         std::uniform_int_distribution<int> d(5, 20);
         kv_dim = d(generator);
         while (kv_dim == d_model) {
@@ -3467,6 +4158,7 @@ namespace detail {
       }
       const auto decoder_state = torch::rand({batch_sz, d_model});
       const torch::Tensor K = torch::rand(dims);
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       const torch::Tensor V = K;
       const torch::Tensor Q = decoder_state.clone().resize_({batch_sz, 1, d_model});
       auto attn_mask = torch::randint(0, 2, {1, seq_len});
@@ -3474,6 +4166,7 @@ namespace detail {
       attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, -std::numeric_limits<double>::infinity());
       attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, double(0.0));
 
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       const torch::Tensor decoder_state_tensor = decoder_state;
       const torch::Tensor source_hid_tensor = K.transpose(0, 1);
 
@@ -3516,7 +4209,9 @@ namespace detail {
       }
 
       torch::Tensor _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1);
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       torch::Tensor _V = source_hid_tensor;
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       torch::Tensor _K = source_hid_tensor;
 
       torch::Tensor result;
@@ -3642,6 +4337,7 @@ namespace detail {
       );
       const auto combined_attn_heads = _combine_heads_ref(attn_heads, {batch_sz, 1}, nheads, d_head);
       auto reference = _fc(combined_attn_heads, multihead_attn_module->out_proj->weight, multihead_attn_module->out_proj->bias);
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       reference = torch::squeeze(reference, /*axis=*/1);
 
       // result = reference
@@ -3656,6 +4352,7 @@ namespace detail {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, MultiheadAttention) {
   using namespace ::detail;
 
@@ -3738,10 +4435,12 @@ TEST_F(ModulesTest, MultiheadAttention) {
   );
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintFlatten) {
   ASSERT_EQ(c10::str(Flatten()),
     "torch::nn::Flatten(start_dim=1, end_dim=-1)");
@@ -3749,6 +4448,7 @@ TEST_F(ModulesTest, PrettyPrintFlatten) {
     "torch::nn::Flatten(start_dim=2, end_dim=4)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintUnflatten) {
   ASSERT_EQ(
       c10::str(Unflatten(UnflattenOptions(0, {2, 2}))),
@@ -3761,163 +4461,248 @@ TEST_F(ModulesTest, PrettyPrintUnflatten) {
       "torch::nn::Unflatten(dim=\"B\", unflattened_size={{\"B1\", 2}, {\"B2\", 2}})");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReflectionPad1d) {
   {
     ReflectionPad1d m(ReflectionPad1dOptions(2));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{2., 1., 0., 1., 2., 3., 2., 1.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {6., 5., 4., 5., 6., 7., 6., 5.}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
   {
     ReflectionPad1d m(ReflectionPad1dOptions({3, 1}));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{3., 2., 1., 0., 1., 2., 3., 2.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {7., 6., 5., 4., 5., 6., 7., 6.}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReflectionPad2d) {
   {
     ReflectionPad2d m(ReflectionPad2dOptions(2));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{{8., 7., 6., 7., 8., 7., 6.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {5., 4., 3., 4., 5., 4., 3.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {2., 1., 0., 1., 2., 1., 0.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {5., 4., 3., 4., 5., 4., 3.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {8., 7., 6., 7., 8., 7., 6.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {5., 4., 3., 4., 5., 4., 3.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {2., 1., 0., 1., 2., 1., 0.}}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
   {
     ReflectionPad2d m(ReflectionPad2dOptions({1, 1, 2, 0}));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{{7., 6., 7., 8., 7.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {4., 3., 4., 5., 4.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {1., 0., 1., 2., 1.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {4., 3., 4., 5., 4.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {7., 6., 7., 8., 7.}}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReplicationPad1d) {
   {
     ReplicationPad1d m(ReplicationPad1dOptions(2));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{0., 0., 0., 1., 2., 3., 3., 3.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {4., 4., 4., 5., 6., 7., 7., 7.}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
   {
     ReplicationPad1d m(ReplicationPad1dOptions({3, 1}));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{0., 0., 0., 0., 1., 2., 3., 3.},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {4., 4., 4., 4., 5., 6., 7., 7.}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReplicationPad2d) {
   {
     ReplicationPad2d m(ReplicationPad2dOptions(2));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{{0., 0., 0., 1., 2., 2., 2.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {0., 0., 0., 1., 2., 2., 2.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {0., 0., 0., 1., 2., 2., 2.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {3., 3., 3., 4., 5., 5., 5.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {6., 6., 6., 7., 8., 8., 8.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {6., 6., 6., 7., 8., 8., 8.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {6., 6., 6., 7., 8., 8., 8.}}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
   {
     ReplicationPad2d m(ReplicationPad2dOptions({1, 1, 2, 0}));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{{0., 0., 1., 2., 2.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {0., 0., 1., 2., 2.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {0., 0., 1., 2., 2.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {3., 3., 4., 5., 5.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {6., 6., 7., 8., 8.}}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReplicationPad3d) {
   {
     ReplicationPad3d m(ReplicationPad3dOptions(1));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
     auto output = m(input);
     auto expected = torch::tensor({{{{{0., 0., 1., 1.},
                                       {0., 0., 1., 1.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {2., 2., 3., 3.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {2., 2., 3., 3.}},
                                      {{0., 0., 1., 1.},
                                       {0., 0., 1., 1.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {2., 2., 3., 3.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {2., 2., 3., 3.}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{4., 4., 5., 5.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {4., 4., 5., 5.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7.}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{4., 4., 5., 5.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {4., 4., 5., 5.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7.}}}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
   {
     ReplicationPad3d m(ReplicationPad3dOptions({1, 2, 1, 2, 1, 2}));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
     auto output = m(input);
     auto expected = torch::tensor({{{{{0., 0., 1., 1., 1.},
                                       {0., 0., 1., 1., 1.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {2., 2., 3., 3., 3.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {2., 2., 3., 3., 3.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {2., 2., 3., 3., 3.}},
                                      {{0., 0., 1., 1., 1.},
                                       {0., 0., 1., 1., 1.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {2., 2., 3., 3., 3.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {2., 2., 3., 3., 3.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {2., 2., 3., 3., 3.}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{4., 4., 5., 5., 5.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {4., 4., 5., 5., 5.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7., 7.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7., 7.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7., 7.}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{4., 4., 5., 5., 5.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {4., 4., 5., 5., 5.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7., 7.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7., 7.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7., 7.}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{4., 4., 5., 5., 5.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {4., 4., 5., 5., 5.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7., 7.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7., 7.},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {6., 6., 7., 7., 7.}}}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ZeroPad2d) {
   {
     ZeroPad2d m(ZeroPad2dOptions(2));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
     auto output = m(input);
     auto expected = torch::tensor({{{{0., 0., 0., 0., 0., 0., 0.},
                                      {0., 0., 0., 0., 0., 0., 0.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {0., 0., 0., 1., 2., 0., 0.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {0., 0., 3., 4., 5., 0., 0.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {0., 0., 6., 7., 8., 0., 0.},
                                      {0., 0., 0., 0., 0., 0., 0.},
                                      {0., 0., 0., 0., 0., 0., 0.}}}}, torch::kFloat);
@@ -3925,126 +4710,207 @@ TEST_F(ModulesTest, ZeroPad2d) {
   }
   {
     ZeroPad2d m(ZeroPad2dOptions({1, 1, 2, 0}));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
     auto output = m(input);
     auto expected = torch::tensor({{{{0., 0., 0., 0., 0.},
                                      {0., 0., 0., 0., 0.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {0., 0., 1., 2., 0.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {0., 3., 4., 5., 0.},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {0., 6., 7., 8., 0.}}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConstantPad1d) {
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ConstantPad1d m(ConstantPad1dOptions(2, 3.5));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{3.5000, 3.5000, 0.0000, 1.0000, 2.0000, 3.0000, 3.5000, 3.5000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {3.5000, 3.5000, 4.0000, 5.0000, 6.0000, 7.0000, 3.5000, 3.5000}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ConstantPad1d m(ConstantPad1dOptions({3, 1}, 3.5));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(6, torch::kFloat).reshape({1, 2, 3});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{3.5000, 3.5000, 3.5000, 0.0000, 1.0000, 2.0000, 3.5000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {3.5000, 3.5000, 3.5000, 3.0000, 4.0000, 5.0000, 3.5000}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConstantPad2d) {
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ConstantPad2d m(ConstantPad2dOptions(2, 3.5));
     auto input = torch::arange(4, torch::kFloat).reshape({1, 2, 2});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{3.5000, 3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {3.5000, 3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {3.5000, 3.5000, 0.0000, 1.0000, 3.5000, 3.5000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {3.5000, 3.5000, 2.0000, 3.0000, 3.5000, 3.5000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {3.5000, 3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {3.5000, 3.5000, 3.5000, 3.5000, 3.5000, 3.5000}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ConstantPad2d m(ConstantPad2dOptions({3, 0, 2, 1}, 3.5));
     auto input = torch::arange(4, torch::kFloat).reshape({1, 2, 2});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {3.5000, 3.5000, 3.5000, 0.0000, 1.0000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {3.5000, 3.5000, 3.5000, 2.0000, 3.0000},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ConstantPad3d) {
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ConstantPad3d m(ConstantPad3dOptions(1, 3.5));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{{{3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 0.0000, 1.0000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 2.0000, 3.0000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 4.0000, 5.0000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 6.0000, 7.0000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000}}}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ConstantPad3d m(ConstantPad3dOptions({1, 2, 1, 2, 1, 2}, 3.5));
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
     auto output = m(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto expected = torch::tensor({{{{{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 0.0000, 1.0000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 2.0000, 3.0000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 4.0000, 5.0000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 6.0000, 7.0000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}},
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                      {{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}}}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, CrossMapLRN2d) {
   /// size 3, default options
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto input = torch::arange(9, torch::kFloat32).view({1, 1, 3, 3}).requires_grad_(true);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{{{0.00000000, 0.99997497, 1.99980010},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {2.99932500, 3.99840070, 4.99687700},
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                    {5.99460600, 6.99143740, 7.98722360}}}}, torch::kFloat32);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto grad_expected = torch::tensor({{{{1.00000000, 0.99992496, 0.99970007},
+                                        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                         {0.99932520, 0.99880093, 0.99812720},
+                                        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                         {0.99730474, 0.99633380, 0.99521490}}}}, torch::kFloat32);
   auto crossmaplrn2d = CrossMapLRN2d(3);
   auto output = crossmaplrn2d(input);
@@ -4054,56 +4920,80 @@ TEST_F(ModulesTest, CrossMapLRN2d) {
   ASSERT_TRUE(output.allclose(expected));
 
   /// size change
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(4).alpha(1e-4).beta(0.75).k(1));
   output = crossmaplrn2d(input);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   expected = torch::tensor({{{{0.00000000, 0.99998120, 1.99985000},
+                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                               {2.99949400, 3.99880050, 4.99765800},
+                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                               {5.99595300, 6.99357600, 7.99041300}}}}, torch::kFloat32);
   ASSERT_TRUE(output.allclose(expected));
 
   /// alpha change
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-3).beta(0.75).k(1));
   output = crossmaplrn2d(input);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   expected = torch::tensor({{{{0.00000000, 0.99975010, 1.99800230},
+                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                               {2.99326750, 3.98407440, 4.96897600},
+                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                               {5.94656100, 6.91545720, 7.87434340}}}}, torch::kFloat32);
   ASSERT_TRUE(output.allclose(expected));
 
   /// beta change
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-4).beta(0.95).k(1));
   output = crossmaplrn2d(input);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   expected = torch::tensor({{{{0.00000000, 0.99996830, 1.99974680},
+                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                               {2.99914500, 3.99797440, 4.99604460},
+                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                               {5.99316840, 6.98915600, 7.98382000}}}}, torch::kFloat32);
   ASSERT_TRUE(output.allclose(expected));
 
   /// k change
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-4).beta(0.75).k(2));
   output = crossmaplrn2d(input);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   expected = torch::tensor({{{{0.00000000, 0.59459610, 1.18914770},
+                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                               {1.78361000, 2.37793870, 2.97208900},
+                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                               {3.56601700, 4.15967700, 4.75302650}}}}, torch::kFloat32);
   ASSERT_TRUE(output.allclose(expected));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, RNNCell) {
   torch::manual_seed(0);
   auto rnn = RNNCell(1, 2);
   auto input = torch::randn({3, 1});
   auto hx = torch::randn({3, 2});
   auto output = rnn(input, hx);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{-0.5078,  0.4380},
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {-0.7215,  0.2969},
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {-0.1304,  0.0653}});
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
 
   output = rnn(input);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   expected = torch::tensor({{-0.0775,  0.6688},
+                            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                             {-0.0734,  0.4759},
+                            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                             {-0.0725,  0.4225}});
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, LSTMCell) {
   torch::manual_seed(0);
   auto rnn = LSTMCell(1, 2);
@@ -4113,11 +5003,17 @@ TEST_F(ModulesTest, LSTMCell) {
   auto output = rnn(input, std::make_tuple(hx, cx));
   auto output_hx = std::get<0>(output);
   auto output_cx = std::get<1>(output);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected_hx = torch::tensor({{-0.2462,  0.0810},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.2206,  0.1867},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.0146,  0.0429}});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected_cx = torch::tensor({{-0.4480,  0.1071},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.6245,  0.2687},
+                                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                     {-0.0322,  0.0518}});
   ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
   ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
@@ -4125,39 +5021,54 @@ TEST_F(ModulesTest, LSTMCell) {
   output = rnn(input);
   output_hx = std::get<0>(output);
   output_cx = std::get<1>(output);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   expected_hx = torch::tensor({{-0.1331,  0.1634},
+                               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                {-0.1494,  0.2869},
+                               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                {-0.1428,  0.2263}});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   expected_cx = torch::tensor({{-0.2679,  0.2180},
+                               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                {-0.3049,  0.3493},
+                               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                {-0.2896,  0.2853}});
   ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
   ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, GRUCell) {
   torch::manual_seed(0);
   auto rnn = GRUCell(1, 2);
   auto input = torch::randn({3, 1});
   auto hx = torch::randn({3, 2});
   auto output = rnn(input, hx);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto expected = torch::tensor({{ 1.0243,  0.3227},
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {-0.5659,  0.0330},
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                  {-0.4030, -0.2800}});
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
 
   output = rnn(input);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   expected = torch::tensor({{-0.0085,  0.1095},
+                            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                             {-0.1291,  0.2675},
+                            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                             {-0.1339,  0.2725}});
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in_features=3, out_features=4, bias=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBilinear) {
   ASSERT_EQ(
       c10::str(Bilinear(3, 2, 4)), "torch::nn::Bilinear(in1_features=3, in2_features=2, out_features=4, bias=true)");
@@ -4165,6 +5076,7 @@ TEST_F(ModulesTest, PrettyPrintBilinear) {
       c10::str(Bilinear(BilinearOptions(3, 2, 4).bias(false))), "torch::nn::Bilinear(in1_features=3, in2_features=2, out_features=4, bias=false)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv1d(3, 4, 5)),
@@ -4212,6 +5124,7 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintConvTranspose) {
   ASSERT_EQ(
       c10::str(ConvTranspose1d(3, 4, 5)),
@@ -4259,6 +5172,7 @@ TEST_F(ModulesTest, PrettyPrintConvTranspose) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintUpsample) {
   ASSERT_EQ(
       c10::str(Upsample(UpsampleOptions().size(std::vector<int64_t>({2, 4, 4})))),
@@ -4268,6 +5182,7 @@ TEST_F(ModulesTest, PrettyPrintUpsample) {
       "torch::nn::Upsample(scale_factor=[0.5, 1.5], mode=kBilinear)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintFold) {
   ASSERT_EQ(
       c10::str(Fold(FoldOptions({2, 2}, {5, 5}))),
@@ -4277,6 +5192,7 @@ TEST_F(ModulesTest, PrettyPrintFold) {
       "torch::nn::Fold(output_size=[8, 8], kernel_size=[3, 3], dilation=[2, 2], padding=[2, 1], stride=[2, 2])");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintUnfold) {
   ASSERT_EQ(
       c10::str(Unfold(torch::IntArrayRef({2, 4}))),
@@ -4286,6 +5202,7 @@ TEST_F(ModulesTest, PrettyPrintUnfold) {
       "torch::nn::Unfold(kernel_size=[2, 4], dilation=[2, 2], padding=[2, 1], stride=[2, 2])");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMaxPool) {
   ASSERT_EQ(
       c10::str(MaxPool1d(5)),
@@ -4310,6 +5227,7 @@ TEST_F(ModulesTest, PrettyPrintMaxPool) {
       "torch::nn::MaxPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=false)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintAvgPool) {
   ASSERT_EQ(
       c10::str(AvgPool1d(5)),
@@ -4334,6 +5252,7 @@ TEST_F(ModulesTest, PrettyPrintAvgPool) {
       "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0])");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrinFractionalMaxPool) {
   ASSERT_EQ(
       c10::str(FractionalMaxPool2d(FractionalMaxPool2dOptions(5).output_size(1))),
@@ -4343,6 +5262,7 @@ TEST_F(ModulesTest, PrettyPrinFractionalMaxPool) {
       "torch::nn::FractionalMaxPool3d()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLPPool) {
   ASSERT_EQ(
       c10::str(LPPool1d(2, 5)),
@@ -4358,6 +5278,7 @@ TEST_F(ModulesTest, PrettyPrintLPPool) {
       "torch::nn::LPPool2d(norm_type=1, kernel_size=[3, 4], stride=[5, 6], ceil_mode=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
   ASSERT_EQ(
       c10::str(AdaptiveMaxPool1d(5)),
@@ -4395,6 +5316,7 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
       "torch::nn::AdaptiveMaxPool3d(output_size=[None, None, None])");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
   ASSERT_EQ(
       c10::str(AdaptiveAvgPool1d(5)),
@@ -4427,6 +5349,7 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
       "torch::nn::AdaptiveAvgPool3d(output_size=[None, None, None])");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMaxUnpool) {
   ASSERT_EQ(
       c10::str(MaxUnpool1d(5)),
@@ -4446,28 +5369,33 @@ TEST_F(ModulesTest, PrettyPrintMaxUnpool) {
       "torch::nn::MaxUnpool2d(kernel_size=[5, 6], stride=[3, 4], padding=[1, 2])");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintDropout) {
   ASSERT_EQ(c10::str(Dropout()), "torch::nn::Dropout(p=0.5, inplace=false)");
   ASSERT_EQ(c10::str(Dropout(0.42)), "torch::nn::Dropout(p=0.42, inplace=false)");
   ASSERT_EQ(c10::str(Dropout(DropoutOptions().p(0.42).inplace(true))), "torch::nn::Dropout(p=0.42, inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintDropout2d) {
   ASSERT_EQ(c10::str(Dropout2d()), "torch::nn::Dropout2d(p=0.5, inplace=false)");
   ASSERT_EQ(c10::str(Dropout2d(0.42)), "torch::nn::Dropout2d(p=0.42, inplace=false)");
   ASSERT_EQ(c10::str(Dropout2d(Dropout2dOptions().p(0.42).inplace(true))), "torch::nn::Dropout2d(p=0.42, inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintDropout3d) {
   ASSERT_EQ(c10::str(Dropout3d()), "torch::nn::Dropout3d(p=0.5, inplace=false)");
   ASSERT_EQ(c10::str(Dropout3d(0.42)), "torch::nn::Dropout3d(p=0.42, inplace=false)");
   ASSERT_EQ(c10::str(Dropout3d(Dropout3dOptions().p(0.42).inplace(true))), "torch::nn::Dropout3d(p=0.42, inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintFunctional) {
   ASSERT_EQ(c10::str(Functional(torch::relu)), "torch::nn::Functional()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
   ASSERT_EQ(
       c10::str(BatchNorm1d(
@@ -4476,6 +5404,7 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
       "torch::nn::BatchNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBatchNorm2d) {
   ASSERT_EQ(
       c10::str(BatchNorm2d(
@@ -4484,6 +5413,7 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm2d) {
       "torch::nn::BatchNorm2d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBatchNorm3d) {
   ASSERT_EQ(
       c10::str(BatchNorm3d(
@@ -4492,6 +5422,7 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm3d) {
       "torch::nn::BatchNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintInstanceNorm1d) {
   ASSERT_EQ(
       c10::str(InstanceNorm1d(
@@ -4500,6 +5431,7 @@ TEST_F(ModulesTest, PrettyPrintInstanceNorm1d) {
       "torch::nn::InstanceNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintInstanceNorm2d) {
   ASSERT_EQ(
       c10::str(InstanceNorm2d(
@@ -4508,6 +5440,7 @@ TEST_F(ModulesTest, PrettyPrintInstanceNorm2d) {
       "torch::nn::InstanceNorm2d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintInstanceNorm3d) {
   ASSERT_EQ(
       c10::str(InstanceNorm3d(
@@ -4516,6 +5449,7 @@ TEST_F(ModulesTest, PrettyPrintInstanceNorm3d) {
       "torch::nn::InstanceNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {
   ASSERT_EQ(
     c10::str(LayerNorm(LayerNormOptions({2, 2}))),
@@ -4525,6 +5459,7 @@ TEST_F(ModulesTest, PrettyPrintLayerNorm) {
           "torch::nn::LayerNorm([2, 2], eps=2e-05, elementwise_affine=false)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintGroupNorm) {
   ASSERT_EQ(
     c10::str(GroupNorm(GroupNormOptions(2, 2))),
@@ -4534,6 +5469,7 @@ TEST_F(ModulesTest, PrettyPrintGroupNorm) {
     "torch::nn::GroupNorm(2, 2, eps=2e-05, affine=false)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {
   ASSERT_EQ(
     c10::str(LocalResponseNorm(LocalResponseNormOptions(2))),
@@ -4543,6 +5479,7 @@ TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {
       "torch::nn::LocalResponseNorm(2, alpha=0.0002, beta=0.85, k=2)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
       c10::str(Embedding(EmbeddingOptions(10, 2))),
@@ -4555,6 +5492,7 @@ TEST_F(ModulesTest, PrettyPrintEmbedding) {
       "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
   ASSERT_EQ(
       c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2))),
@@ -4573,50 +5511,60 @@ TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
       "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=kSum, padding_idx=5)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintL1Loss) {
   ASSERT_EQ(
       c10::str(L1Loss()),
       "torch::nn::L1Loss()");
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintKLDivLoss) {
   ASSERT_EQ(
       c10::str(KLDivLoss()),
       "torch::nn::KLDivLoss()");
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMSELoss) {
   ASSERT_EQ(
       c10::str(MSELoss()),
       "torch::nn::MSELoss()");
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBCELoss) {
   ASSERT_EQ(
       c10::str(BCELoss()),
       "torch::nn::BCELoss()");
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintHingeEmbeddingLoss) {
   ASSERT_EQ(
       c10::str(HingeEmbeddingLoss(HingeEmbeddingLossOptions().margin(4))),
       "torch::nn::HingeEmbeddingLoss(margin=4)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintCosineEmbeddingLoss) {
   ASSERT_EQ(
       c10::str(CosineEmbeddingLoss(CosineEmbeddingLossOptions().margin(0.25))),
       "torch::nn::CosineEmbeddingLoss(margin=0.25)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
   ASSERT_EQ(
       c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
       "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintTripletMarginWithDistanceLoss) {
   auto distanceOptions = TripletMarginWithDistanceLossOptions()
                              .distance_function([&](const torch::Tensor& x,
                                                     const torch::Tensor& y) {
+                               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                return torch::pairwise_distance(x, y, 2.0, 1e-6);
                              })
+                             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                              .margin(1.5)
                              .swap(true)
                              .reduction(torch::kMean);
@@ -4625,28 +5573,34 @@ TEST_F(ModulesTest, PrettyPrintTripletMarginWithDistanceLoss) {
       "torch::nn::TripletMarginWithDistanceLoss(margin=1.5, swap=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintNLLLoss) {
   ASSERT_EQ(
       c10::str(NLLLoss()), "torch::nn::NLLLoss()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrinCrossEntropyLoss) {
   ASSERT_EQ(
       c10::str(CrossEntropyLoss()), "torch::nn::CrossEntropyLoss()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMultiLabelMarginLoss) {
   ASSERT_EQ(c10::str(MultiLabelMarginLoss()), "torch::nn::MultiLabelMarginLoss()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMultiLabelSoftMarginLoss) {
   ASSERT_EQ(c10::str(MultiLabelSoftMarginLoss()), "torch::nn::MultiLabelSoftMarginLoss()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftMarginLoss) {
   ASSERT_EQ(c10::str(SoftMarginLoss()), "torch::nn::SoftMarginLoss()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
   ASSERT_EQ(
       c10::str(CosineSimilarity()),
@@ -4656,6 +5610,7 @@ TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
       "torch::nn::CosineSimilarity(dim=0, eps=0.5)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
   ASSERT_EQ(
       c10::str(PairwiseDistance()),
@@ -4665,6 +5620,7 @@ TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
       "torch::nn::PairwiseDistance(p=3, eps=0.5, keepdim=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintReflectionPad) {
   ASSERT_EQ(
       c10::str(ReflectionPad1d(ReflectionPad1dOptions(2))),
@@ -4680,6 +5636,7 @@ TEST_F(ModulesTest, PrettyPrintReflectionPad) {
       "torch::nn::ReflectionPad2d(padding=[1, 1, 2, 0])");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintReplicationPad) {
   ASSERT_EQ(
       c10::str(ReplicationPad1d(ReplicationPad1dOptions(2))),
@@ -4701,6 +5658,7 @@ TEST_F(ModulesTest, PrettyPrintReplicationPad) {
       "torch::nn::ReplicationPad3d(padding=[1, 2, 1, 2, 1, 2])");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintZeroPad2d) {
   ASSERT_EQ(
       c10::str(ZeroPad2d(ZeroPad2dOptions(2))),
@@ -4710,6 +5668,7 @@ TEST_F(ModulesTest, PrettyPrintZeroPad2d) {
       "torch::nn::ZeroPad2d(padding=[1, 1, 2, 0])");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintConstantPad) {
   ASSERT_EQ(
       c10::str(ConstantPad1d(ConstantPad1dOptions(2, 3.5))),
@@ -4731,11 +5690,13 @@ TEST_F(ModulesTest, PrettyPrintConstantPad) {
       "torch::nn::ConstantPad3d(padding=[1, 2, 1, 2, 1, 2], value=3.5)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintNestedModel) {
   struct InnerTestModule : torch::nn::Module {
     InnerTestModule()
         : torch::nn::Module("InnerTestModule"),
           fc(register_module("fc", torch::nn::Linear(3, 4))),
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           table(register_module("table", torch::nn::Embedding(10, 2))) {}
 
     torch::nn::Linear fc;
@@ -4745,7 +5706,9 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
   struct TestModule : torch::nn::Module {
     TestModule()
         : torch::nn::Module("TestModule"),
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           fc(register_module("fc", torch::nn::Linear(4, 5))),
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           table(register_module("table", torch::nn::Embedding(EmbeddingOptions(10, 2)))),
           inner(register_module("inner", std::make_shared<InnerTestModule>())) {
     }
@@ -4767,29 +5730,34 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
       ")");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintELU) {
   ASSERT_EQ(c10::str(ELU()), "torch::nn::ELU(alpha=1)");
   ASSERT_EQ(c10::str(ELU(ELUOptions().alpha(42.42).inplace(true))),
             "torch::nn::ELU(alpha=42.42, inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSELU) {
   ASSERT_EQ(c10::str(SELU()), "torch::nn::SELU()");
   ASSERT_EQ(c10::str(SELU(SELUOptions().inplace(true))),
             "torch::nn::SELU(inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintGLU) {
   ASSERT_EQ(c10::str(GLU()), "torch::nn::GLU(dim=-1)");
   ASSERT_EQ(c10::str(GLU(1)), "torch::nn::GLU(dim=1)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintHardshrink) {
   ASSERT_EQ(c10::str(Hardshrink()), "torch::nn::Hardshrink(0.5)");
   ASSERT_EQ(c10::str(Hardshrink(HardshrinkOptions().lambda(42.42))),
             "torch::nn::Hardshrink(42.42)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintHardtanh) {
   ASSERT_EQ(c10::str(Hardtanh()),
     "torch::nn::Hardtanh(min_val=-1, max_val=1)");
@@ -4798,6 +5766,7 @@ TEST_F(ModulesTest, PrettyPrintHardtanh) {
     "torch::nn::Hardtanh(min_val=-42.42, max_val=0.42, inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLeakyReLU) {
   ASSERT_EQ(c10::str(LeakyReLU()),
     "torch::nn::LeakyReLU(negative_slope=0.01)");
@@ -4806,33 +5775,40 @@ TEST_F(ModulesTest, PrettyPrintLeakyReLU) {
     "torch::nn::LeakyReLU(negative_slope=0.42, inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLogSigmoid) {
   ASSERT_EQ(c10::str(LogSigmoid()), "torch::nn::LogSigmoid()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftmax) {
   ASSERT_EQ(c10::str(Softmax(SoftmaxOptions(1))), "torch::nn::Softmax(dim=1)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftmin) {
   ASSERT_EQ(c10::str(Softmin(SoftminOptions(1))), "torch::nn::Softmin(dim=1)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLogSoftmax) {
   ASSERT_EQ(c10::str(LogSoftmax(LogSoftmaxOptions(1))),
             "torch::nn::LogSoftmax(dim=1)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftmax2d) {
   ASSERT_EQ(c10::str(Softmax2d()), "torch::nn::Softmax2d()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintPReLU) {
   ASSERT_EQ(c10::str(PReLU()), "torch::nn::PReLU(num_parameters=1)");
   ASSERT_EQ(c10::str(PReLU(PReLUOptions().num_parameters(42))),
             "torch::nn::PReLU(num_parameters=42)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintReLU) {
   ASSERT_EQ(c10::str(ReLU()), "torch::nn::ReLU()");
   ASSERT_EQ(c10::str(ReLU(ReLUOptions().inplace(true))),
@@ -4841,6 +5817,7 @@ TEST_F(ModulesTest, PrettyPrintReLU) {
     "torch::nn::ReLU(inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintReLU6) {
   ASSERT_EQ(c10::str(ReLU6()), "torch::nn::ReLU6()");
   ASSERT_EQ(c10::str(ReLU6(ReLU6Options().inplace(true))),
@@ -4849,6 +5826,7 @@ TEST_F(ModulesTest, PrettyPrintReLU6) {
     "torch::nn::ReLU6(inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintRReLU) {
   ASSERT_EQ(c10::str(RReLU()),
     "torch::nn::RReLU(lower=0.125, upper=0.333333)");
@@ -4857,27 +5835,32 @@ TEST_F(ModulesTest, PrettyPrintRReLU) {
     "torch::nn::RReLU(lower=0.24, upper=0.42, inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintCELU) {
   ASSERT_EQ(c10::str(CELU()), "torch::nn::CELU(alpha=1)");
   ASSERT_EQ(c10::str(CELU(CELUOptions().alpha(42.42).inplace(true))),
             "torch::nn::CELU(alpha=42.42, inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSigmoid) {
   ASSERT_EQ(c10::str(Sigmoid()), "torch::nn::Sigmoid()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintPixelShuffle) {
   ASSERT_EQ(c10::str(PixelShuffle(PixelShuffleOptions(5))),
             "torch::nn::PixelShuffle(upscale_factor=5)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintPixelUnshuffle) {
   ASSERT_EQ(
       c10::str(PixelUnshuffle(PixelUnshuffleOptions(5))),
       "torch::nn::PixelUnshuffle(downscale_factor=5)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftplus) {
   ASSERT_EQ(c10::str(Softplus()),
     "torch::nn::Softplus(beta=1, threshold=20)");
@@ -4886,24 +5869,29 @@ TEST_F(ModulesTest, PrettyPrintSoftplus) {
     "torch::nn::Softplus(beta=0.24, threshold=42.42)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftshrink) {
   ASSERT_EQ(c10::str(Softshrink()), "torch::nn::Softshrink(0.5)");
   ASSERT_EQ(c10::str(Softshrink(SoftshrinkOptions(42.42))),
             "torch::nn::Softshrink(42.42)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintSoftsign) {
   ASSERT_EQ(c10::str(Softsign()), "torch::nn::Softsign()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintTanh) {
   ASSERT_EQ(c10::str(Tanh()), "torch::nn::Tanh()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintTanhshrink) {
   ASSERT_EQ(c10::str(Tanhshrink()), "torch::nn::Tanhshrink()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintThreshold) {
   ASSERT_EQ(c10::str(Threshold(24.24, 42.42)),
     "torch::nn::Threshold(threshold=24.24, value=42.42)");
@@ -4912,6 +5900,7 @@ TEST_F(ModulesTest, PrettyPrintThreshold) {
     "torch::nn::Threshold(threshold=42.42, value=24.24, inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintCTCLoss) {
   ASSERT_EQ(c10::str(CTCLoss()), "torch::nn::CTCLoss()");
   ASSERT_EQ(c10::str(CTCLoss(
@@ -4919,6 +5908,7 @@ TEST_F(ModulesTest, PrettyPrintCTCLoss) {
       .reduction(torch::kSum))), "torch::nn::CTCLoss()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintPoissonNLLLoss) {
   ASSERT_EQ(c10::str(PoissonNLLLoss()), "torch::nn::PoissonNLLLoss()");
   ASSERT_EQ(c10::str(PoissonNLLLoss(
@@ -4927,6 +5917,7 @@ TEST_F(ModulesTest, PrettyPrintPoissonNLLLoss) {
     "torch::nn::PoissonNLLLoss()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMarginRankingLoss) {
   ASSERT_EQ(c10::str(MarginRankingLoss()), "torch::nn::MarginRankingLoss()");
   ASSERT_EQ(c10::str(MarginRankingLoss(
@@ -4934,6 +5925,7 @@ TEST_F(ModulesTest, PrettyPrintMarginRankingLoss) {
     "torch::nn::MarginRankingLoss()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintCrossMapLRN2d) {
   ASSERT_EQ(c10::str(CrossMapLRN2d(4)),
     "torch::nn::CrossMapLRN2d(4, alpha=0.0001, beta=0.75, k=1)");
@@ -4941,6 +5933,7 @@ TEST_F(ModulesTest, PrettyPrintCrossMapLRN2d) {
     "torch::nn::CrossMapLRN2d(3, alpha=1e-05, beta=0.1, k=10)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintAlphaDropout) {
   ASSERT_EQ(c10::str(AlphaDropout()),
     "torch::nn::AlphaDropout(p=0.5, inplace=false)");
@@ -4950,6 +5943,7 @@ TEST_F(ModulesTest, PrettyPrintAlphaDropout) {
     "torch::nn::AlphaDropout(p=0.2, inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintFeatureAlphaDropout) {
   ASSERT_EQ(c10::str(FeatureAlphaDropout()),
     "torch::nn::FeatureAlphaDropout(p=0.5, inplace=false)");
@@ -4959,6 +5953,7 @@ TEST_F(ModulesTest, PrettyPrintFeatureAlphaDropout) {
     "torch::nn::FeatureAlphaDropout(p=0.2, inplace=true)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintBCEWithLogitsLoss) {
   ASSERT_EQ(c10::str(BCEWithLogitsLoss()), "torch::nn::BCEWithLogitsLoss()");
   ASSERT_EQ(c10::str(BCEWithLogitsLoss(
@@ -4969,6 +5964,7 @@ TEST_F(ModulesTest, PrettyPrintBCEWithLogitsLoss) {
     "torch::nn::BCEWithLogitsLoss()");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
   ASSERT_EQ(c10::str(MultiheadAttention(20, 10)),
     "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=true)\n)");
@@ -4976,6 +5972,7 @@ TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
     "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=false)\n)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintRNNCell) {
   ASSERT_EQ(c10::str(RNNCell(20, 10)),
     "torch::nn::RNNCell(20, 10)");
@@ -4985,6 +5982,7 @@ TEST_F(ModulesTest, PrettyPrintRNNCell) {
     "torch::nn::RNNCell(20, 10, bias=false, nonlinearity=kReLU)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintLSTMCell) {
   ASSERT_EQ(c10::str(LSTMCell(20, 10)),
     "torch::nn::LSTMCell(20, 10)");
@@ -4992,6 +5990,7 @@ TEST_F(ModulesTest, PrettyPrintLSTMCell) {
     "torch::nn::LSTMCell(20, 10, bias=false)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintGRUCell) {
   ASSERT_EQ(c10::str(GRUCell(20, 10)),
     "torch::nn::GRUCell(20, 10)");
@@ -4999,8 +5998,10 @@ TEST_F(ModulesTest, PrettyPrintGRUCell) {
     "torch::nn::GRUCell(20, 10, bias=false)");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, PrettyPrintAdaptiveLogSoftmaxWithLoss) {
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
     ASSERT_EQ(
       c10::str(asfm),
@@ -5015,6 +6016,7 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveLogSoftmaxWithLoss) {
       ")");
   }
   {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 10, {4, 8}).div_value(2.).head_bias(true));
     ASSERT_EQ(
       c10::str(asfm),

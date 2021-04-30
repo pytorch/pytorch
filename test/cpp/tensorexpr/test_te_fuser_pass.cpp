@@ -30,6 +30,7 @@ struct WithCPUFuser {
   bool parallel;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_1) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -56,6 +57,7 @@ TEST(TEFuserPass, FuserPass_1) {
       ->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_2) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -80,6 +82,7 @@ TEST(TEFuserPass, FuserPass_2) {
       ->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_3) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -109,6 +112,7 @@ TEST(TEFuserPass, FuserPass_3) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_0DimInput) {
   const auto graph_string = R"IR(
     graph(%x : Float(device=cuda),
@@ -127,6 +131,7 @@ TEST(TEFuserPass, FuserPass_0DimInput) {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_UnfusibleDevice) {
   WithCPUFuser cf(false);
   const auto graph_string = R"IR(
@@ -144,6 +149,7 @@ TEST(TEFuserPass, FuserPass_UnfusibleDevice) {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_UnknownShapes) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -162,6 +168,7 @@ TEST(TEFuserPass, FuserPass_UnknownShapes) {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_Multidevice) {
   {
     WithCPUFuser cf;
@@ -282,6 +289,7 @@ TEST(TEFuserPass, FuserPass_Multidevice) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_MergeGroups) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -304,6 +312,7 @@ TEST(TEFuserPass, FuserPass_MergeGroups) {
       ->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_UnknownShapesIgnored) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -322,6 +331,7 @@ TEST(TEFuserPass, FuserPass_UnknownShapesIgnored) {
   testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_IgnoreUnknownShapeAtStart) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -338,6 +348,7 @@ TEST(TEFuserPass, FuserPass_IgnoreUnknownShapeAtStart) {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_Where) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -355,6 +366,7 @@ TEST(TEFuserPass, FuserPass_Where) {
   testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TEFuserPass, FuserPass_WhereList) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
