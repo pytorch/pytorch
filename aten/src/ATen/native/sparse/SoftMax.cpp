@@ -293,8 +293,8 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 
   if (dim >= sparse_dim) {
     if (LogSoftMax) {
-      auto new_values = log_softmax_cpu(values, dim - sparse_dim + 1, false);
-      out_values.set_(new_values);
+      // auto new_values = log_softmax_cpu(values, dim - sparse_dim + 1, false);
+      // out_values.set_(new_values);
     } else {
       auto new_values = softmax_cpu(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);

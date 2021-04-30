@@ -8,6 +8,31 @@
 #include <ATen/NamedTensorUtils.h>
 
 namespace at {
+namespace meta {
+TORCH_META_FUNC(_log_softmax)
+(const Tensor& input, const int64_t dim, const bool half_to_float) {
+  auto input_ = input.contiguous();
+  int64_t dim_ = maybe_wrap_dim(dim, input.dim());
+
+  if (input_.dim() == 0) {
+    input_ = input_.view(1);
+  }
+
+  TORCH_CHECK(
+      dim_ >= 0 && dim_ < input_.dim(),
+      "dim must be non-negative and less than input dimensions");
+
+  Tensor output = at::native::empty_like(
+      input_,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  set_output(input_.sizes(), output.options());
+}
+}
+
 namespace native {
 namespace {
 
@@ -147,34 +172,34 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   return output;
 }
 
-Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
-  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on CPU");
-  auto input = input_.contiguous();
-  Tensor output = at::native::empty_like(
-      input,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
-      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  int64_t dim = maybe_wrap_dim(dim_, input.dim());
+TORCH_IMPL_FUNC(log_softmax_cpu_out)
+(const Tensor& input,
+ const int64_t dim,
+ const bool half_to_float,
+ const Tensor& output) {
+  TORCH_CHECK(
+      !half_to_float,
+      "softmax with half to float conversion is not supported on CPU");
 
   if (input.numel() == 0) {
-    return output;
+    return;
   }
-  if (input.dim() == 0)
-    input = input.view(1);
-  TORCH_CHECK(
-      dim >= 0 && dim < input.dim(),
-      "dim must be non-negative and less than input dimensions");
-  if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
-    log_softmax_lastdim_kernel(kCPU, output, input);
+
+  auto input_ = input.contiguous();
+  int64_t dim_ = maybe_wrap_dim(dim, input.dim());
+
+  if (input_.dim() == 0) {
+    input_ = input_.view(1);
+  }
+
+  if (input_.ndimension() > 0 && dim_ == input_.ndimension() - 1) {
+    // log_softmax_lastdim_kernel(kCPU, output, input);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::BFloat16, input.scalar_type(), "log_softmax",
-        [&] { host_softmax<scalar_t, true>(output, input, dim); });
+        at::ScalarType::BFloat16, input.scalar_type(), "log_softmax", [&] {
+          host_softmax<scalar_t, true>(output, input_, dim_);
+        });
   }
-  return output;
 }
 
 Tensor softmax_backward_cpu(

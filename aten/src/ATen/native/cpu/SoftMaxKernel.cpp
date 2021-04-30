@@ -192,7 +192,7 @@ inline void _vec_host_softmax_backward_lastdim(
 
 template <typename scalar_t, bool LogSoftMax>
 struct vec_host_softmax_lastdim {
-  static void apply(Tensor& output, const Tensor& input) {
+  static void apply(const Tensor& output, const Tensor& input) {
     int64_t outer_size = 1;
     int64_t dim_size = input.size(input.ndimension() - 1);
     for (int64_t i = 0; i < input.ndimension() - 1; ++i)
@@ -236,7 +236,7 @@ static void softmax_lastdim_kernel_impl(Tensor& result, const Tensor& self) {
 }
 
 static void log_softmax_lastdim_kernel_impl(
-    Tensor& result,
+    const Tensor& result,
     const Tensor& self) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       at::ScalarType::BFloat16, self.scalar_type(),
