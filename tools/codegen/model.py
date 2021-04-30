@@ -595,10 +595,29 @@ class BackendIndex:
                 assert op_name not in parent_index[k], f'duplicate operator {op_name} for dispatch key {k}'
                 parent_index[k][op_name] = metadata
 
-    def has_backend(self, f: NativeFunction) -> bool:
+    def primary(self, g: NativeFunctionsGroup) -> NativeFunction:
+        if self.use_out_as_primary:
+            return g.out
+        else:
+            return g.functional
+
+    def has_backend(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> bool:
+        if isinstance(g, NativeFunction):
+            f = g
+        elif isinstance(g, NativeFunctionsGroup):
+            f = self.primary(g)
+        else:
+            assert_never(f)
         return f.func.name in self.index
 
-    def get(self, f: NativeFunction) -> Optional[BackendMetadata]:
+
+    def get(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> Optional[BackendMetadata]:
+        if isinstance(g, NativeFunction):
+            f = g
+        elif isinstance(g, NativeFunctionsGroup):
+            f = self.primary(g)
+        else:
+            assert_never(f)
         if f.func.name not in self.index:
             return None
         return self.index[f.func.name]
@@ -608,12 +627,6 @@ class BackendIndex:
         if m is None:
             return None
         return m.kernel
-
-    def primary(self, g: NativeFunctionsGroup) -> NativeFunction:
-        if self.use_out_as_primary:
-            return g.out
-        else:
-            return g.functional
 
     def structured(self, f: Union[NativeFunction, NativeFunctionsGroup]) -> Optional[bool]:
         if isinstance(f, NativeFunction):

@@ -126,30 +126,27 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
         fm.write('aten_xla_type.h', lambda: {
             'generated_comment': generated_comment,
             'cpp_namespace': cpp_namespace,
-            'dispatch_xla_declarations': list(concatMap(
-                # Convert to a set first to remove duplicate kernel names.
-                # Backends are allowed to repeat kernel names; only generate the declaration once!
-                lambda f: list(set(concatMap(
-                    lambda dispatch_key: dest.compute_native_function_declaration(f, backend_indices[dispatch_key]),
-                    [backend_dispatch_key, autograd_dispatch_key]))),
-                grouped_native_functions)),
+            # Convert to a set first to remove duplicate kernel names.
+            # Backends are allowed to repeat kernel names; only generate the declaration once!
+            'dispatch_xla_declarations': list(set(concatMap(
+                lambda f: dest.compute_native_function_declaration(f, backend_indices[backend_dispatch_key]),
+                grouped_native_functions
+            ))) + list(set(concatMap(
+                lambda f: dest.compute_native_function_declaration(f, backend_indices[autograd_dispatch_key]),
+                grouped_native_functions
+            ))),
         })
 
         fm.write('aten_xla_type_default.h', lambda: {
             'generated_comment': generated_comment,
             'cpp_namespace': cpp_namespace,
-            'dispatch_aten_fallback_declarations': list(
-                # Using a set to dedup: we end up with duplicate definitions,
-                # because ops that have neither an XLA nor an AutogradXLA kernel
-                # will get a CPU fallback from both calls.
-                set(concatMap(
-                    dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[backend_dispatch_key]),
-                    grouped_native_functions
-                )) | set(concatMap(
-                    dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[autograd_dispatch_key]),
-                    grouped_native_functions
-                ))
-            ),
+            'dispatch_aten_fallback_declarations': list(concatMap(
+                dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[backend_dispatch_key]),
+                [g for g in grouped_native_functions if backend_indices[backend_dispatch_key].has_backend(g)]
+            )) + list(concatMap(
+                dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[autograd_dispatch_key]),
+                [g for g in grouped_native_functions if backend_indices[autograd_dispatch_key].has_backend(g)]
+            )),
         })
 
         fm.write('aten_xla_type_default.cpp', lambda: {
@@ -157,22 +154,20 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
             'cpp_namespace': cpp_namespace,
             # TODO: after cpu fallbacks are moved to a boxed kernel,
             # merge registrations / definitions into RegisterDispatchKey
-            'dispatch_aten_fallback_definitions': list(
-                set(concatMap(
-                    dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[backend_dispatch_key]),
-                    grouped_native_functions
-                )) | set(concatMap(
-                    dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[autograd_dispatch_key]),
-                    grouped_native_functions
-                ))
-            ),
+            'dispatch_aten_fallback_definitions': list(concatMap(
+                dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[backend_dispatch_key]),
+                [g for g in grouped_native_functions if backend_indices[backend_dispatch_key].has_backend(g)]
+            )) + list(concatMap(
+                dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[autograd_dispatch_key]),
+                [g for g in grouped_native_functions if backend_indices[autograd_dispatch_key].has_backend(g)]
+            )),
             'dispatch_registrations': list(concatMap(
                 dest.GenExternalAtenFallback(Target.REGISTRATION, backend_indices[backend_dispatch_key]),
-                grouped_native_functions
+                [g for g in grouped_native_functions if backend_indices[backend_dispatch_key].has_backend(g)]
             )),
             'dispatch_autograd_registrations': list(concatMap(
                 dest.GenExternalAtenFallback(Target.REGISTRATION, backend_indices[autograd_dispatch_key]),
-                grouped_native_functions
+                [g for g in grouped_native_functions if backend_indices[autograd_dispatch_key].has_backend(g)]
             )),
         })
 
