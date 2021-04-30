@@ -271,11 +271,18 @@ class intrusive_ptr final {
   explicit intrusive_ptr(TTarget* target)
       : intrusive_ptr(target, raw::DontIncreaseRefcount{}) {
     if (target_ != NullType::singleton()) {
-      // We can't use retain_(), because we also have to increase weakcount
-      // and because we allow raising these values from 0, which retain_()
-      // has an assertion against.
-      detail::atomic_refcount_increment(target_->refcount_);
-      detail::atomic_weakcount_increment(target_->weakcount_);
+      // We just created result.target_, so we know no other thread has
+      // access to it, so we know we needn't care about memory ordering.
+      // (On x86_64, a store with memory_order_relaxed generates a plain old
+      // `mov`, whereas an atomic increment does a lock-prefixed `add`, which is
+      // much more expensive: https://godbolt.org/z/eKPzj8.)
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          target_->refcount_ == 0 && target_->weakcount_ == 0,
+          "intrusive_ptr: Newly-created target had non-zero refcounts. Does its "
+          "constructor do something strange like incref or create an intrusive_ptr"
+          "from `this`?");
+      target_->refcount_.store(1, std::memory_order_relaxed);
+      target_->weakcount_.store(1, std::memory_order_relaxed);
     }
   }
 
@@ -426,22 +433,7 @@ class intrusive_ptr final {
    */
   template <class... Args>
   static intrusive_ptr make(Args&&... args) {
-    auto result = intrusive_ptr(new TTarget(std::forward<Args>(args)...), raw::DontIncreaseRefcount{});
-
-    // We just created result.target_, so we know no other thread has
-    // access to it, so we know we needn't care about memory ordering.
-    // (On x86_64, a store with memory_order_relaxed generates a plain old
-    // `mov`, whereas an atomic increment does a lock-prefixed `add`, which is
-    // much more expensive: https://godbolt.org/z/eKPzj8.)
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        result.target_->refcount_ == 0 && result.target_->weakcount_ == 0,
-        "intrusive_ptr: Newly-created target had non-zero refcounts. Does its "
-        "constructor do something strange like incref or create an intrusive_ptr"
-        "from `this`?");
-    result.target_->refcount_.store(1, std::memory_order_relaxed);
-    result.target_->weakcount_.store(1, std::memory_order_relaxed);
-
-    return result;
+    return intrusive_ptr(new TTarget(std::forward<Args>(args)...));
   }
 
   /**
