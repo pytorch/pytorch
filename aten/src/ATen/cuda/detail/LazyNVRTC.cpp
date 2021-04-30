@@ -19,7 +19,7 @@ at::DynamicLibrary& getCUDALibrary() {
   return lib;
 }
 
-at::DynamicLibrary& getNVRTCLibrary() {
+static std::string getLibVersion() {
   // [NVRTC versioning]
   // Quote of https://docs.nvidia.com/cuda/nvrtc/index.html Section 8.1. NVRTC library versioning
   //
@@ -41,33 +41,44 @@ at::DynamicLibrary& getNVRTCLibrary() {
   // library in CUDA 11.3 and later 11.x releases will have the same soname (Linux) or DLL name (Windows) as the NVRTC library in CUDA 11.2.
   constexpr auto major = CUDA_VERSION / 1000;
   constexpr auto minor = ( CUDA_VERSION / 10 ) % 10;
-  static std::once_flag flag;
-  static std::string libname, alt_libname;
-  std::call_once(flag, [&] {
-    std::string lib_version;
 #if defined(_WIN32)
-    if (major < 11 || (major == 11 && minor < 3)) {
-      lib_version = std::to_string(major) + std::to_string(minor);
-    } else if (major == 11) {
-      lib_version = "112";
-    } else {
-      lib_version = std::to_string(major) + "0";
-    }
-    libname = std::string("nvrtc64_") + lib_version + "_0.dll";
+  if (major < 11 || (major == 11 && minor < 3)) {
+    return std::to_string(major) + std::to_string(minor);
+  } else if (major == 11) {
+    return "112";
+  } else {
+    return std::to_string(major) + "0";
+  }
 #else
-    if (major < 11 || (major == 11 && minor < 3)) {
-      lib_version = std::to_string(major) + "." + std::to_string(minor);
-    } else if (major == 11) {
-      lib_version = "11.2";
-    } else {
-      lib_version = std::to_string(major);
-    }
-    libname = std::string("libnvrtc.so.") + lib_version;
-#ifdef NVRTC_SHORTHASH
-    alt_libname = std::string("libnvrtc-") + C10_STRINGIZE(NVRTC_SHORTHASH) + ".so." + lib_version;
+  if (major < 11 || (major == 11 && minor < 3)) {
+    return std::to_string(major) + "." + std::to_string(minor);
+  } else if (major == 11) {
+    return "11.2";
+  } else {
+    return std::to_string(major);
+  }
 #endif
+}
+
+static std::string getLibName() {
+#if defined(_WIN32)
+  return std::string("nvrtc64_") + getLibVersion() + "_0.dll";
+#else
+  return std::string("libnvrtc.so.") + getLibVersion();
 #endif
-  });
+}
+
+static std::string getAltLibName() {
+#if !defined(_WIN32) && defined(NVRTC_SHORTHASH)
+  return std::string("libnvrtc-") + C10_STRINGIZE(NVRTC_SHORTHASH) + ".so." + getLibVersion();
+#else
+  return {};
+#endif
+}
+
+at::DynamicLibrary& getNVRTCLibrary() {
+  static std::string libname = getLibName();
+  static std::string alt_libname = getAltLibName();
   static at::DynamicLibrary lib(libname.c_str(), alt_libname.empty() ? nullptr : alt_libname.c_str());
   return lib;
 }
