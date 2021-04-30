@@ -245,7 +245,7 @@ jobs:
           sudo apt-get update
           sudo apt-get --no-install-recommends -y install cuda-toolkit-10-2
           # Install dependencies
-          pip install pyyaml typing_extensions
+          pip install pyyaml typing_extensions ninja
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
           sudo apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-11 main"
           sudo apt-get update
@@ -289,10 +289,11 @@ jobs:
           # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
           # in a follow up PR.
           # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
-          # deploy/interpreter files are excluded due to using macros and other techniquies
+          # deploy/interpreter files are excluded due to using macros and other techniques
           # that are not easily converted to accepted c++
           python tools/clang_tidy.py                               \
             --verbose                                              \
+            --parallel                                             \
             --paths torch/csrc/                                    \
             --diff "$BASE_SHA"                                   \
             -g"-torch/csrc/jit/passes/onnx/helper.cpp"             \
