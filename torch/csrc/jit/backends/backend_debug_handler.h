@@ -139,8 +139,8 @@ using DelegateDebugInfoMapType =
     std::unordered_map<DebugHandleType, DebugInfoPair>;
 
 /*
- * This class is used to generate debug info map = module's inline callstack ptr
- * map It is initialized with module's object ptr and during ctor it will
+ * This class is used to generate debug info map (module's inline callstack ptr
+ * map). It is initialized with module's object ptr and during ctor it will
  * instantiate debug_handle_manager and initialize thread local pointer to it.
  * backend's preprocess will call generate_debug_handles, which uses
  * debug_handle_manager to generate debug handles. When lowering process

@@ -172,7 +172,12 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
     // we saved both type name and instance name.
     // In such cases, when module is absorbed by lowered backend
     // we augment instance name with type name instead of losing it.
-    type_name = type_name.substr(type_name.find_last_of('.') + 1);
+    auto last_dot_position = type_name.find_last_of('.');
+    size_t substring_pos{0};
+    if (last_dot_position != std::string::npos) {
+      substring_pos = last_dot_position + 1;
+    }
+    type_name = type_name.substr(substring_pos);
     instance_name = instance_name + "(" + type_name + ")";
   }
   cached_module_instance_info_[tup] =
