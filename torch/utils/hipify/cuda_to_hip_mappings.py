@@ -7916,6 +7916,14 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             "OptionalCUDAStreamGuard",
             ("OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH),
         ),
+        (
+            "cuda::CUDAMultiStreamGuard",
+            ("hip::HIPMultiStreamGuardMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        (
+            "CUDAMultiStreamGuard",
+            ("HIPMultiStreamGuardMasqueradingAsCUDA", API_PYTORCH),
+        ),
         # Only get needs to be transformed this way; all the other ones can go
         # straight to the normal versions hip::HIPCachingAllocator
         (

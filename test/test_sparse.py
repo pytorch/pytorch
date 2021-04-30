@@ -1070,7 +1070,7 @@ class TestSparse(TestCase):
 
     @onlyCUDA
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
+    @dtypes(torch.double)
     @unittest.skipIf(
         IS_WINDOWS,
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
@@ -1140,7 +1140,7 @@ class TestSparse(TestCase):
 
     @onlyCPU
     @coalescedonoff
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_saddmm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x = self._gen_sparse(2, nnz, [di, dj], dtype, device, coalesced)[0]
@@ -1170,7 +1170,7 @@ class TestSparse(TestCase):
 
     @onlyCPU
     @coalescedonoff
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_sspaddmm(self, device, dtype, coalesced):
 
         def test_shape(di, dj, dk, nnz):
