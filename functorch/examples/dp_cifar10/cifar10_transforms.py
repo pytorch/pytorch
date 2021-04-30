@@ -25,9 +25,8 @@ from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 
 from make_functional import make_functional, load_weights
-from torch.eager_transforms import vmap, grad_with_value
 from functools import partial
-# from resnet import resnet18
+from functorch import vmap, grad_and_value
 
 def save_checkpoint(state, is_best, filename="checkpoint.tar"):
     torch.save(state, filename)
@@ -104,7 +103,7 @@ def train(args, model, train_loader, optimizer, epoch, device):
         # We want to extract some intermediate
         # values from the computation (i.e. the loss and output).
         # 
-        # To extract the loss, we use the `grad_with_value` API, that returns the
+        # To extract the loss, we use the `grad_and_value` API, that returns the
         # gradient of the weights w.r.t. the loss and the loss.
         # 
         # To extract the output, we use the `has_aux=True` flag.
@@ -112,13 +111,9 @@ def train(args, model, train_loader, optimizer, epoch, device):
         # where the first is to be differentiated and the second "auxiliary value"
         # is not to be differentiated. `f'` returns the gradient w.r.t. the loss,
         # the loss, and the auxiliary value.
-        grads_loss_output = grad_with_value(compute_loss_and_output, has_aux=True)
-        def packed(weights, images, target):
-            grads, loss, output = grads_loss_output(weights, images, target)
-            result = tuple([*grads, loss, output])
-            return result
-        result = vmap(partial(packed, weights))(images, target)
-        sample_grads, sample_loss, output, = result[:-2], result[-2], result[-1]
+        grads_loss_output = grad_and_value(compute_loss_and_output, has_aux=True)
+        sample_grads, (sample_loss, output) = \
+            vmap(grads_loss_output, (None, 0, 0))(weights, images, target)
         loss = sample_loss.mean()
 
         # `load_weights` is the inverse operation of make_functional. We put
