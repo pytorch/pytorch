@@ -85,9 +85,12 @@ bool TileOp<CPUContext>::DoRunWithType<std::string>() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Tile, TileOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TileGradient, TileGradientOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Tile)
     .NumInputs(1, 3)
     .NumOutputs(1)
@@ -179,6 +182,7 @@ Y:
     .Output(0, "Y", "(*Tensor*): output tensor")
     .InheritOnnxSchema();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TileGradient).NumInputs(1, 3).NumOutputs(1);
 
 namespace {
@@ -202,6 +206,7 @@ class GetTileGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Tile, GetTileGradient);
 
 } // namespace caffe2
