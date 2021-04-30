@@ -26,6 +26,5 @@ std::tuple<Tensor,optional<int64_t>> basic_unary_batch_rule(
     const Tensor& tensor, optional<int64_t> batch_dim, ExtraArgs... extra_args) {
   return {Func(tensor, std::forward<ExtraArgs>(extra_args)...), batch_dim};
 }
-
 }}
 
