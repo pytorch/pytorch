@@ -31,7 +31,6 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
-#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/insert_guards.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
@@ -2150,8 +2149,7 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
       return self.A0.forward(x, y, z) + self.B0.forward(x)
   )");
 
-  auto graph = c.get_method("forward").graph();
-  torch::jit::Inline(*graph);
+  auto graph = c.get_method("forward").function().optimized_graph();
   std::stringstream add_ss, mul_ss;
   for (Node* n : graph->nodes()) {
     if (n->kind() == prim::If) {

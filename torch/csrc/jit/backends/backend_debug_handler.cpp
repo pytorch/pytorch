@@ -42,7 +42,7 @@ BackendModuleDebugInfoRecorder::BackendModuleDebugInfoRecorder(
     ObjectPtr module_ptr) {
   TORCH_CHECK(
       debug_handle_manager_ptr == nullptr,
-      "Module debug recording alredy in progress.");
+      "Module debug recording already in progress.");
   debug_handle_manager_ptr = &debug_handle_manager;
   module_ptr_ = module_ptr;
 }
@@ -80,11 +80,7 @@ void BackendModuleDebugInfoMap::addDebugInfoMap(
 
 void BackendModuleDebugInfoMap::removeDebugInfoMap(const ObjectPtr& ptr) {
   std::unique_lock<std::mutex> lock(debug_info_mutex_);
-  const auto& it = debug_info_map_.find(ptr);
-  if (it == debug_info_map_.end()) {
-    return;
-  }
-  debug_info_map_.erase(it);
+  debug_info_map_.erase(ptr);
 }
 
 c10::optional<DelegateDebugInfoMapType> BackendModuleDebugInfoMap::
