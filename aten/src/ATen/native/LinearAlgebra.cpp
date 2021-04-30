@@ -26,6 +26,35 @@
 #include <ATen/native/TensorIterator.h>
 
 namespace at {
+namespace meta {
+TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+  TORCH_CHECK(self.dim() == 2, "input must be a matrix, got ", self.dim(), "-D tensor");
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+
+  // Array access is faster than .size(n) and .stride(n)
+  const auto self_sizes = self.sizes();
+  auto m1_strides = mat1.strides();
+  auto m1_sizes = mat1.sizes();
+  auto m2_strides = mat2.strides();
+  auto m2_sizes = mat2.sizes();
+
+  TORCH_CHECK(
+      m1_sizes[1] == m2_sizes[0], "mat1 and mat2 shapes cannot be multiplied (",
+      m1_sizes[0], "x", m1_sizes[1], " and ", m2_sizes[0], "x", m2_sizes[1], ")");
+
+  TORCH_CHECK(
+      self_sizes[0] == m1_sizes[0] && self_sizes[1] == m2_sizes[1],
+      "input shape is incompatible with matrix multiplication (",
+      m1_sizes[0], "x", m1_sizes[1], " @ ", m2_sizes[0], "x", m2_sizes[1], " != ",
+      self_sizes[0], "x", self_sizes[1], ")");
+  set_output(0, IntArrayRef(mat1.sizes().data(), 1), self.options());
+  //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
+  TORCH_CHECK(((self.dim() == 2) && (self.sizes()[0] == mat1.sizes()[0]) && (self.sizes()[1] == mat2.sizes()[1])),
+  "The input tensor must be a matrix with size ", mat1.sizes()[0], "x", mat2.sizes()[1], ", but got a ", self.dim(),
+  "-D tensor with size ", self.sizes()[0], "x", self.sizes()[1]);
+}
+} // namespace meta
 namespace native {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -918,16 +947,6 @@ static void addmm_impl_cpu_(
   auto m2_strides = m2.strides();
   auto m2_sizes = m2.sizes();
 
-  TORCH_CHECK(
-      m1_sizes[1] == m2_sizes[0], "mat1 and mat2 shapes cannot be multiplied (",
-      m1_sizes[0], "x", m1_sizes[1], " and ", m2_sizes[0], "x", m2_sizes[1], ")");
-
-  TORCH_CHECK(
-      self_sizes[0] == m1_sizes[0] && self_sizes[1] == m2_sizes[1],
-      "input shape is incompatible with matrix multiplication (",
-      m1_sizes[0], "x", m1_sizes[1], " @ ", m2_sizes[0], "x", m2_sizes[1], " != ",
-      self_sizes[0], "x", self_sizes[1], ")");
-
   at::native::resize_output(result, self_sizes);
   const auto result_strides = result.strides();
   const auto result_sizes = result.sizes();
@@ -1005,7 +1024,7 @@ static void addmm_impl_cpu_(
 
   // Apply BLAS routine
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
-      result.scalar_type(), "addmm_impl_cpu_",
+      result.scalar_type(), "addmm_out_cpu",
       [&]{
         at::native::cpublas::gemm(
             transpose_a ? cpublas::Transpose : cpublas::NoTranspose,
@@ -1083,42 +1102,42 @@ Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, co
   return native::addbmm_out(self, batch1, batch2, beta, alpha, result);
 }
 
-Tensor& addmm_cpu_out(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor &result) {
   auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
     at::NoNamesGuard guard;
-    addmm_impl_cpu_(result, *b_self, mat1, mat2, beta, alpha);
+    addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
   }
-  at::namedinference::propagate_names_for_addmm(result, mat1, mat2, self);
-  return result;
 }
 
 Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   Tensor result = at::empty({0}, self.options());
-  return addmm_cpu_out(self, mat1, mat2, beta, alpha, result);
+  addmm_impl_cpu_(result, self, mat1, mat2, beta, alpha);
+  return result;
 }
 
 Tensor &addmm_cpu_(Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(((self.dim() == 2) && (self.sizes()[0] == mat1.sizes()[0]) && (self.sizes()[1] == mat2.sizes()[1])),
   "The input tensor must be a matrix with size ", mat1.sizes()[0], "x", mat2.sizes()[1], ", but got a ", self.dim(),
   "-D tensor with size ", self.sizes()[0], "x", self.sizes()[1]);
-  return addmm_cpu_out(self, mat1, mat2, beta, alpha, self);
+  addmm_impl_cpu_(self, self, mat1, mat2, beta, alpha);
+  return self;
 }
 
 Tensor& mm_cpu_out(const Tensor & self, const Tensor & mat2, Tensor & result) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
-  return addmm_cpu_out(result, self, mat2, 0, 1, result);
+  addmm_impl_cpu_(result, result, self, mat2, 0, 1);
+  return result;
 }
 
 Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   Tensor result = at::empty({self.sizes()[0], mat2.sizes()[1]}, self.options());
-  return addmm_cpu_out(result, self, mat2, 0, 1, result);
+  addmm_impl_cpu_(result, result, self, mat2, 0, 1);
+  return result;
 }
 
 template <typename scalar_t, bool is_bmm>
