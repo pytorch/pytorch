@@ -31,6 +31,18 @@ std::string kernelPreamble() {
 
 #ifndef __HIP_PLATFORM_HCC__
   ss << nvfuser_resources::fp16_support_cu;
+#else
+  ss << R"(
+#ifndef __noinline__
+#define __noinline__ __attribute__((noinline))
+#endif
+#ifndef __forceinline__
+#define __forceinline__ inline __attribute__((always_inline))
+#endif
+#ifndef assert
+#define assert(expr) ((void)0)
+#endif
+  )";
 #endif
 
   ss << nvfuser_resources::tensor_cu;
