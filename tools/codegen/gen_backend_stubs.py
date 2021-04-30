@@ -142,7 +142,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
             'cpp_namespace': cpp_namespace,
             'dispatch_aten_fallback_declarations': list(concatMap(
                 dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[backend_dispatch_key]),
-                [g for g in grouped_native_functions if backend_indices[backend_dispatch_key].has_backend(g)]
+                [g for g in grouped_native_functions if not backend_indices[autograd_dispatch_key].has_backend(g)]
             )) + list(concatMap(
                 dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[autograd_dispatch_key]),
                 [g for g in grouped_native_functions if backend_indices[autograd_dispatch_key].has_backend(g)]
@@ -156,14 +156,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
             # merge registrations / definitions into RegisterDispatchKey
             'dispatch_aten_fallback_definitions': list(concatMap(
                 dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[backend_dispatch_key]),
-                [g for g in grouped_native_functions if backend_indices[backend_dispatch_key].has_backend(g)]
+                [g for g in grouped_native_functions if not backend_indices[autograd_dispatch_key].has_backend(g)]
             )) + list(concatMap(
                 dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[autograd_dispatch_key]),
                 [g for g in grouped_native_functions if backend_indices[autograd_dispatch_key].has_backend(g)]
             )),
             'dispatch_registrations': list(concatMap(
                 dest.GenExternalAtenFallback(Target.REGISTRATION, backend_indices[backend_dispatch_key]),
-                [g for g in grouped_native_functions if backend_indices[backend_dispatch_key].has_backend(g)]
+                [g for g in grouped_native_functions if not backend_indices[autograd_dispatch_key].has_backend(g)]
             )),
             'dispatch_autograd_registrations': list(concatMap(
                 dest.GenExternalAtenFallback(Target.REGISTRATION, backend_indices[autograd_dispatch_key]),
