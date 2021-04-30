@@ -169,6 +169,7 @@ class PackageImporter(Importer):
         pickle_file = self._zipfile_path(package, resource)
         restore_location = _get_restore_location(map_location)
         loaded_storages = {}
+        loaded_reduces = {}
 
         def load_tensor(data_type, size, key, location, restore_location):
             name = f".data/{key}.storage"
@@ -197,10 +198,12 @@ class PackageImporter(Importer):
                 storage = loaded_storages[key]
                 return storage
             elif typename == "reduce_package":
-                func, args = data
-                return func(self, *args)
+                reduce_id, func, args = data
+                if reduce_id not in loaded_reduces:
+                    loaded_reduces[reduce_id] = func(self, *args)
+                return loaded_reduces[reduce_id]
             else:
-                f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
+                f"Unknown typename for persistent_load, expected 'storage' or 'reduce_package' but got '{typename}'"
 
         # Load the data (which may in turn use `persistent_load` to load tensors)
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
