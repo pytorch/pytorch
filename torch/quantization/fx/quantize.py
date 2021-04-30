@@ -552,7 +552,7 @@ def handle_copy_nodes(
                             observed_nodes.add(node)
                     else:
                         observed_nodes.add(node)
-        elif root_node is None: # and node.op != 'placeholder':
+        elif root_node is None and node.op != 'placeholder':
             # rule 4: remove observer for getitem if it is followed by an unmatched node
             if len(node.args) > 0:
                 maybe_observer_node = node.args[0]
