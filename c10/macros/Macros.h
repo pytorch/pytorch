@@ -197,6 +197,13 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #include <sstream>
 #include <string>
 
+#ifdef __HIPCC__
+// Unlike CUDA, HIP requires a HIP header to be included for __host__ to work.
+// We do this #include here so that C10_HOST_DEVICE and friends will Just Work.
+// See https://github.com/ROCm-Developer-Tools/HIP/issues/441
+#include <hip/hip_runtime.h>
+#endif
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
 // Designates functions callable from the host (CPU) and the device (GPU)
 #define C10_HOST_DEVICE __host__ __device__
