@@ -16,7 +16,6 @@
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <c10/util/MaybeOwned.h>
 #include <THC/THCTensorInfo.cuh>
-#include <THC/THCThrustAllocator.cuh>
 
 namespace at { namespace native {
 

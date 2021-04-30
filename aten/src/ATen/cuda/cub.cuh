@@ -111,6 +111,44 @@ static inline void sort_pairs(
   }
 }
 
+template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT>
+void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
+  // non synchronizing cub call
+  // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
+  // so split at int_max/2
+  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
+  for (int64_t i = 0; i < num_items; i += max_cub_size) {
+    int size_cub = std::min<int64_t>(num_items - i, max_cub_size);
+    Tensor first_elem; // need to save it for all iterations other than first
+    if (i > 0) {
+      // need to temporarily transform first element of the range we are
+      // operating on; self might be multi-d, but we need to index a single
+      // element
+      auto self_view = at::_unsafe_view(self, -1);
+      first_elem = self_view[i].clone();
+      transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+          self.data_ptr<scalar_t>() + i,
+          result.data_ptr<scalar_t>() + i - 1,
+          self.data_ptr<scalar_t>() + i,
+          scan_op);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan(
+        input + i,
+        output + i,
+        scan_op,
+        size_cub,
+        at::cuda::getCurrentCUDAStream()));
+    if (i > 0) {
+      if (self.data_ptr<scalar_t>() != result.data_ptr<scalar_t>()) {
+        // restore modified first element only if it's not an inplace operation
+        auto self_view = at::_unsafe_view(self, -1);
+        self_view[i].copy_(first_elem, /*non_blocking=*/true);
+      }
+    }
+  }
+}
+
 template<typename InputIteratorT, typename OutputIteratorT>
 void exclusive_sum(InputIteratorT input, OutputIteratorT output, int64_t n) {
   auto allocator = c10::cuda::CUDACachingAllocator::get();
