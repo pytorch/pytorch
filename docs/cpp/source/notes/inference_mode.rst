@@ -2,20 +2,21 @@ Inference Mode
 ==============
 
 ``c10::InferenceMode`` is a new RAII guard analogous to ``NoGradMode``
-to be used when you are cetain your operations will have no interactions
-with autograd (e.g. model training). Code run under this mode gets better
-performance by disabling autograd related work like view tracking
-and version counter bumps, in return tensors created inside ``c10::InferenceMode``
-has more limitation interacting with autograd system compared to ``NoGradMode``.
+to be used when you are certain your operations will have no interactions
+with autograd (e.g. model training). Compared to ``NoGradMode``, code run
+under this mode gets better performance by disabling autograd related work like
+view tracking and version counter bumps. However, tensors created inside
+``c10::InferenceMode`` has more limitation interacting with autograd system as well.
 
 ``InferenceMode`` can be enabled for a given block of code. Inside ``InferenceMode``
 all newly allocated (non-view) tensors are marked as inference tensors. Inference tensors:
 
-- Do not have a version counter.
-- Raise an error if you try to read their version (e.g., because you saved this tensor for backward).
-- Raise an error if you try to mutate their data outside InferenceMode. To work around you
-  can make a clone to get a normal tensor before doing inplace update.
-- Raise an error if you try to mutate them into ``requires_grad=True`` outside InferenceMode.
+- do not have a version counter so an error will be raised if you try to read their version
+  (e.g., because you saved this tensor for backward).
+- are immutable outside ``InferenceMode``. So an error will be raised if you try to:
+  - mutate their data outside InferenceMode.
+  - mutate them into ``requires_grad=True`` outside InferenceMode.
+  To work around you can make a clone to get a normal tensor before mutating.
 
 A non-view tensor is an inference tensor if and only if it was allocated inside ``InferenceMode``.
 A view tensor is an inference tensor if and only if the tensor it is a view of is an inference tensor.
@@ -29,12 +30,14 @@ Inside an ``InferenceMode`` block, we make the following performance guarantees:
 - Inplace operations on inference tensors are guaranteed not to do a version bump.
 
 For more implementation details of ``InferenceMode`` please see the `InferenceMode RFC <https://github.com/pytorch/rfcs/pull/17>`_.
+Currently this guard is only available in C++ frontend, adding python frontend support
+is tracked in #56608.
 
-Migration Guide from ``AutoNonVariableTypeMode``
+Migration guide from ``AutoNonVariableTypeMode``
 ------------------------------------------------
 
 In production use of PyTorch for inference workload, we have seen a proliferation
-of uses of the C++ guard ``AutoNonVariableTypeMode``(now ``AutoDispatchBelowADInplaceOrView``),
+of uses of the C++ guard ``AutoNonVariableTypeMode`` (now ``AutoDispatchBelowADInplaceOrView``),
 which disables autograd, view tracking and version counter bumps. Unfortunately,
 current colloquial of this guard for inference workload is unsafe: it's possible to
 use ``AutoNonVariableTypeMode`` to bypass PyTorch's safety checks and result in
@@ -61,11 +64,13 @@ the performance characteristics of ``AutoNonVariableTypeMode``. But they also ha
 users should pay additional attention to:
 
   - Both guards affects tensor execution process to skip work not related to inference, but ``InferenceMode``
-    also affects tensor creation. In other words, tensors created inside ``InferenceMode`` are marked as
-    inference tensors so that certain limitation can be applied when they participate in autograd computation.
+    also affects tensor creation while ``AutoNonVariableTypeMode`` doesn't. In other words, tensors created
+    inside ``InferenceMode`` are marked as inference tensors so that certain limitation can be applied when
+    they participate in autograd computation in the future.
   - Enabled/disabled ``InferenceMode`` states can be nested while ``AutoNonVariableTypeMode`` only allows enabled state..
 
 .. code-block:: cpp
+
   {
     InferenceMode guard(true);
     // InferenceMode is on
@@ -112,4 +117,7 @@ users should pay additional attention to:
       return {result};
     }
 
+Customized inplace & view kernels need some special handling in addition to the guard above, see
+`custom kernel tutorial <https://pytorch.org/tutorials/advanced/cpp_extension.html#backward-pass>`_
+for more details.
 
