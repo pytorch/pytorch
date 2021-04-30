@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/source_ref.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
@@ -1382,6 +1383,14 @@ void initJITBindings(PyObject* module) {
         print);
   });
 #endif // defined(C10_SUPPORTS_SIGNAL_HANDLER)
+
+  py::class_<SourceRef>(m, "SourceRef")
+      .def(
+          "__eq__",
+          [](const SourceRef& self, const SourceRef& other) {
+            return self == other;
+          })
+      .def(py::hash(py::self));
 
   initPythonCustomClassBindings(module);
   initPythonIRBindings(module);
