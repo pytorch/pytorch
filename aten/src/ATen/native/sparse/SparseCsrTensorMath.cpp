@@ -181,7 +181,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   return out;
 }
 
-Tensor addmm_sparse_csr_dense_cpu(
+Tensor addmm_sparse_csr_dense(
     const Tensor& self,
     const SparseCsrTensor& sparse,
     const Tensor& dense,
