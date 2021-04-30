@@ -726,45 +726,26 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
-# In order to use the kwarg alpha, partials should be used in an OpInfo's sample_inputs_func
-# eg. sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2)
-# Then one sample input would also be generated corresponding to the value of alpha provided.
-# In the future, kwargs 'alpha_floating', 'alpha_integral' & 'alpha_complex' can be used to
-# specify scalars of floating, integral & complex types as values for "alpha".
-def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, **kwargs):
-    scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
-    scalar = 1 if dtype is torch.bool else scalar
-    tests_list = [
-        ((S, S, S), (S, S, S), False),
-        ((S, S, S), (S, S), False),
-        ((), (), False),
-        ((S, S, S), (), False),
-        ((S, S, S), scalar, False),
-        ((), scalar, False)
-    ]
-    tests_with_lhs_broadcasting = [
-        ((S, S), (S, S, S), True),
-        ((), (S, S, S), True),
-        ((S, 1, S), (M, S), True),
-    ]
-    test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
-    samples = []
-    for first_shape, shape_or_scalar, broadcasts_input in test_cases:
-        arg = shape_or_scalar
-        if isinstance(shape_or_scalar, tuple):
-            arg = make_tensor(shape_or_scalar, device=device, dtype=dtype,
-                              requires_grad=requires_grad)
-        samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
-                                               requires_grad=requires_grad),
-                                   args=(arg,),
-                                   broadcasts_input=broadcasts_input))
-    # Adds an extra sample using "alpha" if it's passed in kwargs
-    if 'alpha' in kwargs:
-        a = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
-        b = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
-        sample = SampleInput(a, args=(b,), kwargs={'alpha': kwargs['alpha']})
-        samples.append(sample)
-    return tuple(samples)
+
+# If 'alpha' is not passed as kwargs, defaults to 'sample_inputs_binary'. Otherwise returns only a single sample to be
+# used as sanity check, since 'alpha' is rarely used in practice.
+def sample_inputs_add_sub(op_info, device, dtype, requires_grad, **kwargs):
+    if "alpha" not in kwargs:
+        return sample_inputs_binary(op_info, device, dtype, requires_grad, **kwargs)
+
+    low, high = op_info.domain
+    if low is not None:
+        low += op_info._domain_eps
+    if high is not None:
+        high -= op_info._domain_eps
+
+    return (
+        SampleInput(
+            make_tensor((S, S, S), device, dtype, low=low, high=high, requires_grad=requires_grad),
+            args=(make_tensor((S, S, S), device, dtype, low=low, high=high, requires_grad=requires_grad),),
+            kwargs=kwargs,
+        ),
+    )
 
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
     args_list = (
@@ -3474,6 +3455,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo(
         "add",
         ref=np.add,
+        sample_inputs_func=sample_inputs_add_sub,
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         supports_out=True,
     ),
@@ -3482,7 +3464,7 @@ op_db: List[OpInfo] = [
         variant_test_name="with_alpha",
         # numpy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
         ref=lambda input, other, *, alpha: np.add(input, np.multiply(alpha, other)),
-        sample_inputs_func=partial(sample_inputs_binary, alpha=2),
+        sample_inputs_func=partial(sample_inputs_add_sub, alpha=2),
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         supports_out=True,
     ),
@@ -3497,6 +3479,7 @@ op_db: List[OpInfo] = [
         "sub",
         aliases=("subtract",),
         ref=np.subtract,
+        sample_inputs_func=sample_inputs_add_sub,
         supports_out=True,
     ),
     BinaryUfuncInfo(
@@ -3505,7 +3488,7 @@ op_db: List[OpInfo] = [
         variant_test_name="with_alpha",
         # numpy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
         ref=lambda input, other, *, alpha: np.subtract(input, np.multiply(alpha, other)),
-        sample_inputs_func=partial(sample_inputs_binary, alpha=2),
+        sample_inputs_func=partial(sample_inputs_add_sub, alpha=2),
         supports_out=True,
     ),
     OpInfo('addmm',
