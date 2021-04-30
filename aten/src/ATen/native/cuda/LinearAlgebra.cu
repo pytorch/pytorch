@@ -243,8 +243,8 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
   auto batch1_ = prepare_batch_matrix_for_cublas(transpose_result ? batch2 : batch1, transpose_batch1, lda, transpose_result, m, k);
   auto batch2_ = prepare_batch_matrix_for_cublas(transpose_result ? batch1 : batch2, transpose_batch2, ldb, transpose_result, k, n);
 
-  ldc = result_.strides()[leading_dim];
-  int64_t num_batches = result_.sizes()[0];
+  ldc = result_->strides()[leading_dim];
+  int64_t num_batches = result_->sizes()[0];
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
@@ -260,7 +260,7 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
       batch1_ptr, lda, batch1_->strides()[0],
       batch2_ptr, ldb, batch2_->strides()[0],
       beta_val,
-      result_ptr, ldc, result_.strides()[0],
+      result_ptr, ldc, result_->strides()[0],
       num_batches
     );
   });
