@@ -259,6 +259,6 @@ from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, Pro
 
 if kineto_available():
     from torch._C._autograd import (ProfilerResult, KinetoEvent,
-                                    _prepare_profiler, _enable_profiler, _disable_profiler)
+                                    _add_metadata, _prepare_profiler, _enable_profiler, _disable_profiler)
 
 from . import profiler
