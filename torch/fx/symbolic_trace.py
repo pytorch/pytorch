@@ -351,7 +351,7 @@ class Tracer(TracerBase):
 
                     return x
 
-                return pytree.tree_map(concrete_args[name], replace_ph)
+                return pytree.tree_map(replace_ph, concrete_args[name])
             if name[0] == '*':
                 default = ()
             else:

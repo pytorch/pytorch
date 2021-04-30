@@ -103,7 +103,7 @@ class TestPytree(TestCase):
             def f(x):
                 return x * 3
             sm1 = sum(map(tree_flatten(pytree)[0], f))
-            sm2 = tree_flatten(tree_map(pytree, f))[0]
+            sm2 = tree_flatten(tree_map(f, pytree))[0]
             self.assertEqual(sm1, sm2)
 
             def invf(x):

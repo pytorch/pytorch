@@ -1912,8 +1912,8 @@ class TestFX(JitTestCase):
         mod_true = symbolic_trace(mod, concrete_args={'y': True})
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
         self.assertEqual(mod_true(3, True), 6)
-        assert(any([i.target == torch._assert for i in mod_true.graph.nodes]))
         print(mod_true.code)
+        assert(any([i.target == torch._assert for i in mod_true.graph.nodes]))
         with self.assertRaises(AssertionError):
             mod_true(3, False)
         self.assertEqual(mod_false(3, False), 3)
@@ -2362,7 +2362,7 @@ class TestFX(JitTestCase):
         ]
 
         def verify_pytree(f, inp):
-            val = pytree.tree_map(inp, lambda x: torch.randn(3) if x == PH else x)
+            val = pytree.tree_map(lambda x: torch.randn(3) if x == PH else x, inp)
             num_flat_args = len([i == PH for i in pytree.tree_flatten(inp)[0]])
             orig_out = f(val)
             nf = symbolic_trace(f, concrete_args={'x': inp})
@@ -2396,7 +2396,7 @@ class TestFX(JitTestCase):
 
         inp = {'a': {'a': PH, 'z': PH}, 'b': True}
         nf = symbolic_trace(f, concrete_args=inp)
-        val = pytree.tree_map(inp, lambda x: torch.randn(3) if x == PH else x)
+        val = pytree.tree_map(lambda x: torch.randn(3) if x == PH else x, inp)
         self.assertEqual(nf(**val), f(**val))
 
         nf = symbolic_trace(nf)
