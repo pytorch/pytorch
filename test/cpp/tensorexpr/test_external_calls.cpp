@@ -266,12 +266,7 @@ TEST(ExternalCall, Addmm_float) {
   at::Tensor mat1 = at::ones({100, 200}, options) * 6.f;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor mat2 = at::ones({200, 300}, options) * 11.f;
-  at::Tensor ref = at::addmm(
-      input,
-      mat1,
-      mat2,
-      beta,
-      alpha);
+  at::Tensor ref = at::addmm(input, mat1, mat2, beta, alpha);
 
   at::Tensor nnc_result;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
