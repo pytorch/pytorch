@@ -15,7 +15,7 @@ from functools import partial
 
 import functorch
 from functorch import (
-    grad, vjp, vmap, jacrev, grad_with_value,
+    grad, vjp, vmap, jacrev, grad_and_value,
     make_functional, make_functional_with_buffers,
 )
 
@@ -251,6 +251,33 @@ class TestGradTransform(TestCase):
         result = grad(foo)(x)
         self.assertEqual(result, x.cos())
 
+    def test_invalid_argnums(self, device):
+        x = torch.randn([])
+        y = torch.randn([])
+        with self.assertRaisesRegex(RuntimeError, 'but only'):
+            grad(torch.mul, argnums=-1)(x, y)
+        with self.assertRaisesRegex(RuntimeError, 'but only'):
+            grad(torch.mul, argnums=2)(x, y)
+        with self.assertRaisesRegex(RuntimeError, 'int or Tuple'):
+            grad(torch.mul, argnums=[0])(x, y)
+        with self.assertRaisesRegex(RuntimeError, 'must be int'):
+            grad(torch.mul, argnums=('0',))(x, y)
+
+    def test_argnums(self, device):
+        x = torch.randn([])
+        y = torch.randn([])
+        gx = grad(torch.mul, argnums=0)(x, y)
+        self.assertEqual(gx, y)
+
+        gy = grad(torch.mul, argnums=1)(x, y)
+        self.assertEqual(gy, x)
+
+        gx, = grad(torch.mul, argnums=(0,))(x, y)
+        self.assertEqual(gx, y)
+
+        gx, gy = grad(torch.mul, argnums=(0, 1))(x, y)
+        self.assertEqual(gx, y)
+        self.assertEqual(gy, x)
 
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
@@ -672,7 +699,7 @@ class TestExamplesCorrectness(TestCase):
                 return loss
 
             if use_transform:
-                grad_weights, loss = grad_with_value(compute_loss)(weights, batch, targets)
+                grad_weights, loss = grad_and_value(compute_loss)(weights, batch, targets)
             else:
                 loss = compute_loss(weights, batch, targets)
                 grad_weights = torch.autograd.grad(loss, weights)
