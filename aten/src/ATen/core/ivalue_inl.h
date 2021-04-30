@@ -739,33 +739,26 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   static std::vector<c10::Device> sortAndDeduplicateDevices(
       const c10::impl::VirtualGuardImpl& impl,
       std::vector<c10::Device> devices) {
-    // We expect the devices to be already sorted in most cases, hence we do an
-    // in-place insertion sort which doesn't do any data movement in such cases.
-    size_t sortedPrefixLen = 0;
-    for (size_t idx = 0; idx < devices.size(); idx++) {
-      TORCH_CHECK_VALUE(
-          devices[idx].has_index(), "Expected devices to have indices, got ", devices[idx]);
-      c10::Device* targetPos = std::lower_bound(
-        &devices[0], &devices[sortedPrefixLen], devices[idx],
-        [](const c10::Device& a, const c10::Device& b) { return a.index() < b.index(); });
-      if (targetPos == &devices[idx]) {
-        // Already in the right place.
-        sortedPrefixLen++;
-        continue;
-      }
-      if (targetPos->index() == devices[idx].index()) {
+    std::sort(
+      devices.begin(), devices.end(),
+      [](const c10::Device& a, const c10::Device& b) { return a.index() < b.index(); });
+    // Deduplicate by compacting.
+    size_t targetIdx = 0;
+    for (size_t sourceIdx = 0; sourceIdx < devices.size(); sourceIdx++) {
+      if (targetIdx > 0 && devices[targetIdx - 1].index() == devices[sourceIdx].index()) {
         // It's a duplicate, skip it.
         continue;
       }
-      c10::Device device = devices[idx];
-      std::move(targetPos, &devices[sortedPrefixLen], targetPos + 1);
-      *targetPos = device;
+      if (sourceIdx != targetIdx) {
+        devices[targetIdx] = devices[sourceIdx];
+      }
+      targetIdx++;
     }
     // If there were duplicates there's now a gap at the end: trim it. Resizing
     // requires the item type to be default-constructible (which c10::Device is
     // not) because in principle it could be required to create new items. Since
     // we know we'll shrink the vector, we provide a custom dummy value instead.
-    devices.resize(sortedPrefixLen, c10::Device(c10::kCPU));
+    devices.resize(targetIdx, c10::Device(c10::kCPU));
     return devices;
   }
 
