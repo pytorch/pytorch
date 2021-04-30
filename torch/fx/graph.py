@@ -1020,11 +1020,12 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
                             raise RuntimeError(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
                                                'not reference an nn.Module')
                         elif (node.op == "get_attr"
-                                    and not isinstance(new_m_itr, torch.nn.Module)
-                                    and not isinstance(new_m_itr, torch.nn.Parameter)
-                                    and atom not in m_itr._buffers):
-                                raise RuntimeError(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
-                                                    'not reference an nn.Module')
+                              and not isinstance(new_m_itr, torch.nn.Module)
+                              and not isinstance(new_m_itr, torch.nn.Parameter)
+                              and atom not in m_itr._buffers):
+                            warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
+                                          'not reference an nn.Module, nn.Parameter, or buffer, which is '
+                                          'what \'get_attr\' Nodes typically target')
                         else:
                             m_itr = new_m_itr
 
