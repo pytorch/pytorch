@@ -116,7 +116,6 @@ class TestSparseCSR(TestCase):
                     should_be_cuda = (device == 'cuda' or (device is None and values_device == 'cuda'))
                     self.assertEqual(should_be_cuda, t.is_cuda)
 
-    @onlyCPU
     def test_sparse_csr_print(self, device):
         shape_nnz = [
             ((10, 10), 10),
@@ -136,12 +135,9 @@ class TestSparseCSR(TestCase):
             for index_dtype in [torch.int32, torch.int64]:
                 for dtype in torch.testing.floating_types():
                     printed.append("########## {}/{} ##########".format(dtype, index_dtype))
-                    crow_indices = [0, 2, 4]
-                    col_indices = [0, 1, 0, 1]
-                    values = [1, 2, 3, 4]
-                    x = torch.sparse_csr_tensor(torch.tensor(crow_indices, dtype=index_dtype),
-                                                    torch.tensor(col_indices, dtype=index_dtype),
-                                                    torch.tensor(values), dtype=dtype, device=device)
+                    x = torch.sparse_csr_tensor(torch.tensor([0, 2, 4], dtype=index_dtype),
+                                                torch.tensor([0, 1, 0, 1], dtype=index_dtype),
+                                                torch.tensor([1, 2, 3, 4]), dtype=dtype, device=device)
                     printed.append("# sparse tensor")
                     printed.append(str(x))
                     printed.append("# _crow_indices")
@@ -154,7 +150,6 @@ class TestSparseCSR(TestCase):
                 printed.append('')
         self.assertExpected('\n'.join(printed))
 
-    @onlyCPU
     def test_sparse_csr_from_dense(self, device):
         dense = torch.tensor([[4, 5, 0], [0, 0, 0], [1, 0, 0]], device=device)
         sparse = dense.to_sparse_csr()
@@ -174,7 +169,6 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9), sparse.values())
 
-    @onlyCPU
     @dtypes(torch.double)
     def test_dense_convert(self, device, dtype):
         size = (5, 5)
@@ -267,7 +261,6 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, "mv: expected"):
                 csr.matmul(bad_vec)
 
-    @onlyCPU
     @dtypes(*torch.testing.floating_types())
     def test_coo_csr_conversion(self, device, dtype):
         size = (5, 5)
