@@ -52,6 +52,7 @@ WORKFLOWS = [
     PyTorchLinuxWorkflow(
         build_environment="pytorch-linux-xenial-py3.6-gcc5.4",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        on_pull_request=True,
     ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4",
