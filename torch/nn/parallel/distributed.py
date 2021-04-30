@@ -290,15 +290,6 @@ class DistributedDataParallel(Module):
         Using ``DistributedDataParallel`` in conjunction with the
         :ref:`distributed-rpc-framework` is experimental and subject to change.
 
-    .. warning::
-        The ``gradient_as_bucket_view`` mode  does not yet work with Automatic
-        Mixed Precision (AMP). AMP maintains stashed gradients that are used for
-        unscaling gradients. With ``gradient_as_bucket_view=True``, these
-        stashed gradients will point to communication buckets in the first
-        iteration. In the next iteration, the communication buckets are mutated
-        and thus these stashed gradients will be unexpectedly mutated as well,
-        which might lead to wrong results.
-
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices.
@@ -345,8 +336,7 @@ class DistributedDataParallel(Module):
                                unused can be detached from the autograd graph
                                using ``torch.Tensor.detach``. (default: ``False``)
         check_reduction: This argument is deprecated.
-        gradient_as_bucket_view (bool): This is a prototype feature and subject
-                      to changes. When set to ``True``, gradients will be views
+        gradient_as_bucket_view (bool): When set to ``True``, gradients will be views
                       pointing to different offsets of ``allreduce`` communication
                       buckets. This can reduce peak memory usage, where the
                       saved memory size will be equal to the total gradients
@@ -1305,11 +1295,15 @@ class DistributedDataParallel(Module):
     def get_ddp_logging_data(self):
         r"""
         This interface can be called after DistributedDataParallel() is
-        constructed. It returns DDPLoggingData for debugging and analysis.
-        More detailed explanation of the fields in DDPLoggingData are in
-        ``torch/c10/util/Logging.h``.
+        constructed. It returns a dictionary of logging data. It could help
+        for debugging and analysis. The loggind data includes DistributedDataParallel
+        constructor input parameters, some internal states of DistributedDataParallel
+        and performance metrics. Simply print the dictorinary and see what
+        these metrics are.
+        THis is a prototype interface and subject to change in the future.
         """
-        return self.logger._get_ddp_logging_data()
+        ddp_logging_data = self.logger._get_ddp_logging_data()
+        return {**ddp_logging_data.strs_map, **ddp_logging_data.ints_map}
 
     def set_ddp_runtime_logging_sample_rate(self, sample_rate):
         r"""
@@ -1320,9 +1314,39 @@ class DistributedDataParallel(Module):
         default, runtime stats are recorded for the first 10 iterations,
         after 10 iterations runtime stats are recorded once every
         "kDDPRuntimeLoggingSampleRate=100" training iterations.
+        This is a prototype interface and subject to change in the future.
         """
         if sample_rate < 1:
             raise ValueError(
                 "DDP runtime logging sample rate should be equal or greater than 1"
             )
         self.reducer._set_ddp_runtime_logging_sample_rate(sample_rate)
+
+    def _set_static_graph(self):
+        """
+        Users can explicitly let DDP know the trained graph is static,
+        when 1) the set of used and unused parameters will not change
+        during the whole training loop; in this case, it does not matter
+        whether users set find_unsued_parameters = true or not.
+        2) how the graph is trained will not change during the whole training
+        loop (meaning there is no control flow depending on iterations).
+        When graph is set to be static, DDP will support cases that can not
+        be supported in the past: 1) reentrant backwards
+        2) activation checkpointing multiple times 3)
+        activation checkpointing with find_unused_parameters = true.
+        4) not all output tensors are used in loss calculation.
+        5) there is model parameter that is outside of forward function.
+        6) potentially improve performance when find_unsued_parameters = true
+        or there are unused parameters, as DDP will not search graph in each
+        iteraton to detect unused parameters when static_graph is set to be True.
+
+        This API should be called after DistributedDataParallel construction, and
+        before training loops starts. Also it should be called in the same way for
+        all ranks. For example:
+            ddp_model = DistributedDataParallel(model)
+            ddp_model._set_static_graph()
+            for i in range(n):
+                .....
+        """
+        self.reducer._set_static_graph()
+        self.logger._set_static_graph()
