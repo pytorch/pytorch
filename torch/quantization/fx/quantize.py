@@ -589,8 +589,14 @@ def handle_copy_nodes(
         # similar to TorchScript
         if (node.op, node.target) == ("call_method", "masked_fill"):
             maybe_observer_node = node.args[1]
-            if is_activation_post_process_node(maybe_observer_node, modules):
+            while isinstance(maybe_observer_node, Node) and is_activation_post_process_node(maybe_observer_node, modules):
                 actpp_to_remove.add(maybe_observer_node)
+                # trace back from the current observer node
+                n = maybe_observer_node.args[0]
+                if isinstance(n, Node) and len(n.args) > 0:
+                    maybe_observer_node = n.args[0]
+                else:
+                    break
 
     for node in observed_graph.nodes:
         if node.op == "output":
