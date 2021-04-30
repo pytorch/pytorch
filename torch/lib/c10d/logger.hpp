@@ -13,6 +13,8 @@ class Logger {
       int output_device,
       bool broadcast_buffers);
 
+  void set_static_graph();
+
   // An interface for users to get DDPLoggingData and log them
   // in the applications. Explanation of logging fields are in
   // "struct DDPLoggingData" of "torch/c10/util/Logging.h".
