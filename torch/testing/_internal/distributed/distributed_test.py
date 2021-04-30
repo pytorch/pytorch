@@ -4354,7 +4354,8 @@ class DistributedTest:
             model = nn.Linear(dim, dim, bias=False)
             inp = torch.rand(batch, dim, device=self.rank)
             net = torch.nn.parallel.DistributedDataParallel(
-                model.cuda(self.rank), device_ids=[self.rank]
+                model.cuda(self.rank),
+                device_ids=[self.rank],
             )
             profiler_ctx_copy = copy.deepcopy(profiler_ctx)
 
@@ -4382,7 +4383,9 @@ class DistributedTest:
             # for a single pass, and ensure it is recorded. This tests that the
             # thread local state is correctly updated.
             net = torch.nn.parallel.DistributedDataParallel(
-                model.cuda(self.rank), device_ids=[self.rank]
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=True
             )
             for i in range(3):
                 loss = net(inp).sum()
@@ -4393,9 +4396,12 @@ class DistributedTest:
                 loss.backward()
 
             events = get_profiling_event(all_reduce_event_name, prof)
-            self.assertEqual(1, len(events))
-            self.assertEqual(1, events[0].count)
+            self.assertGreaterEqual(len(events), 1)
+            self.assertGreaterEqual(events[0].count, 1)
             self.assertEqual(events[0].name, all_reduce_event_name)
+            # Ensure searching unused parameters was profiled
+            events = get_profiling_event("search_unused_parameters",prof)
+            self.assertEqual(len(events), 1)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
