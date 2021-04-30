@@ -47,6 +47,8 @@ from jit.test_jit_utils import TestJitUtils  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 from jit.test_types import TestTypesAndAnnotation  # noqa: F401
 from jit.test_misc import TestMisc  # noqa: F401
+from jit.test_pdt import TestPDT  # noqa: F401
+from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -7566,7 +7568,7 @@ dedent """
         def fn(x):
             return type(x)
 
-        with self.assertRaisesRegex(RuntimeError, "value of type type"):
+        with self.assertRaisesRegex(RuntimeError, "value of type _TensorMeta"):
             fn(torch.tensor(.5))
 
     def test_python_call_annotation(self):
