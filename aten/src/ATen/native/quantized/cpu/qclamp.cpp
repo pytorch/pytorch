@@ -14,8 +14,11 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qclamp_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qclamp_min_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qclamp_max_stub);
 
 namespace {
@@ -137,11 +140,10 @@ Tensor hardtanh_quantized_cpu(
   return qy;
 }
 
-Tensor& hardtanh_out_quantized_cpu(
-    Tensor& result,
-    const Tensor& qx,
+Tensor& hardtanh_out_quantized_cpu(const Tensor& qx,
     const Scalar& min,
-    const Scalar& max) {
+    const Scalar& max,
+    Tensor& result) {
   result = quantized_clamp_impl(qx, min, max);
   return result;
 }

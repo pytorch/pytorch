@@ -6,6 +6,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, Attributes) {
   Graph g;
   auto one = attr::alpha;
@@ -14,6 +15,7 @@ TEST(IRTest, Attributes) {
   auto four = attr::perm;
   Node* n = g.create(Symbol::fromQualString("foo::bar"));
   Node& attr = *n;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   attr.f_(one, 3.4)->i_(two, 5)->s_(three, "what");
   ASSERT_EQ(attr.f(one), 3.4);
   ASSERT_EQ(attr.s(three), "what");
@@ -29,11 +31,13 @@ TEST(IRTest, Attributes) {
   Node& attr2 = *n2;
   attr2.copyAttributes(attr);
   ASSERT_EQ(attr2.s(one), "no");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   attr2.f_(one, 5);
   ASSERT_EQ(attr.s(one), "no");
   ASSERT_EQ(attr2.f(one), 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, Blocks) {
   auto g = std::make_shared<Graph>();
   const auto graph_string = R"IR(
@@ -93,6 +97,7 @@ TEST(IRTest, Blocks) {
       ->run(*g2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, CommonAncestor) {
   std::string input_str = R"(
 graph(%x : Tensor,
@@ -130,6 +135,7 @@ graph(%x : Tensor,
       value_names.begin(), value_names.end());
 
   /* clang-format off */
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   int ref_blocks_from_graph[4][4] = {
     /* (6, 6), (6, 7), (6, 9), (6, 10) */
     {   2,     1,      0,      0        },

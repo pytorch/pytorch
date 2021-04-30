@@ -15,24 +15,6 @@ namespace at {
 namespace native {
 namespace metal {
 
-static inline NSString* kernelFunction(MPSImage* X, MPSImage* Y) {
-  bool (^is2DArray)(MPSImage*) = ^(MPSImage* image) {
-    return image.numberOfImages > 1 || image.featureChannels > 4;
-  };
-  bool b1 = is2DArray(X);
-  bool b2 = is2DArray(Y);
-  // TODO: Simplify the kernel selection
-  if (b1 && b2) {
-    return @"reshape1"; // array -> array
-  } else if (b1 && !b2) {
-    return @"reshape2"; // array -> nonarray
-  } else if (!b1 && b2) {
-    return @"reshape3"; // nonarray -> array
-  } else {
-    return @"reshape4"; // nonarray -> nonarray
-  }
-}
-
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor view(const Tensor& input, IntArrayRef size) {
   TORCH_CHECK(input.is_metal());
@@ -51,11 +33,12 @@ Tensor view(const Tensor& input, IntArrayRef size) {
   mt.texture()->allocateTemporaryTextureStorage(inferred_size, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      specializedPipelineState:kernelFunction(X, Y)
+      specializedPipelineState:@"reshape"
                      Constants:@[
                        @(Y.height),
                        @(Y.width),
                        @(Y.featureChannels),
+                       @(Y.numberOfImages),
                        @(X.height),
                        @(X.width),
                        @(X.featureChannels),

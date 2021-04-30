@@ -875,6 +875,7 @@ class TestOperators(TestCase):
     def test_det(self):
         x = torch.randn(2, 3, 5, 5, device=torch.device('cpu'))
         self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
+        self.assertONNX(lambda x: torch.linalg.det(x), x, opset_version=11)
 
     def test_softmaxcrossentropy(self):
         x = torch.randn(3, 5)

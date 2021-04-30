@@ -19,6 +19,10 @@
 #include <execinfo.h>
 #endif
 
+#ifdef FBCODE_CAFFE2
+#include <common/process/StackTrace.h>
+#endif
+
 namespace c10 {
 
 #if SUPPORTS_BACKTRACE
@@ -167,7 +171,14 @@ std::string get_backtrace(
     size_t frames_to_skip,
     size_t maximum_number_of_frames,
     bool skip_python_frames) {
-#if SUPPORTS_BACKTRACE
+#ifdef FBCODE_CAFFE2
+  // For some reason, the stacktrace implementation in fbcode is
+  // better than ours, see  https://github.com/pytorch/pytorch/issues/56399
+  // When it's available, just use that.
+  facebook::process::StackTrace st;
+  return st.toString();
+
+#elif SUPPORTS_BACKTRACE
 
   // We always skip this frame (backtrace).
   frames_to_skip += 1;

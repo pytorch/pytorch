@@ -481,6 +481,8 @@ class profile(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         if self.kineto_activities:
             self.kineto_results = torch.autograd._disable_profiler()
             parsed_results = parse_kineto_results(self.kineto_results)
@@ -807,11 +809,11 @@ class FormattedTimesMixin(object):
 
     @property
     def cpu_time(self):
-        return 0.0 if self.count == 0 else 1.0 * self.cpu_time_total / self.count  # type: ignore
+        return 0.0 if self.count == 0 else 1.0 * self.cpu_time_total / self.count  # type: ignore[attr-defined]
 
     @property
     def cuda_time(self):
-        return 0.0 if self.count == 0 else 1.0 * self.cuda_time_total / self.count  # type: ignore
+        return 0.0 if self.count == 0 else 1.0 * self.cuda_time_total / self.count  # type: ignore[attr-defined]
 
 
 class Interval(object):
@@ -1185,13 +1187,14 @@ def parse_kineto_results(result):
     # output top-level memory events
     for mem_record in mem_records:
         if not mem_record[1]:
+            rel_start_us = mem_record[0].start_us() - start_record.start_us()
             fe = FunctionEvent(
                 id=mem_record[0].handle(),
                 name="[memory]",
                 trace_name=None,  # not outputting in the trace
                 thread=mem_record[0].thread_id(),
-                start_us=mem_record[0].start_us(),
-                end_us=mem_record[0].start_us(),  # no duration
+                start_us=rel_start_us,
+                end_us=rel_start_us,  # no duration
                 fwd_thread=mem_record[0].fwd_thread_id(),
                 input_shapes=[],
                 stack=[],
@@ -1530,6 +1533,16 @@ def build_table(
         assert log_flops >= 0 and log_flops < len(flop_headers)
         return (pow(10, (math.floor(log_flops) * -3.0)), flop_headers[int(log_flops)])
 
+    def flops_rate(evt):
+        US_IN_SECOND = 1000.0 * 1000.0
+        if evt.flops > 0:
+            if evt.cuda_time_total != 0:
+                return float(evt.flops) / evt.cuda_time_total * US_IN_SECOND
+            else:
+                return float(evt.flops) / evt.cpu_time_total * US_IN_SECOND
+        else:
+            return -1
+
     add_column(name_column_width)
     for _ in headers[1:]:
         add_column(DEFAULT_COLUMN_WIDTH)
@@ -1544,15 +1557,11 @@ def build_table(
 
     if with_flops:
         # Auto-scaling of flops header
-        US_IN_SECOND = 1000.0 * 1000.0  # cpu_time_total is in us
         raw_flops = []
         for evt in events:
-            if evt.flops > 0:
-                if evt.cuda_time_total != 0:
-                    evt.flops = float(evt.flops) / evt.cuda_time_total * US_IN_SECOND
-                else:
-                    evt.flops = float(evt.flops) / evt.cpu_time_total * US_IN_SECOND
-                raw_flops.append(evt.flops)
+            rate = flops_rate(evt)
+            if rate > 0:
+                raw_flops.append(rate)
         if len(raw_flops) != 0:
             (flops_scale, flops_header) = auto_scale_flops(min(raw_flops))
             headers.append(flops_header)
@@ -1563,7 +1572,7 @@ def build_table(
     row_format = row_format_lst[0]
     header_sep = header_sep_lst[0]
     line_length = line_length_lst[0]
-    add_column = None  # type: ignore
+    add_column = None  # type: ignore[assignment]
 
     # Have to use a list because nonlocal is Py3 only...
     result = []
@@ -1656,10 +1665,11 @@ def build_table(
         if has_input_shapes:
             row_values.append(str(evt.input_shapes)[:shapes_column_width])
         if with_flops:
-            if evt.flops <= 0.0:
+            rate = flops_rate(evt)
+            if rate <= 0.0:
                 row_values.append("--")
             else:
-                row_values.append('{0:8.3f}'.format(evt.flops * flops_scale))
+                row_values.append('{0:8.3f}'.format(rate * flops_scale))
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:

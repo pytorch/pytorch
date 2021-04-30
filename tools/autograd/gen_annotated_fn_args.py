@@ -22,7 +22,7 @@ from typing import Dict, List, Any
 
 from tools.codegen.gen import parse_native_yaml, FileManager
 from tools.codegen.context import with_native_function
-from tools.codegen.model import *
+from tools.codegen.model import BaseOperatorName, NativeFunction
 import tools.codegen.api.python as python
 from .gen_python_functions import should_generate_py_binding, is_py_torch_function, \
     is_py_nn_function, is_py_linalg_function, is_py_variable_method

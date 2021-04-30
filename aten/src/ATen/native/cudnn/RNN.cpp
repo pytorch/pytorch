@@ -48,7 +48,14 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
   AT_ERROR("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
 }
 
-Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
+Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   AT_ERROR("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
 
@@ -904,7 +911,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
     ) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight_buf_r = c10::value_or_else(weight_buf_r_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_buf_r_maybe_owned = at::borrow_from_optional_tensor(weight_buf_r_opt);
+  const Tensor& weight_buf_r = *weight_buf_r_maybe_owned;
   const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
   const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
 
@@ -1284,7 +1292,8 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     std::array<bool, 4> output_mask
     ) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> cx_maybe_owned = at::borrow_from_optional_tensor(cx_opt);
+  const Tensor& cx = *cx_maybe_owned;
   const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
   const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
   const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
@@ -1317,7 +1326,14 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 // as input.  The codegen currently assumes that ALL factory functions
 // take TensorOptions, so it's just a lot easier for this function to
 // be bound if it also does it.
-Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
+Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto handle = getCudnnHandle();
   DropoutDescriptor dropout_desc;
   auto dropout_p = train ? dropout : 0;
@@ -1393,7 +1409,9 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
   static std::vector<DropoutState> dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
   static std::mutex state_cache_mut;
 
-  int device = cuda::current_device();
+  AT_ASSERT(options.device().is_cuda());
+  int device = options.device().index();
+
   std::unique_lock<std::mutex> lock {state_cache_mut};
   auto& state = dropout_state_cache.at(device);
   if (train && dropout_p > 0 && !state.buffer.defined()) {

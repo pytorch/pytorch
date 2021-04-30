@@ -299,7 +299,7 @@ void softplus_backward_kernel(TensorIterator& iter, const Scalar& beta_, const S
     auto threshold = threshold_.to<scalar_t>();
     gpu_kernel(iter, [beta, threshold]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       scalar_t z = std::exp(b * beta);
-      return (b * beta) > threshold ? a : a * (z - scalar_t(1.)) / z;
+      return (b * beta) > threshold ? a : a * z / (z + scalar_t(1.));
     });
   });
 }
@@ -499,14 +499,26 @@ void silu_backward_kernel(TensorIterator& iter) {
 } // namespace
 
 Tensor gelu_cuda(const Tensor& self) {
-  Tensor Y = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor Y = at::native::empty_like(
+      self,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::unary_op(Y, self);
   GeluCUDAKernelImpl(it);
   return Y;
 }
 
 Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
-  Tensor dX = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor dX = at::native::empty_like(
+      self,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::binary_op(dX, grad, self);
   GeluBackwardCUDAKernelImpl(it);
   return dX;
@@ -544,7 +556,7 @@ Tensor& threshold__cuda(Tensor& self, const Scalar& threshold, const Scalar& val
   return self;
 }
 
-Tensor& threshold_out_cuda(Tensor& result, const Tensor& self, const Scalar& threshold, const Scalar& value) {
+Tensor& threshold_out_cuda(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
   threshold_out_cuda(make_optional(result), self, threshold, value, self);
   return result;
 }

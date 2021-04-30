@@ -22,15 +22,15 @@ class TORCH_API CodeGen {
 
   CodeGen(
       Stmt* stmt,
-      const std::vector<BufferArg>& buffer_args,
+      std::vector<BufferArg> buffer_args,
       at::Device device = at::kCPU,
-      const std::string& kernel_func_name = "func")
+      std::string kernel_func_name = "func")
       : stmt_(stmt),
-        buffer_args_(buffer_args),
+        buffer_args_(std::move(buffer_args)),
         device_(device),
-        kernel_func_name_(kernel_func_name) {}
+        kernel_func_name_(std::move(kernel_func_name)) {}
 
-  virtual ~CodeGen() {}
+  virtual ~CodeGen() = default;
 
   Stmt* stmt() const {
     return stmt_;
@@ -120,12 +120,15 @@ class CodeGen::CallArg {
   CallArg(const PaddedBuffer<T>& buffer);
 
   template <typename T>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-pro-type-const-cast)
   CallArg(const std::vector<T>& buffer) : ptr_(const_cast<T*>(buffer.data())) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CallArg(void* ptr) : ptr_(ptr) {}
 
 #define ARG_TYPE_CTOR(Type, Name) \
   CallArg(Type v) : Name##val_(v) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_TYPE_CTOR);
 #undef ARG_TYPE_CTOR
 
@@ -144,6 +147,7 @@ class CodeGen::CallArg {
   Type* Name##Ptr() const {                \
     return const_cast<Type*>(&Name##val_); \
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_PTR_DEFINE);
 #undef ARG_PTR_DEFINE
 
@@ -171,16 +175,16 @@ class RegisterCodeGenList {
       const std::string& kernel_func_name)>;
 
   TORCH_API StmtFactoryMethod FindStmtFactoryMethod(const std::string& name);
+  RegisterCodeGenList(const RegisterCodeGenList&) = delete;
+  RegisterCodeGenList& operator=(const RegisterCodeGenList&) = delete;
 
  private:
   template <class CodeGenType>
   friend class RegisterCodeGen;
-  RegisterCodeGenList() {}
+  RegisterCodeGenList() = default;
   TORCH_API void AddStmtFactoryMethod(
       const std::string& name,
       const StmtFactoryMethod& stmt_factory_method);
-  RegisterCodeGenList(const RegisterCodeGenList&) = delete;
-  RegisterCodeGenList& operator=(const RegisterCodeGenList&) = delete;
 
   std::unordered_map<std::string, StmtFactoryMethod> stmt_factory_methods_;
 };
