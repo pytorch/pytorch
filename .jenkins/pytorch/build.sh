@@ -184,7 +184,7 @@ fi
 # Target only our CI GPU machine's CUDA arch to speed up the build
 export TORCH_CUDA_ARCH_LIST="5.2"
 
-# Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 build
+# Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 CircleCI build
 if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1-cudnn8*build ]]; then
   export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
 fi
