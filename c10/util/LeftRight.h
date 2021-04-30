@@ -28,6 +28,24 @@ private:
 
 // LeftRight wait-free readers synchronization primitive
 // https://hal.archives-ouvertes.fr/hal-01207881/document
+//
+// LeftRight is quite easy to use (it can make an arbitrary
+// data structure permit wait-free reads), but it has some
+// particular performance characteristics you should be aware
+// of if you're deciding to use it:
+//
+//  - Reads still incur an atomic write (this is how LeftRight
+//    keeps track of how long it needs to keep around the old
+//    data structure)
+//
+//  - Writes get executed twice, to keep both the left and right
+//    versions up to date.  So if your write is expensive or
+//    nondeterministic, this is also an inappropriate structure
+//
+// LeftRight is used fairly rarely in PyTorch's codebase.  If you
+// are still not sure if you need it or not, consult your local
+// C++ expert.
+//
 template <class T>
 class LeftRight final {
 public:
