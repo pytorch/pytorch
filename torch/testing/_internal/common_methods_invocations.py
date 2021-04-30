@@ -3486,6 +3486,28 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         supports_out=True,
     ),
+    BinaryUfuncInfo(
+        "mul",
+        aliases=("multiply",),
+        ref=np.multiply,
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+        supports_out=True,
+    ),
+    BinaryUfuncInfo(
+        "sub",
+        aliases=("subtract",),
+        ref=np.subtract,
+        supports_out=True,
+    ),
+    BinaryUfuncInfo(
+        "sub",
+        aliases=("subtract",),
+        variant_test_name="with_alpha",
+        # numpy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
+        ref=lambda input, other, *, alpha: np.subtract(input, np.multiply(alpha, other)),
+        sample_inputs_func=partial(sample_inputs_binary, alpha=2),
+        supports_out=True,
+    ),
     OpInfo('addmm',
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
            # alpha=beta=1 is tested in the following opinfo, because that special case will
@@ -5661,28 +5683,6 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    sample_inputs_func=sample_inputs_logit,
                    safe_casts_outputs=True),
-    BinaryUfuncInfo(
-        "mul",
-        aliases=("multiply",),
-        ref=np.multiply,
-        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-        supports_out=True,
-    ),
-    BinaryUfuncInfo(
-        "sub",
-        aliases=("subtract",),
-        ref=np.subtract,
-        supports_out=True,
-    ),
-    BinaryUfuncInfo(
-        "sub",
-        aliases=("subtract",),
-        variant_test_name="with_alpha",
-        # numpy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
-        ref=lambda input, other, *, alpha: np.subtract(input, np.multiply(alpha, other)),
-        sample_inputs_func=partial(sample_inputs_binary, alpha=2),
-        supports_out=True,
-    ),
     BinaryUfuncInfo(
         "true_divide",
         ref=np.true_divide,
