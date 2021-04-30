@@ -2287,7 +2287,6 @@ class TestReductions(TestCase):
             # Check if function raises error on specified zero'd dimension as reduction dim.
             self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input, dim=1))
 
-
     # Tests to ensure that reduction of zero-dim tensors (i.e. empty tensors) using comparison operators
     # raises an error if no `dim` parameter is specified. This exists separately from tests in
     # test_tensot_compare_ops_empty because not specifying a `dim` parameter in the former tests does
