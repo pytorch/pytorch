@@ -22,6 +22,17 @@ def _remote_forward(
     if device.type != "cuda":
         return module.forward({args}, {kwargs})
 
+    # FIXME: Remote this line after fixing test_load_di_parts in
+    # torch/fb/training_toolkit/applications/sparse_nn/batch_distributed_inference/tests:batch_distributed_inference_test
+    # The error is that:
+    # 1) If annotation of Tuple[()] is used for out_args and ret, then the test fails because
+    # "Variable 'ret' previously has type Tuple[()] but is now being assigned to a value of type Tuple[Tensor]".
+    # 2) If annotation of Tuple[Any] is used for out_args and ret, the the test fails because
+    # "Variable 'ret' is annotated with type Tuple[Any] but is being assigned to a value of type Tuple[()]".
+    # 3) If there is no annotation, for out_args and ret, the the test fails because
+    # "Variable 'ret' previously has type Tuple[()] but is now being assigned to a value of type Tuple[Tensor]".
+    return module.forward({args}, {kwargs})
+
     # If the module is on a cuda device,
     # move any CPU tensor in args or kwargs to the same cuda device.
     # Since torch script does not support generator expression,
