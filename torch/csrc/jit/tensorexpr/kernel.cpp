@@ -2532,7 +2532,6 @@ std::vector<VarHandle> squeezeIndices(
 
 } // namespace
 
-
 Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
   auto reduction_info = getReductionInfo(v->node());
   return Reduce(
