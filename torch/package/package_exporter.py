@@ -22,7 +22,6 @@ import torch
 from torch.serialization import location_tag, normalize_storage_type
 
 from ._digraph import DiGraph
-from ._file_structure_representation import Folder, _create_folder_from_file_list
 from .glob_group import GlobPattern, GlobGroup
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
@@ -127,66 +126,6 @@ class PackageExporter:
         ] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.matched_patterns: Set[int] = set()
         self._unique_id = 0
-
-    def save_source_file(
-        self, module_name: str, file_or_directory: str, dependencies=True
-    ):
-        """Adds the local file system `file_or_directory` to the source package to provide the code
-        for `module_name`.
-
-        Args:
-            module_name (str): e.g. `my_package.my_subpackage`, code will be saved to provide code for this package.
-            file_or_directory (str): the path to a file or directory of code. When a directory, all python files in the directory
-                are recursively copied using :meth:`save_source_file`. If a file is named "/__init__.py" the code is treated
-                as a package.
-            dependencies (bool, optional): If ``True``, we scan the source for dependencies.
-        """
-        path = Path(file_or_directory)
-        if path.is_dir():
-            to_save = []  # list of tuples with arguments to save_source_string
-            module_path = module_name.replace(".", "/")
-            for filename in path.glob("**/*.py"):
-                relative_path = filename.relative_to(path).as_posix()
-                archivename = module_path + "/" + relative_path
-                if filename.is_dir():
-                    self.provided[archivename] = True
-                else:
-                    submodule_name = None
-                    if filename.name == "__init__.py":
-                        submodule_name = archivename[: -len("/__init__.py")].replace(
-                            "/", "."
-                        )
-                        is_package = True
-                    else:
-                        submodule_name = archivename[: -len(".py")].replace("/", ".")
-                        is_package = False
-
-                    self.provided[submodule_name] = True
-                    # we delay the call to save_source_string so that we record all the source files
-                    # being provided by this directory structure _before_ attempting to resolve the dependencies
-                    # on the source. This makes sure we don't try to copy over modules that will just get
-                    # overwritten by this directory blob
-                    to_save.append(
-                        (
-                            submodule_name,
-                            _read_file(str(filename)),
-                            is_package,
-                            dependencies,
-                            str(filename),
-                        )
-                    )
-
-            for item in to_save:
-                self.save_source_string(*item)
-        else:
-            is_package = path.name == "__init__.py"
-            self.save_source_string(
-                module_name,
-                _read_file(file_or_directory),
-                is_package,
-                dependencies,
-                file_or_directory,
-            )
 
     def get_unique_id(self) -> str:
         """Get an id. This id is guaranteed to only be handed out once for this package."""
@@ -541,8 +480,11 @@ node [shape=box];
         Prefer using `mock` to only include this module if it is required by other modules.
         """
         if "_mock" not in self.provided:
-            self.save_source_file(
-                "_mock", str(Path(__file__).parent / "_mock.py"), dependencies=False
+            self.save_source_string(
+                "_mock",
+                _read_file(str(Path(__file__).parent / "_mock.py")),
+                is_package=False,
+                dependencies=False,
             )
         is_package = hasattr(self._import_module(module_name), "__path__")
         self.save_source_string(module_name, _MOCK_IMPL, is_package, dependencies=False)
