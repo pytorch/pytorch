@@ -107,9 +107,14 @@ int main(int argc, char *argv[]) {
     register_fd(srv_socket->socket_fd);
     print_init_message(tempfile->name.c_str());
     DEBUG("opened socket %s", tempfile->name.c_str());
+  } catch (const std::exception& e) {
+    std::string message("ERROR: ");
+    message += e.what();
+    print_init_message(message.c_str());
+    return 1;
   } catch (...) {
-    print_init_message("ERROR");
-    throw;
+    print_init_message("ERROR: unhandled exception");
+    return 1;
   }
 
   int timeout = -1;
