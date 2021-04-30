@@ -195,7 +195,7 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
   TORCH_CHECK(self_sizes[0] == batch1_sizes[0], "self dim 0 must match batch1 dim 0");
   TORCH_CHECK(self_sizes[0] == batch2_sizes[0], "self dim 0 must match batch2 dim 0");
   TORCH_CHECK(self_sizes[1] == batch1_sizes[1], "self dim 1 must match batch1 dim 1");
-  TORCH_CHECK(self_sizes[2] == batch2_sizes[2], "self dim  2 must match batch2 dim 2");
+  TORCH_CHECK(self_sizes[2] == batch2_sizes[2], "self dim 2 must match batch2 dim 2");
   TORCH_CHECK(batch1_sizes[2] == batch2_sizes[1], "batch1 dim 2 must match batch2 dim 1");
 
   if (!result.is_same(self)) {
@@ -243,8 +243,8 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
   auto batch1_ = prepare_batch_matrix_for_cublas(transpose_result ? batch2 : batch1, transpose_batch1, lda, transpose_result, m, k);
   auto batch2_ = prepare_batch_matrix_for_cublas(transpose_result ? batch1 : batch2, transpose_batch2, ldb, transpose_result, k, n);
 
-  ldc = result_strides[leading_dim];
-  int64_t num_batches = result_sizes[0];
+  ldc = result_.strides()[leading_dim];
+  int64_t num_batches = result_.sizes()[0];
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
@@ -260,7 +260,7 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
       batch1_ptr, lda, batch1_->strides()[0],
       batch2_ptr, ldb, batch2_->strides()[0],
       beta_val,
-      result_ptr, ldc, result_strides[0],
+      result_ptr, ldc, result_.strides()[0],
       num_batches
     );
   });
