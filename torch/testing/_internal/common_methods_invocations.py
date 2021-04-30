@@ -5977,7 +5977,8 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
             var.requires_grad = requires_grad
             return var
         elif isinstance(arg, tuple) and not isinstance(arg[0], torch.Tensor):
-            return Variable(maybe_conj(maybe_non_contig(torch.randn(*arg, dtype=dtype, device=device))), requires_grad=requires_grad)
+            return Variable(maybe_conj(
+                maybe_non_contig(torch.randn(*arg, dtype=dtype, device=device))), requires_grad=requires_grad)
         # double check casting
         elif isinstance(arg, non_differentiable):
             if isinstance(arg.tensor, torch.Tensor):

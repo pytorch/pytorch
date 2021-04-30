@@ -2240,15 +2240,12 @@ conjugate bit. If :attr:`input` has a non-complex dtype, this function just retu
 Args:
     {input}
 
-Keyword args:
-    {out}
-
 Example::
 
     >>> x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
     >>> x.is_conj()
     False
-    >>> y = torch.conj()
+    >>> y = torch.conj(x)
     >>> y.is_conj()
     True
 
