@@ -77,7 +77,7 @@ class ProcessGroupMPI : public ProcessGroup {
  public:
   class WorkMPI : public ProcessGroup::Work {
    public:
-    WorkMPI(
+    explicit WorkMPI(
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
@@ -87,9 +87,9 @@ class ProcessGroupMPI : public ProcessGroup {
               OpType::UNKNOWN,
               profilingTitle,
               inputTensors),
-          outputTensors_(outputTensors) {}
+          outputTensors_(std::move(outputTensors)) {}
 
-   virtual std::vector<at::Tensor> result() override;
+    std::vector<at::Tensor> result() override;
 
    protected:
     friend class ProcessGroupMPI;
@@ -102,7 +102,7 @@ class ProcessGroupMPI : public ProcessGroup {
    public:
     AsyncWork(
         MPI_Request request,
-        const std::vector<at::Tensor> outputTensors,
+        std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
@@ -119,11 +119,12 @@ class ProcessGroupMPI : public ProcessGroup {
 
     void abort() override;
 
-   virtual std::vector<at::Tensor> result() override;
+    std::vector<at::Tensor> result() override;
 
    protected:
     void populateException();
 
+   private:
     const std::vector<at::Tensor> outputTensors_;
     MPI_Request request_;
     MPI_Status status_;

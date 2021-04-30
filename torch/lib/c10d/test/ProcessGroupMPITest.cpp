@@ -18,7 +18,7 @@ std::vector<std::vector<at::Tensor>> waitWork(
   std::vector<std::vector<at::Tensor>> outputTensors;
   for (auto& work : works) {
     try {
-     work->wait();
+      work->wait();
     } catch (const std::exception& ex) {
       std::cerr << "Exception received: " << ex.what() << std::endl;
       pg->abort();
@@ -262,15 +262,18 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   // Generate inputs
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
+
+  // pg->send does not keep sent tensors alive, so we need to.
+  std::vector<std::vector<at::Tensor>> sendTensors(iter);
   auto rank = pg->getRank();
   for (auto i = 0; i < iter; ++i) {
     if (rank == 0) {
       auto tensor = at::ones({16, 16}) * i;
-      auto sendTensors = std::vector<at::Tensor>({tensor});
+      sendTensors[i] = std::vector<at::Tensor>({tensor});
 
       // Queue the work.
       c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
-          pg->send(sendTensors, 1, 0);
+          pg->send(sendTensors[i], 1, 0);
       works.push_back(std::move(work));
     } else {
       auto tensor = at::zeros({16, 16});
