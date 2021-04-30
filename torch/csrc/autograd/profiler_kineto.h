@@ -11,7 +11,7 @@
 
 #ifdef USE_KINETO
 namespace libkineto {
-class TraceActivity;
+struct TraceActivity;
 class ActivityTraceInterface;
 }
 #endif
@@ -28,6 +28,7 @@ enum class C10_API_ENUM ActivityType {
 
 #ifdef USE_KINETO
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct KinetoObserverContext : public at::ObserverContext {
   int64_t startUs;
   uint64_t correlationId;
@@ -239,6 +240,9 @@ TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 TORCH_API void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
+
+TORCH_API void addMetadata(
+    const std::string& key, const std::string& value);
 #endif // USE_KINETO
 
 } // namespace profiler
