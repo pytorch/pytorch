@@ -1,7 +1,8 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
-CPU_CAPABILITY_NAMES = ["DEFAULT", "AVX2"]
+CPU_CAPABILITY_NAMES = ["DEFAULT", "AVX2", "AVX512"]
 CAPABILITY_COMPILER_FLAGS = {
+    "AVX512": ["-mavx512f", "-mavx512bw", "-mavx512dq", "-mavx512vl", "-mfma"],
     "AVX2": ["-mavx2", "-mfma"],
     "DEFAULT": [],
 }

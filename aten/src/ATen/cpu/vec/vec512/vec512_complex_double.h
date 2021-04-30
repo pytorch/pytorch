@@ -1,0 +1,528 @@
+#pragma once
+
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+
+#include <c10/util/complex.h>
+#include <ATen/cpu/vec/vec512/intrinsics.h>
+#include <ATen/cpu/vec/vec512/vec512_base.h>
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#include <sleef.h>
+#endif
+
+namespace at {
+namespace vec {
+// See Note [Acceptable use of anonymous namespace in header]
+namespace {
+
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+
+template <> class Vectorize<c10::complex<double>> {
+private:
+  __m512d values;
+  static constexpr __m512i zero_vector {0, 0, 0, 0, 0, 0, 0, 0};
+public:
+  using value_type = c10::complex<double>;
+  using size_type = int;
+  static constexpr size_type size() {
+    return 4;
+  }
+  Vectorize() {}
+  Vectorize(__m512d v) : values(v) {}
+  Vectorize(c10::complex<double> val) {
+    double real_value = val.real();
+    double imag_value = val.imag();
+    values = _mm512_setr_pd(real_value, imag_value, real_value, imag_value,
+                            real_value, imag_value, real_value, imag_value);
+  }
+  Vectorize(c10::complex<double> val1, c10::complex<double> val2,
+            c10::complex<double> val3, c10::complex<double> val4) {
+    values = _mm512_setr_pd(val1.real(), val1.imag(),
+                            val2.real(), val2.imag(),
+                            val3.real(), val3.imag(),
+                            val4.real(), val4.imag());
+  }
+  operator __m512d() const {
+    return values;
+  }
+  template <int64_t mask>
+  static Vectorize<c10::complex<double>> blend(const Vectorize<c10::complex<double>>& a,
+                                               const Vectorize<c10::complex<double>>& b) {
+     // convert c10::complex<V> index mask to V index mask: xy -> xxyy
+    // NOLINTNEXTLINE(clang-diagnostic-warning)
+    switch (mask) {
+      case 0:
+        return a;
+      case 1:
+        return _mm512_mask_blend_pd(0x03, a.values, b.values);
+      case 2:
+        return _mm512_mask_blend_pd(0x0C, a.values, b.values);
+      case 3:
+        return _mm512_mask_blend_pd(0X0F, a.values, b.values);
+      case 4:
+        return _mm512_mask_blend_pd(0x30, a.values, b.values);
+      case 5:
+        return _mm512_mask_blend_pd(0x33, a.values, b.values);
+      case 6:
+        return _mm512_mask_blend_pd(0X3C, a.values, b.values);
+      case 7:
+        return _mm512_mask_blend_pd(0x3F, a.values, b.values);
+    }
+    return b;
+  }
+  static Vectorize<c10::complex<double>> blendv(const Vectorize<c10::complex<double>>& a,
+                                                const Vectorize<c10::complex<double>>& b,
+                                                const Vectorize<c10::complex<double>>& mask) {
+    // convert c10::complex<V> index mask to V index mask: xy -> xxyy
+    auto mask_ = _mm512_unpacklo_pd(mask.values, mask.values);
+    return _mm512_permutex2var_pd(a.values, _mm512_castpd_si512(mask_), b.values);
+
+  }
+  template<typename step_t>
+  static Vectorize<c10::complex<double>> arange(c10::complex<double> base = 0., 
+                                                step_t step = static_cast<step_t>(1)) {
+    return Vectorize<c10::complex<double>>(base,
+                                           base + c10::complex<double>(2)*step,
+                                           base + c10::complex<double>(3)*step,
+                                           base + c10::complex<double>(4)*step);
+  }
+  static Vectorize<c10::complex<double>> set(const Vectorize<c10::complex<double>>& a,
+                                             const Vectorize<c10::complex<double>>& b,
+                                             int64_t count = size()) {
+    switch (count) {
+      case 0:
+        return a;
+      case 1:
+        return blend<1>(a, b);
+      case 2:
+        return blend<3>(a, b);
+      case 3:
+        return blend<7>(a, b);
+    }
+    return b;
+  }
+  static Vectorize<c10::complex<double>> loadu(const void* ptr, int64_t count = size()) {
+    if (count == size())
+      return _mm512_loadu_pd(reinterpret_cast<const double*>(ptr));
+
+    __at_align64__ double tmp_values[2*size()];
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
+    for (auto i = 0; i < 2*size(); ++i) {
+      tmp_values[i] = 0.0;
+    }
+    std::memcpy(
+        tmp_values,
+        reinterpret_cast<const double*>(ptr),
+        count * sizeof(c10::complex<double>));
+    return _mm512_load_pd(tmp_values);
+  }
+  void store(void* ptr, int count = size()) const {
+    if (count == size()) {
+      _mm512_storeu_pd(reinterpret_cast<double*>(ptr), values);
+    } else if (count > 0) {
+      double tmp_values[2*size()];
+      _mm512_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
+      std::memcpy(ptr, tmp_values, count * sizeof(c10::complex<double>));
+    }
+  }
+  const c10::complex<double>& operator[](int idx) const  = delete;
+  c10::complex<double>& operator[](int idx) = delete;
+  Vectorize<c10::complex<double>> map(c10::complex<double> (*f)(const c10::complex<double> &)) const {
+    __at_align64__ c10::complex<double> tmp[size()];
+    store(tmp);
+    for (int i = 0; i < size(); i++) {
+      tmp[i] = f(tmp[i]);
+    }
+    return loadu(tmp);
+  }
+  // AVX512 doesn't have horizontal add & horizontal sub instructions.
+  // TODO: hadd_pd() & hsub_pd() may have scope for improvement.
+  // At https://stackoverflow.com/questions/26896432/horizontal-add-with-m512-avx512/26905830,
+  // Peter Cordes recommends not using _mm256_hadd_ps because it has a high latency
+  // and blocks port longer than other clever alternatives.
+  static __m512d hadd_pd(__m512d a, __m512d b) {
+    auto first_half_a = _mm512_extracti64x4_epi64(_mm512_castpd_si512(a), 0);
+    auto second_half_a = _mm512_extracti64x4_epi64(_mm512_castpd_si512(a), 1);
+    auto first_half_b = _mm512_extracti64x4_epi64(_mm512_castpd_si512(b), 0);
+    auto second_half_b = _mm512_extracti64x4_epi64(_mm512_castpd_si512(b), 1);
+    auto first_half_hadd = _mm256_hadd_pd(_mm256_castsi256_pd(first_half_a),
+                                          _mm256_castsi256_pd(first_half_b));
+    auto second_half_hadd = _mm256_hadd_pd(_mm256_castsi256_pd(second_half_a),
+                                           _mm256_castsi256_pd(second_half_b));
+    auto ret_val = _mm512_set1_pd(0.0);
+    ret_val = _mm512_insertf64x4(ret_val, first_half_hadd, 0);
+    ret_val = _mm512_insertf64x4(ret_val, second_half_hadd, 1);
+    return ret_val;
+  }
+  static __m512d hsub_pd(__m512d a, __m512d b) {
+    auto first_half_a = _mm512_extracti64x4_epi64(_mm512_castpd_si512(a), 0);
+    auto second_half_a = _mm512_extracti64x4_epi64(_mm512_castpd_si512(a), 1);
+    auto first_half_b = _mm512_extracti64x4_epi64(_mm512_castpd_si512(b), 0);
+    auto second_half_b = _mm512_extracti64x4_epi64(_mm512_castpd_si512(b), 1);
+    auto first_half_hsub = _mm256_hsub_pd(_mm256_castsi256_pd(first_half_a),
+                                          _mm256_castsi256_pd(first_half_b));
+    auto second_half_hsub = _mm256_hsub_pd(_mm256_castsi256_pd(second_half_a),
+                                           _mm256_castsi256_pd(second_half_b));
+    auto ret_val = _mm512_set1_pd(0.0);
+    ret_val = _mm512_insertf64x4(ret_val, first_half_hsub, 0);
+    ret_val = _mm512_insertf64x4(ret_val, second_half_hsub, 1);
+    return ret_val;
+  }
+  __m512d abs_2_() const {
+    auto val_2 = _mm512_mul_pd(values, values);     // a*a     b*b
+    return hadd_pd(val_2, val_2);            // a*a+b*b a*a+b*b
+  }
+  __m512d abs_() const {
+    return _mm512_sqrt_pd(abs_2_());                // abs     abs
+  }
+  Vectorize<c10::complex<double>> abs() const {
+    const __m512d real_mask = _mm512_castsi512_pd(_mm512_set_epi64(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
+    return _mm512_and_pd(abs_(), real_mask);        // abs     0
+  }
+  __m512d angle_() const {
+    //angle = atan2(b/a)
+    auto b_a = _mm512_permute_pd(values, 0x05);     // b        a
+    return Sleef_atan2d8_u10(values, b_a);          // 90-angle angle
+  }
+  Vectorize<c10::complex<double>> angle() const {
+    const __m512d real_mask = _mm512_castsi512_pd(_mm512_setr_epi64(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
+    auto angle = _mm512_permute_pd(angle_(), 0x05); // angle    90-angle
+    return _mm512_and_pd(angle, real_mask);         // angle    0
+  }
+  Vectorize<c10::complex<double>> sgn() const {
+    auto abs = abs_();
+    auto zero = _mm512_setzero_pd();
+    auto mask = _mm512_cmp_pd_mask(abs, zero, _CMP_EQ_OQ);
+    auto mask_vec = _mm512_mask_set1_epi64(_mm512_castpd_si512(zero), mask,
+                                          0xFFFFFFFFFFFFFFFF);
+    auto abs_val = Vectorize(abs);
+
+    auto div = values / abs_val.values;       // x / abs(x)
+
+    return blendv(div, zero, _mm512_castsi512_pd(mask_vec));
+  }
+  __m512d real_() const {
+    const __m512d real_mask = _mm512_castsi512_pd(_mm512_setr_epi64(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
+    return _mm512_and_pd(values, real_mask);
+  }
+  Vectorize<c10::complex<double>> real() const {
+    return real_();
+  }
+  __m512d imag_() const {
+    const __m512d imag_mask = _mm512_castsi512_pd(_mm512_setr_epi64(0x0000000000000000, 0xFFFFFFFFFFFFFFFF,
+                                                                    0x0000000000000000, 0xFFFFFFFFFFFFFFFF,
+                                                                    0x0000000000000000, 0xFFFFFFFFFFFFFFFF,
+                                                                    0x0000000000000000, 0xFFFFFFFFFFFFFFFF));
+    return _mm512_and_pd(values, imag_mask);
+  }
+  Vectorize<c10::complex<double>> imag() const {
+    return _mm512_permute_pd(imag_(), 0x05);           //b        a
+  }
+  __m512d conj_() const {
+    const __m512d sign_mask = _mm512_setr_pd(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
+    return _mm512_xor_pd(values, sign_mask);           // a       -b
+  }
+  Vectorize<c10::complex<double>> conj() const {
+    return conj_();
+  }
+  Vectorize<c10::complex<double>> log() const {
+    // Most trigonomic ops use the log() op to improve complex number performance.
+    return map(std::log);
+  }
+  Vectorize<c10::complex<double>> log2() const {
+    const __m512d log2_ = _mm512_set1_pd(std::log(2));
+    return _mm512_div_pd(log(), log2_);
+  }
+  Vectorize<c10::complex<double>> log10() const {
+    const __m512d log10_ = _mm512_set1_pd(std::log(10));
+    return _mm512_div_pd(log(), log10_);
+  }
+  Vectorize<c10::complex<double>> log1p() const {
+    AT_ERROR("not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> asin() const {
+    // asin(x)
+    // = -i*ln(iz + sqrt(1 -z^2))
+    // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
+    // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
+    const __m512d one = _mm512_set1_pd(1);
+
+    auto conj = conj_();
+    auto b_a = _mm512_permute_pd(conj, 0x05);                         //-b        a
+    auto ab = _mm512_mul_pd(conj, b_a);                               //-ab       -ab
+    auto im = _mm512_add_pd(ab, ab);                                  //-2ab      -2ab
+
+    auto val_2 = _mm512_mul_pd(values, values);                       // a*a      b*b
+    auto re = hsub_pd(val_2, _mm512_permute_pd(val_2, 0x05));  // a*a-b*b  b*b-a*a
+    re = _mm512_sub_pd(one, re);
+
+    auto root = Vectorize(_mm512_mask_blend_pd(0x0A, re, im)).sqrt();         //sqrt(re + i*im)
+    auto ln = Vectorize(_mm512_add_pd(b_a, root)).log();                 //ln(iz + sqrt())
+    return Vectorize(_mm512_permute_pd(ln.values, 0x05)).conj();         //-i*ln()
+  }
+  Vectorize<c10::complex<double>> acos() const {
+    // acos(x) = pi/2 - asin(x)
+    constexpr auto pi_2d = c10::pi<double> / 2;
+    const __m512d pi_2 = _mm512_setr_pd(pi_2d, 0.0, pi_2d, 0.0, pi_2d, 0.0, pi_2d, 0.0);
+    return _mm512_sub_pd(pi_2, asin());
+  }
+  Vectorize<c10::complex<double>> atan() const;
+  Vectorize<c10::complex<double>> atan2(const Vectorize<c10::complex<double>> &b) const {
+    AT_ERROR("not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> erf() const {
+    AT_ERROR("not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> erfc() const {
+    AT_ERROR("not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> exp() const {
+    //exp(a + bi)
+    // = exp(a)*(cos(b) + sin(b)i)
+    auto exp = Sleef_expd8_u10(values);                               //exp(a)           exp(b)
+    exp = _mm512_mask_blend_pd(0x0A, exp, _mm512_permute_pd(exp, 0x05));   //exp(a)           exp(a)
+
+    auto sin_cos = Sleef_sincosd8_u10(values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
+    auto cos_sin = _mm512_mask_blend_pd(0x0A, _mm512_permute_pd(sin_cos.y, 0x05),
+                                   sin_cos.x);                  //cos(b)           sin(b)
+    return _mm512_mul_pd(exp, cos_sin);
+  }
+  Vectorize<c10::complex<double>> expm1() const {
+    AT_ERROR("not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> sin() const {
+    return map(std::sin);
+  }
+  Vectorize<c10::complex<double>> sinh() const {
+    return map(std::sinh);
+  }
+  Vectorize<c10::complex<double>> cos() const {
+    return map(std::cos);
+  }
+  Vectorize<c10::complex<double>> cosh() const {
+    return map(std::cosh);
+  }
+  Vectorize<c10::complex<double>> ceil() const {
+    return _mm512_ceil_pd(values);
+  }
+  Vectorize<c10::complex<double>> floor() const {
+    return _mm512_floor_pd(values);
+  }
+  Vectorize<c10::complex<double>> hypot(const Vectorize<c10::complex<double>> &b) const {
+    AT_ERROR("not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> igamma(const Vectorize<c10::complex<double>> &x) const {
+    AT_ERROR("not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> igammac(const Vectorize<c10::complex<double>> &x) const {
+    AT_ERROR("not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> neg() const {
+    auto zero = _mm512_setzero_pd();
+    return _mm512_sub_pd(zero, values);
+  }
+  Vectorize<c10::complex<double>> nextafter(const Vectorize<c10::complex<double>> &b) const {
+    AT_ERROR("not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> round() const {
+    return _mm512_roundscale_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  }
+  Vectorize<c10::complex<double>> tan() const {
+    return map(std::tan);
+  }
+  Vectorize<c10::complex<double>> tanh() const {
+    return map(std::tanh);
+  }
+  Vectorize<c10::complex<double>> trunc() const {
+    return _mm512_roundscale_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+  }
+  Vectorize<c10::complex<double>> sqrt() const {
+    return map(std::sqrt);
+  }
+  Vectorize<c10::complex<double>> reciprocal() const;
+  Vectorize<c10::complex<double>> rsqrt() const {
+    return sqrt().reciprocal();
+  }
+  Vectorize<c10::complex<double>> pow(const Vectorize<c10::complex<double>> &exp) const {
+    __at_align64__ c10::complex<double> x_tmp[size()];
+    __at_align64__ c10::complex<double> y_tmp[size()];
+    store(x_tmp);
+    exp.store(y_tmp);
+    for (int i = 0; i < size(); i++) {
+      x_tmp[i] = std::pow(x_tmp[i], y_tmp[i]);
+    }
+    return loadu(x_tmp);
+  }
+  // Comparison using the _CMP_**_OQ predicate.
+  //   `O`: get false if an operand is NaN
+  //   `Q`: do not raise if an operand is NaN
+  Vectorize<c10::complex<double>> operator==(const Vectorize<c10::complex<double>>& other) const {
+    auto mask = _mm512_cmp_pd_mask(values, other.values, _CMP_EQ_OQ);
+    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, mask, 
+                                                      0xFFFFFFFFFFFFFFFF));
+  }
+  Vectorize<c10::complex<double>> operator!=(const Vectorize<c10::complex<double>>& other) const {
+    auto mask = _mm512_cmp_pd_mask(values, other.values, _CMP_NEQ_OQ);
+    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, mask,
+                                                      0xFFFFFFFFFFFFFFFF));
+  }
+  Vectorize<c10::complex<double>> operator<(const Vectorize<c10::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> operator<=(const Vectorize<c10::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> operator>(const Vectorize<c10::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> operator>=(const Vectorize<c10::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+
+  Vectorize<c10::complex<double>> eq(const Vectorize<c10::complex<double>>& other) const;
+  Vectorize<c10::complex<double>> ne(const Vectorize<c10::complex<double>>& other) const;
+  Vectorize<c10::complex<double>> lt(const Vectorize<c10::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> le(const Vectorize<c10::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> gt(const Vectorize<c10::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vectorize<c10::complex<double>> ge(const Vectorize<c10::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+};
+
+template <> Vectorize<c10::complex<double>> inline operator+(const Vectorize<c10::complex<double>> &a,
+                                                             const Vectorize<c10::complex<double>> &b) {
+  return _mm512_add_pd(a, b);
+}
+
+template <> Vectorize<c10::complex<double>> inline operator-(const Vectorize<c10::complex<double>> &a,
+                                                             const Vectorize<c10::complex<double>> &b) {
+  return _mm512_sub_pd(a, b);
+}
+
+template <> Vectorize<c10::complex<double>> inline operator*(const Vectorize<c10::complex<double>> &a,
+                                                             const Vectorize<c10::complex<double>> &b) {
+  //(a + bi)  * (c + di) = (ac - bd) + (ad + bc)i
+  const __m512d sign_mask = _mm512_setr_pd(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
+  auto ac_bd = _mm512_mul_pd(a, b);         //ac       bd
+
+  auto d_c = _mm512_permute_pd(b, 0x05);    //d        c
+  d_c = _mm512_xor_pd(sign_mask, d_c);      //d       -c
+  auto ad_bc = _mm512_mul_pd(a, d_c);       //ad      -bc
+
+  auto ret = Vectorize<c10::complex<double>>::hsub_pd(ac_bd, ad_bc);  //ac - bd  ad + bc
+  return ret;
+}
+
+template <> Vectorize<c10::complex<double>> inline operator/(const Vectorize<c10::complex<double>> &a,
+                                                             const Vectorize<c10::complex<double>> &b) {
+  //re + im*i = (a + bi)  / (c + di)
+  //re = (ac + bd)/abs_2()
+  //im = (bc - ad)/abs_2()
+  const __m512d sign_mask = _mm512_setr_pd(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0);
+  auto ac_bd = _mm512_mul_pd(a, b);         //ac       bd
+
+  auto d_c = _mm512_permute_pd(b, 0x05);    //d        c
+  d_c = _mm512_xor_pd(sign_mask, d_c);      //-d       c
+  auto ad_bc = _mm512_mul_pd(a, d_c);       //-ad      bc
+
+  auto re_im = Vectorize<c10::complex<double>>::hadd_pd(ac_bd, ad_bc);//ac + bd  bc - ad
+  return _mm512_div_pd(re_im, b.abs_2_());
+}
+
+// reciprocal. Implement this here so we can use multiplication.
+Vectorize<c10::complex<double>> Vectorize<c10::complex<double>>::reciprocal() const{
+  //re + im*i = (a + bi)  / (c + di)
+  //re = (ac + bd)/abs_2() = c/abs_2()
+  //im = (bc - ad)/abs_2() = d/abs_2()
+  const __m512d sign_mask = _mm512_setr_pd(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
+  auto c_d = _mm512_xor_pd(sign_mask, values);    //c       -d
+  return _mm512_div_pd(c_d, abs_2_());
+}
+
+Vectorize<c10::complex<double>> Vectorize<c10::complex<double>>::atan() const {
+  // atan(x) = i/2 * ln((i + z)/(i - z))
+  const __m512d i = _mm512_setr_pd(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
+  const Vectorize i_half = _mm512_setr_pd(0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5);
+
+  auto sum = Vectorize(_mm512_add_pd(i, values));                      // a        1+b
+  auto sub = Vectorize(_mm512_sub_pd(i, values));                      // -a       1-b
+  auto ln = (sum/sub).log();                                        // ln((i + z)/(i - z))
+  return i_half*ln;                                                 // i/2*ln()
+}
+
+template <>
+Vectorize<c10::complex<double>> inline maximum(const Vectorize<c10::complex<double>>& a,
+                                               const Vectorize<c10::complex<double>>& b) {
+  auto zero_vec = _mm512_set1_epi64(0);
+  auto abs_a = a.abs_2_();
+  auto abs_b = b.abs_2_();
+  auto mask = _mm512_cmp_pd_mask(abs_a, abs_b, _CMP_LT_OQ);
+  auto max = _mm512_mask_blend_pd(mask, a, b);
+  // Exploit the fact that all-ones is a NaN.
+  auto isnan_mask = _mm512_cmp_pd_mask(abs_a, abs_b, _CMP_UNORD_Q);
+  auto isnan = _mm512_mask_set1_epi64(zero_vec, isnan_mask,
+                                      0xFFFFFFFFFFFFFFFF);
+  return _mm512_or_pd(max, _mm512_castsi512_pd(isnan));
+}
+
+template <>
+Vectorize<c10::complex<double>> inline minimum(const Vectorize<c10::complex<double>>& a,
+                                               const Vectorize<c10::complex<double>>& b) {
+  auto zero_vec = _mm512_set1_epi64(0);
+  auto abs_a = a.abs_2_();
+  auto abs_b = b.abs_2_();
+  auto mask = _mm512_cmp_pd_mask(abs_a, abs_b, _CMP_GT_OQ);
+  auto min = _mm512_mask_blend_pd(mask, a, b);
+  // Exploit the fact that all-ones is a NaN.
+  auto isnan_mask = _mm512_cmp_pd_mask(abs_a, abs_b, _CMP_UNORD_Q);
+  auto isnan = _mm512_mask_set1_epi64(zero_vec, isnan_mask,
+                                      0xFFFFFFFFFFFFFFFF);
+  return _mm512_or_pd(min, _mm512_castsi512_pd(isnan));
+}
+
+template <>
+Vectorize<c10::complex<double>> inline operator&(const Vectorize<c10::complex<double>>& a,
+                                                 const Vectorize<c10::complex<double>>& b) {
+  return _mm512_and_pd(a, b);
+}
+
+template <>
+Vectorize<c10::complex<double>> inline operator|(const Vectorize<c10::complex<double>>& a,
+                                                 const Vectorize<c10::complex<double>>& b) {
+  return _mm512_or_pd(a, b);
+}
+
+template <>
+Vectorize<c10::complex<double>> inline operator^(const Vectorize<c10::complex<double>>& a, 
+                                                 const Vectorize<c10::complex<double>>& b) {
+  return _mm512_xor_pd(a, b);
+}
+
+Vectorize<c10::complex<double>> Vectorize<c10::complex<double>>::eq(const Vectorize<c10::complex<double>>& other) const {
+  return (*this == other) & Vectorize<c10::complex<double>>(_mm512_set1_pd(1.0));
+}
+
+Vectorize<c10::complex<double>> Vectorize<c10::complex<double>>::ne(const Vectorize<c10::complex<double>>& other) const {
+  return (*this != other) & Vectorize<c10::complex<double>>(_mm512_set1_pd(1.0));
+}
+
+#endif
+
+}}}

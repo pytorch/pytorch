@@ -127,7 +127,7 @@ private:
       impl.get_call_ptr(device_type
       , reinterpret_cast<void*>(DEFAULT)
 #ifdef HAVE_AVX512_CPU_DEFINITION
-      , reinterpret_cast<void*>(AVX)
+      , reinterpret_cast<void*>(AVX512)
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
       , reinterpret_cast<void*>(AVX2)
