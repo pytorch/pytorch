@@ -28,6 +28,7 @@ from torch.jit._script import (
     interface,
     CompilationUnit,
     ScriptFunction,
+    _ScriptProfile,
     _unwrap_optional,
 )
 from torch.jit._trace import (

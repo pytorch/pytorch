@@ -1211,6 +1211,35 @@ def _recursive_compile_class(obj, loc):
 CompilationUnit = torch._C.CompilationUnit
 set_module(CompilationUnit, "torch.jit")
 
+
+class _ScriptProfile(torch._C._ScriptProfile):
+    __module__ = "torch.jit"
+
+    headers = ["Line #", "Hits", "Time(ns)", "Line Contents"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _print_table(self, source_ref, stats):
+        lineno = source_ref.starting_lineno
+        print("{:>8s}{:>8s}{:>12s} {}".format(*self.headers))
+        print("=" * 48)
+        for src in source_ref.text.splitlines():
+            stat = stats.get(lineno, None)
+            if stat:
+                line = "{:>8d}{:>8d}{:>12d} {}".format(lineno, stat.count, stat.durationNs, src)
+            else:
+                line = "{:>8d}" + ' ' * 20 + " {}"
+                line = line.format(lineno, src)
+            print(line)
+            lineno += 1
+        print()
+
+    def dump(self):
+        for (source_ref, stats) in self._dump_stats().items():
+            self._print_table(source_ref, stats)
+
+
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
     return x

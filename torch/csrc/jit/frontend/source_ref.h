@@ -25,6 +25,9 @@ class TORCH_API SourceRef {
   bool operator<(const SourceRef& other) const {
     return *this < *other.source_.get();
   }
+  const Source* operator->() const {
+    return source_.get();
+  }
 
  private:
   friend class std::hash<SourceRef>;

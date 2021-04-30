@@ -1391,7 +1391,12 @@ void initJITBindings(PyObject* module) {
           [](const SourceRef& self, const SourceRef& other) {
             return self == other;
           })
-      .def(py::hash(py::self));
+      .def(py::hash(py::self))
+      .def_property_readonly(
+          "starting_lineno",
+          [](const SourceRef& sr) { return sr->starting_line_no(); })
+      .def_property_readonly(
+          "text", [](const SourceRef& sr) { return sr->text(); });
 
   py::class_<InstructionStats>(m, "InstructionStats")
       .def_property_readonly(
