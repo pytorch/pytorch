@@ -867,7 +867,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
-            // Instead of creating a MultiStreamGuard here, the ctx is pass
+            // Instead of creating a MultiStreamGuard here, the ctx is passed
             // to the callback and the MultiStreamGuard is created there,
             // because subsequent processing can switch threads due to 1)
             // waiting for RRef arguments to become ready 2) async_execution.
