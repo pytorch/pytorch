@@ -1,6 +1,17 @@
 import collections
 
-from .constants import *
+from .constants import (API_BLAS, API_C10, API_CAFFE2, API_DRIVER, API_FFT,
+                        API_PYTORCH, API_RAND, API_ROCTX, API_RTC, API_RUNTIME,
+                        API_SPARSE, CONV_CACHE, CONV_CONTEXT, CONV_D3D9,
+                        CONV_D3D10, CONV_D3D11, CONV_DEF, CONV_DEVICE,
+                        CONV_DEVICE_FUNC, CONV_EGL, CONV_ERROR, CONV_EVENT,
+                        CONV_EXEC, CONV_GL, CONV_GRAPHICS, CONV_INCLUDE,
+                        CONV_INCLUDE_CUDA_MAIN_H, CONV_INIT, CONV_JIT,
+                        CONV_MATH_FUNC, CONV_MEM, CONV_MODULE,
+                        CONV_NUMERIC_LITERAL, CONV_OCCUPANCY, CONV_OTHER,
+                        CONV_PEER, CONV_SPECIAL_FUNC, CONV_STREAM,
+                        CONV_SURFACE, CONV_TEX, CONV_THREAD, CONV_TYPE,
+                        CONV_VDPAU, CONV_VERSION, HIP_UNSUPPORTED)
 
 """ Mapping of CUDA functions, include files, constants, and types to ROCm/HIP equivalents
 This closely follows the implementation in hipify-clang
@@ -7727,6 +7738,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cub::DeviceReduce", ("hipcub::DeviceReduce", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::DeviceScan", ("hipcub::DeviceScan", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::DeviceSegmentedRadixSort", ("hipcub::DeviceSegmentedRadixSort", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::DeviceSegmentedReduce", ("hipcub::DeviceSegmentedReduce", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::DeviceSelect", ("hipcub::DeviceSelect", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::KeyValuePair", ("hipcub::KeyValuePair", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::Max", ("hipcub::Max", CONV_SPECIAL_FUNC, API_RUNTIME)),
@@ -7901,6 +7913,14 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         (
             "OptionalCUDAStreamGuard",
             ("OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDAMultiStreamGuard",
+            ("hip::HIPMultiStreamGuardMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        (
+            "CUDAMultiStreamGuard",
+            ("HIPMultiStreamGuardMasqueradingAsCUDA", API_PYTORCH),
         ),
         # Only get needs to be transformed this way; all the other ones can go
         # straight to the normal versions hip::HIPCachingAllocator

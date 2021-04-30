@@ -4,6 +4,16 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
+namespace at {
+namespace native {
+at::Tensor& reshape_copy_out(
+    at::Tensor& out,
+    const at::Tensor& self,
+    const std::vector<int64_t>& proposed_shape,
+    bool infer_size = true);
+} // namespace native
+} // namespace at
+
 namespace torch {
 namespace jit {
 
@@ -87,12 +97,18 @@ bool opIsRegistered(const c10::Symbol& op_name);
 
 bool canRunOutOfPlace(Node* n);
 bool canReuseInputsOutputs(Node* n);
-bool canOptimizeConstruct(Node* n);
+bool isOptimizableContainerType(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 
 bool canRunNatively(Node* n);
 std::function<void(ProcessedNode*)> getNativeOperation(Node* n);
+
+inline std::string PrintNode(const Node* node) {
+  std::ostringstream ss;
+  node->print(ss, 0, nullptr, false);
+  return ss.str();
+}
 
 } // namespace jit
 } // namespace torch

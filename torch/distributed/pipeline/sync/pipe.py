@@ -335,7 +335,7 @@ class Pipe(Module):
 
         return self._copy_streams
 
-    def forward(self, input) -> RRef:  # type: ignore
+    def forward(self, input) -> RRef:
         """
         Processes a single input mini-batch through the pipe and returns an
         :class:`~torch.distributed.rpc.RRef` pointing to the output.

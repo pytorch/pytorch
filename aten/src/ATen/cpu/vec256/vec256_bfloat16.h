@@ -64,7 +64,8 @@ private:
   __m256i values;
 public:
   using value_type = uint16_t;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 16;
   }
   Vec256() {}
@@ -257,6 +258,15 @@ public:
     auto o2 = Sleef_atan2f8_u10(hi, b2);
     return cvtfp32_bf16(o1, o2);
   }
+  Vec256<BFloat16> copysign(const Vec256<BFloat16> &sign) const {
+    // copy sign bit (0x8000) from sign and remaining bits from values
+    __m256i mask_value = _mm256_set1_epi32(~0x80008000);
+    __m256i mask_signbit = _mm256_set1_epi32(0x80008000);
+    return Vec256<BFloat16>(
+      _mm256_or_si256(
+        _mm256_and_si256(values, mask_value),
+        _mm256_and_si256(sign, mask_signbit)));
+  }
   Vec256<BFloat16> erf() const {
     return map(Sleef_erff8_u10);
   }
@@ -310,6 +320,22 @@ public:
     for (int64_t i = 0; i < size() / 2; i++) {
       tmp1[i] = calc_i0(tmp1[i]);
       tmp2[i] = calc_i0(tmp2[i]);
+    }
+    auto o1 = _mm256_loadu_ps(tmp1);
+    auto o2 = _mm256_loadu_ps(tmp2);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> i0e() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto sz = size();
+    __at_align32__ float tmp1[sz / 2], tmp2[sz / 2];
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
+
+    for (decltype(sz) i = 0; i < sz / 2; i++) {
+      tmp1[i] = calc_i0e(tmp1[i]);
+      tmp2[i] = calc_i0e(tmp2[i]);
     }
     auto o1 = _mm256_loadu_ps(tmp1);
     auto o2 = _mm256_loadu_ps(tmp2);

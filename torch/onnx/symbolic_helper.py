@@ -137,10 +137,10 @@ def parse_args(*arg_descriptors):
                 arg_names = list(sig.parameters.keys())[1:]
                 fn_name = fn.__name__
             except Exception:
-                arg_names = [None] * len(args)  # type: ignore
-                fn_name = None  # type: ignore
-            args = [_parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore
-                    for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]  # type: ignore
+                arg_names = [None] * len(args)  # type: ignore[list-item]
+                fn_name = None
+            args = [_parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[assignment]
+                    for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]
             # only support _outputs in kwargs
             assert len(kwargs) <= 1
             if len(kwargs) == 1:
@@ -294,6 +294,11 @@ def _is_fp(value):
             if type is None:
                 warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
             return (type == 'Float') or (type == 'Double') or (type == 'Half')
+    return False
+
+def _dtype_is_fp(type_value):
+    if type_value:
+        return (type_value == torch.float16) or (type_value == torch.float32) or (type_value == torch.float64)
     return False
 
 def _generate_wrapped_number(g, scalar):
@@ -595,14 +600,14 @@ def _scatter_helper(g, self, dim, index, src):
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import scatter  # type: ignore
+        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
     return scatter(g, self, dim, index, src)
 
 def _repeat_interleave_split_helper(g, self, reps, dim):
     if _export_onnx_opset_version <= 12:
         return g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
-        from torch.onnx.symbolic_opset13 import split  # type: ignore
+        from torch.onnx.symbolic_opset13 import split
         repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
         return split(g, self, repeats, dim, _outputs=reps)
 
@@ -651,7 +656,7 @@ def _index_fill_reshape_helper(g, self, dim, index):
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import scatter  # type: ignore
+        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
 
     if self.type().dim() is None:
         return _unimplemented("index_fill", "input rank not accesible")

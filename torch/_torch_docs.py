@@ -1482,6 +1482,143 @@ on inplace modification of the outputs.
     silently incorrect.
 """)
 
+add_docstr(torch.hsplit,
+           r"""
+hsplit(input, indices_or_sections) -> List of Tensors
+
+Splits :attr:`input`, a tensor with one or more dimensions, into multiple tensors
+horizontally according to :attr:`indices_or_sections`. Each split is a view of
+:attr:`input`.
+
+If :attr:`input` is one dimensional this is equivalent to calling
+torch.tensor_split(input, indices_or_sections, dim=0) (the split dimension is
+zero), and if :attr:`input` has two or more dimensions it's equivalent to calling
+torch.tensor_split(input, indices_or_sections, dim=1) (the split dimension is 1),
+except that if :attr:`indices_or_sections` is an integer it must evenly divide
+the split dimension or a runtime error will be thrown.
+
+This function is based on NumPy's :func:`numpy.hsplit`.
+
+Args:
+    input (Tensor): tensor to split.
+    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+
+Example::
+    >>> t = torch.arange(16.0).reshape(4,4)
+    >>> t
+    tensor([[ 0.,  1.,  2.,  3.],
+            [ 4.,  5.,  6.,  7.],
+            [ 8.,  9., 10., 11.],
+            [12., 13., 14., 15.]])
+    >>> torch.hsplit(t, 2)
+    (tensor([[ 0.,  1.],
+             [ 4.,  5.],
+             [ 8.,  9.],
+             [12., 13.]]),
+     tensor([[ 2.,  3.],
+             [ 6.,  7.],
+             [10., 11.],
+             [14., 15.]]))
+    >>> torch.hsplit(t, [3, 6])
+    (tensor([[ 0.,  1.,  2.],
+             [ 4.,  5.,  6.],
+             [ 8.,  9., 10.],
+             [12., 13., 14.]]),
+     tensor([[ 3.],
+             [ 7.],
+             [11.],
+             [15.]]),
+     tensor([], size=(4, 0)))
+
+""")
+
+add_docstr(torch.vsplit,
+           r"""
+vsplit(input, indices_or_sections) -> List of Tensors
+
+Splits :attr:`input`, a tensor with two or more dimensions, into multiple tensors
+vertically according to :attr:`indices_or_sections`. Each split is a view of
+:attr:`input`.
+
+This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=0)
+(the split dimension is 0), except that if :attr:`indices_or_sections` is an integer
+it must evenly divide the split dimension or a runtime error will be thrown.
+
+This function is based on NumPy's :func:`numpy.vsplit`.
+
+Args:
+    input (Tensor): tensor to split.
+    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+
+Example::
+    >>> t = torch.arange(16.0).reshape(4,4)
+    >>> t
+    tensor([[ 0.,  1.,  2.,  3.],
+            [ 4.,  5.,  6.,  7.],
+            [ 8.,  9., 10., 11.],
+            [12., 13., 14., 15.]])
+    >>> torch.vsplit(t, 2)
+    (tensor([[0., 1., 2., 3.],
+             [4., 5., 6., 7.]]),
+     tensor([[ 8.,  9., 10., 11.],
+             [12., 13., 14., 15.]]))
+    >>> torch.vsplit(t, [3, 6])
+    (tensor([[ 0.,  1.,  2.,  3.],
+             [ 4.,  5.,  6.,  7.],
+             [ 8.,  9., 10., 11.]]),
+     tensor([[12., 13., 14., 15.]]),
+     tensor([], size=(0, 4)))
+
+""")
+
+add_docstr(torch.dsplit,
+           r"""
+dsplit(input, indices_or_sections) -> List of Tensors
+
+Splits :attr:`input`, a tensor with three or more dimensions, into multiple tensors
+depthwise according to :attr:`indices_or_sections`. Each split is a view of
+:attr:`input`.
+
+This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=2)
+(the split dimension is 1), except that if :attr:`indices_or_sections` is an integer
+it must evenly divide the split dimension or a runtime error will be thrown.
+
+This function is based on NumPy's :func:`numpy.dsplit`.
+
+Args:
+    input (Tensor): tensor to split.
+    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+
+Example::
+    >>> t = torch.arange(16.0).reshape(2, 2, 4)
+    >>> t
+    tensor([[[ 0.,  1.,  2.,  3.],
+             [ 4.,  5.,  6.,  7.]],
+            [[ 8.,  9., 10., 11.],
+             [12., 13., 14., 15.]]])
+    >>> torch.dsplit(t, 2)
+    (tensor([[[ 0.,  1.],
+            [ 4.,  5.]],
+           [[ 8.,  9.],
+            [12., 13.]]]),
+     tensor([[[ 2.,  3.],
+              [ 6.,  7.]],
+             [[10., 11.],
+              [14., 15.]]]))
+
+    >>> torch.dsplit(t, [3, 6])
+    (tensor([[[ 0.,  1.,  2.],
+              [ 4.,  5.,  6.]],
+             [[ 8.,  9., 10.],
+              [12., 13., 14.]]]),
+     tensor([[[ 3.],
+              [ 7.]],
+             [[11.],
+              [15.]]]),
+     tensor([], size=(2, 2, 0)))
+
+""")
+
 add_docstr(torch.can_cast,
            r"""
 can_cast(from, to) -> bool
@@ -1900,6 +2037,10 @@ Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this r
 .. math::
     y_i = \min(\max(x_i, \text{min\_value}), \text{max\_value})
 """ + r"""
+
+.. note::
+    If :attr:`min` is greater than :attr:`max` :func:`torch.clamp(..., min, max) <torch.clamp>`
+    sets all elements in :attr:`input` to the value of :attr:`max`.
 
 Args:
     {input}
@@ -3199,9 +3340,9 @@ Example::
     >>> x = torch.arange(9.)
     >>> mantissa, exponent = torch.frexp(x)
     >>> mantissa
-    >>> tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
+    tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
     >>> exponent
-    >>> tensor([0, 1, 2, 2, 3, 3, 3, 3, 4], dtype=torch.int32)
+    tensor([0, 1, 2, 2, 3, 3, 3, 3, 4], dtype=torch.int32)
     >>> torch.ldexp(mantissa, exponent)
     tensor([0., 1., 2., 3., 4., 5., 6., 7., 8.])
 """)
@@ -3365,27 +3506,33 @@ add_docstr(torch.geqrf,
            r"""
 geqrf(input, *, out=None) -> (Tensor, Tensor)
 
-This is a low-level function for calling LAPACK directly. This function
+This is a low-level function for calling LAPACK's geqrf directly. This function
 returns a namedtuple (a, tau) as defined in `LAPACK documentation for geqrf`_ .
 
-You'll generally want to use :func:`torch.qr` instead.
-
-Computes a QR decomposition of :attr:`input`, but without constructing
-:math:`Q` and :math:`R` as explicit separate matrices.
-
-Rather, this directly calls the underlying LAPACK function `?geqrf`
-which produces a sequence of 'elementary reflectors'.
+Computes a QR decomposition of :attr:`input`.
+Both `Q` and `R` matrices are stored in the same output tensor `a`.
+The elements of `R` are stored on and above the diagonal.
+Elementary reflectors (or Householder vectors) implicitly defining matrix `Q`
+are stored below the diagonal.
+The results of this function can be used together with :func:`torch.linalg.householder_product`
+to obtain the `Q` matrix or
+with :func:`torch.ormqr`, which uses an implicit representation of the `Q` matrix,
+for an efficient matrix-matrix multiplication.
 
 See `LAPACK documentation for geqrf`_ for further details.
+
+.. note::
+    See also :func:`torch.linalg.qr`, which computes Q and R matrices, and :func:`torch.linalg.lstsq`
+    with the ``driver="gels"`` option for a function that can solve matrix equations using a QR decomposition.
 
 Args:
     input (Tensor): the input matrix
 
 Keyword args:
-    out (tuple, optional): the output tuple of (Tensor, Tensor)
+    out (tuple, optional): the output tuple of (Tensor, Tensor). Ignored if `None`. Default: `None`.
 
 .. _LAPACK documentation for geqrf:
-    https://software.intel.com/en-us/node/521004
+    http://www.netlib.org/lapack/explore-html/df/dc5/group__variants_g_ecomputational_ga3766ea903391b5cf9008132f7440ec7b.html
 
 """)
 
@@ -4559,8 +4706,8 @@ Similar to SciPy's `scipy.special.xlogy`.
 """ + r"""
 
 Args:
-    input (Number or Tensor)
-    other (Number or Tensor)
+    input (Number or Tensor) : Multiplier
+    other (Number or Tensor) : Argument
 
 .. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
 
@@ -5000,13 +5147,14 @@ matrix_power(input, n, *, out=None) -> Tensor
 Alias for :func:`torch.linalg.matrix_power`
 """.format(**common_args))
 
-add_docstr(torch.matrix_exp,
-           r"""
-Returns the matrix exponential. Supports batched input.
-For a matrix ``A``, the matrix exponential is defined as
+add_docstr(torch.matrix_exp, r"""
+matrix_exp(input) -> Tensor
+
+Computes the matrix exponential of a square matrix or of each square matrix in a batch.
+For a matrix :attr:`input`, the matrix exponential is defined as
 
 .. math::
-    \mathrm{e}^A = \sum_{k=0}^\infty A^k / k!
+    \mathrm{e}^\text{input} = \sum_{k=0}^\infty \text{input}^k / k!
 
 """ + r"""
 The implementation is based on:
@@ -5205,7 +5353,7 @@ Returns the indices of the maximum value of all elements in the :attr:`input` te
 This is the second value returned by :meth:`torch.max`. See its
 documentation for the exact semantics of this method.
 
-.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
+.. note:: If there are multiple maximal values then the indices of the first maximal value are returned.
 
 Args:
     {input}
@@ -6595,6 +6743,24 @@ Args:
 
 """)
 
+add_docstr(torch.permute,
+           r"""
+permute(input, dims) -> Tensor
+
+Returns a view of the original tensor :attr:`input` with its dimensions permuted.
+
+Args:
+    {input}
+    dims (tuple of ints): The desired ordering of dimensions
+
+Example:
+    >>> x = torch.randn(2, 3, 5)
+    >>> x.size()
+    torch.Size([2, 3, 5])
+    >>> torch.permute(x, (2, 0, 1)).size()
+    torch.Size([5, 2, 3])
+""")
+
 add_docstr(torch.poisson,
            r"""
 poisson(input, generator=None) -> Tensor
@@ -6653,6 +6819,25 @@ Example::
     tensor([ 6.4939, 97.4091])
     >>> torch.polygamma(4, a)
     tensor([ -24.8863, -771.4742])
+""".format(**common_args))
+
+add_docstr(torch.positive,
+           r"""
+positive(input) -> Tensor
+
+Returns :attr:`input`.
+Throws a runtime error if :attr:`input` is a bool tensor.
+""" + r"""
+Args:
+    {input}
+
+Example::
+
+    >>> t = torch.randn(5)
+    >>> t
+    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
+    >>> torch.positive(t)
+    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
 """.format(**common_args))
 
 add_docstr(torch.pow,
@@ -7006,6 +7191,7 @@ Args:
         Can be a variable number of arguments or a collection like a list or tuple.
 
 Keyword args:
+    {generator}
     {out}
     {dtype}
     {layout}
@@ -7132,6 +7318,7 @@ Args:
         Can be a variable number of arguments or a collection like a list or tuple.
 
 Keyword args:
+    {generator}
     {out}
     {dtype}
     {layout}
@@ -7879,6 +8066,49 @@ Example::
             [-0.0881,  0.4370,  0.2275,  1.0284]])
 """.format(**common_args))
 
+add_docstr(torch.sparse_csr_tensor,
+           r"""
+sparse_csr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a :ref:`sparse tensor in CSR (Compressed Sparse Row) <sparse-csr-docs>` with specified
+values at the given :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix multiplication operations
+in CSR format are typically faster than that for sparse tensors in COO format. Make you have a look
+at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
+
+Args:
+    crow_indices (array_like): One-dimensional array of size size[0] + 1. The last element
+        is the number of non-zeros. This tensor encodes the index in values and col_indices
+        depending on where the given row starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of elements in a given row.
+    col_indices (array_like): Column co-ordinates of each element in values. Strictly one
+        dimensional tensor with the same length as values.
+    values (array_list): Initial values for the tensor. Can be a list, tuple, NumPy ``ndarray``, scalar,
+        and other types.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the sparse tensor. If not provided, the
+        size will be inferred as the minimum size big enough to hold all non-zero elements.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if None, infers data type from :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    {requires_grad}
+
+Example ::
+    >>> crow_indices = [0, 2, 4]
+    >>> col_indices = [0, 1, 0, 1]
+    >>> values = [1, 2, 3, 4]
+    >>> torch.sparse_csr_tensor(torch.tensor(crow_indices, dtype=torch.int64),
+    ...                         torch.tensor(col_indices, dtype=torch.int64),
+    ...                         torch.tensor(values), dtype=torch.double)
+    tensor(crow_indices=tensor([0, 2, 4]),
+           col_indices=tensor([0, 1, 0, 1]),
+           values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+           dtype=torch.float64, layout=torch.sparse_csr)
+""".format(**factory_common_args))
+
 add_docstr(torch.sparse_coo_tensor,
            r"""
 sparse_coo_tensor(indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
@@ -8408,7 +8638,7 @@ add_docstr(torch.symeig, r"""
 symeig(input, eigenvectors=False, upper=True, *, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
-of a real symmetric matrix :attr:`input` or a batch of real symmetric matrices,
+of a real symmetric or complex Hermitian matrix :attr:`input` or a batch thereof,
 represented by a namedtuple (eigenvalues, eigenvectors).
 
 This function calculates all eigenvalues (and vectors) of :attr:`input`
@@ -8420,7 +8650,7 @@ both eigenvectors and eigenvalues or eigenvalues only.
 If it is ``False``, only eigenvalues are computed. If it is ``True``,
 both eigenvalues and eigenvectors are computed.
 
-Since the input matrix :attr:`input` is supposed to be symmetric,
+Since the input matrix :attr:`input` is supposed to be symmetric or Hermitian,
 only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
@@ -8437,7 +8667,7 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
-                    batch dimensions consisting of symmetric matrices.
+                    batch dimensions consisting of symmetric or Hermitian matrices.
     eigenvectors(bool, optional): controls whether eigenvectors have to be computed
     upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
 

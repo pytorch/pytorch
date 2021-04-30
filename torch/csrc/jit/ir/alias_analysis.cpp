@@ -207,7 +207,7 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
   writeRegistry_ = nullptr;
 
   // initialize the write cache
-  writtenToLocationsIndex_ = buildWrittenToLocationsIndex();
+  buildWrittenToLocationsIndex();
   GRAPH_DEBUG(toString());
 }
 
@@ -1498,6 +1498,7 @@ bool AliasDb::tryMove(
   // dependencies
   WorkingSet workingSet(toMove, *this);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int direction;
   if (toMove->isAfter(movePoint)) {
     direction = kPrevDirection;
@@ -1694,13 +1695,13 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
   return *maybe_wildcardElement;
 }
 
-MemoryLocations AliasDb::buildWrittenToLocationsIndex() const {
+void AliasDb::buildWrittenToLocationsIndex() {
   MemoryLocations ret;
   for (const auto& pr : *writeIndex_) {
     const auto& writtenLocs = pr.second;
     ret |= writtenLocs;
   }
-  return ret;
+  writtenToLocationsIndex_ = ret;
 }
 
 void Lint(const AliasDb* db) {

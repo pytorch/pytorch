@@ -6,6 +6,7 @@
 namespace torch {
 namespace jit {
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex lock;
 const std::vector<std::string> functions = {
     R"(
@@ -418,7 +419,11 @@ const std::vector<std::string> functions = {
                 weight_size = weight.size()
                 grad_input = torch.matmul(grad_output, weight)
                 grad_weight = torch.matmul(grad_output.reshape(-1, weight_size[0]).t(), input.reshape(-1, weight_size[1]))
-                return grad_input, grad_weight, grad_bias
+                # Note: calling unchecked_unwrap_optional is only safe, when we
+                #       directly return grad_bias directly back to bias.
+                #       Because in the case where `bias is None`, unwrapped
+                #       grad_bias would just be pruned away.
+                return grad_input, grad_weight, grad_bias.unchecked_unwrap_optional
             return result, backward
     )",
     R"(
@@ -1407,14 +1412,17 @@ const std::vector<std::string> functions = {
           return torch.clamp(self, min=min, max=max), backward
     )"};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
 // This map is a workaround to cache compiled gradient_pairs. Ideally this graph
 // should be compiled only once and saved in Operator structure.
 // This should be done along with merging into native_functions.yaml.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CompilationUnit compilation_unit;
 } // anonymous namespace
 
@@ -1481,6 +1489,7 @@ void loadModule(const CompilationUnit& module) {
           << "gradient must return literal a tuple";
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* context;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());

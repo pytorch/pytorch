@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kConvDoc[] = R"DOC(
 The Conv2D operator computes a 2D convolution operation over an input blob $(X)$, with a filter blob $(filter)$ and a bias blob $(bias)$, and outputs a single output blob $(Y)$. Although there are several options for order, the convention is that the input $(X)$ is a blob of shape $(N,C_{in},H_{in},W_{in})$ and the output $(Y)$ is a blob of shape $(N,C_{out},H_{out},W_{out})$. Here, $N$ is the batch size, $C$ is the number of channels, $H$ is the spatial height, and $W$ is the spatial width. For example, if your input data was a batch of five, 100x120pixel RGB images, $X$ would have shape $(5,3,120,100)$.
 
@@ -164,8 +165,10 @@ and a bias blob and computes the output. {conv_doc})DOC";
     */
   };
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Conv, ConvOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Conv)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -175,8 +178,10 @@ OPERATOR_SCHEMA(Conv)
     .FillUsing(ConvDocGenerator(""))
     .InheritOnnxSchema();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Conv1D, ConvOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Conv1D)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -184,8 +189,10 @@ OPERATOR_SCHEMA(Conv1D)
     .FillUsing(ConvDocGenerator("1D "))
     .InheritOnnxSchema("Conv");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Conv2D, ConvOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Conv2D)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -195,8 +202,10 @@ OPERATOR_SCHEMA(Conv2D)
     .FillUsing(ConvDocGenerator("2D "))
     .InheritOnnxSchema("Conv");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Conv3D, ConvOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Conv3D)
     .NumInputs(2, 3)
     .NumOutputs(1)
