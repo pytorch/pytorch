@@ -24,6 +24,8 @@ namespace c10 {
 class TORCH_API OperatorHandle;
 template<class FuncType> class TypedOperatorHandle;
 
+bool TORCH_API show_dispatch_trace_enabled();
+
 /**
  * Implement this interface and register your instance with the dispatcher
  * to get notified when operators are registered or deregistered with
@@ -481,6 +483,9 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
     // Note: for perf reasons we wouldn't want to pass arguments into
     // the function call or prematurely box them
   at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
+  if (show_dispatch_trace_enabled()) {
+    std::cout << "[" << op.schema().name() << "] " << dispatchKeySet.highestPriorityTypeId() << " (::callWithDispatchKeySlowPath)" << std::endl;
+  }
   if (C10_UNLIKELY(guard.isActive())) {
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
     if (op.operatorDef_->op.isObserved()) {
@@ -514,6 +519,9 @@ C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorH
       args...
     );
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
+  if (show_dispatch_trace_enabled()) {
+    std::cout << "[" << op.schema().name() << "] " << dispatchKeySet.highestPriorityTypeId() << " (::call)" << std::endl;
+  }
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet.highestPriorityTypeId());
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   // By default, when there're no high-frequency or non-sampled callbacks,
@@ -536,6 +544,9 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // do not use RecordFunction on redispatch
   const KernelFunction& kernel = op.operatorDef_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
+  if (show_dispatch_trace_enabled()) {
+    std::cout << "[" << op.schema().name() << "] " << currentDispatchKeySet.highestPriorityTypeId() << " (::redispatch)" << std::endl;
+  }
   return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
@@ -543,6 +554,9 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
+  if (show_dispatch_trace_enabled()) {
+    std::cout << "[" << op.schema().name() << "] " << dispatchKeySet.highestPriorityTypeId() << " (::callBoxed)" << std::endl;
+  }
   const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   bool pre_sampled = false;
@@ -575,6 +589,9 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
+  if (show_dispatch_trace_enabled()) {
+    std::cout << "[" << op.schema().name() << "] " << dispatchKeySet.highestPriorityTypeId() << " (::redispatchBoxed)" << std::endl;
+  }
   const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());
   return kernel.callBoxed(op, dispatchKeySet, stack);
 }

@@ -9,11 +9,12 @@ import torch.fx as fx
 from torch.fx import PythonTensor
 from nnc_compile import nnc_compile
 from types import FunctionType, CodeType
+import functorch
 from functorch import key_wrap, ModuleWrap, jacrev, vmap, grad
+torch._C._debug_only_display_vmap_fallback_warnings(True)
 
 
 import torchvision.models as models
-
 
 def fetch_attr(mod, target : str):
     target_atoms = target.split('.')
@@ -52,15 +53,27 @@ class ModuleBackward(nn.Module):
 class Foo(torch.nn.Module):
     def __init__(self, num_features=50):
         super(Foo, self).__init__()
-        self.linear = nn.Linear(num_features, 1, bias=False)
+        self.linear = nn.Conv2d(3, 3, 3)
         self.w = (nn.Parameter(torch.randn(1, num_features)))
 
     def forward(self, x):
-        out = (self.linear(x * torch.sin(self.w))**2).sum()
-        out.backward()
-        return list(self.parameters())
+        return vmap(self.linear)(x)
+        # out = (self.linear(x * torch.sin(self.w))**2).sum()
+        # out.backward()
+        # return list(self.parameters())
 
 
+model = Foo()
+def f(x, w):
+    return F.conv2d(x, w, None)
+inps = (torch.randn(1,1, 3,10,10), model.linear.weight)
+vmap_f = vmap(f, in_dims=(0,None))
+vmap_f(*inps)
+exit(0)
+begin = time.time()
+vmap_f(*inps)
+print(time.time()-begin)
+exit(0)
 
 from functorch import vmap
 batch_size, feature_size = 3, 5
@@ -74,12 +87,15 @@ def compute_loss(weights, example, target):
     y = model(weights, example)
     return ((y - target) ** 2).mean()  # MSELoss
 
+torch._C._debug_only_display_vmap_fallback_warnings(True)
 weights = torch.randn(feature_size, requires_grad=True)
 examples = torch.randn(batch_size, feature_size)
 targets = torch.randn(batch_size)
 inputs = (weights,examples, targets)
 grad_weight_per_example = fx.symbolic_trace(key_wrap(vmap(grad(compute_loss, diff_argnums=(0,)), in_dims=(None, 0, 0)), inputs))
 print(grad_weight_per_example.code)
+# nnc_compile(grad_weight_per_example, inputs)
+# print(grad_weight_per_example.code)
 
 
 exit(0)

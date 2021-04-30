@@ -212,13 +212,13 @@ py::tuple vectorToPyTuple(
   }
   return py::cast<py::tuple>(tuple);
 }
+
 void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
   const auto num_arguments = schema.arguments().size();
   const auto arguments = torch::jit::last(stack, num_arguments);
-
   py::gil_scoped_acquire g;
   std::vector<py::object> pyArgs;
   std::vector<py::object> pyTensorArgs;
@@ -286,9 +286,8 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   func_name = func_name.substr(func_name.find(delimiter) + delimiter.size());
   py::object torch_api_function =
       PyObject_FastGetAttrString(THPVariableClass, (char*)func_name.c_str());
-  // if (torch_api_function == nullptr) {
+
   torch_api_function = py::str(op.operator_name().name);
-  // }
   auto pyTupleArgs = vectorToPyTuple<py::object>(pyArgs, pyIdentity);
 
   auto out = PyObject_CallFunctionObjArgs(
@@ -304,14 +303,13 @@ void pythonFallBack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   py::list outs = py::cast<py::list>(out);
   torch::jit::drop(stack, num_arguments);
   std::vector<c10::IValue> ret_ivalues;
+  assert(outs.size() == op.schema().returns().size());
   for (int idx = 0; idx < outs.size(); idx++) {
     auto ret_type = op.schema().returns()[idx].type();
     if (ret_type->kind() == c10::TensorType::Kind) {
       torch::jit::push(stack, addKey(py::cast<py::object>(outs[idx])));
     } else {
       auto ivalue_out = torch::jit::toTypeInferredIValue(outs[idx]);
-      // std::cout<<ivalue_out.
-      // torch::jit::toIValue(outs[idx], ret_type);
       torch::jit::push(stack, ivalue_out);
     }
   }

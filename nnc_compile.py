@@ -61,49 +61,14 @@ def ones_like_lower(name, out_shape, inp_shapes, args):
     res = te.Compute(name, get_dim_args(out_shape), f)
     return res
 
-def expand_lower(name, out_shape, inp_shapes, args):
-    inp_shape = inp_shapes[0][0]
-    A = args[0]
-    def f(*idxs):
-        return A.load(index_or_broadcast(inp_shape, args))
-    return te.Compute(name, get_dim_args(out_shape), f)
-
-def mm_lower(name, out_shape, inp_shapes, args):
-    M1 = args[0]
-    M2 = args[1]
-    N, M = inp_shapes[0][0]
-    P = inp_shapes[1][0][1]
-
-    def f(n, p, m):
-        return M1.load([n, m]) * M2.load([m, p])
-    mm = te.Compute('mm', get_dim_args([N,P,M]), f)
-    out = te.Reduce(name, get_dim_args([N, P]), te.Sum(), mm, get_dim_args([M]))
-    return out.buf(), [mm.stmt(), out.stmt()]
-    # C = torch._C._te.BufHandle('C', get_te_shapes([N, P]), get_nnc_type(torch.float))
-    # s = torch._C._te.ExternalCall(C, "nnc_aten_matmul", [M1, M2], [])
-    # return C, [s]
-
-def transpose_lower(name, out_shape, inp_shapes, args):
-    if len(args) == 1:
-        idx_1, idx_2 = 0, 1
-    else:
-        idx_1, idx_2 = args[1], args[2]
-    def transpose(shape):
-        shape[idx_1], shape[idx_2] = shape[idx_2], shape[idx_1]
-        return shape
-    def f(*idxs):
-        idxs = transpose(list(idxs))
-        return args[0].load(idxs)
-    return te.Compute(name, get_dim_args(out_shape), f)
-
 def dot_lower(name, out_shape, inp_shapes, args):
-    out = te.lower('aten::mul', args, inp_shapes[0][0], inp_shapes[0][1])
+    mul_te = te.lower('aten::mul', list(args), get_te_shapes(inp_shapes[0][0]), get_nnc_type(inp_shapes[0][1]))
+    res = te.lower('aten::sum', [mul_te.buf()], get_te_shapes(out_shape), get_nnc_type(inp_shapes[0][1]))
+    return (res.buf(), [mul_te.stmt(), res.stmt()])
 
 
 lowering_functions[torch.ops.aten.ones_like] = ones_like_lower
-lowering_functions[torch.ops.aten.expand] = expand_lower
-lowering_functions[torch.ops.aten.mm] = mm_lower
-lowering_functions[torch.ops.aten.t] = transpose_lower
+lowering_functions[torch.ops.aten.dot] = dot_lower
 
 func_to_aten = {
     operator.getitem: torch.ops.aten.slice,
@@ -219,7 +184,7 @@ def nnc_compile(model: torch.nn.Module, example_inputs) -> torch.nn.Module:
     loopnest = te.LoopNest(te.Stmt(compute_stmts), outs[0])
     # loopnest.inline_intermediate_bufs(True)
     loopnest.simplify()
-    # print(loopnest)
+    print(loopnest)
     loopnest.prepare_for_codegen()
     stmt = te.simplify(loopnest.root_stmt())
     cg = te.construct_codegen('llvm', stmt, [te.BufferArg(x) for x in [env[i.name] for i in module_attrs] + inputs + outs[0]])

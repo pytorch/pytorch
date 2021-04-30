@@ -4,6 +4,26 @@
 
 namespace c10 {
 
+static bool compute_dispatch_trace_enabled() {
+  auto envar = std::getenv("TORCH_SHOW_DISPATCH_TRACE");
+  if (envar) {
+    if (strcmp(envar, "0") == 0) {
+      return false;
+    }
+    if (strcmp(envar, "1") == 0) {
+      return true;
+    }
+    TORCH_WARN("ignoring invalid value for TORCH_SHOW_DISPATCH_TRACE: ", envar,
+               " valid values are 0 or 1.");
+  }
+  return false;
+}
+
+bool show_dispatch_trace_enabled() {
+  static bool enabled = compute_dispatch_trace_enabled();
+  return enabled;
+}
+
 namespace detail {
 
 class RegistrationListenerList final {
