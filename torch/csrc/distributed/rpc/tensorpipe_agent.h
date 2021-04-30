@@ -201,7 +201,7 @@ class TensorPipeAgent : public RpcAgent {
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
-  DeviceMap getDeviceMap(const WorkerInfo& dest) override;
+  DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
 
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;

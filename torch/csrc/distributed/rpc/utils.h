@@ -130,7 +130,7 @@ struct TORCH_API LazyStreamContext {
   c10::Stream getStream(c10::Device device) {
     auto iter = streams_.find(device);
     if (iter == streams_.end()) {
-      auto stream = impl_.getStreamFromPool(device);
+      auto stream = impl_.getStreamFromGlobalPool(device);
       streams_.emplace(device, stream);
       return stream;
     } else {
@@ -154,11 +154,6 @@ struct TORCH_API LazyStreamContext {
   const c10::impl::VirtualGuardImpl impl_;
   std::unordered_map<c10::Device, c10::Stream> streams_;
 };
-
-inline std::shared_ptr<LazyStreamContext> createLazyStreamContext(
-    c10::DeviceType device_type) {
-  return std::make_shared<LazyStreamContext>(device_type);
-}
 
 } // namespace rpc
 } // namespace distributed

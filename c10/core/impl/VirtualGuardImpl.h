@@ -40,8 +40,8 @@ public:
   Stream getDefaultStream(Device d) const override {
     return impl_->getDefaultStream(d);
   }
-  Stream getStreamFromPool(Device d, bool isHighPriority = false) const override {
-    return impl_->getStreamFromPool(d, isHighPriority);
+  Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false) const override {
+    return impl_->getStreamFromGlobalPool(d, isHighPriority);
   }
   Stream exchangeStream(Stream s) const noexcept override {
     return impl_->exchangeStream(s);

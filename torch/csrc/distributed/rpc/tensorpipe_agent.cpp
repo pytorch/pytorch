@@ -81,8 +81,8 @@ std::vector<c10::Device> getDevicesForTensors(
 // CUDA stream for each device in the given device list.
 std::shared_ptr<LazyStreamContext> createCalleeStreamContext(
     const std::vector<c10::Device>& devices) {
-  auto ctx =
-      createLazyStreamContext(devices.empty() ? c10::kCPU : devices[0].type());
+  auto ctx = std::make_shared<LazyStreamContext>(
+      devices.empty() ? c10::kCPU : devices[0].type());
   for (const c10::Device& device : devices) {
     ctx->getStream(device);
   }
@@ -998,7 +998,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is sending request #"
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
-  auto ctx = createLazyStreamContext(
+  auto ctx = std::make_shared<LazyStreamContext>(
       devices_.empty() ? c10::kCPU : devices_[0].type());
   ctx->waitForCurrentStreams(requestMessage.tensors());
   pipeWrite(
@@ -1441,7 +1441,7 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
   }
 }
 
-DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dest) {
+DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dest) const {
   auto it = opts_.deviceMaps.find(dest.name_);
   if (it == opts_.deviceMaps.end()) {
     return {};
