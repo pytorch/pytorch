@@ -2,12 +2,6 @@
 
 namespace at { namespace functorch {
 
-template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> basic_unary_batch_rule(
-    const Tensor& tensor, optional<int64_t> batch_dim, ExtraArgs... extra_args) {
-  return {Func(tensor, std::forward<ExtraArgs>(extra_args)...), batch_dim};
-}
-
 static void handleScalarTypePromotion(Tensor& logical_scalar_tensor, Tensor& second) {
   auto result_type = at::native::result_type(logical_scalar_tensor[0], second);
   if (logical_scalar_tensor.scalar_type() != result_type) {
