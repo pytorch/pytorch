@@ -425,7 +425,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
     if (!is_variable) {
       // TODO: remove this code path once Variable and Tensor are merged in Python
       if (enforce_variables) {
-        THPUtils_setError("expected a Variable argument, but got %s",
+        THPUtils_setError("expected a Tensor argument, but got %s",
                           THPUtils_typename(arg));
         throw python_error();
       }
@@ -564,6 +564,12 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
 PyObject* THPFunction_name(PyObject *self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto cdata = ((THPFunction*)self)->cdata.lock();
+  TORCH_CHECK(cdata,
+    "Attribute 'name' is invalid for this instance of _C._FunctionBase. "
+    "Accessing this attribute directly on an instance of autograd.Function is a legacy "
+    "access pattern that is no longer supported. For examples on how to use new-style "
+    "autograd functions, see "
+    "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
   return THPUtils_packString(cdata->name());
   END_HANDLE_TH_ERRORS
 }
@@ -634,13 +640,19 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 PyObject* THPFunction__register_hook_dict(PyObject *_self, PyObject *_var)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPVariable_Check(_var), "_register_hook_dict expected a variable");
+  THPUtils_assert(THPVariable_Check(_var), "_register_hook_dict expected a Tensor");
   THPVariable* var = reinterpret_cast<THPVariable*>(_var);
   const auto& tensor = THPVariable_Unpack(var);
   std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(
       var->backward_hooks, tensor.output_nr()));
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
+  TORCH_CHECK(cdata,
+    "Attribute '_register_hook_dict' is invalid for this instance of _C._FunctionBase. "
+    "Accessing this attribute directly on an instance of autograd.Function is a legacy "
+    "access pattern that is no longer supported. For examples on how to use new-style "
+    "autograd functions, see "
+    "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
   cdata->add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -651,6 +663,12 @@ PyObject* THPFunction_register_hook(PyObject *_self, PyObject *hook)
   HANDLE_TH_ERRORS
   auto self= (THPFunction*)_self;
   auto cdata = self->cdata.lock();
+  TORCH_CHECK(cdata,
+    "Attribute 'register_hook' is invalid for this instance of _C._FunctionBase. "
+    "Accessing this attribute directly on an instance of autograd.Function is a legacy "
+    "access pattern that is no longer supported. For examples on how to use new-style "
+    "autograd functions, see "
+    "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
   return torch::autograd::registerFunctionHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
 }
@@ -728,6 +746,12 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
   auto cdata = self->cdata.lock();
+  TORCH_CHECK(cdata,
+    "Attribute 'next_functions' is invalid for this instance of _C._FunctionBase. "
+    "Accessing this attribute directly on an instance of autograd.Function is a legacy "
+    "access pattern that is no longer supported. For examples on how to use new-style "
+    "autograd functions, see "
+    "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
   const auto num_outputs = cdata->num_outputs();
   THPObjectPtr result(PyTuple_New(num_outputs));
   if (!result)

@@ -2115,6 +2115,32 @@ class TestAutograd(TestCase):
         for _ in range(10):
             CollectOnDelete().forward(torch.randn(1, requires_grad=True)).backward()
 
+    def test_naughty_autograd_function_attr_access(self):
+        class Id(Function):
+            @staticmethod
+            def forward(self, x):
+                return x
+
+            @staticmethod
+            def backward(self, grad_x):
+                return grad_x
+        f = Id()
+        # THPFunction is the base class of both grad_fn and autograd functions,
+        # which means that a lot of accessors on them may segfault. Test that we
+        # properly error in this case.
+        t = torch.ones(1, requires_grad=True)
+        t._backward_hooks = dict()
+        with self.assertRaisesRegex(RuntimeError, "Attribute '_register_hook_dict' is invalid"):
+            f._register_hook_dict(t)
+        with self.assertRaisesRegex(RuntimeError, "Attribute 'register_hook' is invalid"):
+            f.register_hook(lambda x, y: None)
+        with self.assertRaisesRegex(RuntimeError, "Attribute 'next_functions' is invalid"):
+            f.next_functions
+        with self.assertRaisesRegex(RuntimeError, "Attribute 'name' is invalid"):
+            f.name()
+        with self.assertRaisesRegex(RuntimeError, "underlying PyNode has already been deallocated"):
+            f.metadata
+
     @unittest.expectedFailure
     def test_naughty_anomaly_access(self):
         class MyFunction(Function):
