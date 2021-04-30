@@ -81,6 +81,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   }
 }
 
+#ifndef ATEN_CPU_STATIC_DISPATCH
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericMode);
@@ -128,5 +129,6 @@ TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   Tensor b = mul(a, a);
   ASSERT_EQ(override_call_count, 1);
 }
+#endif // ATEN_CPU_STATIC_DISPATCH
 
 }

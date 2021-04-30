@@ -12,6 +12,7 @@
 
 using namespace at;
 
+#ifndef ATEN_CPU_STATIC_DISPATCH
 namespace {
 
 constexpr auto kCustomRNG = DispatchKey::CustomRNGKeyId;
@@ -498,3 +499,4 @@ TEST_F(RNGTest, Bernoulli_out) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 }
+#endif // ATEN_CPU_STATIC_DISPATCH
