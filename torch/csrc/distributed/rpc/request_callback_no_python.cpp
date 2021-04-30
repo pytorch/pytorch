@@ -1,3 +1,6 @@
+#include <torch/csrc/distributed/rpc/request_callback_no_python.h>
+
+#include <c10/core/StreamGuard.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
@@ -7,7 +10,6 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
-#include <torch/csrc/distributed/rpc/request_callback_no_python.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
@@ -88,6 +90,7 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
                     ->config());
           }
 
+          c10::MultiStreamGuard guard(ctx->getReservedStreams());
           processRpcWithErrors(
               *rpc, messageType, id, retFuture, std::move(ctx));
 
