@@ -8,7 +8,7 @@
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/import.h>
-#include <torch/csrc/jit/mobile/model_bytecode_version.h>
+#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -649,12 +649,10 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
       filePath.substr(0, filePath.find_last_of("/\\") + 1);
   test_model_file_v5.append("script_module_v5.ptl");
 
-  auto version_v4 =
-      torch::jit::mobile::_get_model_bytecode_version(test_model_file_v4);
+  auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
 
-  auto version_v5 =
-      torch::jit::mobile::_get_model_bytecode_version(test_model_file_v5);
+  auto version_v5 = _get_model_bytecode_version(test_model_file_v5);
   AT_ASSERT(version_v5 == 5);
 }
 
@@ -664,11 +662,11 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelV4) {
   auto test_model_file_v4 =
       filePath.substr(0, filePath.find_last_of("/\\") + 1);
   test_model_file_v4.append("script_module_v4.ptl");
-  auto version = mobile::_get_model_bytecode_version(test_model_file_v4);
+  auto version = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version == 4);
 
   std::ostringstream oss;
-  bool isSuccess = mobile::_backport_for_mobile(test_model_file_v4, oss);
+  bool isSuccess = _backport_for_mobile(test_model_file_v4, oss);
   AT_ASSERT(!isSuccess);
 }
 
@@ -679,18 +677,18 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelV5) {
   test_model_file_v5.append("script_module_v5.ptl");
 
   // Load check in model: script_module_v5.ptl
-  auto from_version = mobile::_get_model_bytecode_version(test_model_file_v5);
+  auto from_version = _get_model_bytecode_version(test_model_file_v5);
   AT_ASSERT(from_version == 5);
 
   // Backport script_module_v5.ptl to an older version
   std::ostringstream oss;
-  bool backPortSuccess = mobile::_backport_for_mobile(test_model_file_v5, oss);
+  bool backPortSuccess = _backport_for_mobile(test_model_file_v5, oss);
 
   AT_ASSERT(backPortSuccess);
 
   // Check backport model version
   std::istringstream iss(oss.str());
-  auto backport_version = mobile::_get_model_bytecode_version(iss);
+  auto backport_version = _get_model_bytecode_version(iss);
   AT_ASSERT(backport_version == 4);
 
   // Load and run the backport model, then compare the result with expect result
