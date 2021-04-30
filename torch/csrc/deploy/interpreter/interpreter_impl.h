@@ -70,7 +70,6 @@ struct InterpreterSessionImpl {
       std::vector<std::tuple<std::string, at::IValue>> kwargs) = 0;
   virtual Obj attr(Obj obj, const char* attr) = 0;
 
-
  protected:
   int64_t ID(Obj obj) const {
     return obj.id_;
@@ -97,7 +96,8 @@ inline Obj Obj::operator()(at::ArrayRef<at::IValue> args) {
   return interaction_->call(*this, args);
 }
 
-inline Obj Obj::call_kwargs(std::vector<std::tuple<std::string, at::IValue>> kwargs) {
+inline Obj Obj::call_kwargs(
+    std::vector<std::tuple<std::string, at::IValue>> kwargs) {
   return interaction_->call_kwargs(*this, std::move(kwargs));
 }
 inline Obj Obj::attr(const char* attr) {

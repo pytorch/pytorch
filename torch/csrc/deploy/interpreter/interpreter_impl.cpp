@@ -427,14 +427,17 @@ struct ConcreteInterpreterSessionImpl
     return wrap(call(unwrap(obj), m_args));
   }
 
-  Obj call_kwargs(Obj obj, std::vector<std::tuple<std::string, at::IValue>> kwargs) override {
+  Obj call_kwargs(
+      Obj obj,
+      std::vector<std::tuple<std::string, at::IValue>> kwargs) override {
     std::vector<std::tuple<std::string, py::object>> kwargs_list;
     kwargs_list.reserve(kwargs.size());
-    for (auto& kv: kwargs) {
-      kwargs_list.emplace_back(std::get<0>(kv), torch::jit::toPyObject(std::get<1>(kv)));
+    for (auto& kv : kwargs) {
+      kwargs_list.emplace_back(
+          std::get<0>(kv), torch::jit::toPyObject(std::get<1>(kv)));
     }
     py::object o = py::cast(kwargs_list);
-    if(!o) {
+    if (!o) {
       throw py::error_already_set();
     }
     py::dict py_kwargs(o);
@@ -446,7 +449,10 @@ struct ConcreteInterpreterSessionImpl
     return wrap(unwrap(obj).attr(attr));
   }
 
-  static py::object call(py::handle object, py::handle args, py::handle kwargs = nullptr) {
+  static py::object call(
+      py::handle object,
+      py::handle args,
+      py::handle kwargs = nullptr) {
     PyObject* result = PyObject_Call(object.ptr(), args.ptr(), kwargs.ptr());
     if (!result) {
       throw py::error_already_set();
