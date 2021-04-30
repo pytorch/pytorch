@@ -9,8 +9,7 @@ from tools.codegen.utils import Target, mapMaybe
 from tools.codegen.model import (DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind,
                                  TensorOptionsArguments, assert_never,
-                                 is_cuda_dispatch_key, BackendIndex,
-                                 is_structured_dispatch_key)
+                                 is_cuda_dispatch_key, BackendIndex)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      CppSignature, CppSignatureGroup,
                                      DispatcherSignature, Expr, MutRefCType,
@@ -59,7 +58,9 @@ class RegisterDispatchKey:
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         if isinstance(f, NativeFunctionsGroup):
-            if self.backend_index.structured(f):
+            # Note: We call gen_structured() if the operator is marked structured, regardless of the backend.
+            # gen_structured() has special logic to handle auto-generated kernels.
+            if f.structured:
                 return self.gen_structured(f)
             else:
                 return list(mapMaybe(self.gen_unstructured, f.functions()))
@@ -78,7 +79,7 @@ class RegisterDispatchKey:
             assert not self.backend_index.has_backend(g.out), \
                 "Do not explicitly specify CompositeExplicitAutograd dispatch key on structured " \
                 "functions, they will be automatically generated for you"
-        elif not is_structured_dispatch_key(self.backend_index.dispatch_key):
+        elif not self.backend_index.structured(g):
             return list(mapMaybe(self.gen_unstructured, g.functions()))
         elif not self.backend_index.has_backend(g.out):
             return []

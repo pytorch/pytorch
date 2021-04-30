@@ -349,7 +349,7 @@ class NativeFunction:
         # Why is 'structured' included? External backends (e.g. XLA) opt into which ops are structured
         # independently of which in-tree ops are structured
         backend_metadata = {k: {func.name: BackendMetadata(
-            kernel=v, structured=structured, external=False)} for k, v in dispatch.items()}
+            kernel=v, structured=structured and is_structured_dispatch_key(k), external=False)} for k, v in dispatch.items()}
 
         # don't care if it exists or not; make it easier to use this function
         # with other yaml parsers that aren't setting __line__ in the dict
@@ -358,9 +358,9 @@ class NativeFunction:
 
         # Asserts that we can't do in post_init, because they rely on backend-specific info
         if structured_delegate is not None:
-            for k in STRUCTURED_DISPATCH_KEYS:
-                assert k not in dispatch, \
-                    f"if structured_delegate, then must not have {k} in dispatch dictionary " \
+            for key in STRUCTURED_DISPATCH_KEYS:
+                assert key not in dispatch, \
+                    f"if structured_delegate, then must not have {key} in dispatch dictionary " \
                     "(it is delegated!)"
 
         return NativeFunction(
