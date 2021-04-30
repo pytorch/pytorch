@@ -13,11 +13,14 @@ namespace at {
 namespace autocast {
 
 bool is_enabled() {
-  return c10::impl::tls_is_dispatch_key_included(DispatchKey::Autocast);
+  //return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA) ||
+  //         !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCPU);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
 }
 
 void set_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_included(DispatchKey::Autocast, new_enabled);
+  //c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCPU, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCUDA, !new_enabled);
 }
 
 namespace {
@@ -39,12 +42,14 @@ namespace {
 // directly against incoming TensorImpl*s.
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::unordered_map<TensorImpl*, val_type> cached_casts;
 
 // nesting tracks the nesting depth of the Python-side context manager.
 // When the autocast context manager exits to a nesting level that's outside
 // any instance of autocast (which should occur at the end of each forward pass)
 // it calls clear_cache() to ensure cached Tensors don't leak outside the autocasting region.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local int nesting = 0;
 }
 

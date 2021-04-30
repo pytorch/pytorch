@@ -16,6 +16,7 @@ RecvRpcBackward::RecvRpcBackward(
     rpc::worker_id_t fromWorkerId,
     std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap)
     : autogradMetadata_(autogradMetadata),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       autogradContext_(std::move(autogradContext)),
       fromWorkerId_(fromWorkerId),
       deviceMap_(std::move(deviceMap)) {}
