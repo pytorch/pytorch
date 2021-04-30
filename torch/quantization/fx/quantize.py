@@ -211,88 +211,8 @@ def maybe_insert_observer_for_output_of_the_node(
     if not activation_is_statically_quantized(qconfig):
         return
 
-    if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) \
-            and model.training:
-        # we only insert fake quantize module in qat
-        assert pattern is not None
-        if activation_dtype(qconfig) == torch.float16:
-            activation_post_process_ctr = qconfig.activation
-        else:
-            activation_post_process_ctr = \
-                get_default_output_activation_post_process_map().get(
-                    pattern, None)
-        assert activation_post_process_ctr is not None, \
-            "activation_post_process constructor not provided " + \
-            "for pattern:" + str(pattern)
-        insert_observer(
-            node, activation_post_process_ctr(),
-            model, activation_post_process_map,
-            activation_post_process_indexes,
-            env, observed_graph,
-            load_arg, observed_node_names_set, quants)
-        inserted_observer = True
-    elif (isinstance(quantize_handler,
-                     FixedQParamsOpQuantizeHandler) and
-          not model.training):
-        # inserting observers for output of observed module, or
-        # mark the output as observed
-        assert node.op in [
-            'call_module',
-            'call_function',
-            'call_method'], \
-            'FixedQParamsQuantizeHandler of type ' + node.op + ' is not handled'
-
-        def is_observed(input_arg):
-            if isinstance(input_arg, Node):
-                return input_arg.name in observed_node_names_set
-            elif isinstance(input_arg, list):
-                return all(map(is_observed, input_arg))
-
-        # insert observers for fixedqparams ops like sigmoid, since
-        # it supports fp16 static quantization
-        if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) and \
-           activation_dtype(qconfig) == torch.float16:
-            insert_observer(
-                node, qconfig.activation(),
-                model, activation_post_process_map,
-                activation_post_process_indexes,
-                env, observed_graph,
-                load_arg, observed_node_names_set, quants)
-            inserted_observer = True
-        else:
-            # propagate observed property from input
-            if is_observed(node.args[0]):
-                observed_node_names_set.add(node.name)
-                inserted_observer = True
-    elif (isinstance(quantize_handler, BinaryOpQuantizeHandler) and
-          quantize_handler.num_tensor_args == 1):
-        assert matched_nodes is not None
-        input_node = matched_nodes[-1]  # first node in the sequence
-
-        def input_is_observed(arg):
-            return (isinstance(arg, Node) and
-                    arg.name in observed_node_names_set)
-        # This is checking if one of the argument of add/mul
-        # is an observed node
-        # If both of the inputs are number,
-        # we will not consider the output to be observed
-        if (input_is_observed(input_node.args[0]) or
-                input_is_observed(input_node.args[1])):
-            observed_node_names_set.add(node.name)
-            inserted_observer = True
-
-        if activation_dtype(qconfig) == torch.float16:
-            # observer for outputs
-            new_observer = qconfig.activation()
-            insert_observer(
-                node, new_observer, model,
-                activation_post_process_map,
-                activation_post_process_indexes,
-                env, observed_graph,
-                load_arg, observed_node_names_set, quants)
-            inserted_observer = True
-    elif isinstance(quantize_handler,
-                    StandaloneModuleQuantizeHandler):
+    if isinstance(quantize_handler,
+                  StandaloneModuleQuantizeHandler):
         assert node.op == "call_module"
         assert isinstance(node.target, str)
         sm_out_qidxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore[operator]
@@ -300,17 +220,30 @@ def maybe_insert_observer_for_output_of_the_node(
 
         if output_is_quantized:
             observed_node_names_set.add(node.name)
-    elif (quantize_handler.all_node_args_are_tensors and
-          input_output_observed(quantize_handler)):
-        # observer for outputs
-        new_observer = qconfig.activation()
-        insert_observer(
-            node, new_observer, model,
-            activation_post_process_map,
-            activation_post_process_indexes,
-            env, observed_graph,
-            load_arg, observed_node_names_set, quants)
-        inserted_observer = True
+    else:
+        should_insert_observer = quantize_handler.should_insert_observer_for_output(
+            qconfig, model.training)
+        should_mark_output_observed_from_input_observed_status = \
+            quantize_handler.should_mark_output_observed_from_input_observed_status(
+                observed_node_names_set)
+
+        activation_post_process_ctr = quantize_handler.get_activation_ctr(
+            qconfig, pattern)
+        assert activation_post_process_ctr is not None, \
+            "activation_post_process constructor not provided " + \
+            "for pattern:" + str(pattern)
+
+        if should_insert_observer:
+            insert_observer(
+                node, activation_post_process_ctr(),
+                model, activation_post_process_map,
+                activation_post_process_indexes,
+                env, observed_graph,
+                load_arg, observed_node_names_set, quants)
+            inserted_observer = True
+        elif should_mark_output_observed_from_input_observed_status:
+            observed_node_names_set.add(node.name)
+            inserted_observer = True
 
     # insert observer for input of standalone module
     if standalone_module_input_idxs is not None:
