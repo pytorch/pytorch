@@ -3156,6 +3156,7 @@ void TensorExprKernel::runFast(
   KernelScope kernelScope(&kernelArena_);
 
   std::vector<void*> args(inputs);
+  args.reserve(inputs.size() + outputs.size() + constants_.size());
   args.insert(args.end(), outputs.begin(), outputs.end());
 
   // TODO: we can consider preallocating and pre-filling the args vector.
