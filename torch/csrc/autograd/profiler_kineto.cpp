@@ -58,10 +58,16 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     if (!ctx) {
       return;
     }
+#ifdef USE_KINETO_UPDATED
+    libkineto::GenericTraceActivity op;
+    op.activityType = libkineto::ActivityType::CPU_OP;
+    op.activityName = std::string(fn.name().str());
+#else
     libkineto::ClientTraceActivity op;
+    op.opType = std::string(fn.name().str());
+#endif
     op.startTime = ctx->startUs;
     op.endTime = getTimeUs();
-    op.opType = std::string(fn.name().str());
     op.device = 0;
     op.correlation = ctx->correlationId;
     // optimization - postpone shapesToStr till finalizeCPUTrace
@@ -126,7 +132,7 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   void addTraceEvents(libkineto::ActivityTraceInterface& trace) {
     const auto& events = *(trace.activities());
     for (const auto& ev_ptr : events) {
-      // ClientTraceActivity events are already processed
+      // CPU_OP events are already processed
       if (ev_ptr->type() != libkineto::ActivityType::CPU_OP) {
         kineto_events_.emplace_back();
         kineto_events_.back()
@@ -138,16 +144,28 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   void finalizeCPUTrace() {
     TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
     for (size_t idx = 0; idx < cpu_trace->activities.size(); ++idx) {
-      if (kineto_events_[idx].hasShapes()) {
-        cpu_trace->activities[idx].addMetadata("Input Dims", shapesToStr(kineto_events_[idx].shapes()));
+      auto& kineto_event = kineto_events_[idx];
+      auto& activity = cpu_trace->activities[idx];
+
+      if (kineto_event.hasShapes()) {
+        activity.addMetadata("Input Dims", shapesToStr(kineto_event.shapes()));
+      }
+      if (kineto_event.hasStack()) {
+        activity.addMetadata("Call stack", stacksToStr(kineto_event.stack()));
+      }
+      if (kineto_event.hasTypes()) {
+        activity.addMetadata("Input type", dtypesToStr(kineto_event.dtypes()));
       }
 
-      if (kineto_events_[idx].hasStack()) {
-        cpu_trace->activities[idx].addMetadata("Call stack", stacksToStr(kineto_events_[idx].stack()));
-      }
-
-      if (kineto_events_[idx].hasTypes()) {
-        cpu_trace->activities[idx].addMetadata("Input type", dtypesToStr(kineto_events_[idx].dtypes()));
+      // add information about an associated forward op, if a sequence number
+      // is available (e.g. during training)
+      if (kineto_event.sequenceNr() >= 0) {
+        activity.addMetadata(
+            "Fwd thread id",
+            std::to_string(kineto_event.fwdThreadId()));
+        activity.addMetadata(
+            "Sequence number",
+            std::to_string(kineto_event.sequenceNr()));
       }
     }
   }
