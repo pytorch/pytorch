@@ -131,7 +131,9 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
   TORCH_CHECK(
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      id >= 0 && id < allWorkerInfo_.size(), "Invalid destination: ", id);
+      id >= 0 && id < allWorkerInfo_.size(),
+      "Invalid destination: ",
+      id);
   return allWorkerInfo_[id];
 }
 
