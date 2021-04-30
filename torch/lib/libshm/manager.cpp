@@ -93,7 +93,7 @@ int main(int argc, char *argv[]) {
   setsid();  // Daemonize the process
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
-  const auto tempfile =
+  auto tempfile =
       c10::try_make_tempfile(/*name_prefix=*/"torch-shm-file-");
   try {
     if (!tempfile.has_value()) {
@@ -102,11 +102,20 @@ int main(int argc, char *argv[]) {
     }
     // TODO: better strategy for generating tmp names
     // TODO: retry on collisions - this can easily fail
+    std::string tempfile_name = tempfile->name;
+
+    // Reset tempfile, which will cause the contained TempFile
+    // instance to be destroyed and the underlying temporary file
+    // to be unlinked. The file must be unlinked before we can
+    // call bind(2) on its name (as the address of the manager server
+    // socket), otherwise bind(2) will failed with EADDRINUSE.
+    tempfile.reset();
+
     // NOLINTNEXTLINE(modernize-make-unique)
-    srv_socket.reset(new ManagerServerSocket(tempfile->name));
+    srv_socket.reset(new ManagerServerSocket(tempfile_name));
     register_fd(srv_socket->socket_fd);
-    print_init_message(tempfile->name.c_str());
-    DEBUG("opened socket %s", tempfile->name.c_str());
+    print_init_message(tempfile_name.c_str());
+    DEBUG("opened socket %s", tempfile_name.c_str());
   } catch (const std::exception& e) {
     std::string message("ERROR: ");
     message += e.what();
