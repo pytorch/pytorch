@@ -50,6 +50,7 @@ Reducer::Reducer(
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
       divFactor_(kUnsetDivFactor),
+      static_graph_(false),
       comm_hook_(nullptr),
       thread_local_state_(at::ThreadLocalState()),
       ddp_debug_level_(parseDistDebugLevel()),
@@ -1672,6 +1673,15 @@ void Reducer::record_backward_comm_end_time() {
   } else {
     cpu_timer_.backward_comm_end_time = current_time_in_nanos();
   }
+}
+
+void Reducer::set_static_graph() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  TORCH_CHECK(
+      num_iterations_ == 0,
+      "set_static_graph() should be called before training loop starts "
+      "and after DistributedDataParallel is constructed.");
+  static_graph_ = true;
 }
 
 namespace {

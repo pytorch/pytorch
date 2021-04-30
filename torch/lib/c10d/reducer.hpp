@@ -125,6 +125,9 @@ class Reducer {
   // recorded once every "sample_rate" training iterations.
   void set_ddp_runtime_logging_sample_rate(int sample_rate);
 
+  // Specify the training graph is static.
+  void set_static_graph();
+
  protected:
   // Forward declaration.
   struct Bucket;
@@ -418,6 +421,8 @@ class Reducer {
 
   // Division factor for reduction of gradients.
   int divFactor_;
+
+  bool static_graph_;
 
  private:
   // reset counting for buckets before backward starts
