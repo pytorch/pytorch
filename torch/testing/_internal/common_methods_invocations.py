@@ -4118,6 +4118,7 @@ op_db: List[OpInfo] = [
            op=torch.linalg.det,
            aliases=('det', ),
            dtypes=floating_and_complex_types(),
+           # det doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/57358
            backward_dtypes=floating_types(),
            aten_name='linalg_det',
            sample_inputs_func=sample_inputs_linalg_det,
@@ -4713,6 +4714,7 @@ op_db: List[OpInfo] = [
     OpInfo('std',
            dtypes=floating_types_and(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           # std doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/57358
            backward_dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: std does support out in some signatures
@@ -5334,6 +5336,7 @@ op_db: List[OpInfo] = [
     OpInfo('var',
            dtypes=floating_types_and(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           # var doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/57358
            backward_dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: revisit, some var signatures do support out (see std, too)
@@ -5425,10 +5428,11 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   # sigmoid doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/48552
                    backward_dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    backward_dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16),
                    safe_casts_outputs=True,
-                   assert_autodiffed=True),  # Reference: https://github.com/pytorch/pytorch/issues/48552
+                   assert_autodiffed=True),
     UnaryUfuncInfo('digamma',
                    ref=scipy.special.digamma if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 5e-1}),),
