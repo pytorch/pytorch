@@ -18,7 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
     skipCUDAIfRocm, skipIf, ops)
-from torch.testing import all_types_and_complex_and, assert_close
+from torch.testing import all_types_and_complex_and
 from torch.testing._internal.common_methods_invocations import binary_ufuncs
 
 if TEST_SCIPY:
@@ -1214,28 +1214,29 @@ class TestBinaryUfuncs(TestCase):
     #   1D tensors and a large 2D tensor
     @onlyOnCPUAndCUDA
     @ops(binary_ufuncs)
-    def test_reference_numerics(self, device, dtype, op):
+    def test_reference_samples(self, device, dtype, op):
         if dtype == torch.bfloat16:
-            np_dtype = np.float16
-
-            def to_numpy(t):
-                return np.array(t.tolist(), dtype=np_dtype)
-
+            intermediate_dtype = torch.float32
+            np_dtype = torch_to_numpy_dtype_dict[intermediate_dtype]
         else:
+            intermediate_dtype = None
             np_dtype = torch_to_numpy_dtype_dict[dtype]
 
-            def to_numpy(t):
-                return np.array(t.cpu(), dtype=np_dtype)
+        def to_numpy(t):
+            t = t.cpu()
+            if intermediate_dtype:
+                t = t.to(intermediate_dtype)
+            return t.numpy().astype(np_dtype)
 
         # TODO: turn these into separate tests
         for sample in op.sample_inputs(device, dtype):
             torch_inputs = (sample.input,) + sample.args
             numpy_inputs = [to_numpy(t) for t in torch_inputs]
 
-            torch_output = getattr(torch, op.name)(*torch_inputs).cpu()
+            torch_output = op(*torch_inputs).cpu()
             numpy_output = torch.as_tensor(op.ref(*numpy_inputs), dtype=torch_output.dtype)
 
-            assert_close(torch_output, numpy_output, equal_nan=True)
+            self.assertEqual(torch_output, numpy_output)
 
     @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False), torch.testing.get_all_dtypes(include_complex=False)))
     def test_maximum_minimum_type_promotion(self, device, dtypes):
