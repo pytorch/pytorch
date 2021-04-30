@@ -207,10 +207,20 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradOther,
 });
 
+constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
+    //DispatchKey::AutocastCPU,
+    DispatchKey::AutocastCUDA,
+});
+
 // See Note [TLS Initialization]
 constexpr DispatchKeySet default_included_set = DispatchKeySet({
     DispatchKey::BackendSelect,
     DispatchKey::InplaceOrView,
+});
+
+constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
+    // DispatchKey::AutocastCPU,
+    DispatchKey::AutocastCUDA,
 });
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_InplaceOrView =
@@ -262,6 +272,9 @@ C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 // Returns a DispatchKeySet of autograd related keys mapped to backend.
 C10_API DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t);
 
+// Returns a DispatchKeySet of autocast related keys mapped to backend.
+C10_API DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t);
+
 // This API exists because we have a use case for checking
 // getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefined)
 // in OperatorEntry.cpp but we disallow it in has() API.
@@ -278,7 +291,7 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // top of existing "backend" keys like CPU/CUDA, you need to add it
   // here.  At the moment, autograd keys and InplaceOrView key need this
   // treatment;
-  return (s - autograd_dispatch_keyset_with_InplaceOrView).highestPriorityTypeId();
+  return (s - autograd_dispatch_keyset_with_InplaceOrView - autocast_dispatch_keyset).highestPriorityTypeId();
 }
 
 template<class T>
