@@ -145,6 +145,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               &RpcAgent::getWorkerInfos,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_get_device_map",
+              &RpcAgent::getDeviceMap,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "get_debug_info",
               &RpcAgent::getDebugInfo,
               py::call_guard<py::gil_scoped_release>())
