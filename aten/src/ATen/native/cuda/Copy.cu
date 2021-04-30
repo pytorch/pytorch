@@ -175,6 +175,10 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
       src_contig = iter.tensor(1).expand_as(dst).contiguous();
     }
 
+    // propagate the correct conjugate bit
+    dst_contig.set_conj(dst.is_conj());
+    src_contig.set_conj(iter.tensor(1).is_conj());
+
     // perform a same-dtype copy on contiguous tensors
     TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
     TORCH_INTERNAL_ASSERT(dst_contig.scalar_type() == src_contig.scalar_type());
@@ -223,6 +227,10 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
     AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 #endif
+  }
+
+  if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
+     iter.tensor(0).conj_physical_();
   }
 }
 
