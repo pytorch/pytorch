@@ -18,7 +18,7 @@ std::vector<std::vector<at::Tensor>> waitWork(
   std::vector<std::vector<at::Tensor>> outputTensors;
   for (auto& work : works) {
     try {
-      work->wait();
+     work->wait();
     } catch (const std::exception& ex) {
       std::cerr << "Exception received: " << ex.what() << std::endl;
       pg->abort();
@@ -32,14 +32,11 @@ void testAllreduce(int iter = 1000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
 
   // Generate inputs
-  std::vector<std::vector<at::Tensor>> allTensors(iter);
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (auto i = 0; i < iter; ++i) {
     auto tensor = at::ones({16, 16}) * i;
-    allTensors[i] = std::vector<at::Tensor>({tensor});
-  }
+    std::vector<at::Tensor> tensors = {tensor};
 
-  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-  for (auto& tensors : allTensors) {
     // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
         pg->allreduce(tensors);
@@ -65,21 +62,17 @@ void testAllreduce(int iter = 1000) {
 
 void testBroadcast(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  // Generate inputs
-  std::vector<std::vector<at::Tensor>> allTensors(iter);
-
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (auto i = 0; i < iter; ++i) {
+    auto tensors = std::vector<at::Tensor>();
     if (pg->getRank() == 0) {
       auto tensor = at::ones({16, 16}) * i;
-      allTensors[i] = std::vector<at::Tensor>({tensor});
+      tensors = std::vector<at::Tensor>({tensor});
     } else {
       auto tensor = at::zeros({16, 16});
-      allTensors[i] = std::vector<at::Tensor>({tensor});
+      tensors = std::vector<at::Tensor>({tensor});
     }
-  }
 
-  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-  for (auto& tensors : allTensors) {
     // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
         pg->broadcast(tensors);
@@ -102,16 +95,11 @@ void testBroadcast(int iter = 10000) {
 
 void testReduce(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  // Generate inputs
-  std::vector<std::vector<at::Tensor>> allTensors(iter);
-
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (auto i = 0; i < iter; ++i) {
     auto tensor = at::ones({16, 16}) * i;
-    allTensors[i] = std::vector<at::Tensor>({tensor});
-  }
+    auto tensors = std::vector<at::Tensor>({tensor});
 
-  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-  for (auto& tensors : allTensors) {
     // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work = pg->reduce(tensors);
     works.push_back(std::move(work));
@@ -138,8 +126,7 @@ void testReduce(int iter = 10000) {
 
 void testAllgather(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  std::vector<std::vector<at::Tensor>> allTensors(iter);
-  std::vector<std::vector<std::vector<at::Tensor>>> allOutputTensors(iter);
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -148,19 +135,16 @@ void testAllgather(int iter = 10000) {
   // Generate inputs
   for (auto i = 0; i < iter; ++i) {
     auto tensor = at::ones({16, 16}) * i * rank;
-    allTensors[i] = std::vector<at::Tensor>({tensor});
-    allOutputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
-    allOutputTensors[i][0].resize(worldSize);
+    auto tensors = std::vector<at::Tensor>({tensor});
+    auto outputs = std::vector<std::vector<at::Tensor>>(1);
+    outputs[0].resize(worldSize);
     for (auto j = 0; j < worldSize; ++j) {
-      allOutputTensors[i][0][j] = at::zeros({16, 16});
+      outputs[0][j] = at::zeros({16, 16});
     }
-  }
 
-  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-  for (size_t i = 0; i < allTensors.size(); ++i) {
     // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
-        pg->allgather(allOutputTensors[i], allTensors[i]);
+      pg->allgather(outputs, tensors);
     works.push_back(std::move(work));
   }
 
@@ -182,8 +166,7 @@ void testAllgather(int iter = 10000) {
 
 void testGather(int iter = 1000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  std::vector<std::vector<at::Tensor>> allTensors(iter);
-  std::vector<std::vector<std::vector<at::Tensor>>> allOutputTensors(iter);
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -192,23 +175,19 @@ void testGather(int iter = 1000) {
   // Generate inputs
   for (auto i = 0; i < iter; ++i) {
     auto tensor = at::ones({16, 16}) * i * rank;
-    allTensors[i] = std::vector<at::Tensor>({tensor});
+    auto tensors = std::vector<at::Tensor>({tensor});
+    auto outputs = std::vector<std::vector<at::Tensor>>(0);
     if (rank == 0) {
-      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
-      allOutputTensors[i][0].resize(worldSize);
+      outputs = std::vector<std::vector<at::Tensor>>(1);
+      outputs[0].resize(worldSize);
       for (auto j = 0; j < worldSize; ++j) {
-        allOutputTensors[i][0][j] = at::zeros({16, 16});
+        outputs[0][j] = at::zeros({16, 16});
       }
-    } else {
-      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>(0);
     }
-  }
 
-  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-  for (size_t i = 0; i < allTensors.size(); ++i) {
     // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
-        pg->gather(allOutputTensors[i], allTensors[i]);
+        pg->gather(outputs, tensors);
     works.push_back(std::move(work));
   }
 
@@ -238,9 +217,7 @@ void testGather(int iter = 1000) {
 
 void testScatter(int iter = 1) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-
-  std::vector<std::vector<std::vector<at::Tensor>>> allInputTensors(iter);
-  std::vector<std::vector<at::Tensor>> allTensors(iter);
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -249,23 +226,19 @@ void testScatter(int iter = 1) {
   // Generate inputs
   for (auto i = 0; i < iter; ++i) {
     auto tensor = at::zeros({16, 16});
-    allTensors[i] = std::vector<at::Tensor>({tensor});
+    auto tensors = std::vector<at::Tensor>({tensor});
+    auto inputs = std::vector<std::vector<at::Tensor>>(0);
     if (rank == 0) {
-      allInputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
-      allInputTensors[i][0].resize(worldSize);
+      inputs = std::vector<std::vector<at::Tensor>>(1);
+      inputs[0].resize(worldSize);
       for (auto j = 0; j < worldSize; ++j) {
-        allInputTensors[i][0][j] = at::ones({16, 16}) * i * j;
+        inputs[0][j] = at::ones({16, 16}) * i * j;
       }
-    } else {
-      allInputTensors[i] = std::vector<std::vector<at::Tensor>>(0);
     }
-  }
 
-  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-  for (size_t i = 0; i < allTensors.size(); ++i) {
     // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
-        pg->scatter(allTensors[i], allInputTensors[i]);
+      pg->scatter(tensors, inputs);
     works.push_back(std::move(work));
   }
 
@@ -285,65 +258,59 @@ void testScatter(int iter = 1) {
   }
 }
 
-void testSendRecv(bool recvAnysource, int iter = 10000) {
+void testSendRecv(bool recvAnysource, int iter = 10) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   // Generate inputs
-  std::vector<std::vector<at::Tensor>> allTensors(iter);
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   auto rank = pg->getRank();
   for (auto i = 0; i < iter; ++i) {
     if (rank == 0) {
       auto tensor = at::ones({16, 16}) * i;
-      allTensors[i] = std::vector<at::Tensor>({tensor});
-    } else {
-      auto tensor = at::zeros({16, 16});
-      allTensors[i] = std::vector<at::Tensor>({tensor});
-    }
-  }
+      auto sendTensors = std::vector<at::Tensor>({tensor});
 
-  if (rank == 0) {
-    std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-    for (auto& tensors : allTensors) {
       // Queue the work.
       c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
-          pg->send(tensors, 1, 0);
+          pg->send(sendTensors, 1, 0);
       works.push_back(std::move(work));
-    }
-    waitWork(pg, works);
-  } else if (rank == 1) {
-    std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-    std::vector<int> srcRanks;
-    size_t i = 0;
-    for (auto& tensors : allTensors) {
+    } else {
+      auto tensor = at::zeros({16, 16});
+      auto recvTensors = std::vector<at::Tensor>({tensor});
+
       // Queue the work.
       if (!recvAnysource) {
         c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
-            pg->recv(tensors, 0, 0);
+            pg->recv(recvTensors, 0, 0);
         works.push_back(std::move(work));
       } else {
         c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
-            pg->recvAnysource(tensors, 0);
+            pg->recvAnysource(recvTensors, 0);
         works.push_back(std::move(work));
       }
-      ++i;
     }
+  }
 
-    auto outputTensors = waitWork(pg, works);
+  auto outputTensors = waitWork(pg, works);
+  if (rank == 0) {
+    return;
+  }
 
+  std::vector<int> srcRanks;
+  if (recvAnysource) {
     for (const auto& work : works) {
       srcRanks.push_back(work->sourceRank());
     }
+  }
 
-    // Verify outputs
-    for (int i = 0; i < iter; ++i) {
-      if (recvAnysource && srcRanks[i] != 0) {
-        throw std::runtime_error("src rank is wrong for recvAnysource");
-      }
-      const auto expected = i;
-      auto data = outputTensors[i][0].data_ptr<float>();
-      for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
-        if (data[j] != expected) {
-          throw std::runtime_error("BOOM!");
-        }
+  // Verify outputs
+  for (int i = 0; i < iter; ++i) {
+    if (recvAnysource && srcRanks[i] != 0) {
+      throw std::runtime_error("src rank is wrong for recvAnysource");
+    }
+    const auto expected = i;
+    auto data = outputTensors[i][0].data_ptr<float>();
+    for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
+      if (data[j] != expected) {
+        throw std::runtime_error("BOOM!");
       }
     }
   }
