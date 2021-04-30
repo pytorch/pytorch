@@ -194,6 +194,7 @@ if build_mode not in ['clean']:
 
 client_files = [
     'third_party/computation_client/env_vars.cc',
+    'third_party/computation_client/ltc_util.cc',
     'third_party/computation_client/metrics.cc',
     'third_party/computation_client/metrics_reader.cc',
     'third_party/computation_client/multi_wait.cc',
