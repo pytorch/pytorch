@@ -28,7 +28,14 @@ class TestTypesAndAnnotation(JitTestCase):
             xl.append(x)
             xd['foo'] = x
             return xl.pop(), xd['foo']
+
         self.checkScript(fn, [torch.randn(2, 2)])
+
+        x = torch.randn(2, 2)
+        expected = fn(x)
+        scripted = torch.jit.script(fn)(x)
+
+        self.assertEquals(expected, scripted)
 
     def test_types_as_values(self):
         def fn(m: torch.Tensor) -> torch.device:
