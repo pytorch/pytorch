@@ -21,5 +21,11 @@ int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical
       decltype(&batch_rule), &batch_rule, to_operator_t<decltype(batch_rule)> \
       >::apply);
 
+template <typename F, F Func, typename... ExtraArgs>
+std::tuple<Tensor,optional<int64_t>> basic_unary_batch_rule(
+    const Tensor& tensor, optional<int64_t> batch_dim, ExtraArgs... extra_args) {
+  return {Func(tensor, std::forward<ExtraArgs>(extra_args)...), batch_dim};
+}
+
 }}
 
