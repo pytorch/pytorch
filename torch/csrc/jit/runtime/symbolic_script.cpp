@@ -846,7 +846,6 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
-        # Share backward with threshold
         def hardswish(self):
             result = torch.relu(self)
             def backward(grad_output):

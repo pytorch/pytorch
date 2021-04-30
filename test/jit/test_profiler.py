@@ -187,24 +187,6 @@ class TestProfiler(JitTestCase):
         x = torch.ones([2, 3, 5])
         self.assertEqual(foo(x, x), (x + x + 1 + 2 + 3, x.size()))
 
-    # def test_hardswish_autograd(self):
-    #     def foo(x):
-    #         return torch.nn.functional.hardswish(x)
-
-    #     x = torch.arange(-10, 10, dtype=torch.float, requires_grad=True)
-    #     # self.checkScript(foo, (x,))
-    #     x.requires_grad_(True)
-    #     self.checkScript(foo, (x,))
-
-        # foo_s = torch.jit.script(foo)
-        # for _ in range(3):
-
-        # foo(x, y)
-        # b = foo(x, y)
-        # b.backward(torch.ones([1], dtype=torch.float), retain_graph=True)
-        # b.backward(torch.ones([1], dtype=torch.float))
-
-
     def test_fallback_graph_not_specialized(self):
         @torch.jit.script
         def foo(a, b):
