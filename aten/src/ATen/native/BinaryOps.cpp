@@ -53,6 +53,10 @@ TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, c10
   }
 }
 
+TORCH_META_FUNC(special_xlog1py) (const Tensor& self, const Tensor& other) {
+  build_binary_float_op(maybe_get_output(), self, other);
+}
+
 TORCH_META_FUNC2(copysign, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
@@ -152,6 +156,7 @@ DEFINE_DISPATCH(heaviside_stub);
 DEFINE_DISPATCH(copysign_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(xlogy_stub);
+DEFINE_DISPATCH(xlog1py_stub);
 
 TORCH_IMPL_FUNC(add_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -187,6 +192,26 @@ TORCH_IMPL_FUNC(div_out_mode) (
   } else if (*rounding_mode == "floor") {
     div_floor_stub(device_type(), *this);
   }
+}
+
+TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
+  xlog1py_stub(device_type(), *this);
+}
+
+Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
+  return at::special_xlog1py(wrapped_scalar_tensor(x), y);
+}
+
+Tensor special_xlog1py(const Tensor& x, const Scalar& y) {
+  return at::special_xlog1py(x, wrapped_scalar_tensor(y));
+}
+
+Tensor& special_xlog1py_out(const Scalar& self, const Tensor& other, Tensor& result) {
+  return at::special_xlog1py_out(result, wrapped_scalar_tensor(self), other);
+}
+
+Tensor& special_xlog1py_out(const Tensor& self, const Scalar& other, Tensor& result) {
+  return at::special_xlog1py_out(result, self, wrapped_scalar_tensor(other));
 }
 
 TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {

@@ -889,6 +889,40 @@ def sample_inputs_xlogy(self, device, dtype, requires_grad, **kwargs):
         ),
     )
 
+
+def sample_inputs_xlog1py(self, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def generator():
+        # same shape
+        yield SampleInput(make_arg((S, S)), args=(make_arg((S, S), low=-1),))
+        # rhs broadcast
+        yield SampleInput(make_arg((S, S)), args=(make_arg((S,), low=-1),))
+        # all zero `x`
+        with torch.no_grad():
+            x = make_arg((S, S))
+            x.fill_(0)
+        yield SampleInput(x, args=(make_arg((S, S), low=-1),))
+
+        # randomly zero-masked `x`
+        x = make_arg((S, S))
+        y = make_arg((S, S), low=-1)
+        with torch.no_grad():
+            x[torch.rand(x.shape) > 0.5] = 0
+        yield SampleInput(x, args=(y,))
+
+        # Scalar x
+        # `input` has to be a tensor
+        # yield SampleInput(0, args=(make_arg((S, S), low=-1),))
+        # yield SampleInput(2.1, args=(make_arg((S, S), low=-1),))
+
+        # Scalar y
+        yield SampleInput(make_arg((S, S)), args=(-0.5,))
+        yield SampleInput(make_arg((S, S)), args=(1.2,))
+
+    return list(generator())
+
+
 def sample_inputs_logsumexp(self, device, dtype, requires_grad):
     inputs = (
         ((), (0,), True),
@@ -5371,6 +5405,15 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=True,
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_xlogy),
+    OpInfo('special.xlog1py',
+           aten_name='special_xlog1py',
+           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+           safe_casts_outputs=True,
+           skips=(
+               SkipInfo('TestOpInfo', 'test_supported_backward',
+                        device_type='cpu', dtypes=[torch.float16]),
+           ),
+           sample_inputs_func=sample_inputs_xlog1py),
     OpInfo('logsumexp',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
