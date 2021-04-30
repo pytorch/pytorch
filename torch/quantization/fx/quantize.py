@@ -526,6 +526,7 @@ def handle_copy_nodes(
             observed_nodes.add(node)
 
         if root_node is node and qconfig is not None:
+            # recording copy nodes in the graph
             if isinstance(quantize_handler, CopyNodeQuantizeHandler):
                 copy_nodes.add(node)
                 # rule 3: if previous node is observed, the copy node will be observed as well
@@ -551,11 +552,7 @@ def handle_copy_nodes(
                             observed_nodes.add(node)
                     else:
                         observed_nodes.add(node)
-
-
-        if all_node_args_have_no_tensors(node, modules, cache_for_no_tensor_check):
-            non_tensor_input_nodes.add(node)
-        if root_node is None and node.op != 'placeholder':
+        elif root_node is None: # and node.op != 'placeholder':
             # rule 4: remove observer for getitem if it is followed by an unmatched node
             if len(node.args) > 0:
                 maybe_observer_node = node.args[0]
@@ -566,6 +563,9 @@ def handle_copy_nodes(
                         if (observed_node.op, observed_node.target) == ("call_function", operator.getitem):
                             actpp_to_remove.add(maybe_observer_node)
             unmatched_nodes.add(node)
+
+        if all_node_args_have_no_tensors(node, modules, cache_for_no_tensor_check):
+            non_tensor_input_nodes.add(node)
 
         # rule 5: for special node, we'll just remove observer for its input
         special_nodes = [
@@ -582,6 +582,15 @@ def handle_copy_nodes(
                     # if the previous node is not quantized, remove node from copy nodes
                     if node in copy_nodes:
                         copy_nodes.remove(node)
+
+        # rule 6: remove observers for inputs of masked_fill since
+        # it is boolean Tensor
+        # TODO: we need type info from proxy, what type of Tensor this is
+        # similar to TorchScript
+        if (node.op, node.target) == ("call_method", "masked_fill"):
+            maybe_observer_node = node.args[1]
+            if is_activation_post_process_node(maybe_observer_node, modules):
+                actpp_to_remove.add(maybe_observer_node)
 
     for node in observed_graph.nodes:
         if node.op == "output":

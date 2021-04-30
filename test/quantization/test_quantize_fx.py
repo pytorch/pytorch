@@ -3997,6 +3997,19 @@ class TestQuantizeFxOps(QuantizationTestCase):
             expected_node_occurrence=expected_occurrence
         )
 
+    def test_boolean_tensor(self):
+        """ Make sure we don't insert observer for boolean Tensors """
+        class M(torch.nn.Module):
+            def forward(self, x, mask):
+                mask = mask.unsqueeze(0)
+                x = x.masked_fill(mask, 1)
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m)
+        m(torch.rand(1, 2, 3, 4), torch.rand(2, 3, 4).bool())
+        return m
 
 
 class TestQuantizeFxModels(QuantizationTestCase):
