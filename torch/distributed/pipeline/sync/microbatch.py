@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """Manipulation of micro-batches."""
 import typing
-from typing import Callable, List, Union, cast, Sequence
+from typing import Any, Callable, List, Union, cast, Sequence
 
 import torch
 from torch import Tensor
@@ -179,7 +179,7 @@ def scatter(*inputs, chunks: int) -> List[Batch]:
             is_single_sequence = True
             inputs = inputs[0]  # type: ignore
 
-    batches = [[] for _ in range(chunks)]
+    batches: List[Any] = [[] for _ in range(chunks)]
     # Actual number of chunks produced
     num_chunks = -1
     for input in inputs:
@@ -207,11 +207,13 @@ def scatter(*inputs, chunks: int) -> List[Batch]:
 
 def gather(outputs: List[Batch]):
     """Concatenates output micro-batches into a mini-batch."""
+    output: Any
+
     if outputs[0].atomic:
         tensors = tuple(b.tensor for b in outputs)
         output = torch.cat(tensors)
     else:
-        output_buf = []
+        output_buf: List[Any] = []
         for i in range(len(outputs[0])):
             output_type = type(outputs[0][i])
             current_outputs = []

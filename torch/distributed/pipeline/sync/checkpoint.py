@@ -29,6 +29,7 @@ from contextlib import contextmanager
 import threading
 from typing import (
     TYPE_CHECKING,
+    Any,
     Deque,
     Generator,
     List,
@@ -200,6 +201,7 @@ class Context:
     rng_states: Deque[RNGStates]
     function: Function
     input_atomic: bool
+    inputs: Sequence[Any]
 
     saved_tensors: Tuple[Tensor, ...]
 
