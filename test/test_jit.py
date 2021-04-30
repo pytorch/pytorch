@@ -10442,11 +10442,9 @@ dedent """
                     module.bn.running_var.fill_(1.0)
                     ref_module.bn.running_mean.zero_()
                     ref_module.bn.running_var.fill_(1.0)
-                if affine and training:                                          
-                    module.bn.weight.grad.zero_()                                
-                    module.bn.bias.grad.zero_()                                  
-                    #ref_module.bn.weight.grad.zero_()
-                    #ref_module.bn.bias.grad.zero_()
+                if affine and training:
+                    module.bn.weight.grad.zero_()
+                    module.bn.bias.grad.zero_()
 
                 # run jitted module
                 y = jit_module(x)
