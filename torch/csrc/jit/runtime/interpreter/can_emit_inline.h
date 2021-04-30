@@ -104,6 +104,6 @@ struct CanEmitInline {
   std::unordered_map<Node*, bool> can_emit_inline_;
 };
 
-}
-}
-}
+} // namespace interpreter
+} // namespace jit
+} // namespace torch

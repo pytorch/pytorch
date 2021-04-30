@@ -29,15 +29,16 @@ struct Frame {
 
   // unique to every frame with prim::profile across all threads
   c10::optional<size_t> id;
-  static std::atomic<size_t> num_frames;
 
   // RecordFunction object associated with this frame
   std::unique_ptr<at::RecordFunction> record_function;
 
   // symbol table for a frame
   ShapeSymbolTable symbols2dims;
+
+  static size_t genId();
 };
 
-}
-}
-}
+} // namespace interpreter
+} // namespace jit
+} // namespace torch

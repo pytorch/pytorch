@@ -103,6 +103,7 @@ core_sources_common = [
     "torch/csrc/jit/runtime/slice_indices_adjust.cpp",
     "torch/csrc/jit/runtime/register_ops_utils.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
+    "torch/csrc/jit/serialization/import_read.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
@@ -236,6 +237,8 @@ core_sources_full_mobile = [
     "torch/csrc/jit/runtime/argument_spec.cpp",
     "torch/csrc/jit/runtime/autodiff.cpp",
     "torch/csrc/jit/runtime/graph_executor.cpp",
+    "torch/csrc/jit/runtime/interpreter/frame.cpp",
+    "torch/csrc/jit/runtime/interpreter/preprocess_graph.cpp",
     "torch/csrc/jit/runtime/interpreter.cpp",
     "torch/csrc/jit/runtime/logging.cpp",
     "torch/csrc/jit/runtime/profiling_graph_executor_impl.cpp",
@@ -282,8 +285,6 @@ core_sources_full_mobile = [
 ]
 
 core_sources_full = core_sources_full_mobile + [
-    "torch/csrc/jit/runtime/interpreter/frame.cpp",
-    "torch/csrc/jit/runtime/interpreter/preprocess_graph.cpp",
     "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
@@ -988,8 +989,10 @@ aten_native_source_non_codegen_list = [
     "aten/src/TH/THTensorMath.cpp",
     "aten/src/TH/THTensorMoreMath.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
+    "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",
+    "aten/src/ATen/native/xnnpack/AveragePooling.cpp",
     "aten/src/ATen/native/xnnpack/Init.cpp",
     "aten/src/ATen/native/xnnpack/Linear.cpp",
     "aten/src/ATen/native/xnnpack/MaxPooling.cpp",

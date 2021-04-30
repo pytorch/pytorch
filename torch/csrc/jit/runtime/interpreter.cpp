@@ -16,7 +16,9 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/runtime/interpreter/code_impl.h>
 #include <torch/csrc/jit/runtime/interpreter/frame.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -42,6 +44,8 @@ using torch::distributed::autograd::DistAutogradContainer;
 
 namespace torch {
 namespace jit {
+
+using CodeImpl = interpreter::CodeImpl;
 
 // Before we translate to intepreter instructions, we do
 // some preprocessing of the graph to turn it into a form that is closer
@@ -81,8 +85,9 @@ inline int64_t getDistAutogradContextId() {
   return 0;
 #endif
 }
-}
+} // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local InterpreterStateImpl* tls_int_state_ptr_ = nullptr;
 struct TLSCurrentInterpreterGuard {
   TLSCurrentInterpreterGuard(InterpreterStateImpl* state) {
@@ -96,6 +101,102 @@ struct TLSCurrentInterpreterGuard {
 
  private:
   InterpreterStateImpl* prev_state_;
+};
+
+struct MobileCodeImpl : CodeImpl {
+  MobileCodeImpl(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name,
+      size_t remaining_bailout_depth)
+      : CodeImpl(graph, function_name, remaining_bailout_depth, false) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
+    run();
+  }
+
+  void run() override {
+    process_ops_for_mobile();
+    emitCodeForBlock(graph_->block());
+    insertInstruction(RET);
+    // we deferred the emission of bailout blocks so they appear at the end
+    // emit them now and patch up the jumps
+    insertBailoutBlocks();
+  }
+
+  void process_ops_for_mobile() {
+    DepthFirstGraphNodeIterator graph_it(graph_);
+    Node* node = graph_it.next();
+    while (node) {
+      if (node->maybeOperator()) {
+        auto op_schema = node->getOperator().schema();
+        // skip if schema has vararg
+        if (!op_schema.is_vararg()) {
+          auto numInclude =
+              calculate_necessary_args(op_schema.arguments(), node->inputs());
+          auto unique_name = op_schema.overload_name() != ""
+              ? op_schema.name() + "." + op_schema.overload_name()
+              : op_schema.name();
+          auto it = op_to_num_specified_args_.insert(
+              std::pair<std::string, int>(unique_name, 0));
+          auto prev_value = it.first->second;
+          it.first->second = std::max(numInclude, prev_value);
+        }
+      }
+      node = graph_it.next();
+    }
+  }
+
+  int calculate_necessary_args(
+      const std::vector<Argument>& schema_args,
+      at::ArrayRef<Value*> actual_inputs) {
+    AT_ASSERT(schema_args.size() == actual_inputs.size());
+    // keeps track of trailing unnecessary args
+    int schema_size = schema_args.size();
+    for (int schema_idx = schema_size - 1; schema_idx > -1; schema_idx--) {
+      // this means it is not default argument, so it is necessary
+      if (!schema_args.at(schema_idx).default_value().has_value()) {
+        return schema_idx + 1;
+      } else {
+        auto schema_value =
+            schema_args.at(schema_idx).default_value().value().toIValue();
+        // non-const value will become nullptr here, so will be marked necessary
+        // non-const would include prim::ListConstruct, prim::DictConstruct as
+        // well.
+        auto actual_value = toIValue(actual_inputs[schema_idx]);
+        if (!actual_value.has_value()) {
+          return schema_idx + 1;
+        }
+        // if the IR has same value as default value of the schema,
+        // it is not neccessary argument.
+        if (schema_value != actual_value.value()) {
+          return schema_idx + 1;
+        }
+      }
+    }
+    return 0;
+  }
+
+  void emitOperator(Node* node) override {
+    CodeImpl::emitOperator(node);
+    // const Operator& op = node->getOperator();
+    // if (op.hasOperation() && op.schema().is_vararg()) {
+    //   emitLoadInputs(node->inputs());
+    //   insertInstruction(OPN, operator_table_.size(), node->inputs().size());
+    // } else {
+    //   auto unique_op_name = op.schema().overload_name() != ""
+    //     ? op.schema().name() + "." + op.schema().overload_name()
+    //     : op.schema().name();
+    //   auto num_include = node->inputs().size();
+    //   // make sure we only do this for mobile code
+    //   if (op_to_num_specified_args_.find(unique_op_name) !=
+    //           op_to_num_specified_args_.end()) {
+    //     num_include = op_to_num_specified_args_[unique_op_name];
+    //   }
+    //   emitLoadInputs(node->inputs(), num_include);
+    //   insertInstruction(OP, operator_table_.size());
+    // }
+
+    // operator_table_.emplace_back(op.getOperation(node));
+  }
 };
 
 // InterpreterState state that and used to compute a Code
@@ -428,7 +529,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case PROFILE_OP: {
             auto& frame_id_ref = frame.id;
             if (!frame_id_ref.has_value()) {
-              frame_id_ref = Frame::num_frames++;
+              frame_id_ref = Frame::genId();
             }
             const auto& callback =
                 frame.function->profile_function_table_[inst.X];
@@ -448,6 +549,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
           case TYPECHECK: {
             int num_inputs = inst.N, i = 0;
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs && num_inputs > 0);
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
@@ -755,11 +857,24 @@ Code::Code(
     const std::shared_ptr<Graph>& graph,
     std::string function_name,
     size_t remaining_bailout_depth)
-    : pImpl(new interpreter::CodeImpl(
+    : pImpl(new CodeImpl(
           graph,
           std::move(function_name),
           remaining_bailout_depth)) {}
+
+Code::Code(CodeImpl* codeImpl) : pImpl(codeImpl) {}
 Code::~Code() = default;
+
+MobileCode::MobileCode(
+    const std::shared_ptr<Graph>& graph,
+    std::string function_name,
+    size_t remaining_bailout_depth)
+    : Code(new MobileCodeImpl(
+          graph,
+          std::move(function_name),
+          remaining_bailout_depth)) {}
+
+MobileCode::~MobileCode() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
@@ -791,6 +906,11 @@ const std::vector<c10::IValue>& Code::constant_table() const {
 
 const std::vector<Instruction>& Code::instructions() const {
   return pImpl->instructions();
+}
+
+const std::unordered_map<std::string, int>& Code::op_to_num_specified_args()
+    const {
+  return pImpl->op_to_num_specified_args();
 }
 
 const std::vector<Node*>& Code::instructions_source() const {

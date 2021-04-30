@@ -4,9 +4,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import codecs
 import os
+import pickle
 import socket
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 from unittest import TestCase
 
@@ -18,8 +20,39 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     RendezvousTimeout,
     _NodeDesc,
     _NodeDescGenerator,
+    _RendezvousState,
     create_handler,
 )
+
+
+class RendezvousTimeoutTest(TestCase):
+    def test_init_initializes_timeout(self) -> None:
+        timeout = RendezvousTimeout(
+            timedelta(seconds=50),
+            timedelta(seconds=60),
+            timedelta(seconds=70),
+        )
+
+        self.assertEqual(timeout.join, timedelta(seconds=50))
+        self.assertEqual(timeout.last_call, timedelta(seconds=60))
+        self.assertEqual(timeout.close, timedelta(seconds=70))
+
+    def test_init_initializes_timeout_if_no_timeout_is_specified(self) -> None:
+        timeout = RendezvousTimeout()
+
+        self.assertEqual(timeout.join, timedelta(seconds=600))
+        self.assertEqual(timeout.last_call, timedelta(seconds=30))
+        self.assertEqual(timeout.close, timedelta(seconds=30))
+
+    def test_init_raises_error_if_timeout_is_not_positive(self) -> None:
+        join_timeouts = [timedelta(seconds=0), timedelta(seconds=-1)]
+
+        for join_timeout in join_timeouts:
+            with self.subTest(join_timeout=join_timeout):
+                with self.assertRaisesRegex(
+                    ValueError, rf"^The join timeout \({join_timeout}\) must be positive.$"
+                ):
+                    timeout = RendezvousTimeout(join_timeout)
 
 
 class NodeDescTest(TestCase):
@@ -53,34 +86,41 @@ class NodeDescGeneratorTest(TestCase):
                 self.assertEqual(repr(desc), f"{fqdn}_{pid}_{local_id}")
 
 
-class RendezvousTimeoutTest(TestCase):
-    def test_init_initializes_timeout(self) -> None:
-        timeout = RendezvousTimeout(
-            timedelta(seconds=50),
-            timedelta(seconds=60),
-            timedelta(seconds=70),
+class RendezvousStateTest(TestCase):
+    def test_encoded_size_is_within_expected_limit(self) -> None:
+        state = _RendezvousState()
+        state.round = 1
+        state.complete = True
+        state.deadline = datetime.utcnow()
+        state.closed = True
+
+        # fmt: off
+        expected_max_sizes = (
+            (   5,    2 * (2 ** 10),),  #    10 machines <=   2KB  # noqa: E201, E241, E262
+            (  50,   16 * (2 ** 10),),  #   100 machines <=  16KB  # noqa: E201, E241, E262
+            ( 500,  160 * (2 ** 10),),  #  1000 machines <= 160KB  # noqa: E201, E241, E262
+            (5000, 1600 * (2 ** 10),),  # 10000 machines <= 1.6MB  # noqa: E201, E241, E262
         )
+        # fmt: on
 
-        self.assertEqual(timeout.join, timedelta(seconds=50))
-        self.assertEqual(timeout.last_call, timedelta(seconds=60))
-        self.assertEqual(timeout.close, timedelta(seconds=70))
+        for num_nodes, max_byte_size in expected_max_sizes:
+            with self.subTest(num_nodes=num_nodes, max_byte_size=max_byte_size):
+                for i in range(num_nodes):
+                    node_running = _NodeDesc(f"dummy{i}.dummy1-dummy1-dummy1-dummy1.com", 12345, i)
+                    node_waiting = _NodeDesc(f"dummy{i}.dummy2-dummy2-dummy2-dummy2.com", 67890, i)
 
-    def test_init_initializes_timeout_if_no_timeout_is_specified(self) -> None:
-        timeout = RendezvousTimeout()
+                    state.participants[node_running] = i
 
-        self.assertEqual(timeout.join, timedelta(seconds=600))
-        self.assertEqual(timeout.last_call, timedelta(seconds=30))
-        self.assertEqual(timeout.close, timedelta(seconds=30))
+                    state.wait_list.add(node_waiting)
 
-    def test_init_raises_error_if_timeout_is_not_positive(self) -> None:
-        join_timeouts = [timedelta(seconds=0), timedelta(seconds=-1)]
+                    state.last_keep_alives[node_running] = datetime.utcnow()
+                    state.last_keep_alives[node_waiting] = datetime.utcnow()
 
-        for join_timeout in join_timeouts:
-            with self.subTest(join_timeout=join_timeout):
-                with self.assertRaisesRegex(
-                    ValueError, rf"^The join timeout \({join_timeout}\) must be positive.$"
-                ):
-                    timeout = RendezvousTimeout(join_timeout)
+                bits = pickle.dumps(state)
+
+                base64_bits = codecs.encode(bits, "base64")
+
+                self.assertLessEqual(len(base64_bits), max_byte_size)
 
 
 class DummyStore(Store):

@@ -209,6 +209,6 @@ PreprocessGraph::PreprocessGraph(Graph& g) : graph(g.copy()) {
   insertLastUses(*graph);
   can_emit_inline = std::move(CanEmitInline(graph).can_emit_inline_);
 }
-}
-}
-}
+} // namespace interpreter
+} // namespace jit
+} // namespace torch

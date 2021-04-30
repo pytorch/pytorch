@@ -65,6 +65,7 @@ TensorImpl::TensorImpl(
     // Use std::forward to suppress static analyzer false positive.
     : TensorImpl(std::forward<Storage>(storage), key_set, data_type, storage.device()) {}
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     ImplType type,
     Storage&& storage,
@@ -106,6 +107,12 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
 
   bool inference_mode = c10::InferenceMode::is_enabled();
 
+  // TODO: be more explicit about the full key set at call sites so we
+  // don't have to keep recomputing it here
+  DispatchKey k = key_set.highestPriorityBackendTypeId();
+
+  key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
+
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
     // See Note [Expected TLS state in InferenceMode] for why we exclude Autograd & InplaceOrView keys.
@@ -115,7 +122,6 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]
-    DispatchKey k = key_set.highestPriorityBackendTypeId();
     key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
   }
 

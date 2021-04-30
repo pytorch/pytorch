@@ -3,12 +3,12 @@
 #include <memory>
 #include <vector>
 
-#include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
 namespace torch {
 namespace jit {
@@ -89,6 +89,17 @@ struct CodeImpl {
   // map from unique of nodes to register in register table
   std::unordered_map<Value*, int> value_to_reg_;
 
+  // map from operator name to specified arguments
+  // Example: for a schema of aten::foo.str
+  // aten::foo.str(arg0: str="default", arg1: int=0,
+  //               arg2: bool=False, arg3: float=0.0)
+  // If the usages in a graph is:
+  //    aten::foo("somestr", arg1=0, arg2=True, arg3=0.0)
+  //    aten::foo("somestr", arg1=1, arg2=False, arg3=0.0)
+  // op_to_num_specified_args_["aten::foo.str"] = 3
+  // This is because for all usages, at most 3 args are used.
+  std::unordered_map<std::string, int> op_to_num_specified_args_;
+
   // running count of uses as we emit. When we reach use_count_[v] =
   // v.uses().size() we know it is the final use and we can move rather than
   // load.
@@ -106,7 +117,8 @@ struct CodeImpl {
   CodeImpl(
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
-      size_t remaining_bailout_depth)
+      size_t remaining_bailout_depth,
+      bool emit_instructions = true)
       : function_name_(std::move(function_name)),
         preprocess_(*graph),
         current_node_(preprocess_.graph->return_node()),
@@ -120,7 +132,19 @@ struct CodeImpl {
           fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
     }
     n_inputs = graph_->inputs().size();
-    // std::cout << *graph_ << "\n";
+    if (emit_instructions) {
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
+      run();
+    }
+  }
+
+  virtual ~CodeImpl() = default;
+
+  // since subclass of CodeImpl needs to populate
+  // op_to_num_specified_args, we seperate the calls
+  // that changes internals of CodeImpl into a separate
+  // function.
+  virtual void run() {
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
     // we deferred the emission of bailout blocks so they appear at the end
@@ -154,6 +178,10 @@ struct CodeImpl {
 
   const std::vector<Instruction>& instructions() const {
     return instructions_;
+  }
+
+  const std::unordered_map<std::string, int>& op_to_num_specified_args() const {
+    return op_to_num_specified_args_;
   }
 
   const std::vector<Node*>& instructions_source() const {
@@ -226,15 +254,18 @@ struct CodeImpl {
       int reg = registerFor(input);
       bool moved = input->uses().size() == ++use_count_[input];
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       OpCode op;
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
-      } else if (drop) {
-        op = DROPR;
       } else if (moved) {
         op = MOVE;
       } else {
         op = LOAD;
+      }
+
+      if (drop) {
+        op = DROPR;
       }
       insertInstruction(op, reg);
     }
@@ -246,7 +277,17 @@ struct CodeImpl {
     }
   }
 
-  void emitOperator(Node* node) {
+  void emitLoadInputs(at::ArrayRef<Value*> inputs, int num_include) {
+    int count = 0;
+    for (Value* input : inputs) {
+      if (count < num_include) {
+        emitUse(input, false);
+        count++;
+      }
+    }
+  }
+
+  virtual void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
     const Operator& op = node->getOperator();
     if (op.hasOperation() && op.schema().is_vararg()) {
@@ -527,6 +568,7 @@ struct CodeImpl {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
       default:
+        // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
         emitOperator(node);
         break;
       case prim::Drop:

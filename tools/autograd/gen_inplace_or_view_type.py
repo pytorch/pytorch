@@ -14,6 +14,7 @@ from tools.codegen.model import (
 from typing import List, Optional, Sequence, Tuple
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
+from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
 )
@@ -321,6 +322,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
 def modifies_arguments(f: NativeFunction) -> bool:
     return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
 
+@with_native_function_with_differentiability_info
 def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     f = fn.func
     inplace_view_body: List[str] = []
@@ -373,6 +375,7 @@ def gen_formals(f: NativeFunction) -> str:
          for a in f.func.schema_order_arguments()]
     )
 
+@with_native_function_with_differentiability_info
 def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
     if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
@@ -384,6 +387,7 @@ def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInf
         type_definition_body=emit_inplace_or_view_body(fn),
     )
 
+@with_native_function_with_differentiability_info
 def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
     if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
