@@ -583,9 +583,9 @@ node [shape=box];
 
         if hasattr(obj, "__reduce_package__"):
             if self.serialized_reduces.get(id(obj)) is None:
-                self.serialized_reduces[id(obj)] = obj.__reduce_package__(self)
+                self.serialized_reduces[id(obj)] = ("reduce_package", id(obj), *obj.__reduce_package__(self))
 
-            return ("reduce_package", *self.serialized_reduces[id(obj)])
+            return self.serialized_reduces[id(obj)]
 
         return None
 
