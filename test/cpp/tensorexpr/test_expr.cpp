@@ -588,14 +588,14 @@ TEST(Expr, LogicalOps03) {
   ASSERT_EQ(eval2.value<bool>(), true);
   ASSERT_EQ(eval3.value<int>(), 1);
   ASSERT_EQ(eval4.value<int>(), 1);
-  ASSERT_EQ(eval5.value<short>(), 1);
-  ASSERT_EQ(eval6.value<short>(), 1);
-  ASSERT_EQ(eval7.value<long>(), 1);
-  ASSERT_EQ(eval8.value<long>(), 1);
-  ASSERT_EQ(eval9.value<signed char>(), 1);
-  ASSERT_EQ(eval10.value<signed char>(), 1);
-  ASSERT_EQ(eval11.value<unsigned char>(), 1);
-  ASSERT_EQ(eval12.value<unsigned char>(), 1);
+  ASSERT_EQ(eval5.value<int16_t>(), 1);
+  ASSERT_EQ(eval6.value<int16_t>(), 1);
+  ASSERT_EQ(eval7.value<int64_t>(), 1);
+  ASSERT_EQ(eval8.value<int64_t>(), 1);
+  ASSERT_EQ(eval9.value<int8_t>(), 1);
+  ASSERT_EQ(eval10.value<int8_t>(), 1);
+  ASSERT_EQ(eval11.value<uint8_t>(), 1);
+  ASSERT_EQ(eval12.value<uint8_t>(), 1);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
