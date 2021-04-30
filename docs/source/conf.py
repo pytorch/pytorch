@@ -195,6 +195,8 @@ autodoc_inherit_docstrings = False
 # Disable displaying type annotations, these can be very verbose
 autodoc_typehints = 'none'
 
+# Enable overriding of function signatures in the first line of the docstring.
+autodoc_docstring_signature = True
 
 # -- katex javascript in header
 #
