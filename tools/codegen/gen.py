@@ -912,9 +912,9 @@ def main() -> None:
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist]
 
-    static_dispatch_backend_index: Optional[BackendIndex] = None
+    static_dispatch_idx: Optional[BackendIndex] = None
     if options.static_dispatch_backend:
-        static_dispatch_backend_index = backend_indices[DispatchKey.parse(options.static_dispatch_backend)]
+        static_dispatch_idx = backend_indices[DispatchKey.parse(options.static_dispatch_backend)]
 
     for dispatch_key in dispatch_keys:
         fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
@@ -976,30 +976,30 @@ def main() -> None:
 
     cpu_fm.write('Functions.h', lambda: {
         'function_declarations': list(mapMaybe(ComputeFunction(
-            Target.DECLARATION, static_dispatch_backend_index=static_dispatch_backend_index, is_redispatching_fn=False), native_functions)),
+            Target.DECLARATION, static_dispatch_backend_index=static_dispatch_idx, is_redispatching_fn=False), native_functions)),
     })
     cpu_fm.write('Functions.cpp', lambda: {
-        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_backend_index),
+        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
         'function_definitions': list(mapMaybe(ComputeFunction(
-            Target.DEFINITION, static_dispatch_backend_index=static_dispatch_backend_index, is_redispatching_fn=False), native_functions)),
+            Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx, is_redispatching_fn=False), native_functions)),
     })
     cpu_fm.write('RedispatchFunctions.h', lambda: {
         'function_redispatch_declarations': list(mapMaybe(ComputeFunction(
-            Target.DECLARATION, static_dispatch_backend_index=static_dispatch_backend_index, is_redispatching_fn=True), native_functions)),
+            Target.DECLARATION, static_dispatch_backend_index=static_dispatch_idx, is_redispatching_fn=True), native_functions)),
     })
     cpu_fm.write('RedispatchFunctions.cpp', lambda: {
-        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_backend_index),
+        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
         'function_redispatch_definitions': list(mapMaybe(ComputeFunction(
-            Target.DEFINITION, static_dispatch_backend_index=static_dispatch_backend_index, is_redispatching_fn=True), native_functions)),
+            Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx, is_redispatching_fn=True), native_functions)),
     })
     core_fm.write('TensorBody.h', lambda: {
         'tensor_method_declarations': list(mapMaybe(
-            ComputeTensorMethod(Target.DECLARATION, static_dispatch_backend_index=static_dispatch_backend_index), native_functions)),
+            ComputeTensorMethod(Target.DECLARATION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
     })
     core_fm.write('TensorMethods.cpp', lambda: {
-        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_backend_index),
+        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
         'tensor_method_definitions': list(mapMaybe(
-            ComputeTensorMethod(Target.DEFINITION, static_dispatch_backend_index=static_dispatch_backend_index), native_functions)),
+            ComputeTensorMethod(Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
     })
     core_fm.write('ATenOpList.cpp', lambda: {
         'aten_ops': list(mapMaybe(compute_aten_op, native_functions)),
@@ -1025,5 +1025,5 @@ def main() -> None:
         core_fm.write_outputs(f"{options.output_dependencies}-core")
         cuda_fm.write_outputs(f"{options.output_dependencies}-cuda")
 
-    if __name__ == '__main__':
-        main()
+if __name__ == '__main__':
+    main()
