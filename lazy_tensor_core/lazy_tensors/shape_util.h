@@ -12,10 +12,13 @@ namespace lazy_tensors {
 
 class ShapeIndex {
  public:
+  ShapeIndex() = default;
   ShapeIndex(std::initializer_list<int64> init) : indices_(init) {}
 
   bool empty() const { return indices_.empty(); }
   size_t size() const { return indices_.size(); }
+  void push_back(int64 value) { indices_.push_back(value); }
+  void pop_back() { indices_.pop_back(); }
 
   const int64& operator[](size_t i) const { return indices_[i]; }
   int64& operator[](size_t i) { return indices_[i]; }
@@ -126,10 +129,20 @@ class ShapeUtil {
     return MakeShapeWithLayout(element_type, dimensions, layout);
   }
 
+  // Returns the number of elements in the given tuple shape.
+  // Precondition: IsTuple(shape)
+  static int64 TupleElementCount(const Shape& shape);
+
   static const Shape& GetTupleElementShape(const Shape& shape, int64 index) {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 
+  // Calls the given visitor function for each subshape of the given shape.
+  // Subshapes are visited in DFS pre-order starting with the entire shape
+  // (index {}).
+  using VisitorFunction = std::function<void(const Shape& /*subshape*/,
+                                             const ShapeIndex& /*index*/)>;
+  static void ForEachSubshape(const Shape& shape, const VisitorFunction& func);
   using MutatingVisitorFunction =
       std::function<void(Shape* /*subshape*/, const ShapeIndex& /*index*/)>;
   static void ForEachMutableSubshape(Shape* shape,
@@ -145,6 +158,11 @@ class ShapeUtil {
   static bool ElementIsIntegral(const Shape& shape) {
     return primitive_util::IsIntegralType(shape.element_type());
   }
+
+  // Variants of ForEach(Mutable)Subshape which propagate Status from the
+  // visitor function.
+  using StatusVisitorFunction = std::function<Status(
+      const Shape& /*subshape*/, const ShapeIndex& /*index*/)>;
 };
 
 inline torch::jit::tensorexpr::ScalarType PrimitiveToScalarType(

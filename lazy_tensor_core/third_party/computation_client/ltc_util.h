@@ -11,9 +11,7 @@
 namespace lazy_tensors {
 namespace util {
 
-inline hash_t ShapeHash(const Shape& shape) {
-  LTC_LOG(FATAL) << "Not implemented yet.";
-}
+hash_t ShapeHash(const Shape& shape);
 
 }  // namespace util
 }  // namespace lazy_tensors

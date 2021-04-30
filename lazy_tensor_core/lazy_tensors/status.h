@@ -16,6 +16,10 @@ class Status {
   }
 
   bool ok() const { return true; }
+
+  void IgnoreError() const {
+    // no-op
+  }
 };
 
 inline std::ostream& operator<<(std::ostream& os,
