@@ -44,6 +44,7 @@ class ModelTest(PackageTestCase):
             buf = StringIO()
             debug_graph = e._write_dep_graph(failing_module="torch")
             self.assertIn("torchvision.models.resnet", debug_graph)
+            e.intern("**")
 
         # we can now load the saved model
         i = PackageImporter(f1)
@@ -78,6 +79,7 @@ class ModelTest(PackageTestCase):
             # using functions like save_state_dict and load_state_dict to transfer state
             # to the correct code objects.
             e.save_pickle("model", "model.pkl", r2)
+            e.intern("**")
 
         f2.seek(0)
 
@@ -135,6 +137,7 @@ class ModelTest(PackageTestCase):
                 """
             )
             e.save_source_string("model", src, is_package=True)
+            e.intern("**")
 
         f2 = BytesIO()
         # Option 2: save with state dict
@@ -159,6 +162,7 @@ class ModelTest(PackageTestCase):
                 """
             )
             e.save_source_string("model", src, is_package=True)
+            e.intern("**")
 
         # regardless of how we chose to package, we can now use the model in a server in the same way
         input = torch.rand(1, 3, 224, 224)
@@ -182,6 +186,7 @@ class ModelTest(PackageTestCase):
         # - more difficult to edit the code after the model is created
         with PackageExporter(f1, verbose=False) as e:
             e.save_pickle("model", "pickled", resnet)
+            e.intern("**")
 
         f1.seek(0)
 

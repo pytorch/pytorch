@@ -75,6 +75,7 @@ class TestMisc(PackageTestCase):
             he.save_module(package_a.__name__)
             he.save_pickle("obj", "obj.pkl", obj)
             he.save_text("main", "main", "my string")
+            he.intern("**")
 
 
         buffer.seek(0)
@@ -110,6 +111,7 @@ class TestMisc(PackageTestCase):
 
             obj = package_a.subpackage.PackageASubpackageObject()
             he.save_pickle("obj", "obj.pkl", obj)
+            he.intern("**")
 
         buffer.seek(0)
 
@@ -127,6 +129,7 @@ class TestMisc(PackageTestCase):
 
         with PackageExporter(buffer, verbose=False) as pe:
             pe.save_pickle("obj", "obj.pkl", obj)
+            pe.intern("**")
 
         buffer.seek(0)
         pi = PackageImporter(buffer)
@@ -173,6 +176,7 @@ class TestMisc(PackageTestCase):
 
         with PackageExporter(buffer, verbose=False) as pe:
             pe.save_pickle("obj", "obj.pkl", obj)
+            pe.intern("**")
 
         buffer.seek(0)
         pi = PackageImporter(buffer)
@@ -196,6 +200,7 @@ class TestMisc(PackageTestCase):
 
         with PackageExporter(buffer, verbose=False) as pe:
             pe.save_pickle("obj", "obj.pkl", obj)
+            pe.intern("**")
 
         buffer.seek(0)
         pi = PackageImporter(buffer)
@@ -216,6 +221,7 @@ class TestMisc(PackageTestCase):
 
         with PackageExporter(buffer, verbose=False) as pe:
             pe.save_module(mod.__name__)
+            pe.intern("**")
 
         buffer.seek(0)
         pi = PackageImporter(buffer)

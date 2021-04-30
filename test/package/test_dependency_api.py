@@ -195,6 +195,7 @@ class TestDependencyAPI(PackageTestCase):
         with PackageExporter(buffer, verbose=False) as he:
             he.mock(include="package_a.subpackage")
             he.save_pickle("obj", "obj.pkl", obj2)
+            he.intern("**")
 
         buffer.seek(0)
 
@@ -217,6 +218,11 @@ class TestDependencyAPI(PackageTestCase):
                 # should raise an error. However, the error above is more
                 # informative to what's actually going wrong with packaging.
                 pe.save_source_string("bar", "import foo\n")
+
+    def test_foo(self):
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
+            he.save_module("package_a")
 
 
 if __name__ == "__main__":

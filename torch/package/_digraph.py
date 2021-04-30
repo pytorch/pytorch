@@ -55,12 +55,6 @@ class DiGraph:
                 yield n, succ
 
     @property
-    def edges(self):
-        for n, successors in self._succ.items():
-            for succ in successors:
-                yield n, succ
-
-    @property
     def nodes(self):
         return self._node
 

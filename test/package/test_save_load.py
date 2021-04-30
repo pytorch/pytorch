@@ -56,30 +56,13 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
-    def test_save_module_with_module_object(self):
-        """
-        Test that save_module works with a module object
-        instead of a module name.
-        """
-        buffer = BytesIO()
-
-        with PackageExporter(buffer, verbose=False) as he:
-            import module_a
-
-            he.save_module(module_a)
-
-        buffer.seek(0)
-        hi = PackageImporter(buffer)
-        module_a_i = hi.import_module("module_a")
-        self.assertEqual(module_a_i.result, "module_a")
-        self.assertIsNot(module_a, module_a_i)
-
     def test_dunder_imports(self):
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             import package_b
             obj = package_b.PackageBObject
             he.save_pickle("res", "obj.pkl", obj)
+            he.intern("**")
 
         buffer.seek(0)
         hi = PackageImporter(buffer)
@@ -130,6 +113,7 @@ class TestSaveLoad(PackageTestCase):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
             he.save_pickle("obj", "obj.pkl", obj2)
+            he.intern("**")
         hi = PackageImporter(filename)
 
         # check we got dependencies
@@ -157,6 +141,7 @@ class TestSaveLoad(PackageTestCase):
         f1 = self.temp()
         with PackageExporter(f1, verbose=False) as pe:
             pe.save_pickle("obj", "obj.pkl", obj)
+            pe.intern("**")
 
         importer1 = PackageImporter(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
@@ -182,6 +167,7 @@ class TestSaveLoad(PackageTestCase):
         f1 = self.temp()
         with PackageExporter(f1, verbose=False) as pe:
             pe.save_pickle("obj", "obj.pkl", obj2)
+            pe.intern("**")
 
         importer1 = PackageImporter(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
