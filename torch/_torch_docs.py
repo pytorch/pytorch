@@ -2256,7 +2256,7 @@ Example::
 
 add_docstr(torch.resolve_conj,
            r"""
-conj(input) -> Tensor
+resolve_conj(input) -> Tensor
 
 Returns a new tensor with materialized conjugation if :attr:`input`'s conjugate bit is set to `True`,
 else returns :attr:`input`. The output tensor will always have its conjugate bit set to `False`.

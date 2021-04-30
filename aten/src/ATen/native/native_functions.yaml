@@ -3000,17 +3000,20 @@
     CPU, CUDA: reciprocal_out
 
 - func: neg(Tensor self) -> Tensor
+  structured_delegate: neg.out
   variants: function, method
   dispatch:
-    CPU, CUDA, SparseCPU, SparseCUDA: neg
+    SparseCPU, SparseCUDA: neg_sparse
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: neg.out
   variants: function, method
   dispatch:
-    CPU, CUDA: neg_
     SparseCPU, SparseCUDA: neg_sparse_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: neg_out
     SparseCPU, SparseCUDA: neg_out_sparse
@@ -9004,3 +9007,8 @@
   variants: function
   dispatch:
     CPU, CUDA: segment_reduce_kernel
+
+- func: segment_reduce_backward(Tensor grad, Tensor output, Tensor data, *, Tensor? lengths=None) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: segment_reduce_backward_kernel
