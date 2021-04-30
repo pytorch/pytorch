@@ -688,6 +688,11 @@ if(NOT MSVC)
 
   # Use ld.gold if available, fall back to ld.bfd (the default ld) if not
   if(USE_GOLD_LINKER)
+    if(USE_DISTRIBUTED AND USE_MPI)
+      # Same issue as here with default MPI on Ubuntu
+      # https://bugs.launchpad.net/ubuntu/+source/deal.ii/+bug/1841577
+      message(WARNING "Refusing to use gold when USE_MPI=1")
+    else()
       execute_process(COMMAND ${CMAKE_C_COMPILER} -fuse-ld=gold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE LD_VERSION)
       if(NOT "${LD_VERSION}" MATCHES "GNU gold")
         message(WARNING "USE_GOLD_LINKER was set but ld.gold isn't available")
@@ -697,6 +702,7 @@ if(NOT MSVC)
         set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=gold")
         set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fuse-ld=gold")
       endif()
+    endif()
   endif()
 
   string(APPEND CMAKE_CXX_FLAGS " -Wno-error=pedantic")
