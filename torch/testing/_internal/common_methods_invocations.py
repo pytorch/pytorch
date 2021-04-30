@@ -1496,6 +1496,12 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
                   for input_tensor, other_tensor in args_for_binary_op)
     return inputs
 
+def sample_inputs_hardswish(self, device, dtype, requires_grad):
+    N = 5
+    # make_tensor(N, N)
+    tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype, requires_grad=requires_grad, low=-5, high=5)) for _ in range(1, N)]
+    return tensors
+
 def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_grad, **kwargs):
     inputs = []
     args_for_reduction_with_dim = (
@@ -4545,6 +4551,13 @@ op_db: List[OpInfo] = [
            op=torch.minimum,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('nn.functional.hardswish',
+           dtypes=floating_types(),
+           supports_autograd=True,
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_hardswish,
+           supports_gradgrad=False,
+           supports_out=False),
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),

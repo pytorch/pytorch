@@ -82,6 +82,7 @@ nn_functional_tests = [
     ('glu', (S - 1, S - 1, S - 1), (),),
     ('hardtanh', (S, S, S), (-0.5, 0.5),),
     ('hardtanh', (S, S, S), (-0.5, 0.5, True), 'inplace'),
+    ('hardswish', (S, S, S), (), '', (True,'aten::hardswish')),
     ('relu6', (S, S, S), (),),
     ('relu6', (S, S, S), (True), 'inplace'),
     ('elu', (S, S, S), (0.9,),),

@@ -495,6 +495,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::atan:
     case aten::tanh:
     case aten::hardtanh:
+    case aten::hardswish:
     case aten::sqrt:
     case aten::rsqrt:
     case aten::abs:
@@ -662,6 +663,14 @@ ExprHandle promoteHalfToFloat(const ExprHandle& e) {
   } else {
     return e;
   }
+}
+
+ExprHandle clamp(
+    const ExprHandle& cmin,
+    const ExprHandle& cmax,
+    const ExprHandle& input) {
+  auto mm = CompareSelect::make(input, cmin, cmin, input, kLT);
+  return CompareSelect::make(mm, cmax, cmax, mm, kGT);
 }
 
 bool checkTypes(const ScalarType highType, const int typeConstraints) {
@@ -1271,8 +1280,7 @@ Tensor* tensorexpr::computeOperandValue(
             } else {
               auto cmax = cast(max);
               auto cmin = cast(min);
-              auto mm = CompareSelect::make(in, cmin, cmin, in, kLT);
-              return CompareSelect::make(mm, cmax, cmax, mm, kGT);
+              return clamp(cmin, cmax, in);
             }
           },
           false /* promote_inputs */);
@@ -1689,6 +1697,22 @@ Tensor* tensorexpr::computeOperandValue(
              const ExprHandle& max_val) {
             auto mm = CompareSelect::make(a, min_val, min_val, a, kLT);
             return CompareSelect::make(mm, max_val, max_val, mm, kGT);
+          });
+    } break;
+
+    case aten::hardswish: {
+      return computeOneOperand(
+          "aten_hardswish",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a) {
+            //  x * torch.clamp(x + 3.0, 0.0, 6.0) / 6.0
+            auto zero = Cast::make(a.dtype(), 0.);
+            auto three = Cast::make(a.dtype(), 3.);
+            auto six = Cast::make(a.dtype(), 6.);
+
+            return a * clamp(zero, six, a + three) / six;
           });
     } break;
 
