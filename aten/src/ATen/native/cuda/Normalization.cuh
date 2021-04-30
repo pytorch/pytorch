@@ -19,6 +19,8 @@ constexpr int MAX_BLOCK_SIZE = 256;
 constexpr int MAX_BLOCK_SIZE = 512;
 #endif
 
+constexpr unsigned MAX_GRID_SIZE = 65535u;
+
 // Number of threads in a block given an input size up to MAX_BLOCK_SIZE
 static int getNumThreads(int nElem) {
 #if defined(__HIP_PLATFORM_HCC__)
@@ -50,6 +52,26 @@ struct Float2 {
     v2 += a.v2;
     return *this;
   }
+};
+
+template <typename scalar_t, typename accscalar_t, typename PTA>
+struct SumOp {
+  __device__ SumOp(const PTA& t) : tensor(t) {}
+  __device__ __forceinline__ accscalar_t operator()(int batch, int plane, int n) {
+    return static_cast<accscalar_t>(tensor[batch][plane][n]);
+  }
+  const PTA& tensor;
+};
+
+template <typename scalar_t, typename accscalar_t, typename PTA>
+struct VarOp {
+  __device__ VarOp(accscalar_t m, const PTA& t) : mean(m), tensor(t) {}
+  __device__ __forceinline__ accscalar_t operator()(int batch, int plane, int n) {
+    accscalar_t val = tensor[batch][plane][n];
+    return (val - mean) * (val - mean);
+  }
+  const accscalar_t mean;
+  const PTA& tensor;
 };
 
 template <typename scalar_t, typename accscalar_t, typename PTA>
@@ -140,10 +162,6 @@ constexpr int ELEMENTS_PER_THREAD = 16;
 constexpr int OPTIMAL_TILE_W = 32;
 constexpr int MAX_H_BLOCK = 128;
 
-__host__ int div_roundup(int x, int y) {
-  return lastPow2(1 + (x-1)/y);
-}
-
 __host__ void flexible_launch_configs(
       const int reduction,
       const int stride,
@@ -151,14 +169,14 @@ __host__ void flexible_launch_configs(
       dim3 &grid,
       const bool coop_flag = false) {
   int block_x = std::min(lastPow2(stride), OPTIMAL_TILE_W);
-  int block_y = std::min(lastPow2(div_roundup(reduction , ELEMENTS_PER_THREAD)),
+  int block_y = std::min(lastPow2(at::cuda::ATenCeilDiv(reduction , ELEMENTS_PER_THREAD)),
                          MAX_BLOCK_SIZE / block_x);
   if (block_x * block_y != MAX_BLOCK_SIZE) {
     block_x = std::min(lastPow2(stride), MAX_BLOCK_SIZE / block_y);
   }
 
-  int grid_x = div_roundup(stride, block_x);
-  int grid_y = std::min(div_roundup(reduction, block_y * ELEMENTS_PER_THREAD), MAX_H_BLOCK);
+  int grid_x = at::cuda::ATenCeilDiv(stride, block_x);
+  int grid_y = std::min(at::cuda::ATenCeilDiv(reduction, block_y * ELEMENTS_PER_THREAD), MAX_H_BLOCK);
   if (coop_flag) {
     // it's not worth having a grid reduction if the reduction dimension is not big enough
     grid_y = grid_y < 8 ? 1 : grid_y;
@@ -170,6 +188,195 @@ __host__ void flexible_launch_configs(
   grid.x = grid_x;
   grid.y = grid_y;
   grid.z = 1;
+}
+
+template<typename T, typename C>
+__device__ __forceinline__ void welford_merge_element(C& count,
+                                                      T& mean,
+                                                      T& m2n,
+                                                      const C& count_new,
+                                                      const T& mean_new,
+                                                      const T& m2n_new) {
+      T factor = T(1.0) / ::max(1, (count + count_new));
+      T delta0 = mean - mean_new;
+      mean = (mean_new * count_new + mean * count) * factor;
+      m2n += m2n_new + delta0 * delta0 * count_new * count * factor;
+      count += count_new;
+}
+
+// merge mean/m2n among threadIdx.y within block
+template<typename T, typename C>
+__device__ __forceinline__ void welford_merge_block_vertical(C& count,
+                                                             T& mean,
+                                                             T& m2n,
+                                                             C* shmem_count,
+                                                             T* shmem_mean,
+                                                             T* shmem_m2n) {
+  // write to shared memory
+  auto address_base = threadIdx.x + threadIdx.y * blockDim.x;
+
+#pragma unroll
+  for (int offset = blockDim.y/2; offset > 0; offset >>= 1) {
+    if (threadIdx.y < offset*2) {
+      shmem_mean[address_base] = mean;
+      shmem_m2n[address_base] = m2n;
+      shmem_count[address_base] = count;
+    }
+    __syncthreads();
+    if (threadIdx.y < offset && threadIdx.y + offset < blockDim.y) {
+      auto address = address_base + offset * blockDim.x;
+      // read shared memory back to register for reduction
+      auto count_new = shmem_count[address];
+      auto mean_new = shmem_mean[address];
+      auto m2n_new = shmem_m2n[address];
+
+      welford_merge_element(count, mean, m2n, count_new, mean_new, m2n_new);
+    }
+  }
+}
+
+template <typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, bool train, typename index_t>
+__global__ void batch_norm_transform_input_kernel(
+    const GenericPackedTensorAccessor<input_scalar_t, 3, RestrictPtrTraits, index_t> input,
+    GenericPackedTensorAccessor<input_scalar_t, 3, RestrictPtrTraits, index_t> output,
+    const GenericPackedTensorAccessor<typename std::conditional<train, stat_accscalar_t, stat_scalar_t>::type, 1, RestrictPtrTraits, index_t> mean_,
+    const GenericPackedTensorAccessor<typename std::conditional<train, stat_accscalar_t, stat_scalar_t>::type, 1, RestrictPtrTraits, index_t> var_or_invstd,
+    const GenericPackedTensorAccessor<stat_scalar_t, 1, RestrictPtrTraits, index_t> weight,
+    const GenericPackedTensorAccessor<stat_scalar_t, 1, RestrictPtrTraits, index_t> bias,
+    stat_accscalar_t epsilon) {
+
+  index_t plane = blockIdx.x;
+
+  if (plane >= input.size(1)) {
+    return;
+  }
+
+  stat_accscalar_t gamma = weight.size(0) > 0 ? static_cast<stat_accscalar_t>(weight[plane]) : static_cast<stat_accscalar_t>(1);
+  stat_accscalar_t beta = bias.size(0) > 0 ? static_cast<stat_accscalar_t>(bias[plane]) : static_cast<stat_accscalar_t>(0);
+  stat_accscalar_t mean = static_cast<stat_accscalar_t>(mean_[plane]);
+  stat_accscalar_t invstd;
+  if (train) {
+    invstd = var_or_invstd[plane];
+  } else {
+    invstd = static_cast<stat_accscalar_t>(1) / device_sqrt(static_cast<stat_accscalar_t>(var_or_invstd[plane]) + epsilon);
+  }
+
+  index_t bs = input.size(0);
+  index_t fs = input.size(2);
+
+  index_t bstep  = blockDim.y * gridDim.y;
+  for (index_t batch = threadIdx.y + blockIdx.y * blockDim.y; batch < bs; batch += bstep) {
+    auto o = output[batch][plane];
+    auto i = input[batch][plane];
+    for (index_t feature = threadIdx.x; feature < fs; feature += blockDim.x) {
+      o[feature] = static_cast<input_scalar_t>(gamma * (i[feature] - mean) * invstd + beta);
+    }
+  }
+}
+
+struct InvStd {
+  template <typename T>
+  __device__ __forceinline__ T operator()(T var, double epsilon) const {
+    T invstd = 0;
+    if (var != static_cast<T>(0) || epsilon != static_cast<T>(0)) {
+      invstd = static_cast<T>(1) / device_sqrt(var + epsilon);
+    }
+    return invstd;
+  }
+};
+
+struct Var {
+  template <typename T>
+  __device__ __forceinline__ T operator()(T var, double epsilon) const {
+    return var;
+  }
+};
+
+template <typename VarTransform, typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, typename index_t>
+__global__ void batch_norm_collect_statistics_kernel(
+    const GenericPackedTensorAccessor<input_scalar_t, 3, RestrictPtrTraits, index_t> input,
+    const stat_accscalar_t epsilon,
+    const stat_accscalar_t momentum,
+    GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_mean,
+    GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_transformed_var) {
+
+  __shared__ int shared_n[2 * 2 * C10_WARP_SIZE + C10_WARP_SIZE];
+
+  int plane = blockIdx.x;
+  int N = input.size(0) * input.size(2);
+  int tid = threadIdx.x + threadIdx.y * blockDim.x;
+
+  // Compute the mean and variance across (batch, x/y/z)
+  // this uses the Welford (in the for loop)/parallel algorithm (to sum across the block)
+  // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
+  // and the parallel algorithm on the same page.
+  // We use two shuffles to reduce across the entire block.
+  // https://devblogs.nvidia.com/faster-parallel-reductions-kepler/ has a description.
+  stat_accscalar_t* shared_avg_var = (stat_accscalar_t*) &shared_n[C10_WARP_SIZE];
+
+  // first the reductions each thread does separately
+  stat_accscalar_t avg = 0;
+  stat_accscalar_t var_n = 0;
+  int n = 0;
+  for (int batch = threadIdx.y; batch < input.size(0); batch += blockDim.y) {
+    for (int x = threadIdx.x; x < input.size(2); x += blockDim.x) {
+      stat_accscalar_t v = input[batch][plane][x];
+      stat_accscalar_t d1 = v - avg;
+      n++;
+      avg += d1 / n;
+      var_n += d1 * (v - avg);
+    }
+  }
+
+  // first warpSum to get one value per thread to
+  // one value per warp
+  for (int i = 0; i < getMSB(C10_WARP_SIZE); ++i) {
+    stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
+    int o_n = WARP_SHFL_XOR(n, 1 << i, C10_WARP_SIZE);
+    stat_accscalar_t factor = 1.0 / fmaxf(1.0, n+o_n);
+    var_n += WARP_SHFL_XOR(var_n, 1 << i, C10_WARP_SIZE) + (avg - o_avg) * (avg - o_avg) * n * o_n * factor;
+    avg = (n * avg + o_n * o_avg) * factor;
+    n += o_n;
+  }
+
+  // this writes each warps  item into shared memory
+  // there are at most C10_WARP_SIZE items left because
+  // there are at most C10_WARP_SIZE**2 threads at the beginning
+  __syncthreads();
+  if (tid % C10_WARP_SIZE == 0) {
+    shared_n[tid / C10_WARP_SIZE] = n;
+    shared_avg_var[tid / C10_WARP_SIZE * 2] = avg;
+    shared_avg_var[tid / C10_WARP_SIZE * 2 + 1] = var_n;
+  }
+  __syncthreads();
+  // now have a second warpSum to reduce the intermediate values
+  // from shared memory to a single number. The very first
+  // thread writes it to shared memory.
+
+  if (tid < C10_WARP_SIZE) {
+    n = (tid < blockDim.x * blockDim.y / C10_WARP_SIZE ? shared_n[tid] : 0);
+    avg = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid] : stat_accscalar_t(0));
+    var_n = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid + 1] : stat_accscalar_t(0));
+  }
+  for (int i = 0; i < getMSB(C10_WARP_SIZE); ++i) {
+    stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
+    int o_n = WARP_SHFL_XOR(n, 1 << i, C10_WARP_SIZE);
+    stat_accscalar_t factor = 1.0 / fmaxf(1.0, n+o_n);
+    var_n += WARP_SHFL_XOR(var_n, 1 << i, C10_WARP_SIZE) + (avg - o_avg) * (avg - o_avg) * n * o_n * factor;
+    avg = (n * avg + o_n * o_avg) * factor;
+    n += o_n;
+  }
+
+  // Save the mean, variance, and moving averages
+  if (tid == 0) {
+    if (save_mean.data() != NULL) {
+      save_mean[plane] = avg;
+    }
+    if (save_transformed_var.data() != NULL) {
+      save_transformed_var[plane] = VarTransform{}(var_n / N, epsilon);
+    }
+  }
+
 }
 
 template <typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, typename index_t>
@@ -427,6 +634,72 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
   return std::make_tuple(grad_input_, grad_weight_, grad_bias_);
 }
 
+template<typename scalar_t, typename index_t, typename VarTransform>
+void batch_norm_stats_cuda_template(
+    const Tensor& out_mean, const Tensor& out_invstd, const Tensor& input_, double epsilon) {
+
+  using accscalar_t = at::acc_type<scalar_t, true>;
+  int64_t n_input = input_.size(1);
+  Tensor dummy_mean_;
+  Tensor dummy_var_;
+  auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
+
+  auto bs = input_reshaped.size(0);
+  auto features = input_reshaped.size(2);
+  auto input = input_reshaped.generic_packed_accessor<scalar_t, 3, RestrictPtrTraits, index_t>();
+  TORCH_INTERNAL_ASSERT(out_invstd.dim() == 1 && out_invstd.is_contiguous() &&
+                        out_invstd.sizes()[0]);
+  TORCH_INTERNAL_ASSERT(out_mean.dim() == 1 && out_mean.is_contiguous() &&
+                        out_mean.sizes()[0]);
+
+  auto mean = packed_accessor_or_dummy<accscalar_t, 1, RestrictPtrTraits, index_t>(out_mean);
+  auto invstd = packed_accessor_or_dummy<accscalar_t, 1, RestrictPtrTraits, index_t>(out_invstd);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  dim3 blocks(input.size(1));
+  int tf = getNumThreads(input.size(2));
+  dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
+  batch_norm_collect_statistics_kernel<VarTransform, scalar_t, scalar_t, accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
+    (input, epsilon, 0.0, mean, invstd);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
+void batch_norm_elemt_cuda_template(const Tensor& output_, const Tensor& input_, const Tensor& weight_,
+                                    const Tensor& bias_, const Tensor& mean_, const Tensor& invstd_,
+                                    double epsilon) {
+
+  using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
+  int64_t n_input = input_.size(1);
+  auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
+  auto output_reshaped = output_.view({input_.size(0), input_.size(1), -1});
+
+  auto bs = input_reshaped.size(0);
+  auto features = input_reshaped.size(2);
+  auto input = input_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
+  auto output = output_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
+  auto weight = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(weight_);
+  auto bias = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(bias_);
+  auto mean = packed_accessor_or_dummy<stat_accscalar_t, 1, RestrictPtrTraits, index_t>(mean_);
+  auto invstd = packed_accessor_or_dummy<stat_accscalar_t, 1, RestrictPtrTraits, index_t>(invstd_);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // The input_transform kernel is pointwise, but we need to balance reading parameters (save_var/mean,
+  // weight/bias) - which we only do once and have a for loop afterwards - with having many threads and blocks
+  // and good occupancy. Quiet likely, we could go with even more blocks than 1024.
+  // The various planes are independent, so we use blocks for them.
+  int tf = std::max<int>(getNumThreads(input.size(2)/4),
+                         std::min<int>(getNumThreads(input.size(2)), 64));
+  int tb = std::max<int>(64/tf, 1);
+  dim3 blocks_trans(input.size(1), std::max<int>(1, std::min<int>((256*1024)/input.size(1),
+                                                                  (input.size(0)+tb-1)/tb)));
+  blocks_trans.y = std::min(blocks_trans.y, MAX_GRID_SIZE);
+  dim3 threads_trans(tf, tb);
+  batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
+    (input, output, mean, invstd, weight, bias, epsilon);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 template<typename scalar_t, typename accscalar_t, typename index_t>
 std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& mean_, const Tensor& invstd_,
                                                                  const Tensor& running_mean_, const Tensor& running_var_,
@@ -553,6 +826,202 @@ Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Te
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return grad_input_reshaped.view(input_.sizes());
+}
+
+// welford kernel for c last tensor calculating mean/biased_variance/unbiased_variance
+// original apex name: welford_kernel_c_last
+template
+   <typename VarTransform,
+    typename scalar_t,
+    typename accscalar_t,
+    int PARALLEL_LOADS>
+__global__ void
+batch_norm_collect_statistics_channels_last_kernel(
+      const scalar_t* __restrict__ input,
+      accscalar_t* __restrict__ out_mean,
+      accscalar_t* __restrict__ out_invstd,
+      volatile accscalar_t* staging_data,
+      int* semaphores,
+      const int reduction_size,
+      const int stride,
+      accscalar_t epsilon) {
+  // hide latency with concurrency
+  accscalar_t x_mean[PARALLEL_LOADS];
+  accscalar_t m_2_n[PARALLEL_LOADS];
+  int count[PARALLEL_LOADS];
+
+#pragma unroll
+  for (int i = 0; i < PARALLEL_LOADS; i++) {
+    x_mean[i] = accscalar_t(0);
+    m_2_n[i] = accscalar_t(0);
+    count[i] = accscalar_t(0);
+  }
+  // tensor dimension (m,c)
+
+  // loop along m dimension
+  int inner_loop_stride = blockDim.y * gridDim.y;
+
+  // offset along m dimension
+  int m_offset = blockIdx.y * blockDim.y + threadIdx.y;
+  int c_offset = blockIdx.x * blockDim.x + threadIdx.x;
+
+  int loop_count = 1 + (reduction_size - 1) / (inner_loop_stride * PARALLEL_LOADS);
+  int address_base = m_offset * stride + c_offset;
+  int address_increment = inner_loop_stride * stride;
+
+  for (int i = 0; i < loop_count; i++) {
+    accscalar_t x_math[PARALLEL_LOADS];
+    accscalar_t x_count_inv[PARALLEL_LOADS];
+    accscalar_t is_valid[PARALLEL_LOADS];
+
+    // load multiple data in
+#pragma unroll
+    for (int j = 0; j < PARALLEL_LOADS; j++) {
+      if (c_offset < stride && m_offset < reduction_size) {
+        x_math[j] = input[address_base];
+        count[j]++;
+        x_count_inv[j] = accscalar_t(1) / count[j];
+        is_valid[j] = accscalar_t(1);
+      } else {
+        x_math[j] = accscalar_t(0);
+        x_count_inv[j] = accscalar_t(0);
+        is_valid[j] = accscalar_t(0);
+      }
+      m_offset += inner_loop_stride;
+      address_base += address_increment;
+    }
+
+    // calculate mean/m2n with welford
+#pragma unroll
+    for (int j = 0; j < PARALLEL_LOADS; j++) {
+      accscalar_t delta0 = x_math[j] - x_mean[j];
+      x_mean[j] += delta0 * x_count_inv[j];
+      accscalar_t delta1 = x_math[j] - x_mean[j];
+      m_2_n[j] += delta0 * delta1 * is_valid[j];
+    }
+  }
+
+  // thread reduction to accumulate mean/m_2_n/count between PARALLEL_LOADS
+#pragma unroll
+  for (int j = 1; j < PARALLEL_LOADS; j++) {
+    welford_merge_element(count[0], x_mean[0], m_2_n[0], count[j], x_mean[j], m_2_n[j]);
+  }
+
+  // release x_mean / m_2_n
+  auto mean_th = x_mean[0];
+  auto m2_th = m_2_n[0];
+  auto count_th = count[0];
+
+  // block-wise reduction with shared memory (since reduction cannot be done within a warp)
+  static __shared__ accscalar_t shmem_mean[MAX_BLOCK_SIZE];
+  static __shared__ accscalar_t shmem_m2n[MAX_BLOCK_SIZE];
+  static __shared__ int shmem_count[MAX_BLOCK_SIZE];
+
+  welford_merge_block_vertical(count_th, mean_th, m2_th, shmem_count, shmem_mean, shmem_m2n);
+
+  if (gridDim.y > 1) {
+    volatile accscalar_t* staging_mean = staging_data;
+    volatile accscalar_t* staging_m2n = &staging_data[stride*gridDim.y];
+    volatile int* staging_count = reinterpret_cast<volatile int*>(&staging_m2n[stride*gridDim.y]);
+
+    address_base = c_offset + blockIdx.y * stride;
+    // write data to staging_data;
+    if (threadIdx.y == 0 && c_offset < stride) {
+      staging_mean[address_base] = mean_th;
+      staging_m2n[address_base] = m2_th;
+      staging_count[address_base] = count_th;
+    }
+
+    __threadfence();
+    __syncthreads(); // ensuring writes to staging_ is visible to all blocks
+
+    __shared__ bool is_last_block_done;
+    // mark block done
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+      int old = atomicAdd(&semaphores[blockIdx.x], 1);
+      is_last_block_done = (old == (gridDim.y-1));
+    }
+
+    __syncthreads();
+
+    // check that all data is now available in global memory
+    if (is_last_block_done) {
+      count_th = 0;
+      mean_th = accscalar_t(0.0);
+      m2_th = accscalar_t(0.0);
+
+      for (int y = threadIdx.y; y < gridDim.y; y += blockDim.y) {
+        address_base = c_offset + y * stride;
+        int count_new = c_offset < stride ? staging_count[address_base] : 0;
+        accscalar_t mean_new = c_offset < stride ? staging_mean[address_base] : accscalar_t(0.0);
+        accscalar_t m2n_new = c_offset < stride ? staging_m2n[address_base] : accscalar_t(0.0);
+
+        welford_merge_element(count_th, mean_th, m2_th, count_new, mean_new, m2n_new);
+      }
+
+      welford_merge_block_vertical(count_th, mean_th, m2_th, shmem_count, shmem_mean, shmem_m2n);
+      if (threadIdx.y == 0 && c_offset < stride) {
+        out_mean[c_offset] = static_cast<accscalar_t>(mean_th);
+        out_invstd[c_offset] = VarTransform{}(m2_th/count_th, epsilon);
+      }
+    }
+  } else {
+    if (blockIdx.y == 0 && threadIdx.y == 0 && c_offset < stride) {
+      out_mean[c_offset] = static_cast<accscalar_t>(mean_th);
+      out_invstd[c_offset] = VarTransform{}(m2_th/count_th, epsilon);
+    }
+  }
+}
+
+// elementwise BN kernel
+// original apex name: batchnorm_forward_c_last_kernel
+template <
+    typename scalar_t,
+    typename accscalar_t,
+    typename layerscalar_t,
+    int PARALLEL_LOADS>
+__global__ void batch_norm_transform_input_channels_last_kernel(
+      const scalar_t* __restrict__ input,
+      const scalar_t* __restrict__ z,
+      const accscalar_t* __restrict__ mean,
+      const accscalar_t* __restrict__ inv_std,
+      const layerscalar_t* __restrict__ weight,
+      const layerscalar_t* __restrict__ shift,
+      scalar_t* __restrict__ out,
+      const int reduction_size,
+      const int stride,
+      const bool fuse_relu) {
+  // tensor dimension (m,c)
+  // loop along m dimension
+  int inner_loop_stride = blockDim.y * gridDim.y;
+
+  // offset along m dimension
+  int m_offset = blockIdx.y * blockDim.y + threadIdx.y;
+  int c_offset = blockIdx.x * blockDim.x + threadIdx.x;
+
+  auto m_c = mean[c_offset];
+  auto inv_std_c = static_cast<accscalar_t>(inv_std[c_offset]);
+  auto w_c = weight == nullptr ? accscalar_t(1.0) : static_cast<accscalar_t>(weight[c_offset]);
+  auto s_c = shift == nullptr ? accscalar_t(0.0) : static_cast<accscalar_t>(shift[c_offset]);
+
+  int loop_count = 1 + (reduction_size - 1) / (inner_loop_stride * PARALLEL_LOADS);
+  int address_base = m_offset * stride + c_offset;
+  int address_increment = inner_loop_stride * stride;
+
+  for (int i = 0; i < loop_count; i++) {
+#pragma unroll
+    for (int j = 0; j < PARALLEL_LOADS; j++) {
+      if (c_offset < stride && m_offset < reduction_size) {
+        auto tmp = w_c * (static_cast<accscalar_t>(input[address_base]) - m_c ) * inv_std_c + s_c;
+        if (z != nullptr) {
+          tmp += z[address_base];
+        }
+        out[address_base] = (fuse_relu && tmp <= accscalar_t(0.0) ? scalar_t(0.0) : static_cast<scalar_t>(tmp));
+      }
+      m_offset += inner_loop_stride;
+      address_base += address_increment;
+    }
+  }
 }
 
 template<typename T>
@@ -786,6 +1255,105 @@ __global__ void batch_norm_backward_elemt_channels_last_kernel(
       m_offset += inner_loop_stride;
       address_base += address_increment;
     }
+  }
+}
+
+template<typename scalar_t, typename VarTransform>
+void batch_norm_stats_channels_last_cuda_template(
+    const Tensor& out_mean, const Tensor& out_invstd, const Tensor& input, double epsilon) {
+  using accscalar_t = at::acc_type<scalar_t, true>;
+
+  const auto stride = input.sizes()[1];
+  const auto reduction_size = input.numel() / stride;
+
+  TORCH_INTERNAL_ASSERT(out_invstd.dim() == 1 && out_invstd.is_contiguous() &&
+                        out_invstd.sizes()[0]);
+  TORCH_INTERNAL_ASSERT(out_mean.dim() == 1 && out_mean.is_contiguous() &&
+                        out_mean.sizes()[0]);
+
+  dim3 block;
+  dim3 grid;
+  flexible_launch_configs(reduction_size, stride, block, grid, true);
+
+  at::Tensor staging_data;
+  at::Tensor semaphores;
+  if (grid.y > 1) {
+    staging_data = at::empty({4*stride*grid.y}, out_mean.options());
+    semaphores = at::zeros({grid.x}, input.options().dtype(at::kInt));
+  }
+
+  accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.data_ptr<accscalar_t>() : nullptr;
+  int* semaphores_ptr = grid.y > 1 ? semaphores.data_ptr<int>() : nullptr;
+  batch_norm_collect_statistics_channels_last_kernel<VarTransform, scalar_t, accscalar_t, ELEMENTS_PER_ITER>
+      <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+      input.data_ptr<scalar_t>(),
+      out_mean.data_ptr<accscalar_t>(),
+      out_invstd.data_ptr<accscalar_t>(),
+      staging_data_ptr,
+      semaphores_ptr,
+      reduction_size,
+      stride,
+      epsilon);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void batch_norm_elemt_channels_last_cuda_template(
+    const at::Tensor& output,
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& shift,  // bias of BN
+    const at::Tensor& mean,
+    const at::Tensor& inv_std,
+    double epsilon,
+    const at::optional<at::Tensor>& z = c10::nullopt,  // bias after BN
+    const bool fuse_relu = false) {
+  const auto stride = input.sizes()[1];
+  const auto reduction_size = input.numel() / stride;
+
+  dim3 block;
+  dim3 grid;
+  flexible_launch_configs(reduction_size, stride, block, grid);
+
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  if (input.scalar_type() == at::kHalf && weight.defined() && weight.scalar_type() == at::kFloat) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "batchnorm_forward", [&] {
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      batch_norm_transform_input_channels_last_kernel<scalar_t, accscalar_t, accscalar_t, ELEMENTS_PER_ITER>
+          <<<grid, block, 0, stream>>>(
+          input.data_ptr<scalar_t>(),
+          z.has_value() ? z.value().data_ptr<scalar_t>() : nullptr,
+          mean.data_ptr<accscalar_t>(),
+          inv_std.data_ptr<accscalar_t>(),
+          weight.defined() ? weight.data_ptr<accscalar_t>() : nullptr,
+          shift.defined() ? shift.data_ptr<accscalar_t>() : nullptr,
+          output.data_ptr<scalar_t>(),
+          reduction_size,
+          stride,
+          fuse_relu);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    });
+  } else {
+    if (weight.defined()){
+      TORCH_CHECK(input.scalar_type() == weight.scalar_type(), "batchnorm_forward: input.scalar_type() ", input.scalar_type(),
+        " is not supported with weight.scalar_type() ", weight.scalar_type());
+    }
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "batchnorm_forward", [&] {
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      batch_norm_transform_input_channels_last_kernel<scalar_t, accscalar_t, scalar_t, ELEMENTS_PER_ITER>
+          <<<grid, block, 0, stream>>>(
+          input.data_ptr<scalar_t>(),
+          z.has_value() ? z.value().data_ptr<scalar_t>() : nullptr,
+          mean.data_ptr<accscalar_t>(),
+          inv_std.data_ptr<accscalar_t>(),
+          weight.defined() ? weight.data_ptr<scalar_t>() : nullptr,
+          shift.defined() ? shift.data_ptr<scalar_t>(): nullptr,
+          output.data_ptr<scalar_t>(),
+          reduction_size,
+          stride,
+          fuse_relu);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    });
   }
 }
 
