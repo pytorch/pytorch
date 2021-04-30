@@ -32,7 +32,42 @@ transforms comes from the [JAX framework](https://github.com/google/jax).
 
 ### Binaries
 
-Coming soon!
+First, set up an environment. We will be installing a nightly PyTorch binary
+as well as functorch. If you're using conda, create a conda environment:
+```
+conda create --name functorch
+conda activate functorch
+```
+If you wish to use `venv` instead:
+```
+python -m venv functorch-env
+source functorch-env/bin/activate
+```
+
+Next, install one of the following following PyTorch nightly binaries.
+functorch works with any of these but a more recent nightly should work as well.
+```
+# For CUDA 10.2
+pip install --pre torch==1.9.0.dev20210429 -f https://download.pytorch.org/whl/nightly/cu102/torch_nightly.html
+# For CUDA 11.1
+pip install --pre torch==1.9.0.dev20210429 -f https://download.pytorch.org/whl/nightly/cu111/torch_nightly.html
+# For CPU-only build
+pip install --pre torch==1.9.0.dev20210429 -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+```
+
+Install functorch:
+```
+pip install --user "git+https://github.com/zou3519/functorch.git"
+```
+
+Run a quick sanity check in python:
+```
+>>> import torch
+>>> from functorch import vmap
+>>> x = torch.randn(3)
+>>> y = vmap(torch.sin)(x)
+>>> assert torch.allclose(y, x.sin())
+```
 
 ### From Source
 
