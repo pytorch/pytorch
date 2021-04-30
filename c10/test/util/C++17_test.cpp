@@ -5,17 +5,23 @@ namespace {
 
 namespace test_min {
 using c10::guts::min;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(min(3, 5) == 3, "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(min(5, 3) == 3, "");
 static_assert(min(3, 3) == 3, "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(min(3.0, 3.1) == 3.0, "");
 }
 
 namespace test_max {
 using c10::guts::max;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(max(3, 5) == 5, "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(max(5, 3) == 5, "");
 static_assert(max(3, 3) == 3, "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(max(3.0, 3.1) == 3.1, "");
 }
 
@@ -23,10 +29,12 @@ namespace test_if_constexpr {
 
 using c10::guts::if_constexpr;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(if_constexpr, whenIsTrue_thenReturnsTrueCase) {
     EXPECT_EQ(4, if_constexpr<true>([](auto) { return 4; }, [](auto) { return 5; }));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(if_constexpr, whenIsFalse_thenReturnsFalseCase) {
     EXPECT_EQ(5, if_constexpr<false>([](auto) { return 4; }, [](auto) { return 5; }));
 }
@@ -41,6 +49,7 @@ struct MovableOnly final {
     MovableOnly& operator=(const MovableOnly&) = delete;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(if_constexpr, worksWithMovableOnlyTypes_withIdentityArg) {
     EXPECT_EQ(
         4,
@@ -52,6 +61,7 @@ TEST(if_constexpr, worksWithMovableOnlyTypes_withIdentityArg) {
             .value);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(if_constexpr, worksWithMovableOnlyTypes_withoutIdentityArg) {
     EXPECT_EQ(
         4,
@@ -79,12 +89,15 @@ int func(T t) {
     );
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(if_constexpr, otherCaseCanHaveInvalidCode) {
     EXPECT_EQ(8, func(MyClass1{/* .value =  */ 8}));
     EXPECT_EQ(4, func(MyClass2{/* .val =  */ 4}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(if_constexpr, worksWithoutElseCase_withIdentityArg) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int var = 5;
     if_constexpr<false>(
         [&](auto) { var = 3; }
@@ -96,7 +109,9 @@ TEST(if_constexpr, worksWithoutElseCase_withIdentityArg) {
     EXPECT_EQ(3, var);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(if_constexpr, worksWithoutElseCase_withoutIdentityArg) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int var = 5;
     if_constexpr<false>(
         [&] { var = 3; }
@@ -108,6 +123,7 @@ TEST(if_constexpr, worksWithoutElseCase_withoutIdentityArg) {
     EXPECT_EQ(3, var);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(if_constexpr, returnTypeCanDiffer_withIdentityArg) {
     auto a_string = if_constexpr<false>(
         [&](auto) -> int64_t { return 3; },
@@ -115,6 +131,7 @@ TEST(if_constexpr, returnTypeCanDiffer_withIdentityArg) {
     );
     static_assert(std::is_same<std::string, decltype(a_string)>::value, "");
 
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     auto an_int = if_constexpr<true>(
         [&](auto) -> int64_t { return 3; },
         [&](auto) -> std::string { return "3"; }
@@ -122,6 +139,7 @@ TEST(if_constexpr, returnTypeCanDiffer_withIdentityArg) {
     static_assert(std::is_same<int64_t, decltype(an_int)>::value, "");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(if_constexpr, returnTypeCanDiffer_withoutIdentityArg) {
     auto a_string = if_constexpr<false>(
         [&] () -> int64_t { return 3; },
@@ -129,6 +147,7 @@ TEST(if_constexpr, returnTypeCanDiffer_withoutIdentityArg) {
     );
     static_assert(std::is_same<std::string, decltype(a_string)>::value, "");
 
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     auto an_int = if_constexpr<true>(
         [&] () -> int64_t { return 3; },
         [&] () -> std::string { return "3"; }
