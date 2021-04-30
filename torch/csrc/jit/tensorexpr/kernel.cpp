@@ -1026,15 +1026,14 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   std::vector<BufHandle> nonEmptyInputs;
   for (auto buf : bufList) {
     bufInputs.push_back(buf);
-    assert(buf.node()->dims().size() > 0);
+    TORCH_INTERNAL_ASSERT(buf.node()->dims().size() > 0);
     if (buf.node()->dims().size() == 1 &&
         immediateAs<int>(buf.node()->dim(0)) == 0) {
       continue;
     }
     nonEmptyInputs.push_back(buf);
   }
-  auto maybe_dtype = bufInputs[0].dtype().scalar_type();
-  ScalarType highType = maybe_dtype;
+  ScalarType highType = bufInputs[0].dtype().scalar_type();
   for (const auto input : bufInputs) {
     auto maybe_dtype = input.dtype().scalar_type();
     highType = promoteTypes(highType, maybe_dtype);
