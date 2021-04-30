@@ -93,8 +93,11 @@ def parse_native_yaml(path: str) -> Tuple[List[NativeFunction], Dict[DispatchKey
             rs.append(func)
             BackendIndex.grow_index(bs, m)
     error_check_native_functions(rs)
-    # All structured in-tree operators are implemented in terms of their out operator.
-    indices = {k: BackendIndex(dispatch_key=k, use_out_as_primary=True, index=v) for k, v in bs.items()}
+    # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
+    indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(DispatchKey.Undefined, True, {}))
+    for k, v in bs.items():
+        # All structured in-tree operators are implemented in terms of their out operator.
+        indices[k] = BackendIndex(dispatch_key=k, use_out_as_primary=True, index=v)
     return rs, indices
 
 # Some assertions are already performed during parsing, but those are only within a single NativeFunction.

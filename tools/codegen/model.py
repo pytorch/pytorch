@@ -235,8 +235,8 @@ class NativeFunction:
     is_abstract: bool
 
     # Whether or not the NativeFunction contains a backend-agnostic kernel
-    # (irrespective of autograd)
-    has_composite_kernel: bool
+    has_composite_implicit_autograd_kernel: bool
+    has_composite_explicit_autograd_kernel: bool
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -341,7 +341,8 @@ class NativeFunction:
         else:
             is_abstract = dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
 
-        has_composite_kernel = any(is_generic_dispatch_key(k) for k in dispatch.keys())
+        has_composite_implicit_autograd_kernel = DispatchKey.CompositeImplicitAutograd in dispatch.keys()
+        has_composite_explicit_autograd_kernel = DispatchKey.CompositeExplicitAutograd in dispatch.keys()
 
         # BackendMetadata is used to store any information about a NativeFunction that is backend dependent.
         # The most obvious information is the kernel name, which usually contains the name of the backend in it for cpu/cuda.
@@ -355,31 +356,11 @@ class NativeFunction:
         e.pop('__line__', None)
         assert not e, f"leftover entries: {e}"
 
-        # extra validations that we can't move into __post_init__, because data is split
-        # between NativeFunction and BackendIndex objects.
-        if func.arguments.out:
-            assert variants == {Variant.function}, "Native functions with out arguments MUST " \
-                "be declared with only function variant; e.g., variants: function; " \
-                "otherwise you will tickle a Python argument binding bug " \
-                "(which usually manifests itself as the result variable being undefined.)"
-        if structured:
-            assert func.kind() == SchemaKind.out, "Put structured field on the out= " \
-                "variant of a function; did you mean structured_delegate?"
-            assert device_guard, "device_guard: False is not respected by structured kernels"
-        if structured_delegate:
-            assert func.kind() != SchemaKind.out, "structured_delegate field not allowed " \
-                "on out= functions; did you mean structured?"
-            assert device_guard, "device_guard: False is not respected by structured kernels"
-        # Technically, with the asserts above, this assert is impossible to
-        # happen
-        assert not (structured and structured_delegate), \
-            "Cannot have both structured and structured_delegate on function"
-        if structured_inherits is not None:
-            assert structured, "structured_inherits must also imply structured: True"
+        # Asserts that we can't do in post_init, because they rely on backend-specific info
         if structured_delegate is not None:
-            for key in STRUCTURED_DISPATCH_KEYS:
-                assert key not in dispatch, \
-                    f"if structured_delegate, then must not have {key} in dispatch dictionary " \
+            for k in STRUCTURED_DISPATCH_KEYS:
+                assert k not in dispatch, \
+                    f"if structured_delegate, then must not have {k} in dispatch dictionary " \
                     "(it is delegated!)"
 
         return NativeFunction(
@@ -397,8 +378,17 @@ class NativeFunction:
             loc=loc,
             cpp_no_default_args=cpp_no_default_args,
             is_abstract=is_abstract,
-            has_composite_kernel=has_composite_kernel
+            has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
+            has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
         ), backend_metadata
+
+    def validate_unstructured(self) -> None:
+        # TODO: probably better to accumulate these errors and report them all
+        # at once
+        assert not self.structured, "This function is structured, but there was " \
+            "no valid functional variant of it."
+        assert self.structured_delegate, "This function delegates to another structured out function, " \
+            "but no valid function was found (the delegate may not exist, or it has the wrong type)"
 
     # __post_init__ functions in dataclasses can be used to do extra
     # validation after construction.
@@ -408,10 +398,33 @@ class NativeFunction:
     # Validation is for nontrivial invariants that cannot be (conveniently)
     # encoded in the type system.
     def __post_init__(self) -> None:
+        if self.func.arguments.out:
+            assert self.variants == {Variant.function}, "Native functions with out arguments MUST " \
+                "be declared with only function variant; e.g., variants: function; " \
+                "otherwise you will tickle a Python argument binding bug " \
+                "(which usually manifests itself as the result variable being undefined.)"
+        if self.structured:
+            assert self.func.kind() == SchemaKind.out, "Put structured field on the out= " \
+                "variant of a function; did you mean structured_delegate?"
+            assert self.device_guard, "device_guard: False is not respected by structured kernels"
+        if self.structured_delegate:
+            assert self.func.kind() != SchemaKind.out, "structured_delegate field not allowed " \
+                "on out= functions; did you mean structured?"
+            assert self.device_guard, "device_guard: False is not respected by structured kernels"
+        # Technically, with the asserts above, this assert is impossible to
+        # happen
+        assert not (self.structured and self.structured_delegate), \
+            "Cannot have both structured and structured_delegate on function"
         defaulted_arguments = {a.name for a in self.func.schema_order_arguments()
                                if a.default is not None}
         invalid_args = set.difference(self.cpp_no_default_args, defaulted_arguments)
         assert len(invalid_args) == 0, f'Invalid cpp_no_default_args: {invalid_args}'
+        if self.structured_inherits is not None:
+            assert self.structured, "structured_inherits must also imply structured: True"
+
+    @property
+    def has_composite_kernel(self) -> bool:
+        return self.has_composite_implicit_autograd_kernel or self.has_composite_explicit_autograd_kernel
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
@@ -427,6 +440,7 @@ class NativeFunctionsGroup:
     inplace: Optional[NativeFunction]
     out: NativeFunction
 
+    @property
     def structured(self) -> bool:
         # Whether or not the operator has a meta() function. This information is backend-agnostic.
         return self.out.structured
@@ -443,6 +457,17 @@ class NativeFunctionsGroup:
         assert self.out.func.kind() == SchemaKind.out
         if self.inplace is not None:
             assert self.inplace.func.kind() == SchemaKind.inplace
+
+        if self.structured:
+            # For now, structured composite kernels are not supported (need some
+            # design work to figure out how to make the composite case work)
+            assert not self.out.has_composite_implicit_autograd_kernel
+
+            assert self.functional.structured_delegate == self.out.func.name, \
+                f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
+                f"but its actual delegate is {self.out.func.name}"
+            if self.inplace is not None:
+                assert self.inplace.structured_delegate == self.out.func.name
 
     def signature(self) -> 'FunctionSchema':
         return self.out.func.signature()
@@ -471,21 +496,6 @@ class NativeFunctionsGroup:
         # these don't count as structured for our purposes here
         if out is None:
             return None
-
-        for k, per_op_index in backend_indices.items():
-            # TODO: should structured() do the has_backend check autoamtically?
-            if not per_op_index.has_backend(out):
-                continue
-            if per_op_index.structured(out):
-                # For now, structured composite kernels are not supported (need some
-                # design work to figure out how to make the composite case work)
-                assert not backend_indices[DispatchKey.CompositeImplicitAutograd].has_backend(out)
-
-                assert functional.structured_delegate == out.func.name, \
-                    f"{functional.func.name} delegates to {functional.structured_delegate} " \
-                    f"but its actual delegate is {out.func.name}"
-                if inplace is not None:
-                    assert inplace.structured_delegate == out.func.name
 
         return NativeFunctionsGroup(
             functional=functional,
