@@ -3376,8 +3376,8 @@ TEST(LoopNest, FlattenSimpleLoopNest2D) {
 
   std::vector<For*> loops = {outer_for, inner_for};
   For* flattened = nullptr;
-  bool success = LoopNest::flatten(loops, &flattened);
-  ASSERT_TRUE(success);
+  ASSERT_TRUE(LoopNest::flatten(loops, &flattened));
+  ASSERT_EQ(flattened, loops.front());
 
   auto result = IRSimplifier::simplify(flattened);
   std::ostringstream oss;
@@ -3431,8 +3431,8 @@ TEST(LoopNest, FlattenSimpleLoopNest3D) {
 
   std::vector<For*> loops = {for3, for2, for1};
   For* flattened = nullptr;
-  bool success = LoopNest::flatten(loops, &flattened);
-  ASSERT_TRUE(success);
+  ASSERT_TRUE(LoopNest::flatten(loops, &flattened));
+  ASSERT_EQ(flattened, loops.front());
 
   auto result = IRSimplifier::simplify(flattened);
   std::ostringstream oss;
@@ -3481,8 +3481,8 @@ TEST(LoopNest, FlattenLoopNestAfterNormalize) {
 
   std::vector<For*> loops = {outer_for, inner_for};
   For* flattened = nullptr;
-  bool success = LoopNest::flatten(loops, &flattened);
-  ASSERT_TRUE(success);
+  ASSERT_TRUE(LoopNest::flatten(loops, &flattened));
+  ASSERT_EQ(flattened, loops.front());
 
   auto result = IRSimplifier::simplify(flattened);
   std::ostringstream oss;
@@ -3534,8 +3534,8 @@ TEST(LoopNest, FlattenLoopNestWithNonLiteralConstantBounds) {
 
   std::vector<For*> loops = {outer_for, inner_for};
   For* flattened = nullptr;
-  bool success = LoopNest::flatten(loops, &flattened);
-  ASSERT_TRUE(success);
+  ASSERT_TRUE(LoopNest::flatten(loops, &flattened));
+  ASSERT_EQ(flattened, loops.front());
 
   auto result = IRSimplifier::simplify(flattened);
   checkIR(result, R"IR(
@@ -3584,20 +3584,16 @@ TEST(LoopNest, FlattenImperfectLoopNest) {
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       10,
       Block::make({Store::make(a_buf, {i, i}, 0), inner_for}));
-  Block::make({outer_for});
+  auto par = Block::make({outer_for});
+  HashProvider hasher;
+  auto hash_before = hasher.hash(par);
 
   std::vector<For*> loops = {outer_for, inner_for};
   For* flattened = nullptr;
-  bool success = LoopNest::flatten(loops, &flattened);
-  ASSERT_FALSE(success);
-
-  auto result = IRSimplifier::simplify(flattened);
-  checkIR(result, R"IR(
-        # CHECK: for (int i = 0; i < 10; i++) {
-        # CHECK-NEXT:   A[i, i] =
-        # CHECK-NEXT:   for (int j = 0; j < 15; j++) {
-        # CHECK-NEXT:     A[i, j] =
-      )IR");
+  ASSERT_FALSE(LoopNest::flatten(loops, &flattened));
+  ASSERT_EQ(flattened, nullptr);
+  auto hash_after = hasher.hash(par);
+  ASSERT_EQ(hash_before, hash_after);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -3626,20 +3622,16 @@ TEST(LoopNest, FlattenReductionLoopNest) {
   auto outer_for =
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       For::make(i, 0, 10, Block::make({Store::make(s_buf, {i}, 0), inner_for}));
-  Block::make({outer_for});
+  auto par = Block::make({outer_for});
+  HashProvider hasher;
+  auto hash_before = hasher.hash(par);
 
   std::vector<For*> loops = {outer_for, inner_for};
   For* flattened = nullptr;
-  bool success = LoopNest::flatten(loops, &flattened);
-  ASSERT_FALSE(success);
-
-  auto result = IRSimplifier::simplify(flattened);
-  checkIR(result, R"IR(
-        # CHECK: for (int i = 0; i < 10; i++) {
-        # CHECK-NEXT:   S[i] =
-        # CHECK-NEXT:   for (int j = 0; j < 15; j++) {
-        # CHECK-NEXT:     S[i] = (S[i]) + (A[i, j])
-      )IR");
+  ASSERT_FALSE(LoopNest::flatten(loops, &flattened));
+  ASSERT_EQ(flattened, nullptr);
+  auto hash_after = hasher.hash(par);
+  ASSERT_EQ(hash_before, hash_after);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -3652,19 +3644,15 @@ TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
   Placeholder b(BufHandle("b", {m, n}, kFloat));
   Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}});
   LoopNest loop({c});
-  auto loops = loop.getAllLoopNestsWritingToBuf(c->buf())[0];
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* flattened;
-  bool success = LoopNest::flatten(loops, &flattened);
-  ASSERT_FALSE(success);
+  HashProvider hasher;
+  auto hash_before = hasher.hash(loop.root_stmt());
 
-  auto result = IRSimplifier::simplify(flattened);
-  checkIR(result, R"IR(
-        # CHECK: for (int m = 0; m < 3; m++) {
-        # CHECK-NEXT:   sum[m] =
-        # CHECK-NEXT:   for (int n = 0; n < 7; n++) {
-        # CHECK-NEXT:     sum[m] =
-      )IR");
+  auto loops = loop.getAllLoopNestsWritingToBuf(c->buf())[1];
+  For* flattened = nullptr;
+  ASSERT_FALSE(LoopNest::flatten(loops, &flattened));
+  ASSERT_EQ(flattened, nullptr);
+  auto hash_after = hasher.hash(loop.root_stmt());
+  ASSERT_EQ(hash_before, hash_after);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -3701,19 +3689,16 @@ TEST(LoopNest, FlattenIncorrectLoopsAsInput) {
   auto inner_for2 = For::make(y, 0, 5, for_body2);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
-  Block::make({outer_for1, outer_for2});
+  auto par = Block::make({outer_for1, outer_for2});
+  HashProvider hasher;
+  auto hash_before = hasher.hash(par);
 
   std::vector<For*> loops = {outer_for1, inner_for2};
   For* flattened = nullptr;
-  bool success = LoopNest::flatten(loops, &flattened);
-  ASSERT_FALSE(success);
-
-  auto result = IRSimplifier::simplify(flattened);
-  checkIR(result, R"IR(
-        # CHECK: for (int i = 0; i < 10; i++) {
-        # CHECK-NEXT:   for (int j = 0; j < 5; j++) {
-        # CHECK-NEXT:     A[i, j] = i * j
-      )IR");
+  ASSERT_FALSE(LoopNest::flatten(loops, &flattened));
+  ASSERT_EQ(flattened, nullptr);
+  auto hash_after = hasher.hash(par);
+  ASSERT_EQ(hash_before, hash_after);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
