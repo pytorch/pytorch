@@ -1,4 +1,5 @@
 #pragma once
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <assert.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <fstream>
@@ -19,6 +20,7 @@ struct TORCH_API InterpreterSession {
       InterpreterManager* manager) noexcept
       : impl_(impl), manager_(manager) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Obj self; // when retreived from a PythonMovable this will be set.
   InterpreterSession(InterpreterSession&&) noexcept = default;
   ~InterpreterSession();
@@ -73,8 +75,10 @@ class TORCH_API Interpreter {
 struct Package;
 
 struct TORCH_API LoadBalancer {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   LoadBalancer(size_t n) : uses_(new uint64_t[8 * n]), allocated_(n), n_(n) {
     // 8*... to avoid false sharing of atomics on the same cache line
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     memset(uses_.get(), 0, 8 * n_ * sizeof(uint64_t));
   }
   void setResourceLimit(size_t n) {
@@ -85,6 +89,7 @@ struct TORCH_API LoadBalancer {
   void free(int where);
 
  private:
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   std::unique_ptr<uint64_t[]>
       uses_; // the approximate count of the number of users of interpreter
   size_t allocated_;
@@ -137,6 +142,7 @@ struct TORCH_API InterpreterManager {
 struct TORCH_API ReplicatedObjImpl {
   ReplicatedObjImpl(
       size_t object_id,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       PickledObject data,
       InterpreterManager* manager)
       : object_id_(object_id), data_(data), manager_(manager) {}
