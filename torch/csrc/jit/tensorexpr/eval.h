@@ -23,9 +23,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-DECLARE_TRIGGER(simple_ir_eval_executed);
-
 class Value {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)

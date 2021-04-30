@@ -52,13 +52,9 @@ C10_DEFINE_bool(
     false,
     "Use fast (but slightly less accurate) implementations of tanh and sigmoid");
 
-DEFINE_TRIGGER(llvm_codegen_created);
-DEFINE_TRIGGER(llvm_codegen_executed);
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-DEFINE_TRIGGER(llvm_codegen_parallel_dispatched);
 namespace {
 
 llvm::CmpInst::Predicate llvm_comparison_predicate(
@@ -284,7 +280,6 @@ void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
       callee(index, packed_data);
     }
   });
-  USE_TRIGGER(llvm_codegen_parallel_dispatched);
 }
 
 } // namespace tensorexpr
@@ -342,7 +337,6 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
     argv[i] = argToPtr(bufferArg, callArg);
   }
   value<float>(argv.data());
-  USE_TRIGGER(llvm_codegen_executed);
 }
 
 at::Tensor LLVMCodeGen::empty_strided(
@@ -434,8 +428,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   jit_->addModule(std::move(module_), std::move(context_));
   auto sym = jit_->findSymbol("wrapper");
   kernelAddress_ = assertSuccess(sym.getAddress());
-
-  USE_TRIGGER(llvm_codegen_created);
 }
 
 llvm::LLVMContext& LLVMCodeGenImpl::getContext() {

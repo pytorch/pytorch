@@ -593,14 +593,6 @@ void initJITBindings(PyObject* module) {
             return tryToInferType(std::move(obj));
           })
       .def(
-          "_jit_get_trigger_value",
-          [](const std::string& trigger_name) -> int {
-            using namespace torch::jit::tensorexpr;
-            ExecutionTrigger* trigger =
-                ExecutionTriggerList::GetInstance().FindByName(trigger_name);
-            return trigger->value();
-          })
-      .def(
           "_jit_get_te_cuda_pointwise_loop_levels",
           []() -> int {
             using namespace torch::jit::tensorexpr;

@@ -1581,7 +1581,6 @@ TEST(LLVM, SimpleParallel) {
   for (int test_cfg = 0; test_cfg < 4; test_cfg++) {
     // Compute a simple operation, and try all loop-axis combination to be
     // parallel or sequential.
-    ExecutionCounter counter(llvm_codegen_parallel_dispatched);
     KernelScope kernel_scope;
     const int M = 4;
     const int N = 6;
@@ -1614,12 +1613,6 @@ TEST(LLVM, SimpleParallel) {
       }
     }
     ExpectAllNear(f_v, f_ref, 1e-5);
-    int count = counter.elapsed_value();
-    if (test_cfg == 0) {
-      ASSERT_EQ(count, 0);
-    } else {
-      ASSERT_GT(count, 0);
-    }
   }
 }
 
@@ -1629,7 +1622,6 @@ TEST(LLVM, CompositeParallel) {
   // Compute a composite operation, and try all loop-axis combination to be
   // parallel or sequential.
   for (int test_cfg = 0; test_cfg < test_count; test_cfg++) {
-    ExecutionCounter counter(llvm_codegen_parallel_dispatched);
     KernelScope kernel_scope;
     int M = 5;
     int N = 7;
@@ -1690,12 +1682,6 @@ TEST(LLVM, CompositeParallel) {
       }
     }
     ExpectAllNear(t4_v, t4_ref, 1e-5);
-    int count = counter.elapsed_value();
-    if (test_cfg == 0) {
-      ASSERT_EQ(count, 0);
-    } else {
-      ASSERT_GT(count, 0);
-    }
   }
 }
 

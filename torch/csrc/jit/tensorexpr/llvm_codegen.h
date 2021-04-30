@@ -15,8 +15,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-DECLARE_TRIGGER(llvm_codegen_parallel_dispatched);
-
 class LLVMCodeGenImpl;
 
 class TORCH_API LLVMCodeGen : public CodeGen {

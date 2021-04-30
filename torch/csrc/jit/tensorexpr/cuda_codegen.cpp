@@ -17,9 +17,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-DEFINE_TRIGGER(cuda_codegen_created);
-DEFINE_TRIGGER(cuda_codegen_executed);
-
 // A RAII wrapper to manage a variable and name pair in the look-up table.
 // TODO: move this to a more shared place.
 class ScopedVarName {
@@ -1067,7 +1064,6 @@ void CudaCodeGen::Initialize() {
       ")");
 
   CompileToNVRTC(oss_.str(), func_name);
-  USE_TRIGGER(cuda_codegen_created);
 }
 
 void CudaCodeGen::call(const std::vector<CallArg>& args) {
@@ -1181,7 +1177,6 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
       stream,
       ptr_to_args.data(),
       nullptr));
-  USE_TRIGGER(cuda_codegen_executed);
 
   if (prior_device != this->device().index()) {
     at::cuda::set_device(prior_device);
