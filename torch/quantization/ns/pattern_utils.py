@@ -12,7 +12,6 @@ from torch.quantization.fx.pattern_utils import get_default_quant_patterns
 from typing import Dict, Tuple, Set, Callable, Any, Union
 
 
-
 def get_type_a_related_to_b(
     base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]],
 ) -> Set[Tuple[NSNodeTargetType, NSNodeTargetType]]:
