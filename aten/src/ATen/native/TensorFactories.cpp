@@ -48,7 +48,9 @@ void window_function_checks(
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(complex_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(polar_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -858,6 +860,7 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
 
   for(int64_t i = 0; i < n - 1; i++)
   {
+    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
     int64_t z = generator->random() % (n-i);
     scalar_t sav = r__data[i*r__stride_0];
     r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
@@ -879,6 +882,10 @@ Tensor randperm(int64_t n, c10::optional<Generator> generator,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
+  if (!dtype.has_value()) {
+    dtype = ScalarType::Long;
+  }
+
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
@@ -937,6 +944,10 @@ Tensor range(
 Tensor tril_indices_cpu(
     int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  if (!dtype_opt.has_value()) {
+    dtype_opt = ScalarType::Long;
+  }
+
   check_args(row, col, layout_opt);
 
   auto tril_size = get_tril_size(row, col, offset);
@@ -983,6 +994,10 @@ Tensor tril_indices_cpu(
 Tensor triu_indices_cpu(
     int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  if (!dtype_opt.has_value()) {
+    dtype_opt = ScalarType::Long;
+  }
+
   check_args(row, col, layout_opt);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
@@ -1110,6 +1125,7 @@ Tensor bartlett_window(
     window_length += 1;
   }
   auto window = native::arange(window_length, dtype, layout, device, pin_memory)
+                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                     .mul_(2. / static_cast<double>(window_length - 1));
   const int64_t first_half_size = ((window_length - 1) >> 1) + 1;
   window.narrow(0, first_half_size, window_length - first_half_size).mul_(-1).add_(2);
@@ -1151,6 +1167,7 @@ Tensor blackman_window(
   auto window =
       native::arange(window_length, dtype, layout, device, pin_memory)
           .mul_(c10::pi<double> / static_cast<double>(window_length - 1));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   window = window.mul(4).cos_().mul_(0.08) - window.mul(2).cos_().mul_(0.5) + 0.42;
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
@@ -1176,6 +1193,7 @@ Tensor hamming_window(
   return native::hamming_window(
       window_length,
       periodic,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       /*alpha=*/0.54,
       dtype,
       layout,
@@ -1192,6 +1210,7 @@ Tensor hamming_window(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   return native::hamming_window(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       window_length, periodic, alpha, /*beta=*/0.46, dtype, layout, device, pin_memory);
 }
 
@@ -1218,6 +1237,7 @@ Tensor hamming_window(
     window_length += 1;
   }
   auto window = native::arange(window_length, dtype, layout, device, pin_memory);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   window.mul_(c10::pi<double> * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
@@ -1244,6 +1264,7 @@ Tensor hann_window(
 
   window_function_checks("hann_window", options, window_length);
   return native::hamming_window(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, dtype, layout, device, pin_memory);
 }
 
@@ -1257,6 +1278,7 @@ Tensor kaiser_window(int64_t window_length,
   return native::kaiser_window(
       window_length,
       /*periodic=*/true,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       /*beta=*/12.0,
       dtype,
       layout,
@@ -1269,6 +1291,7 @@ Tensor kaiser_window(int64_t window_length, bool periodic,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return native::kaiser_window(window_length, periodic, /*beta=*/12.0, dtype, layout, device, pin_memory);
 }
 
@@ -1431,6 +1454,7 @@ Tensor ones(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   return native::full(
@@ -1498,6 +1522,7 @@ Tensor rand(
 }
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(kaiser_window_stub);
 
 } // namespace native
