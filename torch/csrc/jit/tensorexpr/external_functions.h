@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <cstdint>
 
