@@ -27,13 +27,13 @@ class EnableVmapFallbackWarnings:
 
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
-        with self.assertRaisesRegex(ValueError, "got type <class 'float'> as the return"):
+        with self.assertRaisesRegex(ValueError, "got type <class 'float'> as a return"):
             output = vmap(lambda x: 3.14)(torch.ones(3))
 
         def multiple_outputs(x):
             return x, 3
 
-        with self.assertRaisesRegex(ValueError, "got type <class 'int'> for return 1"):
+        with self.assertRaisesRegex(ValueError, "got type <class 'int'> as a return"):
             vmap(multiple_outputs)(torch.ones(3))
 
     def test_different_map_dim_size_raises(self):
@@ -90,7 +90,7 @@ class TestVmapAPI(TestCase):
         self.assertEqual(outputs[0], x * x)
         self.assertEqual(outputs[1], x * x * x)
 
-    def test_multiple_outputs_error_cases(self):
+    def test_multiple_outputs(self):
         # This is the same thing as
         # def returns_tuple_of_tensors(x):
         #     return x, x
@@ -107,13 +107,8 @@ class TestVmapAPI(TestCase):
 
         # should not throw
         vmap(returns_tuple_of_tensors)(x)
-
-        # jax supports these, but we don't yet
-        msg = "must only return Tensors, got type <class 'list'>"
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(returns_list_of_two_tensors)(x)
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(returns_list_of_one_tensor)(x)
+        vmap(returns_list_of_two_tensors)(x)
+        vmap(returns_list_of_one_tensor)(x)
 
     def test_nested_with_same_map_dim(self):
         x = torch.randn(2, 3, 5)
@@ -267,8 +262,59 @@ class TestVmapAPI(TestCase):
         result = vmap(foo, out_dims=(1,))(tensor)
         self.assertEqual(result, expected)
 
-    def test_out_dims_must_be_int_or_tuple_of_int_err_msg(self):
-        msg = '`out_dims` must be an int or a tuple of int'
+    def test_pytree_returns(self):
+        x = torch.randn(2, 3)
+
+        def f(x):
+            y = x.sin()
+            return y, (y, y), [y, (y, y)]
+
+        y0, (y1, y2), (y3, (y4, y5)) = vmap(f)(x)
+        self.assertEqual(y0, x.sin())
+        self.assertEqual(y0, y1)
+        self.assertEqual(y2, y1)
+        self.assertEqual(y2, y3)
+        self.assertEqual(y4, y3)
+        self.assertEqual(y5, y4)
+
+    def test_pytree_returns_outdims(self):
+        x = torch.randn(2, 3)
+
+        def f(x):
+            y = x.sin()
+            return y, (y, y)
+
+        y0, (y1, y2) = vmap(f, out_dims=(0, (0, 1)))(x)
+        self.assertEqual(y0, x.sin())
+        self.assertEqual(y1, x.sin())
+        self.assertEqual(y2, x.sin().t())
+
+    def test_pytree_returns_broadcast_simple(self):
+        x = torch.randn(2, 3)
+
+        def f(x):
+            y = x.sin()
+            return y, (y, y)
+
+        y0, (y1, y2) = vmap(f, out_dims=1)(x)
+        self.assertEqual(y0, x.sin().t())
+        self.assertEqual(y1, y0)
+        self.assertEqual(y2, y0)
+
+    def test_pytree_returns_broadcast_nested(self):
+        x = torch.randn(2, 3)
+
+        def f(x):
+            y = x.sin()
+            return y, (y, y)
+
+        y0, (y1, y2) = vmap(f, out_dims=(0, 1))(x)
+        self.assertEqual(y0, x.sin())
+        self.assertEqual(y1, y0.t())
+        self.assertEqual(y2, y0.t())
+
+    def test_out_dims_must_be_int_or_collection_of_int_err_msg(self):
+        msg = 'must be an int or a python collection of ints'
         tensor = torch.randn(2, 3)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(lambda x: x, out_dims='lol')(tensor)
@@ -280,7 +326,7 @@ class TestVmapAPI(TestCase):
             vmap(lambda x: x, out_dims=(None,))(tensor)
 
     def test_out_dims_and_num_outputs_mismatch_err_msg(self):
-        msg = '`out_dims` must have one dim per output'
+        msg = 'not compatible'
         x = torch.randn(2, 3, 5)
 
         # Too many out_dims
@@ -2639,9 +2685,9 @@ class TestVmapOperators(TestCase):
                 self.assertEqual(loop_out, batched_out)
 
 
-instantiate_device_type_tests(TestVmapOperators, globals())
-
 only_for = ("cpu", "cuda")
+instantiate_device_type_tests(TestVmapOperators, globals(), only_for=only_for)
+
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
     globals(),

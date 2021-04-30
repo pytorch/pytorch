@@ -4,6 +4,7 @@ import collections
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from .pytree_hacks import tree_map, tree_map_
 import gc
 
 from .vmap import vmap
@@ -15,16 +16,6 @@ from functorch._C import (
     _grad_increment_nesting,
     _grad_decrement_nesting,
 )
-
-# TODO: replace this with tree_map from core
-def tree_map(fn, pytree):
-    flat_args, spec = tree_flatten(pytree)
-    return tree_unflatten([fn(arg) for arg in flat_args], spec)
-
-def tree_map_(fn_, pytree):
-    flat_args, _ = tree_flatten(pytree)
-    [fn_(arg) for arg in flat_args]
-    return pytree
 
 # TODO: replace all of these with pytrees
 def _create_differentiable(tensor_or_tuple_of_tensors, level=None):
