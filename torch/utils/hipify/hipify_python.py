@@ -811,7 +811,7 @@ def preprocessor(
 
     # NOTE: No longer needed; compiler now handles extern __shared__ correctly without special syntax.
     # Replace the extern __shared__
-    #output_source = replace_extern_shared(output_source)
+    # output_source = replace_extern_shared(output_source)
 
     # Don't write out identical hipified files for extensions if dirpath has not changed
     if (
