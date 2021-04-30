@@ -770,6 +770,15 @@ if(HAVE_SOVERSION)
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
+
+if(CMAKE_COMPILER_IS_GNUCXX AND BUILD_LIBTORCH_CPU_WITH_DEBUG)
+  # To enable debug fission we need to build libtorch_cpu with debug info on,
+  # but this increases link time and peak memory usage if we use the
+  # REL_WITH_DEB_INFO env var since that enables it for everything, but it's
+  # only really necessary for libtorch_cpu.
+  target_compile_options(torch_cpu PRIVATE "-g")
+endif()
+
 if(USE_LLVM AND LLVM_FOUND)
   llvm_map_components_to_libnames(LLVM_LINK_LIBS
     support core analysis executionengine instcombine
@@ -1697,8 +1706,9 @@ if(BUILD_PYTHON)
   # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
       import os
-      from distutils import sysconfig
-      print(sysconfig.get_python_lib(prefix=''))
+      import sysconfig
+      relative_site_packages = sysconfig.get_path('purelib').replace(sysconfig.get_path('data'), '').lstrip(os.path.sep)
+      print(relative_site_packages)
   ")
   file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
   set(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
@@ -1709,9 +1719,21 @@ if(BUILD_PYTHON)
   # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,
   # fallback to ".pyd" if windows and ".so" for all others.
   pycmd(PY_EXT_SUFFIX "
-      from distutils import sysconfig
-      ext_suffix = sysconfig.get_config_var('EXT_SUFFIX')
-      print(ext_suffix if ext_suffix else '')
+      def get_ext_suffix():
+          import sys
+          if sys.version_info < (3, 8) and sys.platform == 'win32':
+              # Workaround for https://bugs.python.org/issue39825
+              import _imp
+              return _imp.extension_suffixes()[0]
+          else:
+              import sysconfig
+              return sysconfig.get_config_var('EXT_SUFFIX')
+
+      suffix = get_ext_suffix()
+      if suffix is not None:
+          print(suffix)
+      else:
+          print()
   ")
   if("${PY_EXT_SUFFIX}" STREQUAL "")
     if(MSVC)
