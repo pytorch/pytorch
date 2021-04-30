@@ -250,7 +250,7 @@ class ComputeBlobRecyclingForDag {
     bool had_changes = true;
     while (had_changes) {
       had_changes = false;
-      for (const auto mapped_blob : mapping_) {
+      for (const auto& mapped_blob : mapping_) {
         if (has_key(renamed, mapped_blob.second) &&
             renamed[mapped_blob.second] != mapped_blob.second) {
           renamed[mapped_blob.first] = renamed[mapped_blob.second];
@@ -264,6 +264,7 @@ class ComputeBlobRecyclingForDag {
               << mapped_blobs_set.size() << " shared blobs.";
     if (floats_saved_ > 0) {
       LOG(INFO) << "Memonger saved approximately : "
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 << (floats_saved_ * 4.0 / 1024.0 / 1024.0) << " MB.";
     }
 
@@ -477,6 +478,7 @@ class ComputeBlobRecyclingForDag {
         std::push_heap(
             free_blobs->begin(),
             free_blobs->end(),
+            // NOLINTNEXTLINE(modernize-use-transparent-functors)
             std::greater<std::pair<int, string>>());
       }
     }
@@ -522,6 +524,7 @@ class ComputeBlobRecyclingForDag {
       return 0;
     }
     int size = 1;
+    // NOLINTNEXTLINE(modernize-loop-convert)
     for (size_t i = 0; i < blob_shapes_iter->second.size(); ++i) {
       size *= blob_shapes_iter->second[i];
     }
@@ -569,6 +572,7 @@ class ComputeBlobRecyclingForDag {
         std::pop_heap(
             free_blobs->begin(),
             free_blobs->end(),
+            // NOLINTNEXTLINE(modernize-use-transparent-functors)
             std::greater<std::pair<int, string>>());
         const auto cand_free_blob = free_blobs->back();
         free_blobs->pop_back();
@@ -584,6 +588,7 @@ class ComputeBlobRecyclingForDag {
         std::push_heap(
             free_blobs->begin(),
             free_blobs->end(),
+            // NOLINTNEXTLINE(modernize-use-transparent-functors)
             std::greater<std::pair<int, string>>());
       }
     } else {
