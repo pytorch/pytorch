@@ -593,7 +593,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
 
   return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm", [&] {
       if (!train) {
-        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, {}, {}, running_mean, running_var, train, eps);
+        auto save_mean = at::empty({0}, self.options());
+        auto save_var = at::empty({0}, self.options());
+        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, save_mean, save_var, running_mean, running_var, train, eps);
       } else {
         auto save_stats = batch_norm_cpu_update_stats_template<scalar_t, InvStd>(self, running_mean, running_var, momentum, eps);
         return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps);
