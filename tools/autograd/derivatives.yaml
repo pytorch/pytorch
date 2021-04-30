@@ -691,6 +691,16 @@
 - name: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
   self: grad * at::xlogy((self != 0), other)
 
+- name: special_xlog1py(Tensor self, Tensor other) -> Tensor
+  self: grad * other.log1p()
+  other: grad * self / (other + 1)
+
+- name: special_xlog1py.self_scalar(Scalar self, Tensor other) -> Tensor
+  other: grad * self / (other + 1)
+
+- name: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
+  self: grad * log1p(other.toDouble())
+
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
 
@@ -2051,3 +2061,6 @@
 
 - name: nonzero(Tensor self) -> Tensor
   output_differentiability: [False]
+
+- name: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False) -> Tensor
+  data: segment_reduce_backward(grad, result, data, lengths)
