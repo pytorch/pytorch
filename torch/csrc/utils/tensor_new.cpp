@@ -212,7 +212,7 @@ Tensor internal_new_from_data(
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
 
-  if (THPVariable_Check(data)) {
+  if (PyObject_IsInstance(data, THPVariableClass) == 1) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from a variable");
     // TODO: use MaybeOwned
     auto var = THPVariable_Unpack(data);
