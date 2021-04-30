@@ -15600,10 +15600,6 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                            output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
 
-
-    import pdb; pdb.set_trace()
-
-
     if variant_name != '':
         test_name = test_name + '_' + variant_name
 
@@ -15636,7 +15632,6 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                 # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),
                 #      so that we don't regress on autodiff support.
                 with disable_autodiff_subgraph_inlining():
-                    import pdb; pdb.set_trace()
                     script_fn = create_script_fn(self, name, 'nn_functional')
                     check_against_reference(self, script_fn, fn, output_process_fn,
                                             f_args_variable, kwargs_variable, no_grad=no_grad)
