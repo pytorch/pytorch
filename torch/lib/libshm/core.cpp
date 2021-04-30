@@ -37,6 +37,12 @@ void start_manager() {
     SYSCHECK_ERR_RETURN_NEG1(dup2(pipe_ends[1], 1)); // Replace stdout
     SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[1]));
     execl(manager_executable_path.c_str(), "torch_shm_manager", NULL);
+
+    std::string msg("ERROR: execl failed: ");
+    msg += strerror(errno);
+    msg += '\n';
+    write(1, msg.c_str(), msg.size());
+
     exit(1);
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[1]));
