@@ -483,7 +483,9 @@ void MomentsImpl(
     std::memset(var, 0, sizeof(T) * Y_size);
     return;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int rows;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int cols;
   if (utils::IsRowwiseReduce(ndim, X_dims, Y_dims, &rows, &cols)) {
     RowwiseMoments<T>(rows, cols, X, mean, var);
@@ -493,8 +495,11 @@ void MomentsImpl(
     ColwiseMoments<T>(rows, cols, X, mean, var);
     return;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int pre;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int mid;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int nxt;
   if (utils::IsBothEndsReduce(ndim, X_dims, Y_dims, &pre, &mid, &nxt)) {
     BothEndsMoments<T>(pre, mid, nxt, X, mean, var);
@@ -586,57 +591,77 @@ DELEGATE_GLOBAL_REDUCE_FUNCTION(std::int64_t, ReduceMax, maxCoeff)
     }                                                                      \
     Func##Impl<T>(ndim, X_dims, Y_dims, alpha, X, Y, context);             \
   }
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     float,
     ReduceMin,
     std::numeric_limits<float>::max(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     double,
     ReduceMin,
     std::numeric_limits<double>::max(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     std::int32_t,
     ReduceMin,
     std::numeric_limits<std::int32_t>::max(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     std::int64_t,
     ReduceMin,
     std::numeric_limits<std::int64_t>::max(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     float,
     ReduceMax,
     std::numeric_limits<float>::lowest(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     double,
     ReduceMax,
     std::numeric_limits<double>::lowest(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     std::int32_t,
     ReduceMax,
     std::numeric_limits<std::int32_t>::lowest(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     std::int64_t,
     ReduceMax,
     std::numeric_limits<std::int64_t>::lowest(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(float, ReduceSum, 0.0f, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(double, ReduceSum, 0.0, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(std::int32_t, ReduceSum, 0, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(std::int64_t, ReduceSum, 0LL, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(float, ReduceMean, 0.0f, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(double, ReduceMean, 0.0, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(float, ReduceL1, 0.0f, true)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(double, ReduceL1, 0.0, true)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(std::int32_t, ReduceL1, 0, true)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(std::int64_t, ReduceL1, 0LL, true)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(float, ReduceL2, 0.0f, true)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(double, ReduceL2, 0.0, true)
 #undef DELEGATE_REDUCE_FUNCTION
 

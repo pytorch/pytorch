@@ -135,7 +135,12 @@ class TestSparseCSR(TestCase):
             for index_dtype in [torch.int32, torch.int64]:
                 for dtype in torch.testing.floating_types():
                     printed.append("########## {}/{} ##########".format(dtype, index_dtype))
-                    x = self.genSparseCSRTensor(shape, nnz, device=device, dtype=torch.float32, index_dtype=torch.int64)
+                    crow_indices = [0, 2, 4]
+                    col_indices = [0, 1, 0, 1]
+                    values = [1, 2, 3, 4]
+                    x = torch.sparse_csr_tensor(torch.tensor(crow_indices, dtype=index_dtype),
+                                                    torch.tensor(col_indices, dtype=index_dtype),
+                                                    torch.tensor(values), dtype=dtype, device=device)
                     printed.append("# sparse tensor")
                     printed.append(str(x))
                     printed.append("# _crow_indices")
