@@ -5,7 +5,7 @@ from pathlib import Path
 
 pytorch_test_dri = Path(__file__).resolve().parents[1]
 
-# Script Module python source code
+# script_module_v4.ptl and script_module_v5.ptl source code
 # class TestModule(torch.nn.Module):
 #     def __init__(self, v):
 #         super().__init__()
@@ -24,13 +24,8 @@ pytorch_test_dri = Path(__file__).resolve().parents[1]
 class testVariousModelVersions(TestCase):
     def test_get_model_bytecode_version(self):
         script_module_v4 = pytorch_test_dri / "cpp" / "jit" / "script_module_v4.ptl"
-        script_module_v5 = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"
-
         version_v4 = _get_model_bytecode_version(script_module_v4)
-        version_v5 = _get_model_bytecode_version(script_module_v5)
-
         assert(version_v4 == 4)
-        assert(version_v5 == 5)
 
     def test_load_and_run_model(self):
         script_module_v4 = pytorch_test_dri / "cpp" / "jit" / "script_module_v4.ptl"
