@@ -1778,7 +1778,7 @@ class TestLinalg(TestCase):
             if should_error:
                 with self.assertRaises(ValueError):
                     np.linalg.norm(input_numpy, ord, dim, keepdim)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(IndexError):
                     torch.linalg.norm(input, ord, dim, keepdim)
             else:
                 result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)

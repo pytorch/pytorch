@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import scipy.special
 
 import unittest
 import math
@@ -2246,69 +2247,150 @@ class TestReductions(TestCase):
         expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
         test_against_np(expanded)
 
-    def test_reduction_empty(self, device):
-        fns_to_test = [
-            # name, function, identity
-            ('max', torch.max, None),
-            ('amax', torch.amax, None),
-            ('argmax', torch.argmax, None),
-            ('min', torch.min, None),
-            ('amin', torch.amin, None),
-            ('argmin', torch.argmin, None),
-            ('mode', torch.mode, None),
-            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs), None),
-            ('prod', torch.prod, 1.),
-            ('sum', torch.sum, 0.),
-            ('norm', torch.norm, 0.),
-            ('mean', torch.mean, nan),
-            ('var', torch.var, nan),
-            ('std', torch.std, nan),
-            ('logsumexp', torch.logsumexp, -inf),
+    # Tests to ensure that reduction functions employing comparison operators are usable when there
+    # exists a zero dimension (i.e. when the the tensors are empty) in the tensor. These tests specifically
+    # cater to functions where specifying the `dim` parameter is necessary.
+    def test_tensor_compare_ops_empty(self, device):
+        shape = (2, 0, 4)
+        master_input = torch.randn(shape, device=device)
+        np_input = np.empty(shape)
+        test_functions = [
+            ('amax', torch.amax, np.amax),
+            ('amin', torch.amin, np.amin),
+            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, np.max),
+            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, np.min),
+            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, np.median),
         ]
 
+        for name, fn, np_function in test_functions:
+            # Check if reduction happens along the specified dim with and without keepdim. Check with
+            # numpy to maintain compatibility with numpy functions.
+            error_msg = f"test function: {name}"
+            self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2), msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=2),
+                             fn(master_input, dim=2).cpu().numpy(), msg=error_msg)
+
+            self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=-1), msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=-1),
+                             fn(master_input, dim=-1).cpu().numpy(), msg=error_msg)
+
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True),
+                             msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=2, keepdims=True),
+                             fn(master_input, dim=2, keepdim=True).cpu().numpy(), msg=error_msg)
+
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=-1, keepdim=True),
+                             msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=-1, keepdims=True),
+                             fn(master_input, dim=-1, keepdim=True).cpu().numpy(), msg=error_msg)
+
+            # Check if function raises error on specified zero'd dimension as reduction dim.
+            self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input, dim=1))
+
+    # Tests to ensure that reduction of zero-dim tensors (i.e. empty tensors) using comparison operators
+    # raises an error if no `dim` parameter is specified. This exists separately from tests in
+    # test_tensot_compare_ops_empty because not specifying a `dim` parameter in the former tests does
+    # not throw errors. Also, checking the return type of argmax requires supplying a different dtype
+    # argument than that for the input tensor. There is also variantion in numpy testing.
+    def test_tensor_compare_ops_argmax_argmix_kthvalue_dim_empty(self, device):
+        shape = (2, 0, 4)
+        master_input = torch.randn(shape, device=device)
+        np_input = np.empty(shape)
+        test_functions = [
+            ('argmax', torch.argmax, {'dtype': torch.int64}, np.argmax),
+            ('argmin', torch.argmin, {'dtype': torch.int64}, np.argmin),
+            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values,
+             {}, lambda *args, **kwargs: np.partition(*args, 1, **kwargs))
+        ]
+
+        for name, fn, dtype, np_function in test_functions:
+            error_msg = f"test function: {name}"
+            self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=2), msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=2),
+                             fn(master_input, dim=2).cpu().numpy(), msg=error_msg)
+
+            self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=-1), msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=-1),
+                             fn(master_input, dim=-1).cpu().numpy(), msg=error_msg)
+
+            # keepdim variant does not exist for numpy
+            self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=2, keepdim=True),
+                             msg=error_msg)
+            self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=-1, keepdim=True),
+                             msg=error_msg)
+
+            # Check if function raises error on specified zero'd dimension as reduction dim.
+            self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input, dim=1))
+            if name != 'kthvalue':
+                self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input))
+
+    # Tests to ensure that reduction of zero-dim tensors (i.e. empty tensors) using math operators works when a
+    # non-zero dim is specified for the reduction and throws an error when the dim specified is 0. Although
+    # there is some repetition with test_tensor_compare_ops_optional_dim_empty and test_tensor_compare_ops_empty,
+    # these tests are kept separate since tests for math operators also require checking for correctness of the
+    # returned data using allclose() or isinf() which does not exists in the former tests.
+    def test_tensor_reduce_ops_empty(self, device):
+        shape = (2, 0, 4)
+        master_input = torch.randn(shape, device=device)
+        np_input = np.empty(shape)
+        test_functions = [
+            ('prod', torch.prod, 1., np.prod),
+            ('sum', torch.sum, 0., np.sum),
+            ('norm', torch.norm, 0., np.linalg.norm),
+            ('mean', torch.mean, nan, np.mean),
+            ('var', torch.var, nan, np.var),
+            ('std', torch.std, nan, np.std),
+            ('logsumexp', torch.logsumexp, -inf, scipy.special.logsumexp),
+        ]
+
+        for name, fn, return_value, np_function in test_functions:
+            # Check if reduction happens along the specified dimension.
+            error_msg = f"test function: {name}"
+            self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2), msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=2), fn(master_input, dim=2).cpu().numpy(), msg=error_msg)
+
+            self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=-1), msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=-1), fn(master_input, dim=-1).cpu().numpy(), msg=error_msg)
+
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True), msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=2, keepdims=True), fn(master_input, dim=2, keepdim=True),
+                             msg=error_msg)
+
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=-1, keepdim=True), msg=error_msg)
+            self.assertEqual(np_function(np_input, axis=-1, keepdims=True), fn(master_input, dim=-1, keepdim=True),
+                             msg=error_msg)
+
+            # Check if returned data is correct.
+            check_func = (torch.testing.assert_allclose if math.isnan(return_value) or math.isinf(return_value) else
+                          self.assertEqual)
+
+            check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=1), msg=error_msg)
+            check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=-2), msg=error_msg)
+            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=1, keepdim=True), msg=error_msg)
+            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=-2, keepdim=True), msg=error_msg)
+
+            if name != 'logsumexp':
+                # The scipy function does not work for reduction the zero dimension
+                check_func(np.float32(np_function(np_input, axis=1)), fn(master_input, dim=1).cpu().numpy(), msg=error_msg)
+                check_func(np.float32(np_function(np_input, axis=-2)), fn(master_input, dim=-2).cpu().numpy(), msg=error_msg)
+                check_func(np.float32(np_function(np_input, axis=1, keepdims=True)),
+                           fn(master_input, dim=1, keepdim=True).cpu().numpy(),
+                           msg=error_msg)
+                check_func(np.float32(np_function(np_input, axis=-2, keepdims=True)),
+                           fn(master_input, dim=-2, keepdim=True).cpu().numpy(),
+                           msg=error_msg)
+
+                # logsumexp throws a type error when not specifying dim so test separately.
+                check_func(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
+            else:
+                self.assertRaises(TypeError, lambda: fn(master_input))
+
+    # Tests to ensure that any() and all() functions work with zero-dim tensors. Kept separate from
+    # other tests for checking reduction with zero-dim tensors because these tests have significantly
+    # different testing behaviour than that used for the former tests.
+    def test_reduction_empty_any_all(self, device):
         shape = (2, 0, 4)
         x = torch.randn(shape, device=device)
-
-        for fn in [torch.max, torch.min]:
-            ident_err = 'operation does not have an identity'
-            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x))
-
-        # median and nanmedian have been updated to follow the new convention for empty tensors
-        # where it should only fail if the dimension being reduced has size 0.
-        for name, fn in [('median', torch.median), ('nanmedian', torch.nanmedian)]:
-            ident_err = 'does not have an identity'
-            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
-            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1, keepdim=True))
-            self.assertEqual(fn(x, dim=0)[0].shape, (shape[1], shape[2]))
-            self.assertEqual(fn(x, dim=0, keepdim=True)[0].shape, (1, shape[1], shape[2]))
-            self.assertEqual(fn(x, dim=2)[0].shape, (shape[0], shape[1]))
-            self.assertEqual(fn(x, dim=2, keepdim=True)[0].shape, (shape[0], shape[1], 1))
-
-        for item in fns_to_test:
-            name, fn, identity = item
-            if identity is None:
-                ident_err = 'does not have an identity'
-
-                # Reductions over non-zero dimensions should work even for empty tensors
-                # See https://github.com/pytorch/pytorch/issues/34907 for a discussion on this.
-                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2))
-                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2, keepdim=True))
-
-                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
-                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1, keepdim=True))
-            else:
-                self.assertEqual(torch.empty((2, 0), device=device), fn(x, dim=2))
-                self.assertEqual(torch.empty((2, 0, 1), device=device), fn(x, dim=2, keepdim=True))
-                # assertEqual doesn't work with inf, -inf, nan and two tensors.
-                check = (torch.testing.assert_allclose if math.isnan(identity) or math.isinf(identity) else
-                         self.assertEqual)
-                check(torch.full((2, 4), identity, device=device), fn(x, dim=1))
-                check(torch.full((2, 1, 4), identity, device=device), fn(x, dim=1, keepdim=True))
-                try:
-                    check(torch.full((), identity, device=device), fn(x))
-                except TypeError as err:
-                    # ignore if there is no allreduce.
-                    self.assertTrue('dim' in str(err))
 
         for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
                                                   include_bool=True, include_complex=True):
@@ -2318,9 +2400,9 @@ class TestReductions(TestCase):
             else:
                 out_dtype = torch.bool  # output of all/any is bool irrespective of input dtype
 
-            # any
             xb = x.to(dtype)
             yb = x.to(dtype)
+            # any
             self.assertEqual((2, 0), xb.any(2).shape)
             self.assertEqual((2, 0, 1), xb.any(2, keepdim=True).shape)
             self.assertEqual(torch.zeros((2, 4), device=device, dtype=out_dtype), xb.any(1))
@@ -2333,7 +2415,6 @@ class TestReductions(TestCase):
             self.assertEqual(torch.ones((2, 4), device=device, dtype=out_dtype), xb.all(1))
             self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=out_dtype), xb.all(1, keepdim=True))
             self.assertEqual(torch.ones((), device=device, dtype=out_dtype), xb.all())
-
 
 instantiate_device_type_tests(TestReductions, globals())
 
