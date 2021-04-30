@@ -282,6 +282,7 @@ TEST(ExternalCall, Addmm_float) {
   LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, Mat1, Mat2, Result});
 
   llvm_codegen.call({input_buf, mat1_buf, mat2_buf, result_buf});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 #endif
