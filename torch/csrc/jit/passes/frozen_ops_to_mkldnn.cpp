@@ -84,6 +84,7 @@ void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
   if (type->cast<TensorType>()) {
     return;
   }
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto t : type->containedTypes()) {
     TORCH_INTERNAL_ASSERT(!t->cast<TensorType>());
   }
@@ -146,6 +147,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
       continue;
     }
     Node* last = nullptr;
+    // NOLINTNEXTLINE(modernize-loop-convert)
     for (auto it = set.second->begin(); it != set.second->end(); it++) {
       Value* v = *it;
       auto k = v->node()->kind();
@@ -181,7 +183,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     auto k = node->kind();
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
         k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
-        k == prim::MKLDNNHardTanh) {
+        k == prim::MKLDNNHardTanh || k == aten::tanh) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -428,6 +430,7 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
 // and avoid overhead. avoiding dispatch overhead for other operators - relu,
 // add, etc - did not benchmark as speeding up models noticeably. the additional
 // overhead of `convolution` warrants the custom operator.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
         // XXX: this follows the schema convention of conv2d/conv3d, not
@@ -658,6 +661,7 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     }
 
     if (body_node->kind() == aten::relu6) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       hartanh_node_creator(body_node, 0., 6.);
       continue;
     }
@@ -844,11 +848,19 @@ class MKLDNNSubgraphSlicer {
       case aten::sigmoid:
       case aten::hardsigmoid:
       case aten::hardswish:
+      case aten::tanh:
+      case aten::batch_norm:
       // TODO: max_pool on mkldnn can be slower than in eager. ideally, we'd
       // only fuse it if we knew including max_pool lead to fewer layout
       // conversions. from initial testing including it speeds up models
       case aten::max_pool2d:
       case aten::max_pool3d:
+      case aten::avg_pool2d:
+      case aten::adaptive_avg_pool2d:
+      case aten::avg_pool3d:
+        // case aten::adaptive_max_pool2d: // return tuples which break fusion
+        // case aten::adaptive_max_pool3d: // return tuples which break fusion
+        // case aten::adaptive_avg_pool3d: // no ideep binding
         return true;
     }
 
@@ -992,6 +1004,7 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
           aten::sigmoid_,
           aten::hardsigmoid_,
           aten::hardtanh_,
+          aten::tanh_,
       };
       return mkldnn_ops.count(node_to_functionalize->kind()) != 0;
     });
