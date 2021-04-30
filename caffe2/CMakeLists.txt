@@ -523,6 +523,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
+      set_source_files_properties(../torch/csrc/jit/serialization/export.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+
       # TODO: Delete this when https://github.com/pytorch/pytorch/issues/35026 is fixed
       set_source_files_properties(../torch/csrc/autograd/record_function_ops.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     endif()
@@ -1743,6 +1746,11 @@ if(BUILD_PYTHON)
     endif()
   endif()
 
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+    set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+    set_source_files_properties(${TORCH_SRC_DIR}/../caffe2/operators/box_with_nms_limit_op.cc PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  endif()
   # Allow different install locations for libcaffe2
   # For setuptools installs (that all build Python), install libcaffe2 into
   # site-packages, alongside the torch libraries. The pybind11 library needs

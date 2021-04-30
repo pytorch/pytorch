@@ -287,6 +287,7 @@ cmake_dependent_option(
     USE_DEPLOY "Build embedded torch::deploy interpreter.  See torch/csrc/deploy/README.md for more info." OFF
     "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
+option(WERROR "Build with -Werror supported by the compiler" OFF)
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)

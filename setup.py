@@ -211,7 +211,7 @@ import sysconfig
 
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
-                                     check_env_flag, build_type)
+                                     build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.generate_torch_version import get_torch_version
 
@@ -731,8 +731,6 @@ def configure_extension_build():
             # https://bugs.llvm.org/show_bug.cgi?id=21629
             '-Wno-missing-braces',
         ]
-        if check_env_flag('WERROR'):
-            extra_compile_args.append('-Werror')
 
     library_dirs.append(lib_path)
 
