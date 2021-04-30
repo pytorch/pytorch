@@ -284,7 +284,7 @@ void setstateTuple(
 }
 
 // Check if the global static map of backend debug info
-// constaind debug info for this module and any of its children.
+// contains debug info for this module and any of its children.
 // If so combine all the maps together and return one.
 DelegateDebugInfoMapType getBackendDebugInfoMap(const Module& m) {
   DelegateDebugInfoMapType debug_map;

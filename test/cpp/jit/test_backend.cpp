@@ -199,7 +199,7 @@ TEST(BackendTestDebugInfo, TestCompiler) {
   ASSERT_THROWS_WITH_REGEX_MESSAGE(mlm.forward(inputs), error_pattern);
 }
 
-TEST(BackendTestDebugInfo, TestCompilerWithModuleHier) {
+TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithModuleHierarchy) {
   Module a("A");
   a.define(R"(
     def forward(self, x, y):
@@ -268,7 +268,9 @@ TEST(BackendTestDebugInfo, TestCompilerWithModuleHier) {
       "Module hierarchy:top(backend_with_compiler_demoLoweredModule).A0(A)");
 }
 
-TEST(BackendTestDebugInfo, TestCompilerWithModuleHier1) {
+TEST(
+    BackendTestDebugInfo,
+    TestExceptionStackForCompilerWithTwoLevelModuleHierarchy) {
   Module a("A");
   a.define(R"(
     def forward(self, x, y):
@@ -343,7 +345,7 @@ TEST(BackendTestDebugInfo, TestCompilerWithModuleHier1) {
       "Module hierarchy:top(backend_with_compiler_demoLoweredModule).B0(B).A0(A)");
 }
 
-TEST(BackendTestDebugInfo, TestCompilerWithLowerdSubModule) {
+TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithLoweredSubModule) {
   std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
   Module a("A");
   a.define(R"(
@@ -408,7 +410,9 @@ TEST(BackendTestDebugInfo, TestCompilerWithLowerdSubModule) {
       "Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule)");
 }
 
-TEST(BackendTestDebugInfo, TestCompilerWithDeepLowerdSubModule) {
+TEST(
+    BackendTestDebugInfo,
+    TestExceptionStackForCompilerWithSelectiveLoweredSubModule) {
   std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
   Module aa("AA");
   aa.define(R"(

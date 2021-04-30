@@ -82,6 +82,9 @@ Module codegen_backend_module(
           cloned_module, method_compile_spec),
       /*is_param=*/false);
 
+  // stop debug info recording.
+  debug_info_recorder.stopRecording();
+
   // This is for the method_compile_spec passed in to to_<backend> or
   // loaded from an exported model.
   loweredModule.register_attribute(
@@ -280,9 +283,6 @@ Module codegen_backend_module(
         "] is not available. Execution of this Module is still possible by "
         "saving and loading on a device where the backend is available.");
   }
-
-  // stop debug info recording.
-  debug_info_recorder.stopRecording();
 
   return loweredModule;
 }
