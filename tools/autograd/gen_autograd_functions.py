@@ -110,37 +110,59 @@ PY_GETSETDEF_STRUCT = CodeTemplate("""\
 # Getter templates
 GETTER_DEFINITION = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
   auto prop = static_cast<${op}*>(self->cdata.get())->${name};
   ${body}
+  END_HANDLE_TH_ERRORS
 }
 """)
 
 GETTER_DEFINITION_SAVEDVAR = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
   const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
   ${body}
+  END_HANDLE_TH_ERRORS
+}
+""")
+
+GETTER_DEFINITION_VEC_SAVEDVAR = CodeTemplate("""\
+PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
+  const auto *node = static_cast<${op}*>(self->cdata.get());
+  const auto& prop = node->${name}_;
+  if (node->${name}_released_) {
+    PyErr_SetString(PyExc_RuntimeError, ERR_BACKWARD_TWICE);
+    return nullptr;
+  }
+  ${body}
+  END_HANDLE_TH_ERRORS
 }
 """)
 
 GETTER_DEFINITION_OPT = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
   auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
   if (!opt_prop.has_value()) {
     Py_RETURN_NONE;
   }
   auto prop = opt_prop.value();
   ${body}
+  END_HANDLE_TH_ERRORS
 }
 """)
 
 GETTER_DEFINITION_OPT_ARRAYREF = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
   auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
   if (!opt_prop.list.has_value()) {
     Py_RETURN_NONE;
   }
   auto prop = opt_prop.list.value();
   ${body}
+  END_HANDLE_TH_ERRORS
 }
 """)
 
@@ -317,7 +339,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             release_variables.append(f'{name}_released_ = true;')
             unpack.append(f'auto {name} = unpack_list({name}_);')
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
-            getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
+            getter_definitions.append(GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
         elif type == ListCType(OptionalCType(BaseCType(tensorT))):
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
@@ -328,7 +350,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             release_variables.append(f'{name}_released_ = true;')
             unpack.append(f'auto {name} = unpack_opt_list({name}_);')
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
-            getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
+            getter_definitions.append(GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
         elif type == BaseCType(intArrayRefT):
             saved_variables.append(f'std::vector<int64_t> {name};')

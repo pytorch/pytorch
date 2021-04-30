@@ -1,5 +1,5 @@
 import torch
-from torch.fx import (  # type: ignore
+from torch.fx import (
     GraphModule,
     Proxy,
     map_arg
@@ -147,7 +147,7 @@ def maybe_insert_observer_for_special_module(
     assert modules is not None
     standalone_module_input_idxs = None
     if isinstance(quantize_handler, CustomModuleQuantizeHandler):
-        custom_module = modules[node.target]  # type: ignore
+        custom_module = modules[node.target]  # type: ignore[index]
         custom_module_class_mapping = prepare_custom_config_dict.get(
             "float_to_observed_custom_module_class", {})
         observed_custom_module_class = \
@@ -159,7 +159,7 @@ def maybe_insert_observer_for_special_module(
         setattr(modules[parent_name], name, observed_custom_module)
     elif isinstance(quantize_handler, StandaloneModuleQuantizeHandler):
         # observe standalone module
-        standalone_module = modules[node.target]  # type: ignore
+        standalone_module = modules[node.target]  # type: ignore[index]
         standalone_module_name_configs = prepare_custom_config_dict.get("standalone_module_name", [])
         standalone_module_class_configs = prepare_custom_config_dict.get("standalone_module_class", [])
         class_config_map = {x[0]: (x[1], x[2]) for x in standalone_module_class_configs}
@@ -169,17 +169,18 @@ def maybe_insert_observer_for_special_module(
         sm_qconfig_dict = {"": qconfig} if config[0] is None else config[0]
         sm_prepare_config_dict = {} if config[1] is None else config[1]
         prepare = \
-            torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore
+            torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = \
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
         standalone_module_input_idxs = \
-            observed_standalone_module._standalone_module_input_quantized_idxs.int().tolist()  # type: ignore
+            observed_standalone_module._standalone_module_input_quantized_idxs.int().tolist()
+        preserved_attributes = set(sm_prepare_config_dict.get("preserved_attributes", []))
         observed_standalone_module = ObservedStandaloneGraphModule(
-            observed_standalone_module, observed_standalone_module.graph)
+            observed_standalone_module, observed_standalone_module.graph, preserved_attributes)
         parent_name, name = _parent_name(node.target)
         setattr(modules[parent_name], name,
                 observed_standalone_module)
-        modules[node.target] = observed_standalone_module  # type: ignore
+        modules[node.target] = observed_standalone_module  # type: ignore[index]
     return standalone_module_input_idxs
 
 def insert_observer_for_output_of_the_node(
@@ -291,7 +292,7 @@ def insert_observer_for_output_of_the_node(
                         StandaloneModuleQuantizeHandler):
             assert node.op == "call_module"
             assert isinstance(node.target, str)
-            sm_out_qidxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore
+            sm_out_qidxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore[operator]
             output_is_quantized = 0 in sm_out_qidxs
 
             if output_is_quantized:
@@ -311,7 +312,7 @@ def insert_observer_for_output_of_the_node(
         # insert observer for input of standalone module
         if standalone_module_input_idxs is not None:
             for idx in standalone_module_input_idxs:
-                if node.args[idx].name not in observed_node_names_set:  # type: ignore
+                if node.args[idx].name not in observed_node_names_set:  # type: ignore[union-attr]
                     new_observer = qconfig.activation()
                     insert_observer(
                         node, new_observer, model,
@@ -485,6 +486,10 @@ def in_nodes(a: Argument, nodes: Set[Node]) -> bool:
         return all([in_nodes(arg, nodes) for arg in a])
     return False
 
+def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
+    return node.op == "call_module" and \
+        is_activation_post_process(modules[str(node.target)])
+
 def handle_copy_nodes(
         observed_graph: Graph, matches: Dict[str, MatchResult],
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
@@ -493,7 +498,7 @@ def handle_copy_nodes(
         modules: Dict[str, torch.nn.Module]):
     observed_nodes: Set[Node] = set()
     copy_nodes: Set[Node] = set()
-    non_tensor_input_binary_op_nodes: Set[Node] = set()
+    non_tensor_input_nodes: Set[Node] = set()
     unmatched_nodes: Set[Node] = set()
     actpp_to_remove: Set[Node] = set()
     env: Dict[Any, Any] = {}
@@ -507,7 +512,7 @@ def handle_copy_nodes(
         root_node, matched_nodes, pattern, quantize_handler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
 
-        if node.op == "call_module" and is_activation_post_process(modules[node.target]):
+        if is_activation_post_process_node(node, modules):
             # rule 1: if the input of a copy node is observed, we won't need to
             # insert observer for the output of copy node
             if in_nodes(node.args[0], copy_nodes) and in_nodes(node.args[0], observed_nodes):
@@ -515,24 +520,24 @@ def handle_copy_nodes(
                 # an observed copy node
                 actpp_to_remove.add(node)
 
-            # rule 2: if the previous node is a binary op without tensor input, we can remove the observer
-            if in_nodes(node.args[0], non_tensor_input_binary_op_nodes):
+            # rule 2: if the previous node is an op without tensor input, we can remove the observer
+            if in_nodes(node.args[0], non_tensor_input_nodes):
                 actpp_to_remove.add(node)
             observed_nodes.add(node)
 
         if root_node is node and qconfig is not None:
             if isinstance(quantize_handler, CopyNodeQuantizeHandler):
                 copy_nodes.add(node)
-                # if previous node is observed, the copy node will be observed as well
+                # rule 3: if previous node is observed, the copy node will be observed as well
                 if in_nodes(node.args[0], observed_nodes):
                     prev_node = node.args[0]
                     if (
                         isinstance(prev_node, Node) and
                         prev_node.op == "call_module" and
-                        is_activation_post_process(modules[prev_node.target])  # type: ignore
+                        is_activation_post_process(modules[prev_node.target])  # type: ignore[index]
                     ):
                         prev_prev_node = prev_node.args[0]
-                        # If previous node is unmatched, the input to copy node should not
+                        # rule 3.1: If previous node is unmatched, the input to copy node should not
                         # be observed. For example, in the pattern of
                         #
                         # user_node_unmatched -> obs -> copy_node_matched -> next_node
@@ -549,12 +554,24 @@ def handle_copy_nodes(
 
 
         if all_node_args_have_no_tensors(node, modules, cache_for_no_tensor_check):
-            non_tensor_input_binary_op_nodes.add(node)
+            non_tensor_input_nodes.add(node)
         if root_node is None and node.op != 'placeholder':
+            # rule 4: remove observer for getitem if it is followed by an unmatched node
+            if len(node.args) > 0:
+                maybe_observer_node = node.args[0]
+                if isinstance(maybe_observer_node, Node) and len(maybe_observer_node.args) > 0:
+                    observed_node = maybe_observer_node.args[0]
+                    if is_activation_post_process_node(maybe_observer_node, modules):
+                        assert isinstance(observed_node, Node)
+                        if (observed_node.op, observed_node.target) == ("call_function", operator.getitem):
+                            actpp_to_remove.add(maybe_observer_node)
             unmatched_nodes.add(node)
 
-        # rule 3: for special node, we'll just remove observer for its input
+        # rule 5: for special node, we'll just remove observer for its input
         special_nodes = [
+            # Note: observer placement for getitem is handled in multiple places
+            # since we may need to remove the observer for input and output of getitem
+            # the handling can be simplified if we support querying type of Proxy
             ("call_function", operator.getitem),
         ]
         if (node.op, node.target) in special_nodes:
@@ -639,7 +656,7 @@ def node_arg_is_weight(node: Node, arg: Any) -> bool:
             node.target in WEIGHT_INDEX_DICT:
         for i, node_arg in enumerate(node.args):
             if arg is node_arg and i in \
-                    WEIGHT_INDEX_DICT[node.target]:  # type: ignore
+                    WEIGHT_INDEX_DICT[node.target]:  # type: ignore[index]
                 return True
     return False
 
@@ -863,7 +880,8 @@ class Quantizer:
             self.modules)
 
         self.save_state(model)
-        model = ObservedGraphModule(model, observed_graph)
+        preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
+        model = ObservedGraphModule(model, observed_graph, preserved_attributes)
         if is_standalone_module:
             assert result_node is not None
             assert isinstance(result_node.args[0], Node), \
@@ -883,27 +901,27 @@ class Quantizer:
 
     def save_state(self, observed: GraphModule) -> None:
         observed._activation_post_process_map = \
-            self.activation_post_process_map  # type: ignore
+            self.activation_post_process_map  # type: ignore[assignment]
         observed._activation_post_process_indexes = \
-            self.activation_post_process_indexes  # type: ignore
-        observed._patterns = self.patterns  # type: ignore
-        observed._qconfig_map = self.qconfig_map  # type: ignore
+            self.activation_post_process_indexes  # type: ignore[assignment]
+        observed._patterns = self.patterns  # type: ignore[assignment]
+        observed._qconfig_map = self.qconfig_map  # type: ignore[assignment]
         observed._prepare_custom_config_dict = \
-            self.prepare_custom_config_dict  # type: ignore
-        observed._node_name_to_scope = self.node_name_to_scope  # type: ignore
+            self.prepare_custom_config_dict  # type: ignore[assignment]
+        observed._node_name_to_scope = self.node_name_to_scope  # type: ignore[assignment]
 
     def restore_state(self, observed: GraphModule) -> None:
         assert is_observed_module(observed), \
             'incoming model must be produced by prepare_fx'
         self.activation_post_process_map = \
-            observed._activation_post_process_map  # type: ignore
+            observed._activation_post_process_map  # type: ignore[assignment]
         self.activation_post_process_indexes = \
-            observed._activation_post_process_indexes  # type: ignore
-        self.patterns = observed._patterns  # type: ignore
-        self.qconfig_map = observed._qconfig_map  # type: ignore
+            observed._activation_post_process_indexes  # type: ignore[assignment]
+        self.patterns = observed._patterns  # type: ignore[assignment]
+        self.qconfig_map = observed._qconfig_map  # type: ignore[assignment]
         self.prepare_custom_config_dict = \
-            observed._prepare_custom_config_dict  # type: ignore
-        self.node_name_to_scope = observed._node_name_to_scope  # type: ignore
+            observed._prepare_custom_config_dict  # type: ignore[assignment]
+        self.node_name_to_scope = observed._node_name_to_scope  # type: ignore[assignment]
 
     def prepare(
             self,
@@ -1133,20 +1151,20 @@ class Quantizer:
                 else:
                     root_module = self.modules[""]
                     assert isinstance(prev_node, Node)
-                    observer_dtype: torch.dtype = observer_module.dtype  # type: ignore
+                    observer_dtype: torch.dtype = observer_module.dtype  # type: ignore[assignment]
                     quant_env[node.name] = (
-                        quantize_node(self, load_non_quantized(prev_node),  # type: ignore
-                                      observer_module, node, is_input=True),  # type: ignore
-                        observer_dtype)  # type: ignore
+                        quantize_node(self, load_non_quantized(prev_node),
+                                      observer_module, node, is_input=True),
+                        observer_dtype)
             else:
                 # replace activation post process with quantization ops
                 root_module = self.modules[""]
                 assert isinstance(node.args[0], Node)
-                dtype: torch.dtype = observer_module.dtype  # type: ignore
+                dtype: torch.dtype = observer_module.dtype  # type: ignore[assignment]
                 quant_env[node.name] = (
-                    quantize_node(self, load_non_quantized(node.args[0]),  # type: ignore
-                                  observer_module, node, is_input=True),  # type: ignore
-                    dtype)  # type: ignore
+                    quantize_node(self, load_non_quantized(node.args[0]),
+                                  observer_module, node, is_input=True),
+                    dtype)
 
         # additional state to override inputs to be quantized, if specified
         # by the user
@@ -1175,7 +1193,7 @@ class Quantizer:
                 is_observed_standalone_module_node = (
                     node.op == 'call_module' and
                     is_observed_standalone_module(
-                        self.modules[node.target])  # type: ignore
+                        self.modules[node.target])
                 )
                 if qconfig is None and not is_observed_standalone_module_node:
                     result = self.quantized_graph.node_copy(
@@ -1188,7 +1206,7 @@ class Quantizer:
                     # for non-standalone module, since _standalone_module_output_quantized_idxs
                     # is only available in observed standalone module
                     if is_observed_standalone_module_node:
-                        out_quant_idxs = self.modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore
+                        out_quant_idxs = self.modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore[operator] # noqa: B950
                         assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
                         quantized = 0 in out_quant_idxs
 
@@ -1258,7 +1276,8 @@ class Quantizer:
         # removes qconfig and activation_post_process modules
         if _remove_qconfig_flag:
             _remove_qconfig(model)
-        model = QuantizedGraphModule(model, act_post_process_removed_graph)
+        preserved_attributes = set(convert_custom_config_dict.get("preserved_attributes", []))
+        model = QuantizedGraphModule(model, act_post_process_removed_graph, preserved_attributes)
         return model
 
     # Trace back from the weight node util we hit getattr, reconstruct the
@@ -1310,7 +1329,7 @@ class Quantizer:
             else:
                 # copy other nodes
                 env[node.name] = folded_graph.node_copy(node, load_arg)
-        quantized = QuantizedGraphModule(quantized_root, folded_graph)
+        quantized = QuantizedGraphModule(quantized_root, folded_graph, quantized_root.preserved_attr_names)
         return quantized
 
     def _fold_quant_dequant(self, quantized: QuantizedGraphModule) -> QuantizedGraphModule:
@@ -1410,7 +1429,7 @@ class Quantizer:
                             if use_copy_node:
                                 # TODO(future PR): update the pattern to quantize
                                 # handler logic to take this into account.
-                                value = CopyNodeQuantizeHandler  # type: ignore
+                                value = CopyNodeQuantizeHandler  # type: ignore[assignment]
 
                             # to properly check for dtype support, we need to
                             # navigate to the base node of an add-relu or mul-relu
@@ -1458,7 +1477,7 @@ class Quantizer:
                             record_match(pattern, node, matched)
                             for n in matched:
                                 match_map[n.name] = (
-                                    node, matched, pattern, value(self, node),  # type: ignore
+                                    node, matched, pattern, value(self, node),  # type: ignore[operator]
                                     self.qconfig_map[n.name])
                                 all_matched.add(n.name)
                             # break after finding the first match
@@ -1477,8 +1496,8 @@ class Quantizer:
         def is_standalone_module(node_target):
             assert self.modules is not None
             return (
-                node_target in standalone_module_names or  # type: ignore
-                type(self.modules[node_target]) in standalone_module_classes  # type: ignore
+                node_target in standalone_module_names or  # type: ignore[operator]
+                type(self.modules[node_target]) in standalone_module_classes  # type: ignore[operator]
             )
 
         # add standalone modules to the match
