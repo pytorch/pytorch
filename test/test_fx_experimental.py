@@ -3,7 +3,8 @@ import operator
 import unittest
 import sys
 import math
-from typing import Callable, Dict, Union, List
+import numbers
+from typing import Callable, Dict, Union, List, Optional
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
@@ -29,7 +30,13 @@ from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.fx.operator_schemas import _torchscript_type_to_python_type, normalize_function, normalize_module
+from torch.fx.operator_schemas import (
+    _torchscript_type_to_python_type,
+    normalize_function,
+    normalize_module,
+    type_matches,
+    create_type_hint
+)
 from torch.fx.passes.shape_prop import extract_tensor_metadata, ShapeProp
 
 try:
@@ -1199,6 +1206,42 @@ class {test_classname}(torch.nn.Module):
         self.assertEqual(_count_matmuls(module), 2)
         self.assertEqual(_count_matmuls(opt_module), 2)
 
+    def test_type_matches(self):
+        should_be_equal = [
+            (int, type(5)),
+            (numbers.Number, type(5)),
+            (numbers.Number, type(5.0)),
+            (int, type(torch.float)),
+            (Union[int, float], type(5)),
+            (Union[int, float], type(5.0)),
+            (List[int], type(5)),
+            (List[int], create_type_hint([int, int])),
+            (List[int], create_type_hint((int, int))),
+            (List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
+            (List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.nn.Parameter])),
+            (torch.Tensor, torch.nn.Parameter),
+            (List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
+            (List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
+            (List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
+            (List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.nn.Parameter))),
+            (torch.Tensor, torch.nn.Parameter),
+            (List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
+            (List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
+            (Optional[List[torch.Tensor]], List[torch.Tensor]),
+            (Optional[List[int]], List[int]),
+        ]
+        for sig_type, arg_type in should_be_equal:
+            self.assertTrue(type_matches(sig_type, arg_type))
+
+        should_fail = [
+            (int, float),
+            (Union[int, float], str),
+            (List[torch.Tensor], List[int])
+        ]
+
+        for sig_type, arg_type in should_fail:
+            self.assertFalse(type_matches(sig_type, arg_type))
+
     @skipIfNoMkldnn
     def test_prepare_for_inference_cpu(self):
         import torch.nn as nn
@@ -1263,13 +1306,13 @@ class TestNormalizeOperators(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
+        op_skip = {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma', 'einsum'}
         # Unsupported input types
-        if op.name in {'index_put', '__getitem__', 'unfold', 'repeat', 'polygamma'}:
+        if op.name in op_skip:
             return
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {'stack', 'hstack', 'vstack', 'dstack',
                    'linalg.multi_dot'}
-        print(op.name)
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False
@@ -1307,6 +1350,13 @@ class TestNormalizeOperators(JitTestCase):
             # Test normalize_function by itself
             ref_out = op.op(*arg_values, **kwarg_values)
             norm_args_and_kwargs = normalize_function(op.op, arg_values, kwarg_values, arg_types, kwarg_types)
+            if norm_args_and_kwargs is None:
+                raise RuntimeError(
+                    """
+                    FX failed to normalize op - add the op to the op_skip list.
+                    A common reason is if your OpInfo was implemented with a lambda
+                    - otherwise, file an issue
+                    """)
             test_out = op.op(*norm_args_and_kwargs.args, **norm_args_and_kwargs.kwargs)
             self.assertEqual(test_out, ref_out)
 

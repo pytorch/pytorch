@@ -103,6 +103,7 @@ core_sources_common = [
     "torch/csrc/jit/runtime/slice_indices_adjust.cpp",
     "torch/csrc/jit/runtime/register_ops_utils.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
+    "torch/csrc/jit/serialization/import_read.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
@@ -986,8 +987,10 @@ aten_native_source_non_codegen_list = [
     "aten/src/TH/THTensorMath.cpp",
     "aten/src/TH/THTensorMoreMath.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
+    "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",
+    "aten/src/ATen/native/xnnpack/AveragePooling.cpp",
     "aten/src/ATen/native/xnnpack/Init.cpp",
     "aten/src/ATen/native/xnnpack/Linear.cpp",
     "aten/src/ATen/native/xnnpack/MaxPooling.cpp",
