@@ -75,11 +75,11 @@ class TORCH_API TensorExprKernel {
     return graph_;
   }
 
-  std::vector<ConstantDescr> getConstantDescriptors() const {
+  const std::vector<ConstantDescr>& getConstantDescriptors() const {
     return constants_;
   }
 
-  std::vector<CodeGen::BufferArg> getBufferArgs() const {
+  const std::vector<CodeGen::BufferArg>& getBufferArgs() const {
     return bufferArgs_;
   }
 
