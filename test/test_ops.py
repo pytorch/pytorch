@@ -459,12 +459,19 @@ class TestCommon(JitCommonTestCase):
         # - args_kw is the string of args/kwargs used to call the op, same as args_annot_kw but
         # without type annotations
         args = ["t0"]
+
+        def quote_strs(v):
+            if isinstance(v, str):
+                return f"'{v}'"
+
+            return str(v)
+
         args_annot_kw = args + \
             [f"s{i}: {type(v).__name__}" for i, v in enumerate(sample.args)] + \
-            [f"{k}: {type(v).__name__} = {v}" for k, v in sample.kwargs.items()]
+            [f"{k}: {type(v).__name__} = {quote_strs(v)}" for k, v in sample.kwargs.items()]
         args_kw = args + \
             [f"s{i}" for i in range(len(sample.args))] + \
-            [f"{k}={v}" for k, v in sample.kwargs.items()]
+            [f"{k}={quote_strs(v)}" for k, v in sample.kwargs.items()]
 
         # Prepare data for test tracing
         sample_args_kwargs = ()

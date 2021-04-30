@@ -255,6 +255,11 @@ if(USE_NUMPY)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
 endif()
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
+
 if(USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if(WIN32)
