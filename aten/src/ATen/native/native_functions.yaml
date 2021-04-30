@@ -561,6 +561,7 @@
   device_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function, method
   device_guard: False
   dispatch:
@@ -2962,17 +2963,20 @@
     CPU, CUDA: reciprocal_out
 
 - func: neg(Tensor self) -> Tensor
+  structured_delegate: neg.out
   variants: function, method
   dispatch:
-    CPU, CUDA, SparseCPU, SparseCUDA: neg
+    SparseCPU, SparseCUDA: neg_sparse
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: neg.out
   variants: function, method
   dispatch:
-    CPU, CUDA: neg_
     SparseCPU, SparseCUDA: neg_sparse_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: neg_out
     SparseCPU, SparseCUDA: neg_out_sparse
@@ -8448,6 +8452,43 @@
 - func: special_erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
+- func: special_xlog1py(Tensor self, Tensor other) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_xlog1py.out
+
+- func: special_xlog1py.self_scalar(Scalar self, Tensor other) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py
+
+- func: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py
+
+- func: special_xlog1py.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_xlog1py_out
+
+- func: special_xlog1py.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py_out
+
+- func: special_xlog1py.other_scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py_out
+
 - func: special_i0e(Tensor self) -> Tensor
   python_module: special
   variants: function
@@ -8966,3 +9007,8 @@
   variants: function
   dispatch:
     CPU, CUDA: segment_reduce_kernel
+
+- func: segment_reduce_backward(Tensor grad, Tensor output, Tensor data, *, Tensor? lengths=None) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: segment_reduce_backward_kernel
