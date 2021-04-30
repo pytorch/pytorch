@@ -139,6 +139,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
+CREATE_UNARY_TORCH_IMPL_FUNC(trunc)
 
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
