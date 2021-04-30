@@ -17,15 +17,19 @@ class SleepOp final : public OperatorBase {
   using OperatorBase::OperatorBase;
   bool Run(int /* unused */) override {
     StartAllObservers();
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::this_thread::sleep_for(std::chrono::milliseconds(3000));
     StopAllObservers();
     return true;
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SleepOp, SleepOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CUDA_OPERATOR(SleepOp, SleepOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SleepOp)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
@@ -52,6 +56,7 @@ unique_ptr<NetBase> CreateNetTestHelper(Workspace* ws) {
 }
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TimeObserverTest, Test3Seconds) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -62,6 +67,7 @@ TEST(TimeObserverTest, Test3Seconds) {
   net->AttachObserver(std::move(net_ob));
   net->Run();
   CAFFE_ENFORCE(ob);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
   LOG(INFO) << "av time children: " << ob->average_time_children();
   LOG(INFO) << "av time: " << ob->average_time();
   CAFFE_ENFORCE(ob->average_time_children() > 3000);

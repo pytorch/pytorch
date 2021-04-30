@@ -79,6 +79,7 @@ c10::List<std::string> splitNoneSeparator(const std::string& string) {
   return splits;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg(
     {OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::str(t elem) -> str"),
@@ -124,7 +125,9 @@ RegisterOperators reg(
          // implementation in torch/csrc/utils/tensor_list.cpp as possible.
          [](const Node* /*node*/) -> Operation {
            return [](Stack* stack) {
+             // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
              int elem_ty_val;
+             // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
              int dim_val;
              at::Tensor t;
 
@@ -199,6 +202,7 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA(
              "aten::__range_length(int lo, int hi, int step) -> int"),
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            int64_t lo, hi, step;
            pop(stack, lo, hi, step);
            // error handling when step_val = 0 during runtime
@@ -218,6 +222,7 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA(
              "aten::__derive_index(int index, int start, int step) -> int"),
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            int64_t index, start, step;
            pop(stack, index, start, step);
            push(stack, start + index * step);
@@ -278,6 +283,7 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::Bool.int(int a) -> bool"),
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            int64_t i;
            pop(stack, i);
            push(stack, (bool)i);
@@ -286,6 +292,7 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::Bool.float(float a) -> bool"),
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            double d;
            pop(stack, d);
            push(stack, (bool)d);
@@ -302,6 +309,7 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::Int.bool(bool a) -> int"),
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool b;
            pop(stack, b);
            push(stack, static_cast<int64_t>(b));
@@ -310,6 +318,7 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::Int.float(float a) -> int"),
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            double d;
            pop(stack, d);
            push(stack, static_cast<int64_t>(d));
@@ -332,6 +341,7 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA("aten::Int.str(str a) -> int"),
          [](Stack* stack) {
            auto s = pop(stack).toString();
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            std::string::size_type sz;
            int64_t val = static_cast<int64_t>(c10::stoll(s->string(), &sz));
            if (sz == s->string().size()) {
@@ -369,6 +379,7 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::Float.int(int a) -> float"),
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            int64_t i;
            pop(stack, i);
            push(stack, (float)i);
@@ -377,6 +388,7 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::Float.bool(bool a) -> float"),
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool b;
            pop(stack, b);
            push(stack, (float)b);
@@ -386,6 +398,7 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA("aten::Float.str(str a) -> float"),
          [](Stack* stack) {
            auto s = pop(stack).toString();
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            std::string::size_type sz;
            double b = c10::stod(s->string(), &sz);
            if (sz == s->string().size()) {
@@ -853,6 +866,7 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::pow.int_to_int(int a, int b) -> int"),
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            int64_t a, b;
            pop(stack, a, b);
            push(stack, pow(a, b));
@@ -1032,7 +1046,9 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA(
              "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool non_blocking;
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool copy;
            pop(stack, non_blocking, copy);
            c10::optional<at::ScalarType> scalarType =
@@ -1049,7 +1065,9 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA(
              "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
          [](Stack* stack) {
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool non_blocking;
+           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            bool copy;
            pop(stack, non_blocking, copy);
            c10::optional<at::ScalarType> scalarType =
@@ -1430,6 +1448,7 @@ void dictConstructFromList(Stack* stack) {
           dictCopy,                                                            \
           aliasAnalysisFromSchema())
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_dict_ops({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
@@ -1439,12 +1458,14 @@ RegisterOperators reg_dict_ops({
     CREATE_DICT_OPS("Tensor"),
 });
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
 // Convert an python index (which may be negative) into an index usable for a
 // C++ container
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   if (idx < 0) {
     // Handle negative indexing

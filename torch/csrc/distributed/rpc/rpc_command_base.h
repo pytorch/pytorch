@@ -20,6 +20,7 @@ class RpcCommandBase {
   virtual ~RpcCommandBase() = 0;
 };
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 inline RpcCommandBase::~RpcCommandBase() {}
 
 } // namespace rpc
