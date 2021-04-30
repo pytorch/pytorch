@@ -38,8 +38,8 @@ using ArgValue = c10::variant<
 template <class T>
 std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   std::vector<T> res;
-  for (const auto& idx : v) {
-    res.push_back(c10::get<T>(v[idx]));
+  for (const auto & x : v) {
+    res.push_back(c10::get<T>(x));
   }
   return res;
 }
