@@ -6,6 +6,9 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
+#if defined(C10_MOBILE) && defined(USE_XNNPACK)
+#include <ATen/native/xnnpack/Engine.h>
+#endif
 #include <ATen/core/DistributionsHelper.h>
 
 #include <c10/util/irange.h>
@@ -15,24 +18,43 @@ namespace at { namespace native {
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(elu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(elu_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softplus_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softplus_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_cpu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_backward_cpu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(threshold_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardtanh_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardsigmoid_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardsigmoid_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardswish_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardswish_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardshrink_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softshrink_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(shrink_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(leaky_relu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(leaky_relu_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_backward_stub);
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -136,6 +158,11 @@ Tensor elu_backward(
 }
 
 Tensor hardswish(const Tensor& self) {
+  #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+  if (xnnpack::use_hardswish(self)) {
+    return xnnpack::hardswish(self);
+  }
+  #endif
   Tensor result;
   auto iter = TensorIterator::unary_op(result, self);
   hardswish_stub(iter.device_type(), iter);
@@ -149,6 +176,12 @@ Tensor& hardswish_out(const Tensor& self, Tensor& result) {
 }
 
 Tensor& hardswish_(Tensor& self) {
+  #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+  if (xnnpack::use_hardswish(self)) {
+    xnnpack::hardswish_(self);
+    return self;
+  }
+  #endif
   auto iter = TensorIterator::unary_op(self, self);
   hardswish_stub(iter.device_type(), iter);
   return self;
@@ -174,6 +207,7 @@ Tensor selu(const Tensor & self) {
 }
 
 Tensor relu6(const Tensor & self) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return at::hardtanh(self, /*min_val=*/0, /*max_val=*/6);
 }
 
@@ -182,6 +216,7 @@ Tensor & selu_(Tensor & self) {
 }
 
 Tensor & relu6_(Tensor & self) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return at::hardtanh_(self, /*min_val=*/0, /*max_val=*/6);
 }
 
@@ -320,6 +355,7 @@ Tensor rrelu_with_noise_backward(
     bool is_result) {
   auto lower_tensor = scalar_to_tensor(lower);
   auto upper_tensor = scalar_to_tensor(upper);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
     return grad_output.mul(noise);
   } else {
@@ -428,6 +464,7 @@ void inline prelu_cpu_kernel_share_weights(
   auto input_data = input.data_ptr<scalar_t>();
   auto weight_val = weight.data_ptr<scalar_t>()[0];
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::parallel_for(0, input_numel, 1000, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
       scalar_t input_data_val = input_data[i];
@@ -468,6 +505,7 @@ void inline prelu_cpu_kernel_multi_weights(
       }
     }
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.numel() > 1000) {
     at::parallel_for(0, input_dim0_size, 0, loop);
   } else {
@@ -541,6 +579,7 @@ void inline prelu_cpu_backward_kernel_share_weights(
   auto input_grad_data = input_grad.data_ptr<scalar_t>();
   auto weight_grad_data = weight_grad.data_ptr<scalar_t>();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   scalar_t sum = at::parallel_reduce(0, input_numel, 1000, scalar_t(0),
       [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
     scalar_t partial_sum = ident;
@@ -595,6 +634,7 @@ void inline prelu_cpu_backward_kernel_multi_weights(
       }
     }
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.numel() > 1000) {
     at::parallel_for(0, input_dim0_size, 0, loop);
   } else {
@@ -745,7 +785,9 @@ Tensor infinitely_differentiable_gelu_backward(
     const Tensor& grad,
     const Tensor& self) {
   constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor pdf = (-0.5 * self * self).exp_();
   return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
 }
@@ -852,7 +894,9 @@ Tensor& log_sigmoid_backward_out_cpu(const Tensor& grad_output,
   return grad_input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GeluKernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GeluBackwardKernel);
 
 }}  // namespace at::native
