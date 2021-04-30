@@ -14,8 +14,6 @@ from typing import Tuple
 
 
 {jit_script_decorator}
-# WARNING: If the module is on a cuda device, any CPU tensor stored in a nested ``arg`` or `kwargs``,
-# will not be implicitly moved to the same cuda device.
 def _remote_forward(
     module_rref: RRef[module_interface_cls], device: str, is_device_map_set: bool, {arg_types}){arrow_and_return_type}:
     module = module_rref.local_value()

@@ -100,6 +100,11 @@ class _RemoteModule(nn.Module):
         ``def forward(input: Tensor) -> Tensor:`` and
         ``def forward_async(input: Tensor) -> Future[Tensor]:``.
 
+        .. note::
+            If the remote module is placed on cuda device,
+            any input CPU tensors will be automatically moved to the same cuda device,
+            and GPU tensors are returned over the wire according to the device map of the remote worker on TensorPipe RPC backend.
+
         Args:
             remote_device (str): Device on the destination worker where we'd like to place this module.
                 The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
