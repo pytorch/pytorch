@@ -19,6 +19,7 @@ bool TanhGradientFunctor<CPUContext>::Forward<float>(
     float* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<float> dY_arr(dY, size);
   ConstEigenVectorArrayMap<float> Y_arr(Y, size);
@@ -26,6 +27,7 @@ bool TanhGradientFunctor<CPUContext>::Forward<float>(
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     TanhGradient,
     BinaryElementwiseOp<
@@ -48,6 +50,7 @@ class GetTanhGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Tanh, GetTanhGradient);
 
 } // namespace caffe2
