@@ -25,9 +25,7 @@ from ..utils import (
 
 from .pattern_utils import (
     register_quant_pattern,
-    mark_input_output_not_observed,
     get_default_output_activation_post_process_map,
-    input_output_observed,
     Pattern,
 )
 
@@ -70,6 +68,13 @@ class QuantizeHandler(ABC):
         self.num_tensor_args = len(node.args)
         self.all_node_args_are_tensors = True
 
+    def input_output_observed(self) -> bool:
+        """
+        Returns True if the pattern matched to this qhandler could be
+        be observed, and False it it should not be observed.
+        """
+        return True
+
     def should_insert_observer_for_output(
         self,
         qconfig: Any,
@@ -82,7 +87,7 @@ class QuantizeHandler(ABC):
         """
         # TODO(future PR): potentially clean up and deduplicate these
         # mappings.
-        return self.all_node_args_are_tensors and input_output_observed(self)
+        return self.all_node_args_are_tensors and self.input_output_observed()
 
     def should_mark_output_observed_from_input_observed_status(
         self,
@@ -223,7 +228,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         """
         if self.num_tensor_args == 1:
             return activation_dtype(qconfig) == torch.float16
-        elif self.all_node_args_are_tensors and input_output_observed(self):
+        elif self.all_node_args_are_tensors and self.input_output_observed():
             return True
         else:
             return False
@@ -786,10 +791,12 @@ class BatchNormQuantizeHandler(QuantizeHandler):
 
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
-@mark_input_output_not_observed()
 class EmbeddingQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
+
+    def input_output_observed(self) -> bool:
+        return False
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
@@ -831,10 +838,12 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.LSTMCell)
 @register_quant_pattern(torch.nn.RNNCell)
 @register_quant_pattern(torch.nn.LSTM)
-@mark_input_output_not_observed()
 class RNNDynamicQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
+
+    def input_output_observed(self) -> bool:
+        return False
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
