@@ -32,12 +32,16 @@ at::Tensor run_with_control_flow(
   return output;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUAllocationPlanTest, with_control_flow) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor a = at::rand({23, 16, 16, 16});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor conv_weight = at::rand({16, 16, 3, 3});
   // output shape
   // 23, 16, 14, 14
   // Flattened shape = 23, 3136
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor linear_weight = at::rand({32, 3136});
   at::Tensor output, ref_output;
   std::vector<void*> pointers;
@@ -50,6 +54,7 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
           a, conv_weight, linear_weight, true, pointers);
     }
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(valid_allocation_plan());
 
   auto validate_allocation_plan =
@@ -61,7 +66,9 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
         run_with_control_flow(a, conv_weight, linear_weight, record_mode, pointers);
     }
     bool success{true};
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (uint64_t i = 0; i < 10; ++i) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       bool validation_success;
       {
         c10::WithValidateAllocationPlanGuard
@@ -79,12 +86,16 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
   ASSERT_TRUE(validate_allocation_plan(false, false));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUAllocationPlanTest, with_profiling_alloc) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor a = at::rand({23, 16, 16, 16});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor conv_weight = at::rand({16, 16, 3, 3});
   // output shape
   // 23, 16, 14, 14
   // Flattened shape = 23, 3136
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::Tensor linear_weight = at::rand({32, 3136});
   at::Tensor output, ref_output;
   std::vector<void*> pointers;
@@ -97,6 +108,7 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
           a, conv_weight, linear_weight, false, pointers);
     }
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(valid_allocation_plan());
 
   auto validate_allocation_plan =
@@ -129,6 +141,7 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
             validate_pointers,
             false);
       }
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (uint64_t i = 0; i < 10; ++i) {
         {
           c10::WithProfilingAllocatorGuard
@@ -146,31 +159,39 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   };
   // When control flow conditions are same between profiling and evaluation
   // profiling allocator should not throw.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(true, true, false));
   ASSERT_TRUE(ref_output.equal(output));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(false, false, false));
   ASSERT_TRUE(ref_output.equal(output));
   // Furthermore profiling allocator should return the same pointers
   // back for the intermediate tensors
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(true, true, true));
   ASSERT_TRUE(ref_output.equal(output));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(false, false, true));
   ASSERT_TRUE(ref_output.equal(output));
 
   // When control flow conditions are different between profiling and evaluation
   // profiling allocator should throw.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(validate_allocation_plan(true, false, false), c10::Error);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(validate_allocation_plan(false, true, false), c10::Error);
 }
 
 int main(int argc, char* argv[]) {
   // Setting the priority high to make sure no other allocator gets used instead of this.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
   // Need to disable mkldnn for this test since it allocatred memory
   // via raw_allocate inteface which requires context pointer and raw
   // pointer to be the same. Tis is not true for mobile allocator.
   at::globalContext().setUserEnabledMkldnn(false);
   ::testing::InitGoogleTest(&argc, argv);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::manual_seed(42);
   return RUN_ALL_TESTS();
 }

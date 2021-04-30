@@ -140,6 +140,14 @@ void SparseCsrTensorImpl::set_member_tensors(
       ")");
 
   TORCH_CHECK(
+        crow_indices.options().backend() == values.options().backend(),
+        "backend of csr indices (",
+        crow_indices.options().backend(),
+        ") must match backend of values (",
+        values.options().backend(),
+        ")");
+
+  TORCH_CHECK(
       col_indices.size(0) == values.size(0),
       "col_indices and values must have equal sizes, but got col_indices.size(0): ",
       col_indices.size(0),
