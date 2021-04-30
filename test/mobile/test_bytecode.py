@@ -113,7 +113,9 @@ class testVariousModelVersions(TestCase):
         with tempfile.TemporaryDirectory() as tmpdirname:
             backport_model_path = Path(tmpdirname, "backport_script_module_v5.ptl")
             # backport from file
-            _backport_for_mobile(script_module_v5_path, backport_model_path, 4)
+            success = _backport_for_mobile(script_module_v5_path, backport_model_path, 4)
+            assert(success)
+
             buf = io.StringIO()
             torch.utils.show_pickle.main(["", tmpdirname + "/" + backport_model_path.name + "@*/bytecode.pkl"], output_stream=buf)
             output = buf.getvalue()
@@ -185,8 +187,9 @@ class testVariousModelVersions(TestCase):
         with tempfile.TemporaryDirectory() as tmpdirname:
             backport_model_path = Path(tmpdirname, "backport_script_module_v5.ptl")
 
-            # backport from buffer
-            script_module_v4_buffer = _backport_for_mobile(script_module_v5_buffer, backport_model_path, 4)
+            # backport from buffer to file
+            success = _backport_for_mobile(script_module_v5_buffer, backport_model_path, 4)
+            assert(success)
 
             # check bacport model version
             backport_version = _get_model_bytecode_version(backport_model_path)
