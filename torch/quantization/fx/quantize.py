@@ -76,6 +76,7 @@ from .utils import (
     graph_module_from_producer_nodes,
     assert_and_get_unique_device,
     node_return_type_is_int,
+    node_bool_tensor_arg_indexes,
 )
 
 from .qconfig_utils import (
@@ -587,16 +588,18 @@ def handle_copy_nodes(
         # it is boolean Tensor
         # TODO: we need type info from proxy, what type of Tensor this is
         # similar to TorchScript
-        if (node.op, node.target) == ("call_method", "masked_fill"):
-            maybe_observer_node = node.args[1]
-            while isinstance(maybe_observer_node, Node) and is_activation_post_process_node(maybe_observer_node, modules):
-                actpp_to_remove.add(maybe_observer_node)
-                # trace back from the current observer node
-                n = maybe_observer_node.args[0]
-                if isinstance(n, Node) and len(n.args) > 0:
-                    maybe_observer_node = n.args[0]
-                else:
-                    break
+        bool_tensor_indexes = node_bool_tensor_arg_indexes(node)
+        if bool_tensor_indexes:
+            for idx in bool_tensor_indexes:
+                maybe_observer_node = node.args[idx]
+                while isinstance(maybe_observer_node, Node) and is_activation_post_process_node(maybe_observer_node, modules):
+                    actpp_to_remove.add(maybe_observer_node)
+                    # trace back from the current observer node
+                    n = maybe_observer_node.args[0]
+                    if isinstance(n, Node) and len(n.args) > 0:
+                        maybe_observer_node = n.args[0]
+                    else:
+                        break
 
     for node in observed_graph.nodes:
         if node.op == "output":
