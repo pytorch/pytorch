@@ -109,6 +109,7 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   float loss = 0;
   dy_vec = 0;
   // in case that all docs in a session have zero ratings, no op
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (r_vec.abs().sum() < 1e-6) {
     return 0;
   }
@@ -151,15 +152,18 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   dy_vec =
       -(lambda_mat * CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) *
         CWISE_SIGM(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             -CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N)))
            .rowwise()
            .sum();
   if (use_ndcg_as_loss_) {
     // DCG loss function
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     loss = (idcg - dcg);
   } else {
     loss = -(lambda_mat *
              CWISE_LOG_SIGM(
+                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N),
                  100))
                 .sum();
@@ -170,7 +174,9 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   // Note that normalization is mathematically correct if idcg is guaranteed to
   // be positive!
   if (use_idcg_normalization_) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     dy_vec /= std::max(idcg, 1e-5);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     loss /= std::max(idcg, 1e-5);
   }
   return loss;
@@ -232,17 +238,21 @@ bool LambdaRankNdcgGradientOp<float, CPUContext>::RunOnDevice() {
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LambdaRankNdcg, LambdaRankNdcgOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     LambdaRankNdcgGradient,
     LambdaRankNdcgGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LambdaRankNdcg).NumInputs(3).NumOutputs(2).SetDoc(R"DOC(
 It implements the LambdaRank as appeared in Wu, Qiang, et al. "Adapting boosting
 for information retrieval measures." Information Retrieval 13.3 (2010): 254-270.
 
 This method heuristically optimizes the NDCG.
 )DOC");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LambdaRankNdcgGradient).NumInputs(4).NumOutputs(1);
 
 class GetLambdaRankNdcgGradient : public GradientMakerBase {
@@ -256,6 +266,7 @@ class GetLambdaRankNdcgGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(LambdaRankNdcg, GetLambdaRankNdcgGradient);
 
 } // namespace

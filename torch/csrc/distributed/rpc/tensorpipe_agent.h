@@ -12,10 +12,6 @@
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-#ifdef USE_CUDA_NOT_ROCM
-#include <ATen/cuda/CUDAFuture.h>
-#endif
-
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
 
@@ -202,7 +198,7 @@ class TensorPipeAgent : public RpcAgent {
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
-  tensorpipe::DeviceMap getDeviceMap(const WorkerInfo& dest) override;
+  tensorpipe::DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
 
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
@@ -284,20 +280,14 @@ class TensorPipeAgent : public RpcAgent {
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
-    explicit AtomicJitFuture(
-        const std::vector<c10::DeviceIndex>& devices,
-        bool noCuda = true) {
-#ifdef USE_CUDA_NOT_ROCM
-      if (!noCuda) {
-        jitFuture = std::make_shared<at::cuda::CUDAFuture>(
-            at::AnyClassType::get(), devices);
-      } else {
-#else
-      {
-#endif
-        TORCH_INTERNAL_ASSERT(devices.empty());
-        jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+    explicit AtomicJitFuture(const std::vector<c10::DeviceIndex>& devices) {
+      std::vector<c10::Device> fullDevices;
+      fullDevices.reserve(devices.size());
+      for (const c10::DeviceIndex index : devices) {
+        fullDevices.emplace_back(c10::kCUDA, index);
       }
+      jitFuture = std::make_shared<at::ivalue::Future>(
+          at::AnyClassType::get(), std::move(fullDevices));
     }
 
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
