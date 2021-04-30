@@ -336,6 +336,7 @@ Tensor class reference
     Tensor.exp
     Tensor.exp_
     Tensor.expand_dims
+    Tensor.expand_dims_
     Tensor.expm1
     Tensor.expm1_
     Tensor.expand

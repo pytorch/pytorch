@@ -1954,6 +1954,10 @@ Tensor expand_dims(const Tensor& self, int64_t dim) {
   return self.unsqueeze(dim);
 }
 
+Tensor & expand_dims_(Tensor& self, int64_t dim) {
+  return self.unsqueeze_(dim);
+}
+
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   start_dim = maybe_wrap_dim(start_dim, self.dim());
   end_dim = maybe_wrap_dim(end_dim, self.dim());

@@ -4375,6 +4375,13 @@ expand_dims(dim) -> Tensor
 See :func:`torch.expand_dims`
 """)
 
+add_docstr_all('expand_dims_',
+               r"""
+expand_dims_(dim) -> Tensor
+
+See :func:`torch.Tensor.unsqueeze_`
+""")
+
 add_docstr_all('sum_to_size',
                r"""
 sum_to_size(*size) -> Tensor

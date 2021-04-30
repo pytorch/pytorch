@@ -60,6 +60,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::arctanh, aten::atanh},
       {aten::arctanh_, aten::atanh_},
       {aten::expand_dims, aten::unsqueeze},
+      {aten::expand_dims_, aten::unsqueeze_},
       {aten::fix, aten::trunc},
       {aten::fix_, aten::trunc_},
       {aten::negative, aten::neg},
