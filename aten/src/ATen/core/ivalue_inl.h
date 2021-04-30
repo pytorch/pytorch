@@ -343,9 +343,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       finished_cv_.wait(lock);
     }
 
-    if (!eptr_) {
-      postWaitHook(value_);
-    }
+    synchronizeWithCurrentStreams();
   }
 
   /**
@@ -353,27 +351,21 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * exception if an error exists.
    */
   void waitAndThrow() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    while (!completed_) {
-      finished_cv_.wait(lock);
-    }
+    wait();
 
     if (eptr_) {
       std::rethrow_exception(eptr_);
     }
-
-    postWaitHook(value_);
   }
 
   /**
    * Explicitly mark the future as completed with the output value. Optionally,
-   * the storage pointers for all tensors in IValue can be passed as well, and
-   * it will be passed to preMarkCompletedHook. Some subclass, like CUDAFuture,
-   * uses these DataPtrs to synchronize CUDA streams. If data_ptrs isn't given
-   * the subclass will attempt to extract it from the value, if it needs. Thus
-   * one only needs to provide data_ptrs when 1) DataPtrs cannot be extracted
-   * through IValue::getSubValues() or 2) customized DataPtrs extraction is more
-   * efficient.
+   * the storage pointers for all tensors in IValue can be passed as well. These
+   * DataPtrs are used to synchronize CUDA streams. If data_ptrs isn't given we
+   * will attempt to extract it from the value, if we need. Thus one only needs
+   * to provide data_ptrs when 1) DataPtrs cannot be extracted through IValue's
+   * getSubValues() or through pickling in case of Python object; or when 2)
+   * customized DataPtrs extraction is more efficient.
    */
   void markCompleted(
       IValue value,
@@ -385,17 +377,38 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         "Attempting to mark a completed Future as complete again. Note that "
         "a Future can only be marked completed once.");
 
+    // Start by performing all steps that can throw, before setting any field.
+    std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs;
+    std::vector<c10::Device> usedDevices;
     try {
-      preMarkCompletedHook(value, std::move(data_ptrs));
+      // FIXME We should always extract DataPtrs, in order to catch the case of
+      // users using CUDA values but forgetting to set devices, which currently
+      // leads to a silent synchronization/correctness issue. However, as this
+      // might worsen perf in CPU-only cases, we should only do after careful
+      // benchmarks.
+      if (impl_.type() != c10::kCPU) {
+        actualDataPtrs =
+            data_ptrs.has_value() ? std::move(*data_ptrs) : extractDataPtrs(value);
+        usedDevices = getDevicesOfDataPtrs(impl_, actualDataPtrs);
+        ensureIsSubsetOfDevices(usedDevices, devices_);
+      }
     } catch (const std::exception&) {
       setErrorInternal(std::current_exception(), lock);
       return;
     }
 
-    // Only set value_ and completed_ flag once preMarkCompletedHook has
-    // returned successfully to allow for proper error propagation.
+    // Only set value_ and completed_ flag once all checks and preparation steps
+    // have returned successfully to allow for proper error propagation.
     value_ = std::move(value);
     completed_ = true;
+
+    currentDevice_ = impl_.getDevice();
+    dataPtrs_ = std::move(actualDataPtrs);
+    for (const c10::Device& device : usedDevices) {
+      c10::Event event(impl_.type());
+      event.record(impl_.getStream(device));
+      events_.push_back(std::move(event));
+    }
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
@@ -403,7 +416,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
     finished_cv_.notify_all();
     for (auto& callback : cbs) {
-      callback();
+      invokeCallback(std::move(callback));
     }
   }
 
@@ -464,10 +477,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   void addCallback(std::function<void(void)> callback) {
     std::unique_lock<std::mutex> lock(mutex_);
-    callback = wrapCallback(std::move(callback));
     if (completed()) {
       lock.unlock();
-      callback();
+      invokeCallback(std::move(callback));
       return;
     }
     callbacks_.emplace_back(std::move(callback));
@@ -528,101 +540,36 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return type_;
   }
 
-  // This method should be overridden by subclasses so that they can produce an
-  // instace of their own type.
+  // This method should be used when one intends to manually create a child
+  // future, for example when implementing a customized version of then().
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
     return c10::make_intrusive<Future>(std::move(type), devices_);
   }
 
  private:
 
-  // This hook will be called by this class (the superclass) when the future is
-  // marked completed _with a value_ (hence not in case of error). This is done
-  // right away, while the mutex is still held, before any callbacks are run.
-  // It allows subclasses to further update their state if they so need. For
-  // example the CUDAFuture subclass uses it to determine what devices the value
-  // resides on and record an event in those devices' current streams.
-  // The data_ptrs field contains storage pointers of all tensors in the value,
-  // which is used by the CUDAFuture subclass to synchronize streams.
-  void preMarkCompletedHook(
-      const at::IValue& value,
-      c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
-          dataPtrs) {
-    // Start by performing all steps that can throw, before setting any field.
-    std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs;
-    std::vector<c10::Device> usedDevices;
-    // FIXME We should always extract DataPtrs, in order to catch the case of
-    // users using CUDA values but forgetting to set devices, which currently
-    // leads to a silent synchronization/correctness issue. However, as this
-    // might worsen perf in CPU-only cases, we should only do after careful
-    // benchmarks.
-    if (impl_.type() != c10::kCPU) {
-      actualDataPtrs =
-          dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
-      usedDevices = getDevicesOfDataPtrs(impl_, actualDataPtrs);
-      ensureIsSubsetOfDevices(usedDevices, devices_);
-    }
-
-    currentDevice_ = impl_.getDevice();
-
-    // Extract them once and cache them for later uses.
-    dataPtrs_ = std::move(actualDataPtrs);
-
-    for (const c10::Device& device : usedDevices) {
-      c10::Event event(impl_.type());
-      event.record(impl_.getStream(device));
-      events_.push_back(std::move(event));
-    }
-  }
-
-  // This hook will be called by the addCallback() and the then() methods before
-  // storing the callback for later execution (or before running it inline if
-  // the future is already complete). Note that this method could thus be called
-  // while the future is _not_ yet complete. By default this method does nothing
-  // but subclasses can override this method to add functionality. For example
-  // the CUDAFuture subclass ensures the callback runs with CUDA streams which
-  // are synchronized with the events recorded in the I/O streams.
-  std::function<void(void)> wrapCallback(
+  // This method should always be used when invoking a callback (regardless of
+  // how/when that happens) as it will ensure that the proper "environment" is
+  // set up before running the callback, as in, it will set up the CUDA streams,
+  // synchronize them with the value, and so on (if needed).
+  void invokeCallback(
       std::function<void(void)> callback) {
-    return [this, callback=std::move(callback)]() {
-      std::vector<c10::Stream> streams;
-      for (const c10::Device& device : devices_) {
-        // FIXME Should we find a way to allow to change the priority of
-        // streams?
-        streams.push_back(impl_.getStreamFromGlobalPool(
-            device, /*isHighPriority=*/false));
-      }
+    c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
-      // Use the dedicated callback stream to run callback.
-      c10::MultiStreamGuard streamGuard(streams);
+    std::vector<c10::Stream> streams;
+    for (const c10::Device& device : devices_) {
+      streams.push_back(impl_.getStreamFromGlobalPool(device));
+    }
+    c10::MultiStreamGuard streamGuard(streams);
+    synchronizeWithCurrentStreams();
 
-      for (c10::Event& event : events_) {
-        event.block(impl_.getStream(event.device()));
-      }
-
-      // Do not free the underlying data storage of value_ before its
-      // usage on the stream finishes.
-      for (const at::DataPtr& data_ptr : dataPtrs_) {
-        if (!data_ptr.device().is_cpu()) {
-          impl_.recordDataPtrOnStream(
-              data_ptr, impl_.getStream(data_ptr.device()));
-        }
-      }
-
-      c10::OptionalDeviceGuard deviceGuard(currentDevice_);
-
-      callback();
-    };
+    callback();
   }
 
-  // This hook will be called by this class after a user thread has completed
-  // waiting on a successful future. It will thus not be called if the future
-  // completes with an error. It will also not be called if the user accesses
-  // the future's value without synchronization. Subclasses can override this
-  // to add some synchronization to the wait. For example, the CUDAFuture
-  // subclass ensures the user's current CUDA streams synchronize with the I/O
-  // events stored by the future.
-  void postWaitHook(const at::IValue& value) {
+  // This method should be called before this future's value is used, as it
+  // ensures that the CUDA streams that are "current" at the callsite properly
+  // synchonize with the value.
+  void synchronizeWithCurrentStreams() {
     for (c10::Event& event : events_) {
       event.block(impl_.getStream(event.device()));
     }
@@ -648,15 +595,13 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     completed_ = true;
     eptr_ = std::move(eptr);
 
-    // Do not call preMarkCompletedHook() here as there isn't any value.
-
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
     finished_cv_.notify_all();
     for (auto& callback : cbs) {
-      callback();
+      invokeCallback(std::move(callback));
     }
   }
 
