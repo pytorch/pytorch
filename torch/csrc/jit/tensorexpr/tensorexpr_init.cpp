@@ -435,6 +435,7 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "fuse_loops",
           [](const std::vector<For*>& loops) {
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             For* fused_loop;
             LoopNest::fuseLoops(loops, &fused_loop);
             return fused_loop;
@@ -534,6 +535,38 @@ void initTensorExprBindings(PyObject* module) {
       "simplify",
       [](Stmt* stmt) { return IRSimplifier::simplify(stmt); },
       py::return_value_policy::reference);
+
+  te.def(
+      "lower",
+      [](std::string op_str,
+         py::list inputs,
+         std::vector<ExprHandle> outputShape,
+         Dtype outputType) {
+        auto op = c10::Symbol::fromQualString(op_str);
+        if (op == aten::cat) {
+          throw std::runtime_error("NYI");
+        }
+        std::vector<ArgValue> argInputs;
+        for (auto inp : inputs) {
+          if (py::isinstance<Placeholder>(inp)) {
+            argInputs.push_back(py::cast<Placeholder>(inp).handle());
+          } else if (py::isinstance<BufHandle>(inp)) {
+            argInputs.push_back(py::cast<BufHandle>(inp));
+          } else if (py::isinstance<VarHandle>(inp)) {
+            argInputs.push_back(py::cast<VarHandle>(inp));
+          } else if (py::isinstance<py::float_>(inp)) {
+            argInputs.push_back(py::cast<double>(inp));
+          } else if (py::isinstance<py::int_>(inp)) {
+            argInputs.push_back(py::cast<int64_t>(inp));
+          } else if (py::isinstance<py::none>(inp)) {
+            argInputs.push_back(ArgNone());
+          } else {
+            throw std::runtime_error("nyi");
+          }
+        }
+        return computeOperandValue(
+            op, argInputs, outputShape, outputType.scalar_type());
+      });
 
   using TSGraph = std::shared_ptr<Graph>;
   py::class_<TensorExprKernel>(te, "TensorExprKernel")
