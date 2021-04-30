@@ -13,7 +13,7 @@ namespace {
 template <typename scalar_t>
 void cpu_max_pool(
     const Tensor& output_,
-    const Tensor indices_,
+    const Tensor& indices_,
     const Tensor& input_,
     int kW, int kH,
     int dW, int dH,
@@ -88,7 +88,7 @@ void cpu_max_pool(
 template <typename scalar_t>
 void cpu_max_pool_channels_last(
     const Tensor& output_,
-    const Tensor indices_,
+    const Tensor& indices_,
     const Tensor& input_,
     int kW, int kH,
     int dW, int dH,
