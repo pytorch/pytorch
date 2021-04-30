@@ -141,7 +141,7 @@ def grad_and_value(f, argnums=0, has_aux=False):
                 aux = _undo_create_differentiable(aux, level)
             _grad_decrement_nesting()
         if has_aux:
-            return grad_input, output, aux
+            return grad_input, (output, aux)
         return grad_input, output
     return wrapper
 
@@ -150,7 +150,9 @@ def grad(f, argnums=0, has_aux=False):
     def wrapper(*args):
         results = grad_and_value(f, argnums, has_aux=has_aux)(*args)
         if has_aux:
-            return results[0], results[2]
-        return results[0]
+            grad, (value, aux) = results
+            return grad, aux
+        grad, value = results
+        return grad
     return wrapper
 
