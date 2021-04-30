@@ -423,6 +423,10 @@ class NativeFunction:
                 assert k not in self.dispatch, \
                     f"if structured_delegate, then must not have {k} in dispatch dictionary " \
                     "(it is delegated!)"
+        if str(self.func.name).startswith('_foreach'):
+            assert self.device_check == DeviceCheckType.NoCheck, \
+                "foreach kernels fall back to slow path when tensor are on different devices, " \
+                "device_check not allowed to be enabled"
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 

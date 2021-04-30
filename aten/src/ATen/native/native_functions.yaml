@@ -145,7 +145,9 @@
     CUDA: _cudnn_rnn_flatten_weight
 
 - func: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
-  device_check: NoCheck  # TODO: explain this
+  # rnn_tanh may or may not redispatch to _cudnn_rnn based on algorithm and build. Thus it might hit dispatch or kernel device check.
+  # Disable dispatch time device check for consistent behavior.
+  device_check: NoCheck
   dispatch:
     CUDA: _cudnn_rnn
 
@@ -595,6 +597,7 @@
   device_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -3004,7 +3007,7 @@
   variants: function
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
-  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  variants: function, method
   dispatch:
     CompositeExplicitAutograd: permute
 
@@ -3138,9 +3141,9 @@
 
 - func: randn_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
 
-- func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randperm(int n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: randperm.out(int n, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -3180,19 +3183,22 @@
 
 - func: neg(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: neg.out
   variants: function, method
   dispatch:
-    CPU, CUDA, SparseCPU, SparseCUDA: neg
+    SparseCPU, SparseCUDA: neg_sparse
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured_delegate: neg.out
   variants: function, method
   dispatch:
-    CPU, CUDA: neg_
     SparseCPU, SparseCUDA: neg_sparse_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: neg_out
     SparseCPU, SparseCUDA: neg_out_sparse
@@ -3582,6 +3588,24 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
+
+- func: hsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: hsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
+
+- func: vsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: vsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
+
+- func: dsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+  variants: function
+
+- func: dsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+  variants: function
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
   variants: function, method
@@ -4350,6 +4374,9 @@
     SparseCPU, SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
+
+- func: positive(Tensor(a) self) -> Tensor(a)
+  variants: function, method
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
@@ -6211,14 +6238,12 @@
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
-    CPU: legacy::cpu::_th_geqrf_out
-    CUDA: legacy::cuda::_th_geqrf_out
+    CPU, CUDA: geqrf_out
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_geqrf
-    CUDA: legacy::cuda::_th_geqrf
+    CPU, CUDA: geqrf
 
 # orgqr, alias for linalg_householder_product
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
@@ -6694,12 +6719,13 @@
 - func: topk.values(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
     CPU: topk_out_cpu
-    CUDA: legacy::cuda::_th_topk_out
+    CUDA: topk_out_cuda
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   variants: method, function
   dispatch:
-    CPU, CUDA: topk
+    CPU: topk
+    CUDA: topk_cuda
     QuantizedCPU: topk_quantized_cpu
 
 - func: all(Tensor self) -> Tensor
@@ -8126,15 +8152,14 @@
 
 - func: adaptive_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool2d_backward_out_cpu
     CUDA: adaptive_max_pool2d_backward_out_cuda
 
 - func: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool2d_backward_cpu
-    CUDA: adaptive_max_pool2d_backward_cuda
+  structured_delegate: adaptive_max_pool2d_backward.grad_input
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
@@ -8151,15 +8176,14 @@
 
 - func: adaptive_max_pool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: adaptive_max_pool3d_backward_out_cpu
     CUDA: adaptive_max_pool3d_backward_out_cuda
 
 - func: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: adaptive_max_pool3d_backward_cpu
-    CUDA: adaptive_max_pool3d_backward_cuda
+  structured_delegate: adaptive_max_pool3d_backward.grad_input
 
 - func: avg_pool2d.out(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -9096,6 +9120,43 @@
 - func: special_erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
+- func: special_xlog1py(Tensor self, Tensor other) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_xlog1py.out
+
+- func: special_xlog1py.self_scalar(Scalar self, Tensor other) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py
+
+- func: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py
+
+- func: special_xlog1py.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_xlog1py_out
+
+- func: special_xlog1py.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py_out
+
+- func: special_xlog1py.other_scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py_out
+
 - func: special_i0e(Tensor self) -> Tensor
   python_module: special
   variants: function
@@ -9306,24 +9367,17 @@
 - func: det(Tensor self) -> Tensor
   variants: function, method
 
-- func: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+- func: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   python_module: linalg
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg_lstsq
 
-- func: linalg_lstsq.out(Tensor self, Tensor b, float? cond=None, *, str? driver=None, Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values) -> (Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values)
+- func: linalg_lstsq.out(Tensor self, Tensor b, float? rcond=None, *, str? driver=None, Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values) -> (Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values)
   python_module: linalg
   variants: function
   dispatch:
     CPU, CUDA: linalg_lstsq_out
-
-- func: _lstsq_helper_(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float cond, str driver_name) -> Tensor(a!)
-  device_check: NoCheck  # MAGMA expects infos to be on CPU
-  variants: function
-  dispatch:
-    CPU: _lstsq_helper_cpu
-    CUDA: _lstsq_helper_cuda
 
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
@@ -9463,6 +9517,14 @@
   python_module: linalg
   variants: function
 
+- func: linalg_svdvals(Tensor input) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_svdvals.out(Tensor input, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
 - func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
   python_module: linalg
   variants: function
@@ -9560,6 +9622,14 @@
   python_module: linalg
   variants: function
 
+- func: linalg_matrix_rank.tol_tensor(Tensor input, Tensor tol, bool hermitian=False) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_matrix_rank.out_tol_tensor(Tensor input, Tensor tol, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
 - func: linalg_multi_dot(Tensor[] tensors) -> Tensor
   python_module: linalg
 
@@ -9604,4 +9674,9 @@
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False) -> Tensor
   variants: function
   dispatch:
-    CPU: _segment_reduce_cpu
+    CPU, CUDA: segment_reduce_kernel
+
+- func: segment_reduce_backward(Tensor grad, Tensor output, Tensor data, *, Tensor? lengths=None) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: segment_reduce_backward_kernel

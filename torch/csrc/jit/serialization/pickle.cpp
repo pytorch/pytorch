@@ -4,7 +4,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/import_read.h>
 
 namespace torch {
 namespace jit {
