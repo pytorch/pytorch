@@ -1,6 +1,6 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 from torch.utils._pytree import TreeSpec
-import torch.fx._pytree as fx_pytree
+from . import _pytree as fx_pytree
 
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
 from dataclasses import dataclass

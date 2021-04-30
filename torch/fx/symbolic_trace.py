@@ -377,7 +377,6 @@ class Tracer(TracerBase):
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
             self.graph._pytree_info = _PyTreeInfo(orig_args[:total_args], in_spec)
-            self.graph._orig_args = orig_args[:total_args]
 
             def flatten_fn(*args):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)

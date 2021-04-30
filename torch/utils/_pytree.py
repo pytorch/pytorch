@@ -148,7 +148,7 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
 
     return unflatten_fn(child_pytrees, spec.context)
 
-def tree_map(pytree: PyTree, fn):
+def tree_map(pytree: PyTree, fn: Any) -> PyTree:
     flat_args, spec = tree_flatten(pytree)
     return tree_unflatten([fn(i) for i in flat_args], spec)
 
