@@ -88,5 +88,5 @@ workflows:
           configuration: "Debug"
       - magma-build:
           name: magma-build-cu113-release
-          cuda_version: "112"
+          cuda_version: "113"
           configuration: "Release"
