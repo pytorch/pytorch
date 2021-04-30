@@ -5765,11 +5765,12 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             for _ in range(30):
                 data = torch.rand(2048, 2048).to(local_device)
                 output = model.rpc_sync().forward(data)
-                # FIXME: remove this when RRef ctor can record CUDA events
-                torch.cuda.current_stream(local_device).synchronize()
                 # to_here() internally calls localValue as the caller is
                 # the owner of the RRef.
-                v0 = rpc.RRef(output).remote().sum().to_here().item()
+                v0 = rpc.RRef(
+                    output,
+                    devices=[torch.device(local_device).index]
+                ).remote().sum().to_here().item()
                 v1 = output.sum().item()
                 self.assertEqual(v0, v1)
 
@@ -5851,7 +5852,9 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_not_cuda(self):
-        with self.assertRaisesRegex(ValueError, "Expected CUDA devices, got "):
+        with self.assertRaisesRegex(
+            ValueError, "Expected devices to have indices, got cpu"
+        ):
             fut = Future(devices=["cpu"])
 
     def _test_cuda_future_extraction(self, wrapper, unwrapper):

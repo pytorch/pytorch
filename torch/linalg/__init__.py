@@ -648,7 +648,7 @@ Examples::
 """)
 
 lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
-torch.linalg.lstsq(A, B, cond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
+torch.linalg.lstsq(A, B, rcond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
 
 Computes a solution to the least squares problem  of a system of linear equations.
 
@@ -697,6 +697,8 @@ of shape `(*, m, n)`, `(*, m, k)` respectively, it cointains
   It has shape equal to the batch dimensions of :attr:`A`.
   It is computed when `m > n` and every matrix in :attr:`A` is full-rank,
   otherwise, it is an empty tensor.
+  If :attr:`A` is a batch of matrices and any matrix in the batch is not full rank,
+  then an empty tensor is returned. This behavior may change in a future PyTorch release.
 - `rank`: tensor of ranks of the matrices in :attr:`A`.
   It has shape equal to the batch dimensions of :attr:`A`.
   It is computed when :attr:`driver` is one of (`'gelsy'`, `'gelsd'`, `'gelss'`),
@@ -712,16 +714,16 @@ of shape `(*, m, n)`, `(*, m, k)` respectively, it cointains
     computations separately.
 
 .. warning::
-    The default value of :attr:`cond` may change in the future.
+    The default value of :attr:`rcond` may change in a future PyTorch release.
     It is therefore recommended to use a fixed value to avoid potential
     breaking changes.
 
 Args:
     A (Tensor): lhs tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     B (Tensor): rhs tensor of shape `(*, m, k)` where `*` is zero or more batch dimensions.
-    cond (float, optional): used to determine the effective rank of :attr:`A`.
-                            If :attr:`cond`\ `= None`, :attr:`cond` is set to the machine
-                            precision of the dtype of :attr:`A`. Default: `None`.
+    rcond (float, optional): used to determine the effective rank of :attr:`A`.
+                             If :attr:`rcond`\ `= None`, :attr:`rcond` is set to the machine
+                             precision of the dtype of :attr:`A` times `max(m, n)`. Default: `None`.
 
 Keyword args:
     driver (str, optional): name of the LAPACK/MAGMA method to be used.
