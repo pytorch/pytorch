@@ -717,8 +717,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_device_map",
-          (tensorpipe::DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dest)
-               const) &
+          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dest) const) &
               TensorPipeAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(
