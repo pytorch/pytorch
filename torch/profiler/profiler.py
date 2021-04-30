@@ -1,10 +1,13 @@
-import torch
-import torch.autograd.profiler as prof
-from torch.autograd import ProfilerActivity
-
+import gzip
+import os
+import tempfile
 from enum import Enum
 from typing import Any, Callable, Iterable, Optional
 from warnings import warn
+
+import torch
+import torch.autograd.profiler as prof
+from torch.autograd import ProfilerActivity
 
 
 class ProfilerAction(Enum):
@@ -52,7 +55,7 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
     """
     return ProfilerAction.RECORD
 
-def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None):
+def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
     directly delivered to tensorboard as logdir.
@@ -73,6 +76,8 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None):
         if not worker_name:
             worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
         file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
+        if use_gzip:
+            file_name = file_name + '.gz'
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
     return handler_fn
 
@@ -298,7 +303,17 @@ class profile(object):
         Exports the collected trace in Chrome JSON format.
         """
         assert self.profiler
-        return self.profiler.export_chrome_trace(path)
+        if path.endswith('.gz'):
+            fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+            fp.close()
+            retvalue = self.profiler.export_chrome_trace(fp.name)
+            with open(fp.name) as fin:
+                with gzip.open(path, 'wt') as fout:
+                    fout.writelines(fin)
+            os.remove(fp.name)
+            return retvalue
+        else:
+            return self.profiler.export_chrome_trace(path)
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         """Save stack traces in a file in a format suitable for visualization.

@@ -482,6 +482,7 @@ TensorView* reductionOp(
 }
 
 TensorView* sum(TensorView* v1, const std::vector<int>& axes) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Val* init;
   switch (v1->getDataType().value()) {
     case (DataType::Float):
