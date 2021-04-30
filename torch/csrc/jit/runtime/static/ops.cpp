@@ -372,12 +372,6 @@ struct TEWrapper {
   void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_) {
     cg = std::move(cg_);
   }
-  template <typename... Ts>
-  void operator()(const Ts&... ts) {
-    std::vector<tensorexpr::CodeGen::CallArg> args(
-        {tensorexpr::CodeGen::CallArg(ts)...});
-    cg->call(args);
-  }
 
   void call(const std::vector<void*>& args) {
     cg->call_raw(args);
