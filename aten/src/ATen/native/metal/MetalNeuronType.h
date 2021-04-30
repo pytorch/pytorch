@@ -21,11 +21,11 @@ enum class NeuronType {
 static inline NeuronType neuronType(const Conv2dOpContext& context) {
   float inf_max = std::numeric_limits<float>::infinity();
   float inf_min = -std::numeric_limits<float>::infinity();
-  float output_max = context.output_max.has_value()
-      ? context.output_max.value().toFloat()
+  float output_max = context.get_output_max().has_value()
+      ? context.get_output_max().value().toFloat()
       : inf_max;
-  float output_min = context.output_min.has_value()
-      ? context.output_min.value().toFloat()
+  float output_min = context.get_output_min().has_value()
+      ? context.get_output_min().value().toFloat()
       : inf_min;
   if (output_max == inf_max && output_min == 0) {
     return NeuronType::Relu;

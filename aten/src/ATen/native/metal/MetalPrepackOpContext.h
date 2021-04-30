@@ -88,11 +88,11 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
     return output_max_;
   }
 
-  void set_opaqueOpPtr(void* ptr) {
+  void set_conv2dOpPtr(void* ptr) {
       conv2dOp_ = ptr;
   }
 
-  void* get_opaqueOpPtr() const {
+  void* get_conv2dOpPtr() const {
     return conv2dOp_;
   }
 
