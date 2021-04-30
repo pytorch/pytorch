@@ -4,7 +4,7 @@ from torch.fx import wrap
 wrap("a_non_torch_leaf")
 
 
-class Mod(torch.nn.Module):
+class ModWithSubmod(torch.nn.Module):
     def __init__(self, script_mod):
         super().__init__()
         self.script_mod = script_mod
@@ -13,16 +13,34 @@ class Mod(torch.nn.Module):
         return self.script_mod(x)
 
 
-class SharedTensorsMod(torch.nn.Module):
-    def __init__(self, tensor, script_mod):
+class ModWithTensor(torch.nn.Module):
+    def __init__(self, tensor):
         super().__init__()
-        # have script_mod be a ScriptModule that
-        # itself holds x as a tensor
         self.tensor = tensor
-        self.script_mod = script_mod
 
     def forward(self, x):
-        return self.script_mod(x) + self.tensor
+        return self.tensor * x
+
+
+class ModWithSubmodAndTensor(torch.nn.Module):
+    def __init__(self, tensor, sub_mod):
+        super().__init__()
+        self.tensor = tensor
+        self.sub_mod = sub_mod
+
+    def forward(self, x):
+        return self.sub_mod(x) + self.tensor
+
+
+class ModWithMultipleSubmods(torch.nn.Module):
+    def __init__(self, mod1, mod2):
+        super().__init__()
+        self.mod1 = mod1
+        self.mod2 = mod2
+
+    def forward(self, x):
+        return self.mod1(x) + self.mod2(x)
+
 
 class SimpleTest(torch.nn.Module):
     def forward(self, x):
