@@ -11,9 +11,9 @@ declare -a installers=(
 )
 
 for elem in "${installers[@]}"; do
-    read -a strarr <<< "$elem"  # uses default whitespace IFS
-    if [[ "$CUDA_VERSION" == "${strarr[0]}" ]]; then
-        cuda_installer_name=${strarr[1]}
+    read -a pair <<< "$elem"  # uses default whitespace IFS
+    if [[ "$CUDA_VERSION" == "${pair[0]}" ]]; then
+        cuda_installer_name=${pair[1]}
         break
     fi
 done
@@ -29,9 +29,9 @@ declare -a build_dirs=(
 )
 
 for elem in "${build_dirs[@]}"; do
-    read -a strarr <<< "$elem" # uses default whitespace IFS
-    if [[ "$cuda_major_version" == "${strarr[0]}" ]]; then
-        msbuild_project_dir=${strarr[1]}
+    read -a pair <<< "$elem" # uses default whitespace IFS
+    if [[ "$cuda_major_version" == "${pair[0]}" ]]; then
+        msbuild_project_dir=${pair[1]}
         break
     fi
 done
@@ -46,9 +46,9 @@ declare -a install_packages=(
     "11, ${cuda11_packages_template}"
 )
 for elem in "${install_packages[@]}"; do
-    IFS="," read -a strarr <<< "$elem" # use comma as delimiter because packages includes whitespace
-    if [[ "$cuda_major_version" == "${strarr[0]}" ]]; then
-        packages_template="${strarr[1]}"
+    IFS="," read -a pair <<< "$elem" # use comma as delimiter because packages includes whitespace
+    if [[ "$cuda_major_version" == "${pair[0]}" ]]; then
+        packages_template="${pair[1]}"
         cuda_install_packages=${packages_template//[1-9][0-9*]\.[0-9]/$CUDA_VERSION}
         break
     fi
