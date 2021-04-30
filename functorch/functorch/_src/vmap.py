@@ -3,6 +3,8 @@ import functools
 from torch import Tensor
 from typing import Any, Callable, Optional, Tuple, Union, List
 from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten
+from .pytree_hacks import tree_flatten_hack, tree_map_
+from functools import partial
 import warnings
 
 from functorch._C import (
@@ -96,46 +98,54 @@ def _unwrap_batched(
         batched_outputs: Union[Tensor, Tuple[Tensor, ...]],
         out_dims: out_dims_t,
         vmap_level: int, batch_size: int, func: Callable) -> Tuple:
-    num_outputs = _num_outputs(batched_outputs)
-    out_dims_as_tuple = _as_tuple(
-        out_dims, num_outputs,
-        lambda: f'vmap({_get_name(func)}, ..., out_dims={out_dims}): `out_dims` must '
-                f'have one dim per output (got {num_outputs} outputs) of {_get_name(func)}.')
+    flat_batched_outputs, output_spec = tree_flatten_hack(batched_outputs)
 
-    # NOTE [Ignored _remove_batch_dim, _add_batch_dim]
-    # There is something wrong with our type bindings for functions that begin
-    # with '_', see #40397.
-    if isinstance(batched_outputs, Tensor):
-        out_dim = out_dims_as_tuple[0]
-        return _remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore
-    return tuple(_remove_batch_dim(out, vmap_level, batch_size, out_dim)  # type: ignore
-                 for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
-
-# Checks that `fn` returned one or more Tensors and nothing else.
-# NB: A python function that return multiple arguments returns a single tuple,
-# so we are effectively checking that `outputs` is a single Tensor or a tuple of
-# Tensors.
-def _validate_outputs(outputs: Any, func: Callable) -> None:
-    if isinstance(outputs, Tensor):
-        return
-    if not isinstance(outputs, tuple):
-        raise ValueError(f'vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return '
-                         f'Tensors, got type {type(outputs)} as the return.')
-    for idx, output in enumerate(outputs):
-        if isinstance(output, Tensor):
+    for out in flat_batched_outputs:
+        if isinstance(out, torch.Tensor):
             continue
         raise ValueError(f'vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return '
-                         f'Tensors, got type {type(output)} for return {idx}.')
+                         f'Tensors, got type {type(out)} as a return.')
 
-def _check_out_dims_is_int_or_int_tuple(out_dims: out_dims_t, func: Callable) -> None:
+    def incompatible_error():
+        raise ValueError(
+            f'vmap({_get_name(func)}, ..., out_dims={out_dims})(<inputs>): '
+            f'out_dims is not compatible with the structure of `outputs`. '
+            f'out_dims has structure {tree_flatten(out_dims)[1]} but outputs '
+            f'has structure {output_spec}.')
+
+    if isinstance(batched_outputs, torch.Tensor):
+        # Some weird edge case requires us to spell out the following
+        # see test_out_dims_edge_case
+        if isinstance(out_dims, int):
+            flat_out_dims = [out_dims] 
+        elif isinstance(out_dims, tuple) and len(out_dims) == 1:
+            flat_out_dims = out_dims
+            out_dims = out_dims[0]
+        else:
+            incompatible_error()
+    else:
+        flat_out_dims = _broadcast_to_and_flatten(out_dims, output_spec)
+        if flat_out_dims is None:
+            incompatible_error()
+
+    flat_outputs = [
+        _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)
+        for batched_output, out_dim in zip(flat_batched_outputs, flat_out_dims)
+    ]
+    return tree_unflatten(flat_outputs, output_spec)
+
+def _check_int(x, func, out_dims):
+    if isinstance(x, int):
+        return
+    raise ValueError(
+        f'vmap({_get_name(func)}, ..., out_dims={out_dims}): `out_dims` must be '
+        f'an int or a python collection of ints representing where in the outputs the '
+        f'vmapped dimension should appear.')
+
+def _check_out_dims_is_int_or_int_pytree(out_dims: out_dims_t, func: Callable) -> None:
     if isinstance(out_dims, int):
         return
-    if not isinstance(out_dims, tuple) or \
-            not all([isinstance(out_dim, int) for out_dim in out_dims]):
-        raise ValueError(
-            f'vmap({_get_name(func)}, ..., out_dims={out_dims}): `out_dims` must be '
-            f'an int or a tuple of int representing where in the outputs the '
-            f'vmapped dimension should appear.')
+    tree_map_(partial(_check_int, func=func, out_dims=out_dims), out_dims)
 
 def _get_name(func: Callable):
     if hasattr(func, '__name__'):
@@ -250,13 +260,12 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
 def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
     @functools.wraps(func)
     def wrapped(*args):
-        _check_out_dims_is_int_or_int_tuple(out_dims, func)
+        _check_out_dims_is_int_or_int_pytree(out_dims, func)
         vmap_level = _vmap_increment_nesting()
         torch._C._vmapmode_increment_nesting()
         try:
             batched_inputs, batch_size = _create_batched_inputs(in_dims, args, vmap_level, func)
             batched_outputs = func(*batched_inputs)
-            _validate_outputs(batched_outputs, func)
             return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func)
         finally:
             torch._C._vmapmode_decrement_nesting()
