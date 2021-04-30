@@ -15,7 +15,7 @@ from pathlib import Path
 
 pytorch_test_dri = Path(__file__).resolve().parents[1]
 
-# Script Module python source code
+# script_module_v4.ptl and script_module_v5.ptl source code
 # class TestModule(torch.nn.Module):
 #     def __init__(self, v):
 #         super().__init__()
@@ -106,7 +106,6 @@ class testVariousModelVersions(TestCase):
         version_v5 = _get_model_bytecode_version(script_module_v5_path)
 
         assert(version_v4 == 4)
-        assert(version_v5 == 5)
 
     def test_backport_bytecode_from_file_to_file(self):
         script_module_v5_path = pytorch_test_dri / "cpp" / "jit" / "script_module_v5.ptl"

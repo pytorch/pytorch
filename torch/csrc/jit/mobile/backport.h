@@ -12,7 +12,6 @@ class PyTorchStreamWriter;
 
 namespace torch {
 namespace jit {
-namespace mobile {
 
 // The family of methods below load a serialized Mobile Module
 TORCH_API bool _backport_for_mobile(std::istream& in, std::ostream& out);
@@ -31,7 +30,7 @@ TORCH_API bool _backport_for_mobile(
 
 TORCH_API bool _backport_for_mobile(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai,
-    std::shared_ptr<caffe2::serialize::PyTorchStreamWriter> writer);
+    caffe2::serialize::PyTorchStreamWriter& writer);
 
 TORCH_API bool _backport_for_mobile(
     std::istream& in,
@@ -58,6 +57,5 @@ TORCH_API bool _backport_for_mobile(
     std::unique_ptr<caffe2::serialize::PyTorchStreamWriter> writer,
     const int64_t to_version);
 
-} // namespace mobile
 } // namespace jit
 } // namespace torch
