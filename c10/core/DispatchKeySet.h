@@ -210,11 +210,11 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 // See Note [TLS Initialization]
 constexpr DispatchKeySet default_included_set = DispatchKeySet({
     DispatchKey::BackendSelect,
-    DispatchKey::InplaceOrView,
+    DispatchKey::ADInplaceOrView,
 });
 
-constexpr DispatchKeySet autograd_dispatch_keyset_with_InplaceOrView =
-  autograd_dispatch_keyset | DispatchKeySet(DispatchKey::InplaceOrView);
+constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
+  autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
 
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd
@@ -243,10 +243,10 @@ constexpr DispatchKeySet after_autograd_keyset = DispatchKeySet(
         c10::DispatchKey::AutogradOther
 );
 
-// The set of dispatch keys that come after InplaceOrView
-constexpr DispatchKeySet after_InplaceOrView_keyset = DispatchKeySet(
+// The set of dispatch keys that come after ADInplaceOrView
+constexpr DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
         DispatchKeySet::FULL_AFTER,
-        c10::DispatchKey::InplaceOrView
+        c10::DispatchKey::ADInplaceOrView
 );
 
 // true if t is a backend dispatch key
@@ -276,9 +276,9 @@ C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // NB: If you add any extra keys that can be stored in TensorImpl on
   // top of existing "backend" keys like CPU/CUDA, you need to add it
-  // here.  At the moment, autograd keys and InplaceOrView key need this
+  // here.  At the moment, autograd keys and ADInplaceOrView key need this
   // treatment;
-  return (s - autograd_dispatch_keyset_with_InplaceOrView).highestPriorityTypeId();
+  return (s - autograd_dispatch_keyset_with_ADInplaceOrView).highestPriorityTypeId();
 }
 
 template<class T>

@@ -72,7 +72,7 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
 
 DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t) {
   return DispatchKeySet({
-    DispatchKey::InplaceOrView, getAutogradKeyFromBackend(t)});
+    DispatchKey::ADInplaceOrView, getAutogradKeyFromBackend(t)});
 }
 
 bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {

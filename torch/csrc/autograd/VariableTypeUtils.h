@@ -141,7 +141,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
         CreationMeta creation_meta=CreationMeta::DEFAULT, bool allow_tensor_metadata_change=true) {
   // Note [View of inference tensor]
   // For inference tensor this code can only be hit outside InferenceMode
-  // since InplaceOrView is in the default_included_set.
+  // since ADInplaceOrView is in the default_included_set.
   // If Inplace and View were separate dispatch keys we can just put Inplace
   // in the default_included_set, so that view ops on inference tensor doesn't
   // have to go through as_view even outside InferenceMode.

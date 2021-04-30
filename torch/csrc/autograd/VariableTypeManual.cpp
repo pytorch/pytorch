@@ -284,20 +284,20 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
 }  // namespace
 }} // namespace autograd::VariableType
 
-namespace InplaceOrView {
+namespace ADInplaceOrView {
   Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
     {
-      at::AutoDispatchBelowInplaceOrView guard;
-      at::redispatch::copy_(ks & c10::after_InplaceOrView_keyset, self, src, non_blocking);
+      at::AutoDispatchBelowADInplaceOrView guard;
+      at::redispatch::copy_(ks & c10::after_ADInplaceOrView_keyset, self, src, non_blocking);
     }
     torch::autograd::increment_version(self);
     return self;
   }
 
   namespace {
-    TORCH_LIBRARY_IMPL(aten, InplaceOrView, m) {
-      m.impl("copy_", torch::dispatch(DispatchKey::InplaceOrView, TORCH_FN(InplaceOrView::copy_)));
+    TORCH_LIBRARY_IMPL(aten, ADInplaceOrView, m) {
+      m.impl("copy_", torch::dispatch(DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::copy_)));
     }
   } // namespace
-} // namespace InplaceOrView
+} // namespace ADInplaceOrView
 } // namespace torch

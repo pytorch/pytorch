@@ -34,7 +34,7 @@ Migration Guide from ``AutoNonVariableTypeMode``
 ------------------------------------------------
 
 In production use of PyTorch for inference workload, we have seen a proliferation
-of uses of the C++ guard ``AutoNonVariableTypeMode``(now ``DispatchBelowAutograd``),
+of uses of the C++ guard ``AutoNonVariableTypeMode``(now ``AutoDispatchBelowADInplaceOrView``),
 which disables autograd, view tracking and version counter bumps. Unfortunately,
 current colloquial of this guard for inference workload is unsafe: it's possible to
 use ``AutoNonVariableTypeMode`` to bypass PyTorch's safety checks and result in
@@ -79,7 +79,7 @@ users should pay additional attention to:
 
 
 2. Users trying to implement a customized kernel who wants to redispatch under ``Autograd`` dispatch
-   keys should use ``DispatchBelowAutograd`` instead. Note ``DispatchBelowAutograd`` is just a new name
+   keys should use ``AutoDispatchBelowADInplaceOrView`` instead. Note ``AutoDispatchBelowADInplaceOrView`` is just a new name
    of ``AutoNonVariableTypeMode`` since it explains the guard's functionality better. We're deprecating
    ``AutoNonVariableTypeMode`` and it'll be removed in 1.10 release. See customized kernel
    ``ROIAlignFunction`` in ``pytorch/vision`` for an example:
@@ -105,7 +105,7 @@ users should pay additional attention to:
       ctx->saved_data["input_shape"] = input.sizes();
       ctx->save_for_backward({rois});
       // Used to be at::AutoNonVariableTypeMode g;
-      at::DispatchBelowAutograd guard;
+      at::AutoDispatchBelowADInplaceOrView guard;
       auto result = roi_align(
           input, rois, spatial_scale, pooled_height,
           pooled_width, sampling_ratio, aligned);

@@ -108,10 +108,10 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
 
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
-    // See Note [Expected TLS state in InferenceMode] for why we exclude Autograd & InplaceOrView keys.
+    // See Note [Expected TLS state in InferenceMode] for why we exclude Autograd & ADInplaceOrView keys.
     // Normally key_set only contains backend keys but we do the substraction
     // here to make sure.
-    key_set_ = key_set - c10::autograd_dispatch_keyset_with_InplaceOrView;
+    key_set_ = key_set - c10::autograd_dispatch_keyset_with_ADInplaceOrView;
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]
