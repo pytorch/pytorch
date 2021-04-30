@@ -61,9 +61,9 @@ Message RpcWithAutograd::toMessageImpl() && {
   TORCH_INTERNAL_ASSERT(!payload.empty());
 
   // Convert deviceMap to c10::Dict for serialization.
-  c10::Dict<at::IValue, at::IValue> deviceMap(DeviceObjType::get(), DeviceObjType::get());
+  c10::Dict<std::string, std::string> deviceMap;
   for (const auto& mapEntry : deviceMap_) {
-    deviceMap.insert(mapEntry.first, mapEntry.second);
+    deviceMap.insert(mapEntry.first.str(), mapEntry.second.str());
   }
 
   std::vector<at::IValue> ivalues{wrappedMessageType,
@@ -109,12 +109,12 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   AutogradMetadata autogradMetadata(
       tupleElements[1].toInt(), tupleElements[2].toInt());
   worker_id_t workerId = tupleElements[3].toInt();
-  auto c10DeviceMap = tupleElements[4].to<c10::Dict<at::IValue, at::IValue>>();
+  auto c10DeviceMap = tupleElements[4].to<c10::Dict<std::string, std::string>>();
 
   // Convert to regular map.
   std::unordered_map<c10::Device, c10::Device> deviceMap;
   for (const auto& mapEntry : c10DeviceMap) {
-    deviceMap.insert({mapEntry.key().toDevice(), mapEntry.value().toDevice()});
+    deviceMap.insert({mapEntry.key(), mapEntry.value()});
   }
 
   // Create new message type and build wrapped RPC.

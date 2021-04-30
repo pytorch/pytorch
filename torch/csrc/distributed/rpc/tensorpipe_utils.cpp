@@ -89,8 +89,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     // tensor to CPU.
     const auto& tensorData =
         jit::getWriteableTensorData(tensorDataVec[i], /* toCpu */ false);
-    tensorpipe::Device targetDevice =
-        devices.empty() || devices[i].is_cpu()
+    tensorpipe::Device targetDevice = devices.empty() || devices[i].is_cpu()
         ? tensorpipe::Device{tensorpipe::kCpuDeviceType, 0}
         : tensorpipe::Device{tensorpipe::kCudaDeviceType, devices[i].index()};
 
