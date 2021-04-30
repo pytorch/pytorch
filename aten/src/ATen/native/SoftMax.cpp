@@ -301,9 +301,13 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<Scala
   return result;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softmax_lastdim_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_softmax_lastdim_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {

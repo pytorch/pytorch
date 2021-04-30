@@ -38,6 +38,46 @@
 
 #include <torch/custom_class.h>
 
+namespace {
+
+// Wrapper to ensure GIL is released before destructing ProcessGroupGloo
+// TODO: move this somewhere more generally useful
+template <typename T>
+class IntrusivePtrNoGilDestructor {
+  c10::intrusive_ptr<T> impl_;
+public:
+  IntrusivePtrNoGilDestructor() = default;
+  IntrusivePtrNoGilDestructor(const IntrusivePtrNoGilDestructor&) = default;
+  IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) = default;
+  IntrusivePtrNoGilDestructor& operator=(const IntrusivePtrNoGilDestructor&) = default;
+  IntrusivePtrNoGilDestructor& operator=(IntrusivePtrNoGilDestructor&&) = default;
+  /* implicit */ IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl) : impl_(std::move(impl)) {}
+  // This ctor is very important; see
+  // https://github.com/pybind/pybind11/issues/2957
+  explicit IntrusivePtrNoGilDestructor(T* impl) : impl_(c10::intrusive_ptr<T>::unsafe_steal_from_new(impl)) {}
+  ~IntrusivePtrNoGilDestructor() {
+    if (impl_) {
+      if (PyGILState_Check()) {
+        pybind11::gil_scoped_release release;
+        impl_.reset();
+      } else {
+        impl_.reset();
+      }
+    }
+  }
+  T& operator*() const noexcept { return *impl_; }
+  T* operator->() const noexcept { return impl_.get(); }
+  C10_NODISCARD T* get() const noexcept { return impl_.get(); }
+  void reset() noexcept { impl_.reset(); }
+  operator bool() const noexcept {
+    return impl_;
+  }
+};
+
+} // anonymous namespace
+
+PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true);
+
 namespace torch {
 namespace distributed {
 namespace c10d {
@@ -45,6 +85,7 @@ namespace c10d {
 namespace {
 
 #ifdef USE_C10D_GLOO
+// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable,cppcoreguidelines-avoid-non-const-global-variables)
 constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
 #endif
 
@@ -67,6 +108,9 @@ constexpr auto kDeprecationWarning =
     "if you see this warning";
 template <typename T>
 using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
+
+template <typename T>
+using intrusive_ptr_no_gil_destructor_class_ = py::class_<T, IntrusivePtrNoGilDestructor<T>>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -915,6 +959,14 @@ Arguments:
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "_allgather_base",
+              &::c10d::ProcessGroup::_allgather_base,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "allgather",
               [](::c10d::ProcessGroup& pg,
                  std::vector<at::Tensor>& output,
@@ -1078,6 +1130,14 @@ Arguments:
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_set_sequence_number_for_group",
+              &::c10d::ProcessGroup::setSequenceNumberForGroup,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_sequence_number_for_group",
+              &::c10d::ProcessGroup::getSequenceNumberForGroup,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "monitored_barrier",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::chrono::milliseconds& timeout,
@@ -1096,12 +1156,11 @@ Arguments:
           processGroup,
           "Options",
           R"(
-Base class for all processs group options implementations, such as the 2 provided by PyTorch
-distributed: (:class:`~torch.distributed.ProcessGroupGloo.Options` and
-:class:`~torch.distributed.ProcessGroupNCCL.Options`).
+Base class for all processs group options implementations, such as the nccl
+options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 )")
           .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
-          .def_readwrite("timeout", &::c10d::ProcessGroup::Options::timeout);
+          .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
 
 #ifndef _WIN32
   module.def(
@@ -1120,36 +1179,14 @@ distributed: (:class:`~torch.distributed.ProcessGroupGloo.Options` and
 #endif
 
 #ifdef USE_C10D_GLOO
-  auto processGroupGloo = intrusive_ptr_class_<::c10d::ProcessGroupGloo>(
+  auto processGroupGloo = intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
       module, "ProcessGroupGloo", processGroup);
 
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
 
   intrusive_ptr_class_<::c10d::ProcessGroupGloo::Options>(
-      processGroupGloo,
-      "Options",
-      processGroupOptions,
-      R"(
-ProcessGroup options for Gloo backend
-
-Arguments:
-    timeout (timedelta, optional): Timeout for operations executed against
-            the process group. Default value equals 30 minutes.
-
-Example::
-    >>> import torch.distributed as dist
-    >>> import tempfile
-    >>> from datetime import timedelta
-    >>>
-    >>> temp_name = tempfile.NamedTemporaryFile(delete=False).name
-    >>> gloo_options = dist.ProcessGroupGloo.Options(timeout=timedelta(seconds=300))
-    >>> # initialize a gloo process group with the options just created
-    >>> dist.init_process_group("gloo", init_method=f"file://{temp_name}",
-    >>>                          world_size=2, rank=0, pg_options=gloo_options)
-      )")
-      .def(
-          py::init<std::chrono::milliseconds>(),
-          py::arg("timeout") = kProcessGroupDefaultTimeout)
+      processGroupGloo, "_Options", processGroupOptions)
+      .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
       .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
 
@@ -1206,6 +1243,7 @@ Example::
             }
 
             options->timeout = timeout;
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             options->threads = options->devices.size() * 2;
             return c10::make_intrusive<::c10d::ProcessGroupGloo>(
                 store, rank, size, options);
@@ -1220,7 +1258,7 @@ Example::
 
 #ifdef USE_C10D_NCCL
   auto processGroupNCCL =
-      intrusive_ptr_class_<::c10d::ProcessGroupNCCL>(
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL", processGroup)
           .def(
               py::init<
@@ -1256,31 +1294,19 @@ Example::
 ProcessGroup options for the NCCL backend
 
 Arguments:
-    timeout (timedelta, optional): Timeout for operations executed against
-            the process group. Default value equals 30 minutes. This is
-            applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
-            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1. When
-            ``NCCL_BLOCKING_WAIT`` is set, this is the duration for which the
-            process will block and wait for collectives to complete before
-            throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
-            this is the duration after which collectives will be aborted
-            asynchronously and the process will crash. `
     is_high_priority_stream (bool, optional): flag to enable/disable process
             group to pick up high priority cuda streams. It lets CUDA driver
             to prioritize NCCL kernels when there are compute kernels waiting.
+            Default is False.
 
 Example::
     >>> import torch.distributed as dist
-    >>> from datetime import timedelta
     >>>
-    >>> nccl_options = dist.ProcessGroupNCCL.Options(timeout=timedelta(seconds=300))
+    >>> nccl_options = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
     >>> # initialize a nccl process group with the options just created
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
-      .def(
-          py::init<std::chrono::milliseconds, bool>(),
-          py::arg("timeout") = kProcessGroupDefaultTimeout,
-          py::arg("is_high_priority_stream") = false)
+      .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream);
@@ -1291,7 +1317,7 @@ Example::
 #endif
 
 #ifdef USE_C10D_MPI
-  auto processGroupMPI = intrusive_ptr_class_<::c10d::ProcessGroupMPI>(
+  auto processGroupMPI = intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupMPI>(
       module, "ProcessGroupMPI", processGroup);
 
   // Define static create function instead of a constructor, because
@@ -1392,77 +1418,8 @@ Example::
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
-      .def_readwrite("world_size", &c10::DDPLoggingData::world_size)
-      .def_readwrite("rank", &c10::DDPLoggingData::rank)
-      .def_readwrite("module_name", &c10::DDPLoggingData::module_name)
-      .def_readwrite("device_ids", &c10::DDPLoggingData::device_ids)
-      .def_readwrite("output_device", &c10::DDPLoggingData::output_device)
-      .def_readwrite(
-          "broadcast_buffers", &c10::DDPLoggingData::broadcast_buffers)
-      .def_readwrite("bucket_cap_mb", &c10::DDPLoggingData::bucket_cap_mb)
-      .def_readwrite(
-          "find_unused_parameters",
-          &c10::DDPLoggingData::find_unused_parameters)
-      .def_readwrite(
-          "gradient_as_bucket_view",
-          &c10::DDPLoggingData::gradient_as_bucket_view)
-      .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name)
-      .def_readwrite("iteration", &c10::DDPLoggingData::iteration)
-      .def_readwrite(
-          "total_parameter_size_bytes",
-          &c10::DDPLoggingData::total_parameter_size_bytes)
-      .def_readwrite(
-          "num_parameter_tensors", &c10::DDPLoggingData::num_parameter_tensors)
-      .def_readwrite("dtypes", &c10::DDPLoggingData::dtypes)
-      .def_readwrite("bucket_sizes", &c10::DDPLoggingData::bucket_sizes)
-      .def_readwrite("master_port", &c10::DDPLoggingData::master_port)
-      .def_readwrite("master_addr", &c10::DDPLoggingData::master_addr)
-      .def_readwrite(
-          "cuda_visible_devices", &c10::DDPLoggingData::cuda_visible_devices)
-      .def_readwrite(
-          "gloo_socket_ifname", &c10::DDPLoggingData::gloo_socket_ifname)
-      .def_readwrite(
-          "gloo_device_transport", &c10::DDPLoggingData::gloo_device_transport)
-      .def_readwrite(
-          "nccl_socket_ifname", &c10::DDPLoggingData::nccl_socket_ifname)
-      .def_readwrite(
-          "nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
-      .def_readwrite(
-          "nccl_async_error_handling",
-          &c10::DDPLoggingData::nccl_async_error_handling)
-      .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
-      .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
-      .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout)
-      .def_readwrite(
-          "unused_parameter_size", &c10::DDPLoggingData::unused_parameter_size)
-      .def_readwrite(
-          "has_rebuilt_buckets", &c10::DDPLoggingData::has_rebuilt_buckets)
-      .def_readwrite(
-          "rebuilt_bucket_sizes", &c10::DDPLoggingData::rebuilt_bucket_sizes)
-      .def_readwrite(
-          "avg_forward_compute_time",
-          &c10::DDPLoggingData::avg_forward_compute_time)
-      .def_readwrite(
-          "avg_backward_compute_time",
-          &c10::DDPLoggingData::avg_backward_compute_time)
-      .def_readwrite(
-          "avg_backward_comm_time",
-          &c10::DDPLoggingData::avg_backward_comm_time)
-      .def_readwrite(
-          "avg_backward_compute_comm_overlap_time",
-          &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time)
-      .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook)
-      .def_readwrite("join_uneven_inputs", &c10::DDPLoggingData::join_uneven_inputs)
-      .def_readwrite(
-          "forward_compute_time", &c10::DDPLoggingData::forward_compute_time)
-      .def_readwrite(
-          "backward_compute_time", &c10::DDPLoggingData::backward_compute_time)
-      .def_readwrite(
-          "backward_comm_time", &c10::DDPLoggingData::backward_comm_time)
-      .def_readwrite(
-          "backward_compute_comm_overlap_time",
-          &c10::DDPLoggingData::backward_compute_comm_overlap_time)
-      .def_readwrite("is_multi_device_module", &c10::DDPLoggingData::is_multi_device_module);
+      .def_readwrite("strs_map", &c10::DDPLoggingData::strs_map)
+      .def_readwrite("ints_map", &c10::DDPLoggingData::ints_map);
 
   module.def(
       "_compute_bucket_assignment_by_size",
@@ -1552,6 +1509,7 @@ Example::
       py::call_guard<py::gil_scoped_release>());
 
   module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
+  module.attr("_DEFAULT_PG_TIMEOUT") = py::cast(kProcessGroupDefaultTimeout);
   module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
 
   Py_RETURN_TRUE;
@@ -1892,8 +1850,10 @@ static const auto ProcessGroupNCCLOptionsTorchBind =
         "ProcessGroupNCCLOptions")
         .def(torch::init([](int64_t timeout, bool isHighPriorityStream) {
           auto opTimeout = std::chrono::milliseconds(timeout);
-          return ::c10d::ProcessGroupNCCL::Options::create(
-              opTimeout, isHighPriorityStream);
+          auto opts =
+              ::c10d::ProcessGroupNCCL::Options::create(isHighPriorityStream);
+          opts->timeout = opTimeout;
+          return opts;
         }));
 
 static const auto ProcessGroupNCCLTorchBind =

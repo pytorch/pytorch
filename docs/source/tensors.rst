@@ -523,6 +523,7 @@ Tensor class reference
     Tensor.pinverse
     Tensor.polygamma
     Tensor.polygamma_
+    Tensor.positive
     Tensor.pow
     Tensor.pow_
     Tensor.prod
