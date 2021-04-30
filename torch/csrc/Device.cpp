@@ -51,7 +51,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
     "Device(Device device)",
-    "Device(std::string type, int64_t? index=-1)"
+    "Device(c10::string_view type, int64_t? index=-1)"
   });
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);

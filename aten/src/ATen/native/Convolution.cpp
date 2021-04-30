@@ -678,7 +678,7 @@ static Tensor convolution_same(
 
 Tensor _convolution_mode(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
-    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    IntArrayRef stride, c10::string_view padding, IntArrayRef dilation,
     int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
@@ -698,7 +698,7 @@ Tensor _convolution_mode(
 
 at::Tensor conv1d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
-    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    IntArrayRef stride, c10::string_view padding, IntArrayRef dilation,
     int64_t groups) {
   return at::_convolution_mode(
       input, weight, bias, stride, std::move(padding), dilation, groups);
@@ -706,7 +706,7 @@ at::Tensor conv1d(
 
 at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
-    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    IntArrayRef stride, c10::string_view padding, IntArrayRef dilation,
     int64_t groups) {
   return at::_convolution_mode(
       input, weight, bias, stride, std::move(padding), dilation, groups);
@@ -714,7 +714,7 @@ at::Tensor conv2d(
 
 at::Tensor conv3d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
-    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    IntArrayRef stride, c10::string_view padding, IntArrayRef dilation,
     int64_t groups) {
   return at::_convolution_mode(
       input, weight, bias, stride, std::move(padding), dilation, groups);

@@ -593,7 +593,7 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(None)
                 elif t == 'ScalarType':
                     func_args.append(torch.float32)
-                elif t == 'std::string':
+                elif t == 'c10::string_view':
                     func_args.append('')
                 else:
                     raise RuntimeError(f"Unsupported argument type {t} for {arg['name']} of function {func}")
