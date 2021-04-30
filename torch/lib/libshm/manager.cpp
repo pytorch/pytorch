@@ -93,29 +93,20 @@ int main(int argc, char *argv[]) {
   setsid();  // Daemonize the process
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
-  auto tempfile =
-      c10::try_make_tempfile(/*name_prefix=*/"torch-shm-file-");
+  c10::optional<c10::TempDir> tempdir;
   try {
-    if (!tempfile.has_value()) {
+    tempdir =
+      c10::try_make_tempdir(/*name_prefix=*/"torch-shm-dir-");
+    if (!tempdir.has_value()) {
       throw std::runtime_error(
-          "could not generate a random filename for manager socket");
+          "could not generate a random directory for manager socket");
     }
-    // TODO: better strategy for generating tmp names
-    // TODO: retry on collisions - this can easily fail
-    std::string tempfile_name = tempfile->name;
-
-    // Reset tempfile, which will cause the contained TempFile
-    // instance to be destroyed and the underlying temporary file
-    // to be unlinked. The file must be unlinked before we can
-    // call bind(2) on its name (as the address of the manager server
-    // socket), otherwise bind(2) will failed with EADDRINUSE.
-    tempfile.reset();
-
+    std::string tempfile = tempdir->name + "/manager.sock";
     // NOLINTNEXTLINE(modernize-make-unique)
-    srv_socket.reset(new ManagerServerSocket(tempfile_name));
+    srv_socket.reset(new ManagerServerSocket(tempfile));
     register_fd(srv_socket->socket_fd);
-    print_init_message(tempfile_name.c_str());
-    DEBUG("opened socket %s", tempfile_name.c_str());
+    print_init_message(tempfile.c_str());
+    DEBUG("opened socket %s", tempfile.c_str());
   } catch (const std::exception& e) {
     std::string message("ERROR: ");
     message += e.what();
