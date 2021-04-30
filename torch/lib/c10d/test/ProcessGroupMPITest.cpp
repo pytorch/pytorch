@@ -164,7 +164,7 @@ void testAllgather(int iter = 10000) {
   }
 }
 
-void testGather(int iter = 1000) {
+void testGather(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
 
@@ -258,7 +258,7 @@ void testScatter(int iter = 1) {
   }
 }
 
-void testSendRecv(bool recvAnysource, int iter = 10) {
+void testSendRecv(bool recvAnysource, int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   // Generate inputs
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
