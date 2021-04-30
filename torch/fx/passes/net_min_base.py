@@ -1,5 +1,5 @@
 import argparse
-from typing import Any, Callable, Tuple, Dict, Optional
+from typing import Any, Callable, Tuple, Dict, Optional, List
 
 import torch
 from torch.fx.node import map_arg
@@ -55,11 +55,19 @@ class _MinimizerSettingBase:
             action="store_true",
             help="Minimizer will go through the entire model and return all problematic nodes.",
         )
+        parser.add_argument(
+            "--return_intermediate",
+            default=False,
+            action="store_true",
+            help="If true, when using `run_nodes()` function to run the model, intermediate results "
+            "of all the ops will be returned as output.",
+        )
         args, unknown = parser.parse_known_args()
 
         self.accumulate_error: bool = args.accumulate_error
         self.traverse_method: str = args.traverse_method
         self.find_all: bool = args.find_all
+        self.return_intermediate: bool = args.return_intermediate
 
     def __str__(self):
         settings_str = "FX Minimizer Settings:\n"
@@ -279,6 +287,7 @@ class _MinimizerBase:
         self,
         split_module: torch.fx.GraphModule,
         submod_name: str,
+        output_names: Optional[List[str]] = None,
     ):
         """
         Run the submodule in `split_module` that has name `submod_name`
@@ -287,18 +296,35 @@ class _MinimizerBase:
         Args:
             split_module: Main module that contains the minimize submodule.
             submod_name: Name of the minimize submodule.
+            output_names: Names of the node we want to output. If None, we
+                will use the original output.
         """
         submodule = getattr(split_module, submod_name)
         a_input, b_input = self._get_submod_inputs(split_module, submod_name)
 
-        a_result = self.run_a(submodule, a_input)
-        b_result = self.run_b(submodule, b_input)
-        self._store_outputs(a_result, b_result, submodule)
+        if output_names:
+            output_nodes = []
+            for node in submodule.graph.nodes:
+                if node.op == "output":
+                    submodule.graph.erase_node(node)
+
+                if node.name in output_names:
+                    output_nodes.append(node)
+
+            submodule.graph.output(
+                output_nodes[0] if len(output_nodes) == 1 else tuple(output_nodes)
+            )
+            submodule.graph.lint()
+            submodule.recompile()
 
         # Use name of args in output node as key to store comparison result
         for node in submodule.graph.nodes:
             if node.op == "output":
                 result_key = map_arg(node.args, lambda x: x.name)
+
+        a_result = self.run_a(submodule, a_input)
+        b_result = self.run_b(submodule, b_input)
+        self._store_outputs(a_result, b_result, submodule)
 
         # Compare results
         numeric_result, bool_result = self.compare_fn(a_result, b_result)
@@ -387,7 +413,7 @@ class _MinimizerBase:
     def run_nodes(self, start: Optional[str] = None, end: Optional[str] = None):
         """
         Run part of the model from `start` node to `end` node. If `start` is None
-        then we start from the beggining of the model. If `end` is None then we
+        then we start from the beginning of the model. If `end` is None then we
         stop at the end of the model.
 
         Args:
@@ -399,10 +425,14 @@ class _MinimizerBase:
                 model.
         """
         nodes = self._collect_nodes(start, end)
+        output_names = None
+
+        if self.settings.return_intermediate:
+            output_names = [node.name for node in nodes]
 
         try:
             split_module, submod_name = self._build_submodule(nodes)
-            self._run_and_compare(split_module, submod_name)
+            self._run_and_compare(split_module, submod_name, output_names)
         except (
             FxNetMinimizerRunFuncError,
             FxNetMinimizerResultMismatchError,
