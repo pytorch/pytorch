@@ -5546,7 +5546,9 @@ def add_test(
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
                                 output_variable = (output_variable,)
+
                             inplace_self_variable = self_variable.detach().clone().requires_grad_(self_variable.requires_grad)
+                            self.assertEqual(inplace_self_variable, self_variable)
                             inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                                for i in (inplace_self_variable,))
                             inplace_args_variable = deepcopy(args_variable)
