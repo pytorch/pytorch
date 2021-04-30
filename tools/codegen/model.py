@@ -197,14 +197,6 @@ class NativeFunction:
     # so you can make use of the normal binding if you need it.
     manual_cpp_binding: bool
 
-    # A mapping of dispatch keys to names of functions implementing
-    # them.  In native_functions.yaml, the dispatch entry is optional; in that
-    # case, that is equivalent to having written:
-    #
-    #   dispatch:
-    #       CompositeImplicitAutograd: $operator_name
-    dispatch: Dict[DispatchKey, str]
-
     # The location in the YAML file were this native function entry was
     # defined.  This is for conveniently reporting error messages!
     loc: 'Location'
@@ -240,20 +232,22 @@ class NativeFunction:
     # method is one which has the same dispatch for all types;
     # we just implement it in the base Type.  This is exposed
     # in Declarations.yaml via a field named 'abstract'.
-    @property
-    def is_abstract(self) -> bool:
-        if self.structured_delegate:
-            # Structured functions MUST have a dispatch table
-            return True
-        else:
-            return self.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+    is_abstract: bool
+
+    # Whether or not the NativeFunction contains a backend-agnostic kernel
+    # (irrespective of autograd)
+    has_composite_kernel: bool
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
 
+    # We parse both the NativeFunction + backend-specific information about it, which it stored in a corresponding BackendIndex.
     @staticmethod
-    def from_yaml(ei: Dict[str, object], loc: 'Location') -> 'NativeFunction':
+    def from_yaml(
+            ei: Dict[str, object],
+            loc: 'Location'
+    ) -> Tuple['NativeFunction', Dict[DispatchKey, Dict['OperatorName', 'BackendMetadata']]]:
         """
         Parse a NativeFunction from a dictionary as directly parsed
         from native_functions.yaml
@@ -341,10 +335,52 @@ class NativeFunction:
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
 
+        if structured_delegate:
+            # Structured functions MUST have a dispatch table
+            is_abstract = True
+        else:
+            is_abstract = dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+
+        has_composite_kernel = any(is_generic_dispatch_key(k) for k in dispatch.keys())
+
+        # BackendMetadata is used to store any information about a NativeFunction that is backend dependent.
+        # The most obvious information is the kernel name, which usually contains the name of the backend in it for cpu/cuda.
+        # Why is 'structured' included? External backends (e.g. XLA) opt into which ops are structured
+        # independently of which in-tree ops are structured
+        backend_metadata = {k: {func.name: BackendMetadata(
+            kernel=v, structured=structured, external=False)} for k, v in dispatch.items()}
+
         # don't care if it exists or not; make it easier to use this function
         # with other yaml parsers that aren't setting __line__ in the dict
         e.pop('__line__', None)
         assert not e, f"leftover entries: {e}"
+
+        # extra validations that we can't move into __post_init__, because data is split
+        # between NativeFunction and BackendIndex objects.
+        if func.arguments.out:
+            assert variants == {Variant.function}, "Native functions with out arguments MUST " \
+                "be declared with only function variant; e.g., variants: function; " \
+                "otherwise you will tickle a Python argument binding bug " \
+                "(which usually manifests itself as the result variable being undefined.)"
+        if structured:
+            assert func.kind() == SchemaKind.out, "Put structured field on the out= " \
+                "variant of a function; did you mean structured_delegate?"
+            assert device_guard, "device_guard: False is not respected by structured kernels"
+        if structured_delegate:
+            assert func.kind() != SchemaKind.out, "structured_delegate field not allowed " \
+                "on out= functions; did you mean structured?"
+            assert device_guard, "device_guard: False is not respected by structured kernels"
+        # Technically, with the asserts above, this assert is impossible to
+        # happen
+        assert not (structured and structured_delegate), \
+            "Cannot have both structured and structured_delegate on function"
+        if structured_inherits is not None:
+            assert structured, "structured_inherits must also imply structured: True"
+        if structured_delegate is not None:
+            for key in STRUCTURED_DISPATCH_KEYS:
+                assert key not in dispatch, \
+                    f"if structured_delegate, then must not have {key} in dispatch dictionary " \
+                    "(it is delegated!)"
 
         return NativeFunction(
             func=func,
@@ -357,19 +393,12 @@ class NativeFunction:
             manual_cpp_binding=manual_cpp_binding,
             python_module=python_module,
             category_override=category_override,
-            dispatch=dispatch,
             device_guard=device_guard,
             loc=loc,
             cpp_no_default_args=cpp_no_default_args,
-        )
-
-    def validate_unstructured(self) -> None:
-        # TODO: probably better to accumulate these errors and report them all
-        # at once
-        assert not self.structured, "This function is structured, but there was " \
-            "no valid functional variant of it."
-        assert self.structured_delegate, "This function delegates to another structured out function, " \
-            "but no valid function was found (the delegate may not exist, or it has the wrong type)"
+            is_abstract=is_abstract,
+            has_composite_kernel=has_composite_kernel
+        ), backend_metadata
 
     # __post_init__ functions in dataclasses can be used to do extra
     # validation after construction.
@@ -379,34 +408,10 @@ class NativeFunction:
     # Validation is for nontrivial invariants that cannot be (conveniently)
     # encoded in the type system.
     def __post_init__(self) -> None:
-        if self.func.arguments.out:
-            assert self.variants == {Variant.function}, "Native functions with out arguments MUST " \
-                "be declared with only function variant; e.g., variants: function; " \
-                "otherwise you will tickle a Python argument binding bug " \
-                "(which usually manifests itself as the result variable being undefined.)"
-        if self.structured:
-            assert self.func.kind() == SchemaKind.out, "Put structured field on the out= " \
-                "variant of a function; did you mean structured_delegate?"
-            assert self.device_guard, "device_guard: False is not respected by structured kernels"
-        if self.structured_delegate:
-            assert self.func.kind() != SchemaKind.out, "structured_delegate field not allowed " \
-                "on out= functions; did you mean structured?"
-            assert self.device_guard, "device_guard: False is not respected by structured kernels"
-        # Technically, with the asserts above, this assert is impossible to
-        # happen
-        assert not (self.structured and self.structured_delegate), \
-            "Cannot have both structured and structured_delegate on function"
         defaulted_arguments = {a.name for a in self.func.schema_order_arguments()
                                if a.default is not None}
         invalid_args = set.difference(self.cpp_no_default_args, defaulted_arguments)
         assert len(invalid_args) == 0, f'Invalid cpp_no_default_args: {invalid_args}'
-        if self.structured_inherits is not None:
-            assert self.structured, "structured_inherits must also imply structured: True"
-        if self.structured_delegate is not None:
-            for k in STRUCTURED_DISPATCH_KEYS:
-                assert k not in self.dispatch, \
-                    f"if structured_delegate, then must not have {k} in dispatch dictionary " \
-                    "(it is delegated!)"
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
@@ -422,8 +427,8 @@ class NativeFunctionsGroup:
     inplace: Optional[NativeFunction]
     out: NativeFunction
 
-    @property
     def structured(self) -> bool:
+        # Whether or not the operator has a meta() function. This information is backend-agnostic.
         return self.out.structured
 
     def __post_init__(self) -> None:
@@ -439,17 +444,6 @@ class NativeFunctionsGroup:
         if self.inplace is not None:
             assert self.inplace.func.kind() == SchemaKind.inplace
 
-        if self.structured:
-            # For now, structured composite kernels are not supported (need some
-            # design work to figure out how to make the composite case work)
-            assert self.out.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
-
-            assert self.functional.structured_delegate == self.out.func.name, \
-                f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
-                f"but its actual delegate is {self.out.func.name}"
-            if self.inplace is not None:
-                assert self.inplace.structured_delegate == self.out.func.name
-
     def signature(self) -> 'FunctionSchema':
         return self.out.func.signature()
 
@@ -460,7 +454,10 @@ class NativeFunctionsGroup:
             yield self.inplace
 
     @staticmethod
-    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['NativeFunctionsGroup']:
+    def from_dict(
+            d: Dict[SchemaKind, NativeFunction],
+            backend_indices: Dict[DispatchKey, 'BackendIndex']
+    ) -> Optional['NativeFunctionsGroup']:
         assert d
         if len(d) == 1:
             return None
@@ -474,6 +471,22 @@ class NativeFunctionsGroup:
         # these don't count as structured for our purposes here
         if out is None:
             return None
+
+        for k, per_op_index in backend_indices.items():
+            # TODO: should structured() do the has_backend check autoamtically?
+            if not per_op_index.has_backend(out):
+                continue
+            if per_op_index.structured(out):
+                # For now, structured composite kernels are not supported (need some
+                # design work to figure out how to make the composite case work)
+                assert not backend_indices[DispatchKey.CompositeImplicitAutograd].has_backend(out)
+
+                assert functional.structured_delegate == out.func.name, \
+                    f"{functional.func.name} delegates to {functional.structured_delegate} " \
+                    f"but its actual delegate is {out.func.name}"
+                if inplace is not None:
+                    assert inplace.structured_delegate == out.func.name
+
         return NativeFunctionsGroup(
             functional=functional,
             inplace=inplace,
@@ -528,6 +541,93 @@ def is_foreach_op(name: str) -> bool:
         '_foreach_addcmul_.ScalarList',
         '_foreach_addcdiv_.ScalarList',
         '_foreach_zero_'])
+
+@dataclass(frozen=True)
+class BackendMetadata:
+    # The name of the backend kernel, for a given operator
+    # for in-tree backends. These names come directly from the 'dispatch" field
+    # in native_functions.yaml. The dispatch entry is optional; in that
+    # case, that is equivalent to having written:
+    #
+    #   dispatch:
+    #       CompositeImplicitAutograd: $operator_name
+    kernel: str
+    # Whether or not the operator has a structured kernel implemented, for this particular backend.
+    # For in-tree backends, they all have the same value for structured- this is listed
+    # in native_functions.yaml.
+    # However, external backends like XLA can indendently toggle which ops are structured.
+    structured: bool
+    # Whether or not this op is an in-tree (e.g. CPU/CUDA) or out-of-tree backend (e.g. XLA)
+    external: bool
+
+
+# The BackendIndex encodes per-operator information that is potentially different
+# for each backend. The most obvious example is the name of the kernel
+# (the 'dispatch' entry in native_functions.yaml).
+# However, there can be other examples of different backends having different information.
+# External backends like XLA have a different notion of "structured", which means
+# that this information isn't inherentely tied to a NativeFunction- it's different per backend.
+@dataclass(frozen=True)
+class BackendIndex:
+    dispatch_key: DispatchKey
+    # Mainly important for structured kernels, this determines which variant in the operator group is used to implement the others.
+    # All in-tree ops use out kernels, while XLA uses functional kernels.
+    use_out_as_primary: bool
+    index: Dict['OperatorName', BackendMetadata]
+
+    @staticmethod
+    def grow_index(
+            parent_index: Dict[DispatchKey, Dict['OperatorName', BackendMetadata]],
+            child_index: Dict[DispatchKey, Dict['OperatorName', BackendMetadata]]
+    ) -> None:
+        for k, v in child_index.items():
+            for op_name, metadata in v.items():
+                assert op_name not in parent_index[k], f'duplicate operator {op_name} for dispatch key {k}'
+                parent_index[k][op_name] = metadata
+
+    def has_backend(self, f: NativeFunction) -> bool:
+        return f.func.name in self.index
+
+    def get(self, f: NativeFunction) -> Optional[BackendMetadata]:
+        if f.func.name not in self.index:
+            return None
+        return self.index[f.func.name]
+
+    def kernel(self, f: NativeFunction) -> Optional[str]:
+        m = self.get(f)
+        if m is None:
+            return None
+        return m.kernel
+
+    def primary(self, g: NativeFunctionsGroup) -> NativeFunction:
+        if self.use_out_as_primary:
+            return g.out
+        else:
+            return g.functional
+
+    def structured(self, f: Union[NativeFunction, NativeFunctionsGroup]) -> Optional[bool]:
+        if isinstance(f, NativeFunction):
+            m = self.get(f)
+        elif isinstance(f, NativeFunctionsGroup):
+            m = self.get(self.primary(f))
+        else:
+            assert_never(f)
+
+        if m is None:
+            return None
+        return m.structured
+
+    def is_external(self, f: Union[NativeFunction, NativeFunctionsGroup]) -> Optional[bool]:
+        if isinstance(f, NativeFunction):
+            m = self.get(f)
+        elif isinstance(f, NativeFunctionsGroup):
+            m = self.get(self.primary(f))
+        else:
+            assert_never(f)
+        if m is None:
+            return None
+        return m.external
+
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
@@ -1343,99 +1443,6 @@ class OperatorName:
             return f"{self.name}.{self.overload_name}"
         else:
             return f"{self.name}"
-
-@dataclass(frozen=True)
-class ExternalBackendMetadata:
-
-    operator: OperatorName
-    backend: str
-    is_autograd: bool
-
-    structured: bool = False  # TODO: this will eventually become per-op metadata in the yaml file
-
-@dataclass(frozen=True)
-class ExternalBackendFunction:
-
-    native_function: NativeFunction
-    metadata: Optional[ExternalBackendMetadata]
-
-    @property
-    def structured(self) -> bool:
-        # An external backend op is only considered structured if it's been marked structured both in-tree and out-of-tree
-        return self.native_function.structured and self.metadata is not None and self.metadata.structured
-
-    @property
-    def is_autograd_kernel(self) -> bool:
-        return self.metadata is not None and self.metadata.is_autograd
-
-    def __post_init__(self) -> None:
-        if self.metadata is not None:
-            assert self.metadata.operator == self.native_function.func.name, \
-                f'Metadata and native function names do not match: {self.metadata.operator} and {self.native_function.func.name}'
-        kind = self.native_function.func.kind()
-        if kind == SchemaKind.out or kind == SchemaKind.inplace:
-            assert self.metadata is None or not self.metadata.structured, \
-                "Found an out/inplace operator marked with the structured keyword." \
-                f" Only functional operators can be marked as structured. operator={str(self.native_function.func.name)}"
-
-@dataclass(frozen=True)
-class ExternalBackendFunctionsGroup:
-    functional: ExternalBackendFunction
-    inplace: Optional[ExternalBackendFunction]
-    out: ExternalBackendFunction
-
-    @property
-    def structured(self) -> bool:
-        return self.primary.structured
-
-    @property
-    def primary(self) -> ExternalBackendFunction:
-        # TODO: hardcoding that XLA will only implement functional variants of structured kernel.
-        # This will eventually be toggleable per backend.
-        return self.functional
-
-    @property
-    def is_autograd_kernel(self) -> bool:
-        return self.primary.metadata is not None and self.primary.metadata.is_autograd
-
-    def __post_init__(self) -> None:
-        # Note: I didn't want to copy-paste the post_init checks that NativeFunctionsGroup performs.
-        # ExternalBackendFunctionsGroup objects should be created using `from_function_group` (below),
-        # which guarantees that the relevant checks have already been performed.
-        if self.structured:
-            for f in self.functions():
-                if f == self.primary:
-                    continue
-                # For ops marked as structured externally, we expect external backends to
-                # only include either the functional or out variant in their yaml
-                assert f.metadata is None, \
-                    f"{str(self.primary.native_function.func.name)} is marked as structured. " \
-                    f"variant, {str(f.native_function.func.name)} will be generated for you " \
-                    "and doesn't need to live in the yaml."
-
-    def functions(self) -> Iterator[ExternalBackendFunction]:
-        yield self.out
-        yield self.functional
-        if self.inplace is not None:
-            yield self.inplace
-
-    @staticmethod
-    def from_function_group(
-            g: NativeFunctionsGroup,
-            metadata: Dict[OperatorName, ExternalBackendMetadata]
-    ) -> 'ExternalBackendFunctionsGroup':
-        out_meta = metadata.get(g.out.func.name, None)
-        out = ExternalBackendFunction(g.out, out_meta)
-
-        functional_meta = metadata.get(g.functional.func.name, None)
-        functional = ExternalBackendFunction(g.functional, functional_meta)
-
-        inplace = None
-        if g.inplace:
-            inplace_meta = metadata.get(g.inplace.func.name, None)
-            inplace = ExternalBackendFunction(g.inplace, inplace_meta)
-
-        return ExternalBackendFunctionsGroup(functional, inplace, out)
 
 
 # Helper functions for parsing argument lists (both inputs and returns)

@@ -1,4 +1,5 @@
 from tools.codegen.model import (Argument, FunctionSchema, NativeFunction,
+                                 BackendIndex,
                                  SelfArgument, TensorOptionsArguments, BaseTy)
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict
@@ -478,6 +479,21 @@ class NativeSignature:
 
     def dispatcher_exprs(self) -> List[Expr]:
         return translate.translate(self.arguments(), dispatcher.arguments(self.func), method=False)
+
+
+# Helper functions
+
+def kernel_signature(f: NativeFunction, backend_index: BackendIndex) -> Optional[Union['NativeSignature', 'DispatcherSignature']]:
+    m = backend_index.get(f)
+    if m is None:
+        return None
+    # Note [External Backends Follow Dispatcher API]
+    # Kernel signatures for in-tree backends follow the "native" API,
+    # while kernels for out-of-tree backends follow the dispatcher API.
+    if m.external:
+        return DispatcherSignature.from_schema(f.func)
+    else:
+        return NativeSignature(f.func)
 
 # Functions only, no types
 from tools.codegen.api import cpp, dispatcher, native, translate

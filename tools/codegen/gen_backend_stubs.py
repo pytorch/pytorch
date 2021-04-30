@@ -2,14 +2,14 @@ import pathlib
 import argparse
 import os
 import yaml
-from typing import List, Dict, Union, Tuple, Sequence
+from typing import List, Dict, Union, Tuple, Sequence, Optional
 from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
-from tools.codegen.model import (ExternalBackendFunction, ExternalBackendFunctionsGroup,
-                                 NativeFunction, NativeFunctionsGroup, OperatorName,
-                                 ExternalBackendMetadata, assert_never)
+from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
+                                 NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import Target, concatMap
 import tools.codegen.dest as dest
+import tools.codegen.api.dispatcher as dispatcher
 
 try:
     # use faster C loader if available
@@ -18,10 +18,19 @@ except ImportError:
     from yaml import SafeLoader as Loader  # type: ignore
 
 
+# Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
+# Returns a Tuple of (backend_key, autograd_key, cpp_namespace, updated BackendIndex mapping)
 def parse_backend_yaml(
         backend_yaml_path: str,
-        grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]]
-) -> Tuple[str, List[Union[ExternalBackendFunction, ExternalBackendFunctionsGroup]]]:
+        grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+        backend_indices: Dict[DispatchKey, BackendIndex]
+) -> Tuple[Optional[DispatchKey], Optional[DispatchKey], str, Dict[DispatchKey, BackendIndex]]:
+
+    native_functions_map: Dict[OperatorName, NativeFunction] = {
+        f.func.name: f
+        for f in concatMap(lambda f: [f] if isinstance(f, NativeFunction) else list(f.functions()), grouped_native_functions)
+    }
+
     with open(backend_yaml_path, 'r') as f:
         yaml_values = yaml.load(f, Loader=Loader)
     assert isinstance(yaml_values, dict)
@@ -44,35 +53,36 @@ def parse_backend_yaml(
         f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
 Only the following keys are supported: {", ".join(valid_keys)}'
 
-    metadata: Dict[OperatorName, ExternalBackendMetadata] = {}
-    for op in supported:
-        op_name = OperatorName.parse(op)
-        m = ExternalBackendMetadata(op_name, backend, is_autograd=False)
-        metadata[m.operator] = m
-    for op in supported_autograd:
-        op_name = OperatorName.parse(op)
-        m = ExternalBackendMetadata(op_name, backend, is_autograd=True)
-        metadata[m.operator] = m
-
-    native_functions_map: Dict[OperatorName, NativeFunction] = {
-        f.func.name: f
-        for f in concatMap(lambda f: [f] if isinstance(f, NativeFunction) else list(f.functions()), grouped_native_functions)
-    }
-
-    def native_to_external(
-            g: Union[NativeFunction, NativeFunctionsGroup]
-    ) -> Union[ExternalBackendFunction, ExternalBackendFunctionsGroup]:
-        if isinstance(g, NativeFunction):
-            f = g
-            m = metadata.get(f.func.name, None)
-            return ExternalBackendFunction(f, m)
-        elif isinstance(g, NativeFunctionsGroup):
-            return ExternalBackendFunctionsGroup.from_function_group(g, metadata)
+    def add_backend_index(backend_ops: List[str], backend: str, *, is_autograd: bool = False) -> DispatchKey:
+        if is_autograd:
+            # TODO: add better error messages here (later PR)
+            backend_key = DispatchKey.parse(f'Autograd{backend}')
         else:
-            assert_never(g)
-    for op_name in metadata.keys():
-        assert op_name in native_functions_map, f"Found an invalid operator name: {op_name}"
-    return cpp_namespace, [native_to_external(g) for g in grouped_native_functions]
+            backend_key = DispatchKey.parse(backend)
+        metadata: Dict[OperatorName, BackendMetadata] = {}
+        for op in backend_ops:
+            op_name = OperatorName.parse(op)
+            assert op_name in native_functions_map, f"Found an invalid operator name: {op_name}"
+            # See Note [External Backends Follow Dispatcher API]
+            kernel_name = dispatcher.name(native_functions_map[op_name].func)
+            # TODO: allow structured external backends later.
+            m = BackendMetadata(kernel=kernel_name, structured=False, external=True)
+            metadata[op_name] = m
+        assert backend_key not in backend_indices
+        # TODO: currently hardcoding the fact that XLA implements out/inplace in terms of functional ops,
+        # this should eventually be toggleable per-backend.
+        backend_indices[backend_key] = BackendIndex(dispatch_key=backend_key, use_out_as_primary=False, index=metadata)
+        return backend_key
+
+    backend_key: Optional[DispatchKey] = None
+    if len(supported) > 0:
+        backend_key = add_backend_index(supported, backend)
+
+    autograd_key: Optional[DispatchKey] = None
+    if len(supported_autograd) > 0:
+        autograd_key = add_backend_index(supported_autograd, backend, is_autograd=True)
+
+    return backend_key, autograd_key, cpp_namespace, backend_indices
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate backend stub files')
@@ -100,44 +110,71 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
     fm = make_file_manager(output_dir)
 
     native_yaml_path = os.path.join(pytorch_root, 'aten/src/ATen/native/native_functions.yaml')
-    grouped_native_functions = get_grouped_native_functions(native_yaml_path)
-    cpp_namespace, external_backend_functions = parse_backend_yaml(source_yaml, grouped_native_functions)
-
-    native_functions = parse_native_yaml(native_yaml_path)
+    native_functions, backend_indices = parse_native_yaml(native_yaml_path)
+    grouped_native_functions = get_grouped_native_functions(native_functions, backend_indices)
+    backend_key, autograd_key, cpp_namespace, backend_indices = parse_backend_yaml(
+        source_yaml, grouped_native_functions, backend_indices)
 
     selector = SelectiveBuilder.get_nop_selector()
 
 
-    generated_comment = 'Autogenerated file by gen_backend_stubs.py. Do not edit directly!'
-    fm.write('aten_xla_type.h', lambda: {
-        'generated_comment': generated_comment,
-        'cpp_namespace': cpp_namespace,
-        'dispatch_xla_declarations': list(concatMap(dest.compute_native_function_declaration, external_backend_functions)),
-    })
+    # TODO: handle cases when yaml contains zero ops properly in a later PR.
+    if backend_key is not None and autograd_key is not None:
+        backend_dispatch_key: DispatchKey = backend_key
+        autograd_dispatch_key: DispatchKey = autograd_key
+        generated_comment = 'Autogenerated file by gen_backend_stubs.py. Do not edit directly!'
+        fm.write('aten_xla_type.h', lambda: {
+            'generated_comment': generated_comment,
+            'cpp_namespace': cpp_namespace,
+            'dispatch_xla_declarations': list(concatMap(
+                # Convert to a set first to remove duplicate kernel names.
+                # Backends are allowed to repeat kernel names; only generate the declaration once!
+                lambda f: list(set(concatMap(
+                    lambda dispatch_key: dest.compute_native_function_declaration(f, backend_indices[dispatch_key]),
+                    [backend_dispatch_key, autograd_dispatch_key]))),
+                grouped_native_functions)),
+        })
 
-    fm.write('aten_xla_type_default.h', lambda: {
-        'generated_comment': generated_comment,
-        'cpp_namespace': cpp_namespace,
-        'dispatch_aten_fallback_declarations': list(concatMap(
-            dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION), external_backend_functions
-        )),
-    })
+        fm.write('aten_xla_type_default.h', lambda: {
+            'generated_comment': generated_comment,
+            'cpp_namespace': cpp_namespace,
+            'dispatch_aten_fallback_declarations': list(
+                # Using a set to dedup: we end up with duplicate definitions,
+                # because ops that have neither an XLA nor an AutogradXLA kernel
+                # will get a CPU fallback from both calls.
+                set(concatMap(
+                    dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[backend_dispatch_key]),
+                    grouped_native_functions
+                )) | set(concatMap(
+                    dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[autograd_dispatch_key]),
+                    grouped_native_functions
+                ))
+            ),
+        })
 
-    fm.write('aten_xla_type_default.cpp', lambda: {
-        'generated_comment': generated_comment,
-        'cpp_namespace': cpp_namespace,
-        # TODO: after cpu fallbacks are moved to a boxed kernel,
-        # merge registrations / definitions into RegisterDispatchKey
-        'dispatch_aten_fallback_definitions': list(concatMap(
-            dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION), external_backend_functions
-        )),
-        'dispatch_registrations': list(concatMap(
-            dest.GenExternalAtenFallback(Target.REGISTRATION), [e for e in external_backend_functions if not e.is_autograd_kernel]
-        )),
-        'dispatch_autograd_registrations': list(concatMap(
-            dest.GenExternalAtenFallback(Target.REGISTRATION), [e for e in external_backend_functions if e.is_autograd_kernel]
-        )),
-    })
+        fm.write('aten_xla_type_default.cpp', lambda: {
+            'generated_comment': generated_comment,
+            'cpp_namespace': cpp_namespace,
+            # TODO: after cpu fallbacks are moved to a boxed kernel,
+            # merge registrations / definitions into RegisterDispatchKey
+            'dispatch_aten_fallback_definitions': list(
+                set(concatMap(
+                    dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[backend_dispatch_key]),
+                    grouped_native_functions
+                )) | set(concatMap(
+                    dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[autograd_dispatch_key]),
+                    grouped_native_functions
+                ))
+            ),
+            'dispatch_registrations': list(concatMap(
+                dest.GenExternalAtenFallback(Target.REGISTRATION, backend_indices[backend_dispatch_key]),
+                grouped_native_functions
+            )),
+            'dispatch_autograd_registrations': list(concatMap(
+                dest.GenExternalAtenFallback(Target.REGISTRATION, backend_indices[autograd_dispatch_key]),
+                grouped_native_functions
+            )),
+        })
 
 if __name__ == '__main__':
     main()
