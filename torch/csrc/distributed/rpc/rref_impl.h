@@ -196,6 +196,7 @@ class TORCH_API RRef : public RRefInterface {
   explicit RRef(RRef&& other) = delete;
   RRef& operator=(RRef&& other) = delete;
 
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~RRef() = default;
 
   // returns the worker id of the owner
@@ -265,14 +266,19 @@ class TORCH_API RRef : public RRefInterface {
 
   virtual RRefForkData fork() const;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const worker_id_t ownerId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const RRefId rrefId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::atomic<bool> timedOut_{false};
 
   // type field to denote the type of the element that the RRef is holding
   // it could be any TypePtr that JIT support, including PyObjectType
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const TypePtr type_;
   // Future corresponding to request to create RRef on remote node.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<JitFuture> ownerCreationFuture_;
 };
 
@@ -320,6 +326,7 @@ class TORCH_API UserRRef final : public RRef {
   // https://github.com/pytorch/pytorch/blob/9116f02bebf3a5260feef5732d36c54ecb3b4033/c10/util/intrusive_ptr.h#L204
   // This is called on destructing the wrapping intrusive_ptr_target instance
   // and it's data members. We don't need to implement anything here.
+  // NOLINTNEXTLINE(modernize-use-override)
   ~UserRRef() = default;
 
  private:
@@ -351,20 +358,18 @@ class TORCH_API OwnerRRef final : public RRef {
   OwnerRRef& operator=(const OwnerRRef& other) = delete;
   OwnerRRef& operator=(OwnerRRef&& other) = delete;
 
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
-      : OwnerRRef(ownerId, rrefId, type, {}) {}
+  OwnerRRef(
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      TypePtr type,
+      std::vector<c10::DeviceIndex> devices = {});
 
   OwnerRRef(
       worker_id_t ownerId,
       const RRefId& rrefId,
       TypePtr type,
-      c10::optional<IValue> value)
-      : RRef(ownerId, rrefId, type) {
-    future_ = std::make_shared<JitFuture>(type);
-    if (value.has_value()) {
-      future_->markCompleted(value.value());
-    }
-  }
+      c10::optional<IValue> value,
+      std::vector<c10::DeviceIndex> devices = {});
 
   inline bool isOwner() const override {
     return true;
