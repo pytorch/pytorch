@@ -10393,6 +10393,7 @@ dedent """
         self.assertEqual(w.grad, w_ref.grad)
         self.assertEqual(b.grad, b_ref.grad)
 
+    @unittest.skipIf(not RUN_CUDA, "running tests on cuda to verify cudnn fix")
     def test_batch_norm_grad_training(self):
         with enable_profiling_mode_for_profiling_tests():
             class MyBatchNorm(torch.nn.Module):
