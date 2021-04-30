@@ -124,13 +124,14 @@ std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   std::vector<InlinedCallStackEntry> r;
   c10::optional<InlinedCallStackPtr> current = intrusive_from_this();
   while (current) {
-    r.emplace_back(std::make_tuple(
-        (*current)->fn_,
-        (*current)->source_range_,
-        (*current)->module_instance_info_));
+    r.emplace_back((*current)->getEntry());
     current = (*current)->callee_;
   }
   return r;
+}
+
+InlinedCallStackEntry InlinedCallStack::getEntry() const {
+  return std::make_tuple(fn_, source_range_, module_instance_info_);
 }
 
 ModuleInstanceInfo::ModuleInstanceInfo(

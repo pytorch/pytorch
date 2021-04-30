@@ -145,6 +145,8 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
 
   // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
+
+  InlinedCallStackEntry getEntry() const;
 };
 
 } // namespace jit
