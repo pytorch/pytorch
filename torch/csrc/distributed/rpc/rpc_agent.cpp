@@ -42,6 +42,7 @@ void RpcAgent::shutdown() {
   if (rpcRetryThread_.joinable()) {
     rpcRetryThread_.join();
   }
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.PureVirtualCall)
   shutdownImpl();
 }
 

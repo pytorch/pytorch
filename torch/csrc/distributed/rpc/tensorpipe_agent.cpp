@@ -12,10 +12,9 @@
 #include <torch/csrc/distributed/rpc/agent_utils.h>
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
-#ifdef USE_CUDA_NOT_ROCM
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
-#endif
+#include <c10/core/StreamGuard.h>
 
 #if TENSORPIPE_HAS_SHM_TRANSPORT
 // Needed for ::getpid(), which is used to create a unique address.
@@ -401,41 +400,6 @@ C10_REGISTER_CREATOR(
 
 } // namespace
 
-namespace {
-
-// This is a wrapper of CUDAMultiStreamGuard to run in both CUDA-enabled and
-// CPU-only environments. When CUDA is not available, all methods are no-ops.
-struct MultiStreamGuard {
-  MultiStreamGuard(const MultiStreamGuard& other) = delete;
-  MultiStreamGuard(MultiStreamGuard&& other) = delete;
-  MultiStreamGuard& operator=(const MultiStreamGuard& rhs) = delete;
-  MultiStreamGuard& operator=(MultiStreamGuard&& rhs) = delete;
-
-#ifndef USE_CUDA_NOT_ROCM
-  explicit MultiStreamGuard(
-      const std::shared_ptr<LazyStreamContext>& /* unused */) {}
-#else
-  static inline std::vector<at::cuda::CUDAStream> toCUDAStreams(
-      const std::vector<c10::Stream>& streams) {
-    std::vector<at::cuda::CUDAStream> cudaStreams;
-    cudaStreams.reserve(streams.size());
-    std::transform(
-        streams.begin(),
-        streams.end(),
-        std::back_inserter(cudaStreams),
-        [](c10::Stream s) { return at::cuda::CUDAStream(s); });
-    return cudaStreams;
-  }
-  explicit MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& ctx)
-      : guard(toCUDAStreams(ctx->getReservedStreams())) {}
-
- private:
-  at::cuda::CUDAMultiStreamGuard guard;
-#endif
-};
-
-} // namespace
-
 //////////////////////////  MetricsTracker  /////////////////////////////////
 
 TensorPipeAgent::TimeSeriesMetricsTracker::TimeSeriesMetricsTracker(
@@ -519,29 +483,6 @@ TensorPipeAgent::TensorPipeAgent(
       nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       processGroup_(std::move(processGroup)) {
-  // register Future factories
-  FutureFactoryRegistry::getInstance().registerFutureFactory(
-      c10::DeviceType::CPU,
-      [](const std::vector<c10::DeviceIndex>& devices)
-          -> std::shared_ptr<JitFuture> {
-        TORCH_INTERNAL_ASSERT(devices.empty());
-        return std::make_shared<JitFuture>(at::AnyClassType::get());
-      });
-
-#ifdef USE_CUDA_NOT_ROCM
-  FutureFactoryRegistry::getInstance().registerFutureFactory(
-      c10::DeviceType::CUDA,
-      [](const std::vector<c10::DeviceIndex>& devices)
-          -> std::shared_ptr<JitFuture> {
-        if (!devices.empty()) {
-          return std::make_shared<at::cuda::CUDAFuture>(
-              at::AnyClassType::get(), devices);
-        } else {
-          return std::make_shared<JitFuture>(at::AnyClassType::get());
-        }
-      });
-#endif
-
   // collect worker names
   prepareNames();
 
@@ -921,7 +862,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                          requestMessage{std::move(requestMessage)},
                          ctx{std::move(ctx)}]() mutable {
           // create guards again as this function runs on a different thread
-          MultiStreamGuard guard(ctx);
+          c10::MultiStreamGuard guard(ctx->getReservedStreams());
           VLOG(1) << "RPC agent for " << workerInfo_.name_
                   << " is running request #" << messageId << " from "
                   << pipe->getRemoteName() << " in thread pool";
@@ -1439,7 +1380,7 @@ void TensorPipeAgent::markFutureAsComplete(
                      atomicFuture{std::move(atomicFuture)},
                      message{std::move(message)},
                      ctx{std::move(ctx)}]() mutable {
-      MultiStreamGuard guard(ctx);
+      c10::MultiStreamGuard guard(ctx->getReservedStreams());
       std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
       for (const auto& tensor : message.tensors()) {
         data_ptrs.emplace_back(tensor.storage().data_ptr());
