@@ -364,6 +364,10 @@ class Pipe(Module):
         returning the integer 5, the user would receive the consolidated
         output of `[5, 5]`
 
+        If a tensor is wrapped with the :class:`NoChunk` wrapper, the tensor
+        is not split across micro-batches and is replicated as-is similar to
+        non-tensors.
+
         Args:
             inputs: input mini-batch
 

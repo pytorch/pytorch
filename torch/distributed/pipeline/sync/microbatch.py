@@ -20,6 +20,23 @@ TensorOrTensors = Union[Tensor, Tensors]
 Function = Callable[[TensorOrTensors], TensorOrTensors]
 
 
+class NoChunk(object):
+    """
+    Wrapper for a Tensor in :meth:`Pipe.forward` indicating that the tensor
+    should not be chunked on the batch dimension and instead be replicated
+    as-is across all micro-batches. This is useful for tensors which might
+    not have any 'batch' semantics for the model.
+    """
+    def __init__(self, inp: Tensor):
+        if not torch.is_tensor(inp):
+            raise TypeError(f'NoChunk only supported for tensors, found: {inp}')
+        self._tensor = inp
+
+    @property
+    def tensor(self):
+        return self._tensor
+
+
 class Batch:
     """
     An abstraction representing a microbatch in the pipeline.
@@ -197,7 +214,11 @@ def scatter(*inputs, chunks: int) -> List[Batch]:
         else:
             # Replicate non-tensors.
             for i in range(chunks):
-                batches[i].append(input)
+                if isinstance(input, NoChunk):
+                    # Extract the tensor out.
+                    batches[i].append(input.tensor)
+                else:
+                    batches[i].append(input)
 
     # Truncate to actual number of chunks
     batches = batches[:num_chunks]
