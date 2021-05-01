@@ -745,6 +745,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     // Deduplicate by compacting.
     size_t targetIdx = 0;
     for (size_t sourceIdx = 0; sourceIdx < devices.size(); sourceIdx++) {
+      TORCH_CHECK_VALUE(
+          devices[sourceIdx].has_index(),
+          "Expected devices to have indices, got ", devices[sourceIdx]);
       if (targetIdx > 0 && devices[targetIdx - 1].index() == devices[sourceIdx].index()) {
         // It's a duplicate, skip it.
         continue;
