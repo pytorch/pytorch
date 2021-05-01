@@ -135,6 +135,14 @@ void warn(const SourceLocation& source_location, const std::string& msg, const b
   ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
 }
 
+void warn(SourceLocation source_location, detail::CompileTimeEmptyString msg, const bool verbatim) {
+  warn(source_location, "", verbatim);
+}
+
+void warn(SourceLocation source_location, const char* msg, const bool verbatim) {
+  ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
+}
+
 void set_warning_handler(WarningHandler* handler) noexcept(true) {
   ThreadWarningHandler::set_handler(handler);
 }
