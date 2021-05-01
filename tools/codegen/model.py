@@ -300,7 +300,6 @@ class NativeFunction:
 
         device_check_s = e.pop('device_check', None)
         assert device_check_s is None or isinstance(device_check_s, str), f'not a str: {device_check_s}'
-        assert device_check_s != 'ExactSame'
         device_check: DeviceCheckType
         if device_check_s is None:
             device_check = DeviceCheckType.ExactSame

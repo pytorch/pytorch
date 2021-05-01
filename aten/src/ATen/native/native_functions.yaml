@@ -129,10 +129,12 @@
   variants: method
 
 - func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
+  device_check: NoCheck  # Tensor arguments allowed to be on different devices, see also _cudnn_ctc_loss
   dispatch:
     CUDA: _use_cudnn_ctc_loss
 
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
+  device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
   dispatch:
     CUDA: _cudnn_ctc_loss
 
@@ -143,6 +145,9 @@
     CUDA: _cudnn_rnn_flatten_weight
 
 - func: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  # rnn_tanh may or may not redispatch to _cudnn_rnn based on algorithm and build. Thus it might hit dispatch or kernel device check.
+  # Disable dispatch time device check for consistent behavior.
+  device_check: NoCheck
   dispatch:
     CUDA: _cudnn_rnn
 
@@ -4783,6 +4788,7 @@
     SparseCUDA: hspmm_sparse_cuda
 
 - func: copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
+  device_check: NoCheck  # Allows copy into different device
   variants: function
   dispatch:
     SparseCPU, SparseCUDA: copy_sparse_
