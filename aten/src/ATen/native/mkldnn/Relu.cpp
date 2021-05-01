@@ -31,7 +31,7 @@ namespace at { namespace native {
 Tensor mkldnn_relu(const Tensor& input) {
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_relu: bf16 path needs cpu support for avx512vl and avx512dq");
   }
 
   const ideep::tensor& x = itensor_from_mkldnn(input);
@@ -45,7 +45,7 @@ Tensor mkldnn_relu(const Tensor& input) {
 Tensor& mkldnn_relu_(Tensor& input) {
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_relu_: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_relu_: bf16 path needs cpu support for avx512vl and avx512dq");
   }
 
   ideep::tensor& x = itensor_from_mkldnn(input);
