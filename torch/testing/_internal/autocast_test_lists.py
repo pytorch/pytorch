@@ -248,7 +248,7 @@ class AutocastCPUTestLists(object):
         mat1_bf16 = (torch.randn((n, n), dtype=torch.bfloat16, device=dev),)
         mat2_bf16 = (torch.randn((n, n), dtype=torch.bfloat16, device=dev),)
 
-        dummy_dimsets = ((n), (n, n), (n, n, n), (n, n, n, n), (n, n, n, n, n))
+        dummy_dimsets = ((n,), (n, n), (n, n, n), (n, n, n, n), (n, n, n, n, n))
 
         dummy_bf16 = [(torch.randn(dimset, dtype=torch.bfloat16, device=dev),)
                       for dimset in dummy_dimsets]
