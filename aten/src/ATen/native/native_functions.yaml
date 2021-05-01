@@ -561,6 +561,7 @@
   device_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function, method
   device_guard: False
   dispatch:
@@ -2962,17 +2963,20 @@
     CPU, CUDA: reciprocal_out
 
 - func: neg(Tensor self) -> Tensor
+  structured_delegate: neg.out
   variants: function, method
   dispatch:
-    CPU, CUDA, SparseCPU, SparseCUDA: neg
+    SparseCPU, SparseCUDA: neg_sparse
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: neg.out
   variants: function, method
   dispatch:
-    CPU, CUDA: neg_
     SparseCPU, SparseCUDA: neg_sparse_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: neg_out
     SparseCPU, SparseCUDA: neg_out_sparse
@@ -6367,10 +6371,10 @@
   dispatch:
     CUDA: _amp_foreach_non_finite_check_and_unscale_cuda_
 
-- func: _amp_update_scale(Tensor(a!) growth_tracker, Tensor current_scale, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor
+- func: _amp_update_scale_(Tensor(a!) self, Tensor(b!) growth_tracker, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor(a!)
   variants: function
   dispatch:
-    CUDA: _amp_update_scale_cuda
+    CUDA: _amp_update_scale_cuda_
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
@@ -8448,6 +8452,43 @@
 - func: special_erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
+- func: special_xlog1py(Tensor self, Tensor other) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_xlog1py.out
+
+- func: special_xlog1py.self_scalar(Scalar self, Tensor other) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py
+
+- func: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py
+
+- func: special_xlog1py.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_xlog1py_out
+
+- func: special_xlog1py.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py_out
+
+- func: special_xlog1py.other_scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_xlog1py_out
+
 - func: special_i0e(Tensor self) -> Tensor
   python_module: special
   variants: function
@@ -8658,23 +8699,17 @@
 - func: det(Tensor self) -> Tensor
   variants: function, method
 
-- func: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+- func: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   python_module: linalg
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg_lstsq
 
-- func: linalg_lstsq.out(Tensor self, Tensor b, float? cond=None, *, str? driver=None, Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values) -> (Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values)
+- func: linalg_lstsq.out(Tensor self, Tensor b, float? rcond=None, *, str? driver=None, Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values) -> (Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values)
   python_module: linalg
   variants: function
   dispatch:
     CPU, CUDA: linalg_lstsq_out
-
-- func: _lstsq_helper_(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float cond, str driver_name) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CPU: _lstsq_helper_cpu
-    CUDA: _lstsq_helper_cuda
 
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
@@ -8902,7 +8937,7 @@
 - func: _linalg_qr_helper(Tensor self, str mode) -> (Tensor, Tensor)
   variants: function
   dispatch:
-    CPU: _linalg_qr_helper_cpu
+    CPU: _linalg_qr_helper_default
     CUDA: _linalg_qr_helper_cuda
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
@@ -8972,3 +9007,8 @@
   variants: function
   dispatch:
     CPU, CUDA: segment_reduce_kernel
+
+- func: segment_reduce_backward(Tensor grad, Tensor output, Tensor data, *, Tensor? lengths=None) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: segment_reduce_backward_kernel
