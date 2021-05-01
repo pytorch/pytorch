@@ -437,7 +437,9 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_FALSE(tensor1.requires_grad());
   ASSERT_FALSE(tensor1.is_pinned());
 
-  // Sparse tensor CPU test to avoid requiring CUDA to catch simple bugs.1
+  // Sparse tensor CPU test to avoid requiring CUDA to catch simple bugs.
+  // Sparse tensors do not work with static CPU dispatch.
+#ifndef ATEN_CPU_STATIC_DISPATCH
   tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf).layout(at::kSparse));
   ASSERT_EQ(tensor1.dtype(), at::kHalf);
   ASSERT_EQ(tensor1.layout(), at::kSparse);
@@ -445,6 +447,7 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_FALSE(tensor1.requires_grad());
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(tensor1.is_pinned());
+#endif // ATEN_CPU_STATIC_DISPATCH
 
   if (torch::cuda::is_available()) {
     // Test setting pin memory

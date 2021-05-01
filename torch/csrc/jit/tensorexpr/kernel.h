@@ -61,8 +61,8 @@ inline std::string getArgValueName(const ArgValue& a) {
 template <class T>
 std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   std::vector<T> res;
-  for (size_t idx = 0; idx < v.size(); idx++) {
-    auto val = c10::get_if<T>(&v[idx]);
+  for (const auto& x : v) {
+    auto val = c10::get_if<T>(&x);
     if (val) {
       res.push_back(*val);
     } else {
@@ -105,6 +105,9 @@ class TORCH_API TensorExprKernel {
   explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
 
   void run(Stack& stack);
+  void runFast(
+      const std::vector<void*>& inputs,
+      const std::vector<void*>& outputs);
 
   void fallback(Stack& stack) {
     InterpreterState(code_).run(stack);
