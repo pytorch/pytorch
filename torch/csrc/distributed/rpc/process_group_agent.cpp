@@ -499,9 +499,7 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
     ++serverActiveCalls_;
     std::shared_ptr<JitFuture> futureResponse;
     try {
-      futureResponse = cb_->operator()(
-          message,
-          createLazyStreamContext(c10::DeviceType::CPU, nullptr, nullptr));
+      futureResponse = cb_->operator()(message, {});
     } catch (const std::exception& e) {
       futureResponse = std::make_shared<JitFuture>(at::AnyClassType::get());
       futureResponse->setError(std::current_exception());

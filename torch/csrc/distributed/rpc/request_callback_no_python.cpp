@@ -75,7 +75,8 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
          messageType = request.type(),
          id = request.id(),
          ctx = std::move(ctx)]() mutable {
-          c10::MultiStreamGuard guard(ctx->getReservedStreams());
+          c10::MultiStreamGuard guard(
+              ctx ? ctx->getReservedStreams() : ArrayRef<Stream>({}));
           // The cost of pre-request check is minimal thanks to
           // std::shared_lock. The cost is in magnitude
           // of 10us.
