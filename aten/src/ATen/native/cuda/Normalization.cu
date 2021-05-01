@@ -149,7 +149,7 @@ void batch_norm_mean_var(const Tensor& self, Tensor& save_mean, Tensor& save_var
 void batch_norm_update_stats(
     const Tensor& save_mean, const Tensor& save_var,
     const Tensor& running_mean, const Tensor& running_var,
-    double momentum, int64_t N) {
+    double momentum_, int64_t N) {
 
   auto iter = TensorIteratorConfig()
       .add_output(running_mean)
@@ -162,11 +162,12 @@ void batch_norm_update_stats(
       .promote_inputs_to_common_dtype(false)
       .build();
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, running_mean.scalar_type(),
                                   "batch_norm_update_stats_cuda", [&] {
       using acc_t = at::acc_type<scalar_t, true>;
       const auto bessel_correction_factor = static_cast<acc_t>(
           static_cast<double>(N) / static_cast<double>(N - 1));
+      const auto momentum = static_cast<acc_t>(momentum_);
       gpu_kernel_multiple_outputs(
           iter, [=] GPU_LAMBDA (acc_t mean, acc_t var, scalar_t running_mean, scalar_t running_var)
                -> thrust::tuple<scalar_t, scalar_t> {
@@ -182,7 +183,7 @@ void batch_norm_update_stats(
 void batch_norm_update_stats_and_invert(
     const Tensor& save_mean, const Tensor& save_var,
     const Tensor& running_mean, const Tensor& running_var,
-    double momentum, double epsilon, int64_t N) {
+    double momentum_, double epsilon, int64_t N) {
 
   auto iter = TensorIteratorConfig()
       .add_output(running_mean)
@@ -201,7 +202,8 @@ void batch_norm_update_stats_and_invert(
       using acc_t = at::acc_type<scalar_t, true>;
       const auto bessel_correction_factor = static_cast<acc_t>(
           static_cast<double>(N) / static_cast<double>(N - 1));
-      auto eps = static_cast<acc_t>(epsilon);
+      const auto eps = static_cast<acc_t>(epsilon);
+      const auto momentum = static_cast<acc_t>(momentum_);
       gpu_kernel_multiple_outputs(
           iter, [=] GPU_LAMBDA (acc_t mean, acc_t var, scalar_t running_mean, scalar_t running_var)
                -> thrust::tuple<scalar_t, scalar_t, acc_t> {
@@ -251,7 +253,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, co
   } else {
     TORCH_CHECK(has_running_mean);
     at::native::resize_output(save_mean, running_mean_opt->sizes());
-    save_mean.copy_(*running_mean_opt);
+    save_mean.copy_(*running_mean_opt, /*non_blocking=*/true);
     batch_norm_calc_invstd(save_invstd, running_var_opt.value(), epsilon);
   }
 
