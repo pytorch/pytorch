@@ -288,7 +288,7 @@ bool RpcAgent::isGILProfilingEnabled() {
 }
 
 std::unordered_map<c10::Device, c10::Device> RpcAgent::getDeviceMap(
-    const WorkerInfo& dest) const {
+    const WorkerInfo& /* unused */) const {
   // Default implementation has no device map.
   return {};
 }
