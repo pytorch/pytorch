@@ -67,7 +67,7 @@ std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
       res.push_back(*val);
     } else {
       throw std::runtime_error(
-          "vector type not homogeneous - found " + getArgValueName(v[idx]) +
+          "vector type not homogeneous - found " + getArgValueName(x) +
           ", expected " + getArgValueName(v[0]));
     }
   }
