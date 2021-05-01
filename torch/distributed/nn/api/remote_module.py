@@ -172,6 +172,7 @@ class _RemoteModule(nn.Module):
         self.is_device_map_set = bool(
             agent._get_device_map(agent.get_worker_info(self.on))
         )
+        enable_moving_cpu_tensors_to_cuda = self.device == "cuda"
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
@@ -181,13 +182,13 @@ class _RemoteModule(nn.Module):
             fut = rpc.rpc_async(
                 self.on,
                 _instantiate_template,
-                (_module_interface_cls, self.is_device_map_set),
+                (_module_interface_cls, enable_moving_cpu_tensors_to_cuda),
             )
 
             # Instantiate template on local side.
             generated_module = (
                 instantiator.instantiate_scriptable_remote_module_template(
-                    _module_interface_cls, self.is_device_map_set
+                    _module_interface_cls, enable_moving_cpu_tensors_to_cuda
                 )
             )
             generated_methods = generated_module._generated_methods
