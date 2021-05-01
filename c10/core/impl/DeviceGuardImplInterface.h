@@ -115,7 +115,8 @@ struct C10_API DeviceGuardImplInterface {
   /**
    * Get a stream from the global pool for a given device.
    */
-  virtual Stream getStreamFromGlobalPool(Device, bool isHighPriority = false) const {
+  virtual Stream getStreamFromGlobalPool(Device, bool isHighPriority = false)
+      const {
     TORCH_CHECK(false, "Backend doesn't support acquiring a stream from pool.")
   }
 
