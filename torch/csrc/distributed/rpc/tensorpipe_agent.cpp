@@ -1441,8 +1441,8 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
   }
 }
 
-DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dest) const {
-  auto it = opts_.deviceMaps.find(dest.name_);
+DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dst) const {
+  auto it = opts_.deviceMaps.find(dst.name_);
   if (it == opts_.deviceMaps.end()) {
     return {};
   }
