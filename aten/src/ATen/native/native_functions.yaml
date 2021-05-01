@@ -6913,10 +6913,10 @@
   dispatch:
     CUDA: _amp_foreach_non_finite_check_and_unscale_cuda_
 
-- func: _amp_update_scale(Tensor(a!) growth_tracker, Tensor current_scale, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor
+- func: _amp_update_scale_(Tensor(a!) self, Tensor(b!) growth_tracker, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor(a!)
   variants: function
   dispatch:
-    CUDA: _amp_update_scale_cuda
+    CUDA: _amp_update_scale_cuda_
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
@@ -9024,23 +9024,27 @@
   python_module: special
 
 - func: special_xlog1py(Tensor self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
   python_module: special
   variants: function
   structured_delegate: special_xlog1py.out
 
 - func: special_xlog1py.self_scalar(Scalar self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
   python_module: special
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_xlog1py
 
 - func: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
+  device_check: NoCheck   # TensorIterator
   python_module: special
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_xlog1py
 
 - func: special_xlog1py.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
   python_module: special
@@ -9049,12 +9053,14 @@
     CPU, CUDA: special_xlog1py_out
 
 - func: special_xlog1py.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
   python_module: special
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_xlog1py_out
 
 - func: special_xlog1py.other_scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
   python_module: special
   variants: function
   dispatch:
@@ -9508,7 +9514,7 @@
 - func: _linalg_qr_helper(Tensor self, str mode) -> (Tensor, Tensor)
   variants: function
   dispatch:
-    CPU: _linalg_qr_helper_cpu
+    CPU: _linalg_qr_helper_default
     CUDA: _linalg_qr_helper_cuda
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
