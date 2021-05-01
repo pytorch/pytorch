@@ -48,8 +48,8 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
-      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
-          {}) override;
+      const std::unordered_map<c10::Device, c10::Device>& deviceMap = {})
+      override;
 
  protected:
   // This function checks the messageTypesToFail_ to determine whether to use

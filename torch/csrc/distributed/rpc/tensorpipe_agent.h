@@ -37,13 +37,13 @@ namespace channel {
 class Context;
 } // namespace channel
 
-using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
-
 } // namespace tensorpipe
 
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
 
 struct LazyStreamContext;
 
@@ -86,8 +86,8 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
       optional<std::vector<std::string>> channels,
       float rpc_timeout,
       std::string init_method,
-      std::unordered_map<std::string, tensorpipe::DeviceMap> device_maps = {},
-      std::vector<c10::DeviceIndex> devices = {})
+      std::unordered_map<std::string, DeviceMap> device_maps = {},
+      std::vector<c10::Device> devices = {})
       : RpcBackendOptions(rpc_timeout, init_method),
         numWorkerThreads(numWorkerThreads),
         transports(std::move(transports)),
@@ -119,15 +119,20 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
     }
   }
 
-  void setDeviceMap(
-      const std::string& workerName,
-      const tensorpipe::DeviceMap& deviceMap) {
+  void setDeviceMap(const std::string& workerName, const DeviceMap& deviceMap) {
     auto iter = deviceMaps.find(workerName);
     if (iter == deviceMaps.end()) {
       deviceMaps[workerName] = deviceMap;
     } else {
       for (auto& entry : deviceMap) {
-        iter->second[entry.first] = entry.second;
+        // c10::Device has no default constructor, hence map[device] dosn't work
+        // In C++-17 we can use insert_or_assign.
+        auto entryIter = iter->second.find(entry.first);
+        if (entryIter == iter->second.end()) {
+          iter->second.emplace(entry.first, entry.second);
+        } else {
+          entryIter->second = entry.second;
+        }
       }
     }
   }
@@ -135,8 +140,8 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
   int numWorkerThreads;
   const optional<std::vector<std::string>> transports;
   const optional<std::vector<std::string>> channels;
-  std::unordered_map<std::string, tensorpipe::DeviceMap> deviceMaps;
-  std::vector<c10::DeviceIndex> devices;
+  std::unordered_map<std::string, DeviceMap> deviceMaps;
+  std::vector<c10::Device> devices;
 };
 
 // Struct to track the network source metrics
@@ -175,8 +180,7 @@ class TensorPipeAgent : public RpcAgent {
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
-      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
-          {}) override;
+      const DeviceMap& deviceMap = {}) override;
 
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
@@ -191,14 +195,13 @@ class TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
   void setReverseDeviceMaps(
-      const std::unordered_map<std::string, tensorpipe::DeviceMap>&
-          reverseDeviceMaps);
+      const std::unordered_map<std::string, DeviceMap>& reverseDeviceMaps);
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
-  tensorpipe::DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
+  DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
 
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
@@ -239,10 +242,9 @@ class TensorPipeAgent : public RpcAgent {
   void pipeWrite(
       const std::shared_ptr<tensorpipe::Pipe>&,
       Message&& message,
-      std::vector<c10::DeviceIndex>&& devices,
+      std::vector<c10::Device>&& devices,
       std::shared_ptr<LazyStreamContext> ctx,
-      std::function<void(const tensorpipe::Error&)>,
-      const tensorpipe::DeviceMap& deviceMap = {}) noexcept;
+      std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()
   void onListenerAccepted(
@@ -269,7 +271,7 @@ class TensorPipeAgent : public RpcAgent {
       uint64_t requestSize,
       const std::string& destWorkerName);
 
-  inline std::vector<c10::DeviceIndex> getDevicesForRemote(
+  inline std::vector<c10::Device> getDevicesForRemote(
       const std::string& remoteName,
       const Message& message) const;
 
@@ -280,14 +282,9 @@ class TensorPipeAgent : public RpcAgent {
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
-    explicit AtomicJitFuture(const std::vector<c10::DeviceIndex>& devices) {
-      std::vector<c10::Device> fullDevices;
-      fullDevices.reserve(devices.size());
-      for (const c10::DeviceIndex index : devices) {
-        fullDevices.emplace_back(c10::kCUDA, index);
-      }
+    explicit AtomicJitFuture(const std::vector<c10::Device>& devices) {
       jitFuture = std::make_shared<at::ivalue::Future>(
-          at::AnyClassType::get(), std::move(fullDevices));
+          at::AnyClassType::get(), devices);
     }
 
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
@@ -310,11 +307,11 @@ class TensorPipeAgent : public RpcAgent {
   };
 
   const TensorPipeRpcBackendOptions opts_;
-  std::unordered_map<std::string, tensorpipe::DeviceMap> reverseDeviceMaps_;
+  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps_;
   // Local devices used by this agent. If application didn't specify this
   // field, it will be initialized using corresponding local devices in
   // opts_.deviceMaps and reverseDeviceMaps_;
-  std::vector<c10::DeviceIndex> devices_;
+  std::vector<c10::Device> devices_;
 
   ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;
