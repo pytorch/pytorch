@@ -622,8 +622,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       c10::MultiStreamGuard streamGuard(streams);
 
       for (c10::Event& event : events_) {
-        event.block(impl_->getStream(
-            c10::Device(event.device_type(), event.device_index())));
+        event.block(impl_->getStream(event.device()));
       }
 
       // Do not free the underlying data storage of value_ before its
@@ -654,8 +653,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     }
 
     for (c10::Event& event : events_) {
-      event.block(impl_->getStream(
-          c10::Device(event.device_type(), event.device_index())));
+      event.block(impl_->getStream(event.device()));
     }
 
     for (const at::DataPtr& data_ptr : dataPtrs_) {

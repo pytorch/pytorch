@@ -60,6 +60,9 @@ struct Event final {
   ~Event() = default;
 
   // Getters
+  Device device() const noexcept {
+    return Device(device_type(), device_index());
+  }
   DeviceType device_type() const noexcept {
     return impl_.device_type();
   }
