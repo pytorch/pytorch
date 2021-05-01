@@ -1,3 +1,8 @@
+if "%CUDA_VERSION%" == "cpu" (
+  echo skip magma installation for cpu builds
+  exit /b 0
+)
+
 rem remove dot in cuda_version, fox example 11.1 to 111
 set VERSION_SUFFIX=%CUDA_VERSION:.=%
 set CUDA_SUFFIX=cuda%VERSION_SUFFIX%
