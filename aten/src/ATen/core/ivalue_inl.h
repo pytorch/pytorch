@@ -318,16 +318,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
  public:
   explicit Future(TypePtr type, std::vector<c10::Device> devices={})
       : type_(std::move(type)),
-        impl_(getImplForDevices(devices)),
-        devices_(getSortedIndicesOfDevices(impl_, devices)) {
-    // Use current device to initialize currentDevice_. This is necessary
-    // because preMarkCompletedHook won't be called when the Future contains
-    // an error. Uninitialized currentDevice_ could lead to crash when used
-    // in CUDAGuard.
-    if (impl_ != nullptr) {
-      currentDevice_ = impl_->getDevice().index();
-    }
-  }
+        impl_(getTypeOfDevices(devices)),
+        devices_(sortAndDeduplicateDevices(impl_, std::move(devices))) {}
 
   struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
@@ -539,12 +531,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // This method should be overridden by subclasses so that they can produce an
   // instace of their own type.
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
-    std::vector<c10::Device> devices;
-    devices.reserve(devices_.size());
-    for (const c10::DeviceIndex& index : devices_) {
-      devices.emplace_back(impl_->type(), index);
-    }
-    return c10::make_intrusive<Future>(std::move(type), std::move(devices));
+    return c10::make_intrusive<Future>(std::move(type), devices_);
   }
 
  private:
@@ -561,37 +548,29 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       const at::IValue& value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
           dataPtrs) {
-    if (impl_ == nullptr) {
-      return;
+    // Start by performing all steps that can throw, before setting any field.
+    std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs;
+    std::vector<c10::Device> usedDevices;
+    // FIXME We should always extract DataPtrs, in order to catch the case of
+    // users using CUDA values but forgetting to set devices, which currently
+    // leads to a silent synchronization/correctness issue. However, as this
+    // might worsen perf in CPU-only cases, we should only do after careful
+    // benchmarks.
+    if (impl_.type() != c10::kCPU) {
+      actualDataPtrs =
+          dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
+      usedDevices = getDevicesOfDataPtrs(impl_, actualDataPtrs);
+      ensureIsSubsetOfDevices(usedDevices, devices_);
     }
 
-    // Start by performing all steps that can throw, before setting any field.
-    std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs =
-        dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
-    std::vector<c10::DeviceIndex> usedDevices =
-        getDevicesOfDataPtrs(impl_, actualDataPtrs);
-    std::vector<c10::DeviceIndex> excessDevices;
-    std::set_difference(
-        usedDevices.begin(),
-        usedDevices.end(),
-        devices_.begin(),
-        devices_.end(),
-        std::back_inserter(excessDevices));
-    TORCH_CHECK_VALUE(
-        excessDevices.empty(),
-        "The result contained tensors residing on device(s) ",
-        formatSetOfDevices(impl_, excessDevices),
-        " which are not among the expected device(s) ",
-        formatSetOfDevices(impl_, devices_));
-
-    currentDevice_ = impl_->getDevice().index();
+    currentDevice_ = impl_.getDevice();
 
     // Extract them once and cache them for later uses.
     dataPtrs_ = std::move(actualDataPtrs);
 
-    for (const c10::DeviceIndex& idx : usedDevices) {
-      c10::Event event(impl_->type());
-      event.record(impl_->getStream(c10::Device(impl_->type(), idx)));
+    for (const c10::Device& device : usedDevices) {
+      c10::Event event(impl_.type());
+      event.record(impl_.getStream(device));
       events_.push_back(std::move(event));
     }
   }
@@ -605,36 +584,32 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // are synchronized with the events recorded in the I/O streams.
   std::function<void(void)> wrapCallback(
       std::function<void(void)> callback) {
-    if (impl_ == nullptr) {
-      return callback;
-    }
-
     return [this, callback=std::move(callback)]() {
       std::vector<c10::Stream> streams;
-      for (const c10::DeviceIndex& idx : devices_) {
+      for (const c10::Device& device : devices_) {
         // FIXME Should we find a way to allow to change the priority of
         // streams?
-        streams.push_back(impl_->getStreamFromGlobalPool(
-            c10::Device(impl_->type(), idx), /*isHighPriority=*/false));
+        streams.push_back(impl_.getStreamFromGlobalPool(
+            device, /*isHighPriority=*/false));
       }
 
       // Use the dedicated callback stream to run callback.
       c10::MultiStreamGuard streamGuard(streams);
 
       for (c10::Event& event : events_) {
-        event.block(impl_->getStream(event.device()));
+        event.block(impl_.getStream(event.device()));
       }
 
       // Do not free the underlying data storage of value_ before its
       // usage on the stream finishes.
       for (const at::DataPtr& data_ptr : dataPtrs_) {
         if (!data_ptr.device().is_cpu()) {
-          impl_->recordDataPtrOnStream(
-              data_ptr, impl_->getStream(data_ptr.device()));
+          impl_.recordDataPtrOnStream(
+              data_ptr, impl_.getStream(data_ptr.device()));
         }
       }
 
-      c10::DeviceGuard deviceGuard(c10::Device(impl_->type(), currentDevice_));
+      c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
       callback();
     };
@@ -648,18 +623,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // subclass ensures the user's current CUDA streams synchronize with the I/O
   // events stored by the future.
   void postWaitHook(const at::IValue& value) {
-    if (impl_ == nullptr) {
-      return;
-    }
-
     for (c10::Event& event : events_) {
-      event.block(impl_->getStream(event.device()));
+      event.block(impl_.getStream(event.device()));
     }
 
     for (const at::DataPtr& data_ptr : dataPtrs_) {
       if (!data_ptr.device().is_cpu()) {
-        impl_->recordDataPtrOnStream(
-            data_ptr, impl_->getStream(data_ptr.device()));
+        impl_.recordDataPtrOnStream(
+            data_ptr, impl_.getStream(data_ptr.device()));
       }
     }
   }
@@ -704,54 +675,53 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   static std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
       const at::IValue& value);
 
-  static std::vector<c10::DeviceIndex> getDevicesOfDataPtrs(
-      const c10::impl::DeviceGuardImplInterface* impl,
+  static std::vector<c10::Device> getDevicesOfDataPtrs(
+      const c10::impl::VirtualGuardImpl& impl,
       const std::vector<std::reference_wrapper<const at::DataPtr>>& data_ptrs) {
-    c10::DeviceIndex deviceCount = impl->deviceCount();
+    c10::DeviceIndex deviceCount = impl.deviceCount();
     std::vector<bool> isDeviceUsed(deviceCount, false);
     for (const at::DataPtr& data_ptr : data_ptrs) {
       if (!data_ptr.device().is_cpu()) {
         TORCH_CHECK_VALUE(
-            data_ptr.device().type() == impl->type(),
+            data_ptr.device().type() == impl.type(),
             "Expected all data ptrs to be on a device of type ",
-            impl->type(),
+            impl.type(),
             ", got one on device ",
             data_ptr.device());
         isDeviceUsed[data_ptr.device().index()] = true;
       }
     }
-    std::vector<c10::DeviceIndex> deviceIndices;
+    std::vector<c10::Device> devices;
     for (c10::DeviceIndex idx = 0; idx < deviceCount; idx++) {
       if (isDeviceUsed[idx]) {
-        deviceIndices.push_back(idx);
+        devices.emplace_back(impl.type(), idx);
       }
     }
-    return deviceIndices;
+    return devices;
   }
 
   static std::string formatSetOfDevices(
-      const c10::impl::DeviceGuardImplInterface* impl,
-      const std::vector<c10::DeviceIndex>& devices) {
+      const std::vector<c10::Device>& devices) {
     if (devices.empty()) {
       return "(none)";
     }
     std::ostringstream oss;
-    oss << c10::Device(impl->type(), devices[0]);
+    oss << devices[0];
     for (size_t idx = 1; idx < devices.size(); idx++) {
       if (idx == devices.size() - 1) {
         oss << " and ";
       } else {
         oss << ", ";
       }
-      oss << c10::Device(impl->type(), devices[idx]);
+      oss << devices[idx];
     }
     return oss.str();
   }
 
-  static const c10::impl::DeviceGuardImplInterface* getImplForDevices(
+  static c10::DeviceType getTypeOfDevices(
       const std::vector<c10::Device>& devices) {
     if (devices.empty()) {
-      return nullptr;
+      return c10::kCPU;
     }
     c10::DeviceType deviceType = devices[0].type();
     for (size_t idx = 1; idx < devices.size(); idx++) {
@@ -762,30 +732,58 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
           " and ",
           devices[idx]);
     }
-    return c10::impl::getDeviceGuardImpl(deviceType);
+    return deviceType;
   }
 
-  // We need devices to be sorted in order to use set_difference.
-  static std::vector<c10::DeviceIndex> getSortedIndicesOfDevices(
-      const c10::impl::DeviceGuardImplInterface* impl,
-      const std::vector<c10::Device>& devices) {
-    if (impl == nullptr) {
-      return {};
-    }
-    c10::DeviceIndex deviceCount = impl->deviceCount();
-    std::vector<bool> isDeviceUsed(deviceCount, false);
-    for (const c10::Device& device : devices) {
+  // We need devices to be sorted in order to use ensureIsSubsetOfDevices.
+  static std::vector<c10::Device> sortAndDeduplicateDevices(
+      const c10::impl::VirtualGuardImpl& impl,
+      std::vector<c10::Device> devices) {
+    std::sort(
+      devices.begin(), devices.end(),
+      [](const c10::Device& a, const c10::Device& b) { return a.index() < b.index(); });
+    // Deduplicate by compacting.
+    size_t targetIdx = 0;
+    for (size_t sourceIdx = 0; sourceIdx < devices.size(); sourceIdx++) {
       TORCH_CHECK_VALUE(
-          device.has_index(), "Expected devices to have indices, got ", device);
-      isDeviceUsed[device.index()] = true;
-    }
-    std::vector<c10::DeviceIndex> deviceIndices;
-    for (c10::DeviceIndex idx = 0; idx < deviceCount; idx++) {
-      if (isDeviceUsed[idx]) {
-        deviceIndices.push_back(idx);
+          devices[sourceIdx].has_index(),
+          "Expected devices to have indices, got ", devices[sourceIdx]);
+      if (targetIdx > 0 && devices[targetIdx - 1].index() == devices[sourceIdx].index()) {
+        // It's a duplicate, skip it.
+        continue;
       }
+      if (sourceIdx != targetIdx) {
+        devices[targetIdx] = devices[sourceIdx];
+      }
+      targetIdx++;
     }
-    return deviceIndices;
+    // If there were duplicates there's now a gap at the end: trim it. Resizing
+    // requires the item type to be default-constructible (which c10::Device is
+    // not) because in principle it could be required to create new items. Since
+    // we know we'll shrink the vector, we provide a custom dummy value instead.
+    devices.resize(targetIdx, c10::Device(c10::kCPU));
+    return devices;
+  }
+
+  static void ensureIsSubsetOfDevices(
+      const std::vector<c10::Device>& subset,
+      const std::vector<c10::Device>& superset) {
+    // We assume the devices in both vectors have the same consistent type, and
+    // their indices are unique and sorted.
+    std::vector<c10::Device> excessDevices;
+    std::set_difference(
+        subset.begin(),
+        subset.end(),
+        superset.begin(),
+        superset.end(),
+        std::back_inserter(excessDevices),
+        [](const c10::Device& a, const c10::Device& b) { return a.index() < b.index(); });
+    TORCH_CHECK_VALUE(
+        excessDevices.empty(),
+        "The result contained tensors residing on device(s) ",
+        formatSetOfDevices(excessDevices),
+        " which are not among the expected device(s) ",
+        formatSetOfDevices(superset));
   }
 
   mutable std::mutex mutex_;
@@ -797,16 +795,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   std::vector<std::function<void(void)>> callbacks_;
   std::exception_ptr eptr_;
 
-  // Extra fields needed to optionally support CUDA devices. They will only be
-  // used if impl_ != nullptr.
-
   // An upcast pointer to a virtual class which allows us to manipulate events,
   // streams, ... in a generic way, without an explicit dependency on CUDA.
-  const c10::impl::DeviceGuardImplInterface* const impl_ = nullptr;
+  const c10::impl::VirtualGuardImpl impl_;
 
   // The device that was current when markCompleted was called, which we'll
-  // restore when invoking callbacks.
-  c10::DeviceIndex currentDevice_;
+  // restore when invoking callbacks. It's optional because we'll only store it
+  // if the future completes successfully.
+  optional<c10::Device> currentDevice_;
 
   // The events that correspond to the completion of the async I/O kernels. They
   // are recorded on the appropriate streams when the future is marked completed
@@ -824,7 +820,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // current when invoking a callback, thus allowing the callback to use devices
   // that the parent future didn't use. This field is set to the value provided
   // in the constructor and will be "inherited" by all child futures.
-  const std::vector<c10::DeviceIndex> devices_;
+  const std::vector<c10::Device> devices_;
 };
 
 // Input is a list of Futures with the same target type.
