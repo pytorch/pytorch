@@ -306,15 +306,6 @@ struct EnumHolder;
 
 // Future
 struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
- private:
-  c10::intrusive_ptr<Future> intrusive_from_this() {
-    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
-                                           // from a raw `this` pointer
-                                           // so we need to bump the refcount
-                                           // to account for this ownership
-    return c10::intrusive_ptr<Future>::reclaim(this);
-  }
-
  public:
   explicit Future(TypePtr type, std::vector<c10::Device> devices={})
       : type_(std::move(type)),
@@ -339,10 +330,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   void wait() {
     std::unique_lock<std::mutex> lock(mutex_);
-    while (!completed_) {
-      finished_cv_.wait(lock);
-    }
-
+    finished_cv_.wait(lock, [&]() -> bool { return completed_; });
     synchronizeWithCurrentStreams();
   }
 
@@ -385,7 +373,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       // FIXME We should always extract DataPtrs, in order to catch the case of
       // users using CUDA values but forgetting to set devices, which currently
       // leads to a silent synchronization/correctness issue. However, as this
-      // might worsen perf in CPU-only cases, we should only do after careful
+      // might worsen perf in CPU-only cases, we should only do so after careful
       // benchmarks.
       if (impl_.type() != c10::kCPU) {
         actualDataPtrs =
@@ -553,8 +541,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // how/when that happens) as it will ensure that the proper "environment" is
   // set up before running the callback, as in, it will set up the CUDA streams,
   // synchronize them with the value, and so on (if needed).
-  void invokeCallback(
-      std::function<void(void)> callback) {
+  void invokeCallback(std::function<void(void)> callback) {
     c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
     std::vector<c10::Stream> streams;
@@ -691,6 +678,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     // Deduplicate by compacting.
     size_t targetIdx = 0;
     for (size_t sourceIdx = 0; sourceIdx < devices.size(); sourceIdx++) {
+      TORCH_CHECK_VALUE(
+          devices[sourceIdx].has_index(),
+          "Expected devices to have indices, got ", devices[sourceIdx]);
       if (targetIdx > 0 && devices[targetIdx - 1].index() == devices[sourceIdx].index()) {
         // It's a duplicate, skip it.
         continue;
