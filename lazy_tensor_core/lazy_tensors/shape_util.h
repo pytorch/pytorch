@@ -163,6 +163,9 @@ class ShapeUtil {
   // visitor function.
   using StatusVisitorFunction = std::function<Status(
       const Shape& /*subshape*/, const ShapeIndex& /*index*/)>;
+
+  // Compute a hash for `shape`.
+  static size_t Hash(const Shape& shape);
 };
 
 inline at::ScalarType PrimitiveToScalarType(

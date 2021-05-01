@@ -1,6 +1,8 @@
 #include "lazy_tensors/shape_util.h"
 
 #include "lazy_tensors/core/platform/errors.h"
+#include "lazy_tensors/core/platform/hash.h"
+#include "lazy_tensors/layout_util.h"
 
 namespace lazy_tensors {
 
@@ -41,6 +43,31 @@ void ShapeUtil::ForEachSubshape(const Shape& shape,
       },
       &index)
       .IgnoreError();
+}
+
+/*static*/ size_t ShapeUtil::Hash(const Shape& shape) {
+  using lazy_tensors::hash;
+  using lazy_tensors::Hash64Combine;
+
+  size_t hash_value = hash<PrimitiveType>()(shape.element_type());
+
+  if (shape.tuple_shapes().empty()) {
+    for (int i = 0; i < shape.dimensions_size(); ++i) {
+      hash_value =
+          Hash64Combine(hash_value, hash<int64>()(shape.dimensions(i)));
+      hash_value = Hash64Combine(hash_value,
+                                 hash<bool>()(shape.is_dynamic_dimension(i)));
+    }
+
+    hash_value = Hash64Combine(hash_value, LayoutUtil::Hash(shape.layout()));
+  } else {
+    hash_value = 0;
+    for (const Shape& subshape : shape.tuple_shapes()) {
+      hash_value = Hash64Combine(hash_value, ShapeUtil::Hash(subshape));
+    }
+  }
+
+  return hash_value;
 }
 
 }  // namespace lazy_tensors

@@ -28,18 +28,22 @@ class Literal {
                                value_.numel());
   }
 
+  const void* untyped_data(const ShapeIndex& shape_index = {}) const {
+    return value_.data_ptr();
+  }
+
   void* untyped_data(const ShapeIndex& shape_index = {}) {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
   int64 size_bytes(const ShapeIndex& shape_index = {}) const {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    return value_.numel() * value_.element_size();
   }
 
   std::string ToStringWithoutShape() const {
     LTC_LOG(FATAL) << "Not implemented yet.";
   }
 
-  size_t Hash() const { LTC_LOG(FATAL) << "Not implemented yet."; }
+  size_t Hash() const;
 
   Literal Clone() const { LTC_LOG(FATAL) << "Not implemented yet."; }
 

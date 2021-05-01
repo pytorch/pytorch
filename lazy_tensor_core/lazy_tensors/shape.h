@@ -64,6 +64,8 @@ class Shape {
   PrimitiveType element_type() const { return element_type_; }
   void set_element_type(PrimitiveType value) { element_type_ = value; }
 
+  // Methods for accessing the dimensions array.
+  int dimensions_size() const { return dimensions_.size(); }
   int64 dimensions(int index) const {
     LTC_CHECK_LT(index, dimensions_.size());
     return dimensions_[index];
