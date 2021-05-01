@@ -1281,7 +1281,8 @@ Tensor* computeSoftmax(
         });
     return new Tensor(
         result->buf(),
-        new tensorexpr::Block({max->stmt(), e->stmt(), sum->stmt(), result->stmt()}));
+        new tensorexpr::Block(
+            {max->stmt(), e->stmt(), sum->stmt(), result->stmt()}));
   }
 
   auto log_sum = Compute(
@@ -2420,7 +2421,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           });
     } break;
 
-
     case aten::conv2d: {
       return computeConv2d(v);
     }
@@ -2748,11 +2748,7 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
   return result;
 }
 
-namespace {
-
-
-} // namespace
-
+namespace {} // namespace
 
 Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   const Node* n = v->node();
@@ -2812,7 +2808,6 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
       {sH, sW, pH, pW, dH, dW, groups});
   return new Tensor(ResultBuf.node(), s);
 }
-
 
 template <typename T>
 std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {

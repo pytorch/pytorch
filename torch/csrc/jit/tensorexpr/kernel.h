@@ -158,7 +158,6 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::vector<ExprHandle>& axes);
 
-
   Tensor* computeConv2d(const torch::jit::Value* v);
 
   Tensor* computeValue(const torch::jit::Value* v);
