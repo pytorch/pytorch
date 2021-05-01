@@ -358,7 +358,7 @@ Tensor mkldnn_max_pool2d(
       "mkldnn_max_pool2d does not support dilation case");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_max_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_max_pool2d: bf16 path needs cpu support for avx512vl and avx512dq");
   }
 
   return _mkldnn_pooling(
@@ -382,7 +382,7 @@ Tensor mkldnn_max_pool3d(
       "mkldnn_max_pool3d does not support dilation case");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_max_pool3d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_max_pool3d: bf16 path needs cpu support for avx512vl and avx512dq");
   }
 
   return _mkldnn_pooling(
@@ -407,7 +407,7 @@ Tensor mkldnn_avg_pool2d(
       "mkldnn_avg_pool2d operator does not support divisor");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_avg_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_avg_pool2d: bf16 path needs cpu support for avx512vl and avx512dq");
   }
 
   return _mkldnn_pooling(
@@ -443,7 +443,7 @@ Tensor mkldnn_avg_pool3d(
   TORCH_CHECK(!divisor_override.has_value(), "mkldnn_avg_pool3d operator does not support divisor");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_avg_pool3d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_avg_pool3d: bf16 path needs cpu support for avx512vl and avx512dq");
   }
 
   return _mkldnn_pooling(
@@ -474,7 +474,7 @@ Tensor mkldnn_adaptive_avg_pool2d(
   TORCH_CHECK(input.dim() == 4, "mkldnn_adaptive_avg_pool2d: Expect 2D input");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_adaptive_avg_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_adaptive_avg_pool2d: bf16 path needs cpu support for avx512vl and avx512dq");
   }
   auto output_size_vec =
       expand_param_if_needed(output_size, "output_size", input.dim() - 2);
