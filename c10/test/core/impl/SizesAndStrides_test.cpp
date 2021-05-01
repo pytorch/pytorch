@@ -6,12 +6,16 @@
 using namespace c10;
 using namespace c10::impl;
 
-static void checkData(const SizesAndStrides& sz, IntArrayRef sizes, IntArrayRef strides) {
-  EXPECT_EQ(sizes.size(), strides.size()) << "bad test case: size() of sizes and strides don't match";
+static void checkData(
+    const SizesAndStrides& sz,
+    IntArrayRef sizes,
+    IntArrayRef strides) {
+  EXPECT_EQ(sizes.size(), strides.size())
+      << "bad test case: size() of sizes and strides don't match";
   EXPECT_EQ(sz.size(), sizes.size());
 
   int idx = 0;
-  for (auto x: sizes) {
+  for (auto x : sizes) {
     EXPECT_EQ(sz.size_at_unchecked(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.size_at(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.sizes_data()[idx], x) << "index: " << idx;
@@ -21,7 +25,7 @@ static void checkData(const SizesAndStrides& sz, IntArrayRef sizes, IntArrayRef 
   EXPECT_EQ(sz.sizes_arrayref(), sizes);
 
   idx = 0;
-  for (auto x: strides) {
+  for (auto x : strides) {
     EXPECT_EQ(sz.stride_at_unchecked(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.stride_at(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.strides_data()[idx], x) << "index: " << idx;
