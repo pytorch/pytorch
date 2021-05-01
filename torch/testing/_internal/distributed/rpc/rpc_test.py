@@ -4820,11 +4820,13 @@ class MyConvNetForMNIST(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 10),
         ).to(device)
+        self.device = device
 
     def forward(self, x, is_rref=False):
-        if is_rref:
-            return self.net(x.to_here())
-        else:
+        x = x.to_here() if is_rref else x
+        with torch.cuda.stream(torch.cuda.current_stream(self.device)):
+            # intentionally adding delay to current CUDA stream
+            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
             return self.net(x)
 
 
@@ -5589,8 +5591,8 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             # training of a CNN of MNIST-like data.
             # see https://github.com/pytorch/pytorch/issues/54771
             rref = rpc.remote(dst, MyConvNetForMNIST, args=(remote_device,))
-            for _ in range(20):
-                x = torch.randn(100, 1, 28, 28).to(local_device)
+            for _ in range(10):
+                x = torch.randn(200, 1, 28, 28).to(local_device)
                 actual = rref.remote().forward(x).to_here()
                 expected = rref.rpc_sync().forward(x)
                 self.assertEqual(actual, expected)
@@ -5644,8 +5646,8 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             # training of a CNN of MNIST-like data.
             # see https://github.com/pytorch/pytorch/issues/54771
             rref = rpc.remote(dst, MyConvNetForMNIST, args=(remote_device,))
-            for _ in range(20):
-                rref_x = RRef(torch.randn(100, 1, 28, 28).to(local_device))
+            for _ in range(10):
+                rref_x = RRef(torch.randn(200, 1, 28, 28).to(local_device))
                 actual = rref.remote().forward(rref_x, True).to_here()
                 expected = rref.rpc_sync().forward(rref_x, True)
                 self.assertEqual(actual, expected)
@@ -5719,7 +5721,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             # training of a CNN of MNIST-like data.
             # see https://github.com/pytorch/pytorch/issues/54771
             rref = rpc.remote(model_dst, MyConvNetForMNIST, args=(remote_device,))
-            for _ in range(20):
+            for _ in range(10):
                 rref_input = RRef(torch.randn(200, 1, 28, 28).to(local_device))
                 rref_out = rref.remote().forward(rref_input, True)
                 out = rpc.remote(
