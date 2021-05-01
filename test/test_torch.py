@@ -6195,7 +6195,7 @@ else:
         x = torch.empty(0, device="cpu")
         y = torch.empty(0, device=device)
         self.assertRaisesRegex(
-            RuntimeError, "multinomial arguments must have the same device",
+            RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
     @deviceCountAtLeast(2)
@@ -6204,7 +6204,7 @@ else:
         x = torch.empty(0, device=devices[0])
         y = torch.empty(0, device=devices[1])
         self.assertRaisesRegex(
-            RuntimeError, "multinomial arguments must have the same device",
+            RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
     @deviceCountAtLeast(2)
@@ -6653,8 +6653,13 @@ else:
                 _test_helper(x, op, unary=True)
 
     @skipMeta
-    def test_dlpack_conversion(self, device):
-        x = torch.randn(1, 2, 3, 4, device=device, dtype=torch.float)
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_dlpack_conversion(self, device, dtype):
+        # DLpack does not explicitly support bool
+        # It does it through uint8 type
+        if dtype is torch.bool:
+            return
+        x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
@@ -7877,7 +7882,7 @@ tensor_op_tests = [
     ('geqrf', '', _new_t((20, 20)), lambda t, d: [],
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
+        1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA, skipIfRocm]),
 ]
 
 # Creates and decorates a generic test and adds it to the class.
@@ -8032,6 +8037,16 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         # ensure sharing is not broken
         c = deepcopy([a, a.grad])
         self.assertTrue(c[0].grad is c[1])
+
+    def test_tensor_base_init(self):
+        # Direct construction not OK
+        self.assertRaises(TypeError, lambda: torch._C._TensorBase())
+
+        # But construction of subclass is OK
+        class T(torch._C._TensorBase):
+            pass
+
+        T()
 
 # TODO: this empy class is temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
