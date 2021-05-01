@@ -86,6 +86,7 @@ c10::FunctionSchema RemoveSelfFromSchema(const c10::FunctionSchema& s) {
 }
 
 bool mayContainAlias(AliasDb& db, const Value* a, const Value* b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return db.mayContainAlias(const_cast<Value*>(a), const_cast<Value*>(b));
 }
 
@@ -97,10 +98,12 @@ bool mayContainAlias(
   std::vector<Value*> bs;
   as.reserve(a.size());
   for (auto* v : a) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     as.emplace_back(const_cast<Value*>(v));
   }
   bs.reserve(b.size());
   for (auto* v : b) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     bs.emplace_back(const_cast<Value*>(v));
   }
   return db.mayContainAlias(as, bs);
@@ -531,6 +534,7 @@ StaticModule::StaticModule(
   std::unordered_map<Value*, DefInfo> value_to_ssa_def;
 
   // N inputs map to the first N entries in storage
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (auto i = 0; i < graph_->inputs().size(); ++i) {
     Value* input = graph_->inputs()[i];
     value_to_ivalue[input] = nullptr;
@@ -639,14 +643,18 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
   // NB: create unchanging std::vector<IValue>s we can reference
   inputs_.resize(sm.num_inputs());
   nodes_.resize(sm.nodes().size());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (auto idx = 0; idx < sm.nodes().size(); ++idx) {
     const auto& n_ref = sm.nodes()[idx];
     nodes_[idx] = n_ref; // copy the node
     auto& n = nodes_[idx];
     // hook up the inputs
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < n.inputs().size(); ++i) {
       if (n.inputs()[i] == nullptr) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int node_idx;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int out_idx;
         std::tie(node_idx, out_idx) = sm.index_map().at(idx)[i];
         DCHECK(out_idx >= 0);
@@ -663,7 +671,9 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
   }
 
   for (const auto& index_pair : sm.output_indices()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int node_idx;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int out_idx;
     std::tie(node_idx, out_idx) = index_pair;
     if (node_idx == StaticModule::INPUT_VALUE) {
@@ -672,6 +682,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
       // This is a very rare case where const correctness
       // breaks -- the user is returning a constant from
       // the graph.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       outputs_.emplace_back(const_cast<IValue*>(&sm.constants()[out_idx]));
     } else {
       auto& n = nodes_.at(node_idx);
@@ -766,6 +777,7 @@ c10::IValue StaticRuntime::operator()(
   if (static_module_.num_outputs() > 1) {
     std::vector<c10::IValue> outputs;
     outputs.reserve(static_module_.num_outputs());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < static_module_.num_outputs(); ++i) {
       // use move here. Otherwise, clean up outputs_[i] explicitly
       outputs.emplace_back(std::move(*outputs_[i]));
@@ -787,7 +799,9 @@ void StaticRuntime::benchmark(
     const int warmup_runs,
     const int main_runs) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
-  std::cout << "Static runtime ms per iter: " << time_per_iter
+  std::cout << "Static runtime ms per iter: "
+            << time_per_iter
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
 
   IndividualMetrics results =
@@ -811,11 +825,13 @@ void StaticRuntime::benchmark(
   for (const auto& p : time_per_node_type_vec) {
     const std::string& kind = p.first;
     const double ms = p.second;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
               << results.instances_per_node_type[kind] << " nodes)"
               << std::endl;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
   std::cout << "StaticRuntime setup time: " << results.setup_time << " ms"
@@ -934,6 +950,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     if (static_module_.num_outputs() > 1) {
       std::vector<c10::IValue> outputs;
       outputs.reserve(static_module_.num_outputs());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (auto i = 0; i < static_module_.num_outputs(); ++i) {
         // use move here. Otherwise, clean up outputs_[i] explicitly
         outputs.emplace_back(std::move(*outputs_[i]));
@@ -967,6 +984,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   results.output_dealloc_time /= static_cast<float>(main_runs);
   for (const auto& p : results.time_per_node_type) {
     const std::string& kind = p.first;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     results.percent_per_node_type[kind] = p.second / results.total_time * 100;
   }
   return results;
@@ -1029,6 +1047,7 @@ static void assign_storage_to_managed_tensors(
 
   // Snapshot of the current memory state
   for (auto& pnode : runtime->nodes()) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < pnode.outputs().size(); ++i) {
       auto& ival = pnode.Output(i);
       const auto* val = pnode.node()->outputs()[i];
@@ -1070,6 +1089,7 @@ MemoryPlanner::MemoryPlanner(
   if (enable_out_variant) {
     for (ProcessedNode& pnode : runtime->nodes()) {
       if (canReuseInputsOutputs(pnode.node())) {
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (auto i = 0; i < pnode.outputs().size(); ++i) {
           const Value* out_v = pnode.node()->outputs()[i];
           if (external_values.count(out_v)) {
@@ -1092,6 +1112,7 @@ MemoryPlanner::MemoryPlanner(
   // collect unmanaged output ivalues
   std::unordered_set<IValue*> unmanaged_ivalues;
   for (ProcessedNode& pnode : runtime->nodes()) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < pnode.outputs().size(); ++i) {
       // Types are stored in the underlying TorchScript IR
       const Value* out_v = pnode.node()->outputs()[i];
@@ -1242,6 +1263,7 @@ void ProcessedNode::run() {
     op_->operator()(&stack);
 
     DCHECK_EQ(stack.size(), node_->outputs().size());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < node_->outputs().size(); i++) {
       Output(i) = std::move(stack[i]);
     }
