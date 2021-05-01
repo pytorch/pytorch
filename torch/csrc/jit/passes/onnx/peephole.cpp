@@ -471,9 +471,11 @@ void fixDefaultRnnHiddenState(Block* b, int opset_version) {
     }
     // Hidden state is the sixth input for RNN, LSTM, GRU.
     // See https://pytorch.org/docs/master/nn.html#torch.nn.RNN
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (n->inputs().size() < 6) {
       continue;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     fixDefaultRNNState(b->owningGraph(), n, 5, opset_version);
   }
 }
@@ -490,9 +492,11 @@ void fixDefaultLstmCellState(Block* b, int opset_version) {
     }
     // Cell state is the seventh input for LSTM.
     // See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (n->inputs().size() < 7) {
       continue;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     fixDefaultRNNState(b->owningGraph(), n, 6, opset_version);
   }
 }
@@ -667,6 +671,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
     if (it->kind() == onnx::NegativeLogLikelihoodLoss) {
       auto prev = it->input(0)->node();
       Node* origNllLossNode = *it;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Node* origLogSoftmaxNode;
 
       // Check for patterns especially in cases with autocasting enabled
@@ -851,6 +856,28 @@ static void removeSequenceSplitConcat(Block* b) {
   }
 }
 
+static void insertIdentityForInputUsedAsOutput(Block* b) {
+  // Resolving limitation from ONNX that the block input cannot be used directly
+  // as block output. Inserting an Identity node inside
+  // the block, linking with the value as workaround.
+  for (auto out : b->outputs()) {
+    auto n = out->node();
+    if (nullptr != n && n->kind() == prim::Param) {
+      Node* id_node = b->owningGraph()->create(onnx::Identity);
+      id_node->insertBefore(b->return_node());
+      id_node->addInput(out);
+      id_node->output()->setType(out->type());
+      b->return_node()->replaceInputWith(out, id_node->output());
+    }
+  }
+
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      insertIdentityForInputUsedAsOutput(child_block);
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -894,6 +921,7 @@ void PeepholeOptimizeONNX(
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
   removeSequenceSplitConcat(graph->block());
+  insertIdentityForInputUsedAsOutput(graph->block());
 }
 
 } // namespace jit

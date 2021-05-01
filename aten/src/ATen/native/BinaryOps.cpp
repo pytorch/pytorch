@@ -16,7 +16,7 @@ namespace meta {
 TORCH_META_FUNC2(add, Tensor) (
   const Tensor& self, const Tensor& other, const Scalar& alpha
 ) {
-  build_binary_op(maybe_get_output(), self, other);
+  build_borrowing_binary_op(maybe_get_output(), self, other);
   native::alpha_check(dtype(), alpha);
 }
 
@@ -38,18 +38,29 @@ TORCH_META_FUNC2(div, Tensor) (const Tensor& self, const Tensor& other) {
   build_binary_float_op(maybe_get_output(), self, other);
 }
 
-TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, std::string rounding_mode) {
-  if (rounding_mode == "true") {
+TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
+  if (!rounding_mode.has_value()) {
     build_binary_float_op(maybe_get_output(), self, other);
-  } else if (rounding_mode == "trunc") {
+  // NOLINTNEXTLINE(bugprone-branch-clone)
+  } else if (*rounding_mode == "trunc") {
     build_binary_op(maybe_get_output(), self, other);
-  } else if (rounding_mode == "floor") {
+  } else if (*rounding_mode == "floor") {
     build_binary_op(maybe_get_output(), self, other);
   } else {
     TORCH_CHECK(false,
-        "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
-        "but found '", rounding_mode, "'");
+        "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
+        "but found '", *rounding_mode, "'");
   }
+}
+
+TORCH_META_FUNC2(copysign, Tensor) (
+  const Tensor& self, const Tensor& other
+) {
+  build_binary_float_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
+  build_binary_float_op(maybe_get_output(), self, other);
 }
 
 } // namespace meta
@@ -57,54 +68,90 @@ TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, std
 
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(add_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(add_clamp_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(sub_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mul_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(div_true_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(div_floor_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(div_trunc_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(remainder_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(atan2_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bitwise_and_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bitwise_or_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bitwise_xor_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lshift_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(rshift_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logical_and_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logical_or_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logical_xor_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lt_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(le_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(gt_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(ge_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(eq_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(ne_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(sigmoid_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logit_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(tanh_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(maximum_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(minimum_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fmax_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fmin_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fmod_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logaddexp_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logaddexp2_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(gcd_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lcm_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hypot_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(igamma_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(igammac_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(nextafter_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(heaviside_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(copysign_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(xlogy_stub);
-
-static Tensor wrapped_scalar_tensor(const Scalar& scalar) {
-  auto tensor = scalar_to_tensor(scalar);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
 
 TORCH_IMPL_FUNC(add_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -131,15 +178,19 @@ TORCH_IMPL_FUNC(div_out) (const Tensor& self, const Tensor& other, const Tensor&
 }
 
 TORCH_IMPL_FUNC(div_out_mode) (
-  const Tensor& self, const Tensor& other, std::string rounding_mode, const Tensor& result
+  const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode, const Tensor& result
 ) {
-  if (rounding_mode == "true") {
+  if (!rounding_mode.has_value()) {
     div_true_stub(device_type(), *this);
-  } else if (rounding_mode == "trunc") {
+  } else if (*rounding_mode == "trunc") {
     div_trunc_stub(device_type(), *this);
-  } else if (rounding_mode == "floor") {
+  } else if (*rounding_mode == "floor") {
     div_floor_stub(device_type(), *this);
   }
+}
+
+TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
+  atan2_stub(device_type(), *this);
 }
 
 Tensor& add_relu_impl(
@@ -188,29 +239,25 @@ Tensor& add_relu_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   return add_relu_impl(self, self, other, alpha);
 }
 
-Tensor& copysign_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  copysign_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor copysign(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  copysign_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& copysign_(Tensor& self, const Tensor& other) {
-  return native::copysign_out(self, other, self);
+TORCH_IMPL_FUNC(copysign_out) (
+  const Tensor& self, const Tensor& other, const Tensor& result
+) {
+  copysign_stub(device_type(), *this);
 }
 
 Tensor copysign(const Tensor& self, const Scalar& other) {
-  return native::copysign(self, wrapped_scalar_tensor(other));
+  // redispatch!
+  return at::copysign(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& copysign_(Tensor& self, const Scalar& other) {
-  return native::copysign_(self, wrapped_scalar_tensor(other));
+  // redispatch!
+  return self.copysign_(wrapped_scalar_tensor(other));
+}
+
+Tensor& copysign_out(const Tensor& self, const Scalar& other, Tensor& result) {
+  // redispatch!
+  return at::copysign_out(result, self, wrapped_scalar_tensor(other));
 }
 
 // WARNING: There doesn't appear to be any testing for this function
@@ -227,11 +274,11 @@ Tensor& div_(Tensor& self, const Scalar& other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
 }
 
-Tensor div(const Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor div(const Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
-Tensor& div_(Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor& div_(Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div_(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
@@ -256,23 +303,23 @@ Tensor& divide_(Tensor& self, const Scalar& other) {
   return self.div_(other);
 }
 
-Tensor& divide_out(const Tensor& self, const Tensor& other, std::string rounding_mode, Tensor& result) {
+Tensor& divide_out(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode, Tensor& result) {
   return at::div_out(result, self, other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Tensor& other, std::string rounding_mode) {
+Tensor divide(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Tensor& other, std::string rounding_mode) {
+Tensor& divide_(Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor divide(const Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor& divide_(Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
@@ -410,7 +457,7 @@ Tensor& subtract_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return self.sub_(other, alpha);
 }
 
-Tensor& sigmoid_backward_out(Tensor& result, const Tensor& grad_output, const Tensor& output) {
+Tensor& sigmoid_backward_out(const Tensor& grad_output, const Tensor& output, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   sigmoid_backward_stub(iter.device_type(), iter);
   return result;
@@ -423,11 +470,10 @@ Tensor sigmoid_backward(const Tensor& grad_output, const Tensor& output) {
   return iter.output();
 }
 
-Tensor& logit_backward_out(
-    Tensor& result,
-    const Tensor& grad_output,
+Tensor& logit_backward_out(const Tensor& grad_output,
     const Tensor& input,
-    c10::optional<double> eps) {
+    c10::optional<double> eps,
+    Tensor& result) {
   auto iter = TensorIterator::binary_op(result, grad_output, input);
   logit_backward_stub(
       iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
@@ -445,7 +491,7 @@ Tensor logit_backward(
   return iter.output();
 }
 
-Tensor& tanh_backward_out(Tensor& result, const Tensor& grad_output, const Tensor& output) {
+Tensor& tanh_backward_out(const Tensor& grad_output, const Tensor& output, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   tanh_backward_stub(iter.device_type(), iter);
   return result;
@@ -460,23 +506,6 @@ Tensor tanh_backward(const Tensor& grad_output, const Tensor& output) {
 
 Tensor rsub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return at::sub(other, self, alpha); // redispatch!
-}
-
-Tensor& atan2_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  atan2_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor atan2(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  atan2_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& atan2_(Tensor& self, const Tensor& other) {
-  return native::atan2_out(self, other, self);
 }
 
 // These are still needed because we don't have C++ conversions from number
@@ -1140,10 +1169,12 @@ Tensor& heaviside_(Tensor& self, const Tensor& values) {
 }
 
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return at::mul_out(result, self, at::pow(2.0, other));
 }
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return at::mul(self, at::pow(2.0, other));
 }
 

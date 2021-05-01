@@ -776,16 +776,18 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
 }
 } // namespace
 
-Tensor& slow_conv_transpose2d_out_cuda(
-    Tensor& output,
-    const Tensor& input,
+Tensor& slow_conv_transpose2d_out_cuda(const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
-    IntArrayRef dilation) {
+    IntArrayRef dilation,
+    Tensor& output) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor ones = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
@@ -814,7 +816,8 @@ Tensor slow_conv_transpose2d_cuda(
     IntArrayRef output_padding,
     IntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -836,11 +839,7 @@ Tensor slow_conv_transpose2d_cuda(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cuda(
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias,
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cuda(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -849,7 +848,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cuda(
     IntArrayRef output_padding,
     IntArrayRef dilation,
     const Tensor& columns,
-    const Tensor& ones) {
+    const Tensor& ones,
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias) {
   if (grad_input.defined()) {
     slow_conv_transpose2d_backward_out_cuda_template(
         input,

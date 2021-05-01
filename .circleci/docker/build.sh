@@ -197,6 +197,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    BREAKPAD=yes
     ;;
   pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9)
     CUDA_VERSION=10.2
@@ -239,6 +240,14 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=4.0.1
+    ;;
+  pytorch-linux-bionic-rocm4.1-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=4.1
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -308,6 +317,7 @@ docker build \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
+       --build-arg "BREAKPAD=${BREAKPAD}" \
        --build-arg "ANDROID=${ANDROID}" \
        --build-arg "ANDROID_NDK=${ANDROID_NDK_VERSION}" \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \

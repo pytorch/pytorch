@@ -8,17 +8,36 @@ PyTorch is a Python package that provides two high-level features:
 
 You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
 
-- [More about PyTorch](#more-about-pytorch)
+<!-- toc -->
+
+- [More About PyTorch](#more-about-pytorch)
+  - [A GPU-Ready Tensor Library](#a-gpu-ready-tensor-library)
+  - [Dynamic Neural Networks: Tape-Based Autograd](#dynamic-neural-networks-tape-based-autograd)
+  - [Python First](#python-first)
+  - [Imperative Experiences](#imperative-experiences)
+  - [Fast and Lean](#fast-and-lean)
+  - [Extensions Without Pain](#extensions-without-pain)
 - [Installation](#installation)
   - [Binaries](#binaries)
+    - [NVIDIA Jetson Platforms](#nvidia-jetson-platforms)
   - [From Source](#from-source)
+    - [Install Dependencies](#install-dependencies)
+    - [Get the PyTorch Source](#get-the-pytorch-source)
+    - [Install PyTorch](#install-pytorch)
+      - [Adjust Build Options (Optional)](#adjust-build-options-optional)
   - [Docker Image](#docker-image)
+    - [Using pre-built images](#using-pre-built-images)
+    - [Building the image yourself](#building-the-image-yourself)
   - [Building the Documentation](#building-the-documentation)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
+- [Resources](#resources)
 - [Communication](#communication)
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
+- [License](#license)
+
+<!-- tocstop -->
 
 | System | 3.6 | 3.7 | 3.8 |
 | :---: | :---: | :---: | :--: |
@@ -245,9 +264,15 @@ Each CUDA version only supports one particular XCode version. The following comb
 
 On Windows
 
+Choose Correct Visual Studio Version.
+
+Sometimes there are regressions in new versions of Visual Studio, so
+it's best to use the same Visual Studio Version as [PyTorch CI's](https://github.com/pytorch/pytorch/blob/a1bd7918cc5a06cbef6c5178259bf0a7b5ab1ce3/.circleci/scripts/vs_install.ps1#L4).
+You can use Visual Studio Enterprise, Professional or Community though PyTorch CI uses Visual Studio BuildTools.
+
 Build with CPU
 
-It's fairly easy to build with CPU. Visual Studio 2019 version 16.7.6 (MSVC toolchain version 14.27) or higher is recommended.
+It's fairly easy to build with CPU.
 
 Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the buliding environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configuraions for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
 
@@ -267,8 +292,6 @@ CUDA, MSVC, and PyTorch versions are interdependent; please install matching ver
 | 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.3.0 ~ 1.7.0  |
 | 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
 | 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
-
-Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
 Additional libraries such as
 [Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/master/.jenkins/pytorch/win-test-helpers/installation-helpers) to install them.

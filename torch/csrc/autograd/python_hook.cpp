@@ -40,6 +40,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
   if (!value) throw python_error();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
@@ -51,7 +52,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   }
 
   variable_list results(values);
-  if (value != Py_None) results[value_idx] = ((THPVariable*)value.get())->cdata;
+  if (value != Py_None) results[value_idx] = THPVariable_Unpack(value.get());
   return results;
 }
 
@@ -73,6 +74,7 @@ auto PyFunctionPostHook::operator()(
   THPObjectPtr outputs(wrap_variables(_outputs));
   THPObjectPtr inputs(wrap_variables(_inputs));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
@@ -110,7 +112,7 @@ static variable_list unwrap_variables(PyObject* py_variables)  {
     if (item == Py_None) {
       continue;
     } else if (THPVariable_Check(item)) {
-      results[i] = ((THPVariable*)item)->cdata;
+      results[i] = THPVariable_Unpack(item);
     } else {
       // this should never happen, but just in case...
       std::stringstream ss;
@@ -157,8 +159,8 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw python_error();
   }
 
-  auto& original = ((THPVariable*)_original)->cdata;
-  auto& result = ((THPVariable*)_result)->cdata;
+  const auto& original = THPVariable_Unpack(_original);
+  const auto& result = THPVariable_Unpack(_result);
 
   torch::autograd::check_variable_result(original, result, hook_name(hook));
 }

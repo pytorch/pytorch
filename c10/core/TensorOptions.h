@@ -337,6 +337,10 @@ struct C10_API TensorOptions {
     return layout_ == c10::Layout::Sparse;
   }
 
+  bool is_sparse_csr() const {
+    return layout_ == c10::Layout::SparseCsr;
+  }
+
   // For compatibility with legacy tensor.type() comparisons
   bool type_equal(const TensorOptions& other) const {
     return computeDispatchKey() == other.computeDispatchKey() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
@@ -613,13 +617,10 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             return DispatchKey::XPU;
           }
           case DeviceType::MKLDNN:
-            return DispatchKey::MKLDNN;
           case DeviceType::OPENGL:
-            return DispatchKey::OpenGL;
           case DeviceType::OPENCL:
-            return DispatchKey::OpenCL;
           case DeviceType::IDEEP:
-            return DispatchKey::IDEEP;
+            TORCH_INTERNAL_ASSERT(0, "This is a grandfathered Caffe2 device type ", device_.type(), ", it shouldn't ever convert to a DispatchKey.  File a bug describing what you were doing if you think this is in error.");
           case DeviceType::HIP:
             return DispatchKey::HIP;
           case DeviceType::FPGA:
@@ -660,6 +661,15 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
           default:
             TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for mkldnn layout: ", device_.type());
         }
+      case Layout::SparseCsr:
+        switch(device_.type()) {
+          case DeviceType::CPU:
+            return DispatchKey::SparseCsrCPU;
+          case DeviceType::CUDA:
+            return DispatchKey::SparseCsrCUDA;
+          default:
+            AT_ERROR("Unsupported device type for sparse CSR layout: ", device_.type());
+        }
       default:
         TORCH_CHECK(false, "Unsupported layout: ", layout_);
     }
@@ -671,6 +681,8 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     case DispatchKey::SparseCUDA:
     case DispatchKey::SparseHIP:
     case DispatchKey::SparseXPU:
+    case DispatchKey::SparseCsrCPU:
+    case DispatchKey::SparseCsrCUDA:
       return Layout::Sparse;
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
@@ -715,14 +727,6 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
       return DeviceType::MLC;
 
     // stuff that isn't real
-    case DispatchKey::MKLDNN:
-      return DeviceType::MKLDNN;
-    case DispatchKey::OpenGL:
-      return DeviceType::IDEEP;
-    case DispatchKey::OpenCL:
-      return DeviceType::OPENCL;
-    case DispatchKey::IDEEP:
-      return DeviceType::IDEEP;
     case DispatchKey::MSNPU:
       return DeviceType::MSNPU;
     default:
