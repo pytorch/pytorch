@@ -2368,7 +2368,6 @@ class TestLinalg(TestCase):
 
     # Ensure torch.norm with p='fro' and p=2 give the same results for mutually supported input combinations
     @dtypes(torch.float)
-    @skipCUDAIfRocm
     def test_norm_fro_2_equivalence_old(self, device, dtype):
         input_sizes = [
             (0,),
