@@ -12,6 +12,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <c10/core/ScalarType.h>
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
@@ -243,6 +244,36 @@ static PyObject * is_autocast_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * set_autocast_dtype(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!THPDtype_Check(arg)) {
+    throw TypeError("dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
+  at::autocast::set_autocast_dtype(targetType);
+  Py_RETURN_NONE;;
+  END_HANDLE_TH_ERRORS
+}
+
+static const char* scalarTypeName(const at::ScalarType type) {
+  switch (type) {
+#define DEFINE_CASE(ctype, name) \
+  case at::ScalarType::name:     \
+    return #ctype;
+    AT_FORAUTOCAST_SCALAR_TYPES(DEFINE_CASE)
+#undef DEFINE_CASE
+    default:
+      throw std::runtime_error("unknown scalar type for autocast");
+  }
+}
+
+static PyObject * get_autocast_dtype(PyObject* _unused, PyObject *arg){
+  HANDLE_TH_ERRORS
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype();
+  return THPDtype_New(current_dtype, scalarTypeName(current_dtype));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * clear_autocast_cache(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   at::autocast::clear_cache();
@@ -352,6 +383,8 @@ static PyMethodDef methods[] = { // NOLINT
   {"_is_forward_AD_enabled", is_forward_AD_enabled, METH_NOARGS, nullptr},
   {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
   {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
+  {"set_autocast_dtype", set_autocast_dtype, METH_O, nullptr},
+  {"get_autocast_dtype", get_autocast_dtype, METH_NOARGS, nullptr},
   {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
   {"autocast_increment_nesting", autocast_increment_nesting, METH_NOARGS, nullptr},
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
