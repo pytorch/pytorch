@@ -101,7 +101,7 @@ def _do_instantiate_remote_module_template(
 
 
 def instantiate_scriptable_remote_module_template(
-    module_interface_cls, enable_moving_cpu_tensors_to_cuda
+    module_interface_cls, enable_moving_cpu_tensors_to_cuda=True
 ):
     if not getattr(module_interface_cls, "__torch_script_interface__", False):
         raise ValueError(
