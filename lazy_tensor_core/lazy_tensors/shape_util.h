@@ -165,41 +165,41 @@ class ShapeUtil {
       const Shape& /*subshape*/, const ShapeIndex& /*index*/)>;
 };
 
-inline torch::jit::tensorexpr::ScalarType PrimitiveToScalarType(
+inline at::ScalarType PrimitiveToScalarType(
     lazy_tensors::PrimitiveType scalar_type) {
   switch (scalar_type) {
     case lazy_tensors::PrimitiveType::S8: {
-      return torch::jit::tensorexpr::ScalarType::Char;
+      return at::ScalarType::Char;
     }
     case lazy_tensors::PrimitiveType::S16: {
-      return torch::jit::tensorexpr::ScalarType::Short;
+      return at::ScalarType::Short;
     }
     case lazy_tensors::PrimitiveType::S32: {
-      return torch::jit::tensorexpr::ScalarType::Int;
+      return at::ScalarType::Int;
     }
     case lazy_tensors::PrimitiveType::S64: {
-      return torch::jit::tensorexpr::ScalarType::Long;
+      return at::ScalarType::Long;
     }
     case lazy_tensors::PrimitiveType::U8: {
-      return torch::jit::tensorexpr::ScalarType::Byte;
+      return at::ScalarType::Byte;
     }
     case lazy_tensors::PrimitiveType::U16: {
-      return torch::jit::tensorexpr::ScalarType::Short;
+      return at::ScalarType::Short;
     }
     case lazy_tensors::PrimitiveType::U32: {
-      return torch::jit::tensorexpr::ScalarType::Int;
+      return at::ScalarType::Int;
     }
     case lazy_tensors::PrimitiveType::U64: {
-      return torch::jit::tensorexpr::ScalarType::Long;
+      return at::ScalarType::Long;
     }
     case lazy_tensors::PrimitiveType::F32: {
-      return torch::jit::tensorexpr::ScalarType::Float;
+      return at::ScalarType::Float;
     }
     case lazy_tensors::PrimitiveType::F64: {
-      return torch::jit::tensorexpr::ScalarType::Double;
+      return at::ScalarType::Double;
     }
     case lazy_tensors::PrimitiveType::PRED: {
-      return torch::jit::tensorexpr::ScalarType::Bool;
+      return at::ScalarType::Bool;
     }
     default: { LTC_LOG(FATAL) << "Not implemented yet."; }
   }
