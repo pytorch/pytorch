@@ -55,7 +55,7 @@ Tensor mkldnn_linear(
       "mkldnn_linear: input needs to be mkldnn layout");
   if (self.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_linear: bf16 path needs cpu support for avx512vl and avx512dq");
   }
 
   // reshape first if input dim != 2 and the reshape will cost a memory copy.
