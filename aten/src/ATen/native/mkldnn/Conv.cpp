@@ -96,7 +96,7 @@ Tensor mkldnn_convolution(
 
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_convolution: bf16 path needs the cpu support for avx512vl and avx512dq");
+        "mkldnn_convolution: bf16 path needs cpu support for avx512vl and avx512dq");
   }
   const ideep::tensor mkldnn_input = itensor_from_tensor(input);
   const ideep::tensor mkldnn_weight = itensor_from_tensor(weight);
