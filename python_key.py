@@ -4,13 +4,12 @@ import functools
 from string import ascii_lowercase
 import torch.nn as nn
 import torch.nn.functional as F
-import torch._C.key as key
 import torch.fx as fx
 from torch.fx import PythonTensor
 from nnc_compile import nnc_compile
 from types import FunctionType, CodeType
 import functorch
-from functorch import key_wrap, ModuleWrap, jacrev, vmap, grad
+from functorch import wrap_key, WrapModule, jacrev, vmap, grad
 torch._C._debug_only_display_vmap_fallback_warnings(True)
 
 
@@ -33,12 +32,12 @@ class ModuleBackward(nn.Module):
 
     def f_grad(self, args):
         for idx in range(len(self.inps)):
-            args[idx] = key.addKey(PythonTensor(self.inps[idx].shape, args[idx]))
+            args[idx] = addPythonKey(PythonTensor(self.inps[idx].shape, args[idx]))
             # args[idx].requires_grad = False
         out = self.mod(*args)
         out.backward()
         # import pdb; pdb.set_trace()
-        # return tuple(key.removeKey(p.grad) for p in self.parameters())
+        # return tuple(removePythonKey(p.grad) for p in self.parameters())
         param_grads = []
         for k,v in self.state_dict().items():
             val = fetch_attr(self, k)
@@ -66,7 +65,10 @@ class Foo(torch.nn.Module):
 model = Foo()
 def f(x, w):
     return F.conv2d(x, w, None)
-inps = (torch.randn(1,1, 3,10,10), model.linear.weight)
+model.linear.weight.requires_grad = True
+inps = (torch.randn(1,1, 3,10,10, requires_grad=True), model.linear.weight)
+print(fx.symbolic_trace(wrap_key(vmap(f, in_dims=(0,None)), inps)))
+exit(0)
 vmap_f = vmap(f, in_dims=(0,None))
 vmap_f(*inps)
 exit(0)
