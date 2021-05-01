@@ -24,9 +24,9 @@ gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 
 
-# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
+# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
-# is not meet the requirement.
+# does not meet the requirement.
 def has_bf16_support():
     import subprocess
     try:
@@ -267,7 +267,7 @@ class TestMkldnn(TestCase):
                 y_bf16 = mkldnn_conv_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
-                msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+                msg = r"bf16 path needs cpu support for avx512vl and avx512dq"
                 with self.assertRaisesRegex(RuntimeError, msg):
                     mkldnn_conv_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), torch.bfloat16)
                     y_bf16 = mkldnn_conv_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
@@ -343,7 +343,7 @@ class TestMkldnn(TestCase):
             y_bf16 = fn(x_bf16.to_mkldnn()).to_dense(torch.float32)
             self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
         else:
-            msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+            msg = r"bf16 path needs cpu support for avx512vl and avx512dq"
             self.assertRaisesRegex(RuntimeError,
                                    msg,
                                    lambda: fn(x_bf16.to_mkldnn()))
@@ -407,7 +407,7 @@ class TestMkldnn(TestCase):
                     y_bf16 = max_pool(x_bf16.to_mkldnn()).to_dense(torch.float32)
                     self.assertEqual(y, y_bf16, atol=0.1, rtol=1e-3)
                 else:
-                    msg = "mkldnn_max_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
+                    msg = "mkldnn_max_pool%dd: bf16 path needs cpu support for avx512vl and avx512dq" % dim
                     self.assertRaisesRegex(RuntimeError,
                                            msg,
                                            lambda: max_pool(x_bf16.to_mkldnn()))
@@ -523,7 +523,7 @@ class TestMkldnn(TestCase):
                 y_bf16 = avg_pool(x_bf16.to_mkldnn()).to_dense(torch.float)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
-                msg = "mkldnn_avg_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
+                msg = "mkldnn_avg_pool%dd: bf16 path needs cpu for support for avx512vl and avx512dq" % dim
                 self.assertRaisesRegex(RuntimeError,
                                        msg,
                                        lambda: avg_pool(x_bf16.to_mkldnn()))
@@ -594,7 +594,7 @@ class TestMkldnn(TestCase):
             y_bf16 = adaptive_avg_pool2d(x.to_mkldnn()).to_dense(torch.float32)
             self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
         else:
-            msg = "mkldnn_adaptive_avg_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+            msg = "mkldnn_adaptive_avg_pool2d: bf16 path needs cpu support for avx512vl and avx512dq"
             self.assertRaisesRegex(RuntimeError,
                                    msg,
                                    lambda: adaptive_avg_pool2d(x_bf16.to_mkldnn()))
@@ -662,7 +662,7 @@ class TestMkldnn(TestCase):
                 y_bf16 = bn(input.to_mkldnn().to_dense(torch.float))
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
-                msg = "mkldnn_batch_norm: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+                msg = "mkldnn_batch_norm: bf16 path needs cpu support for avx512vl and avx512dq"
                 self.assertRaisesRegex(RuntimeError,
                                        msg,
                                        lambda: bn(x_bf16.to_mkldnn()))
@@ -947,7 +947,7 @@ class TestMkldnn(TestCase):
                 y_bf16 = mkldnn_linear_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
-                msg = "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+                msg = "mkldnn_linear: bf16 path needs cpu support for avx512vl and avx512dq"
                 self.assertRaisesRegex(RuntimeError,
                                        msg,
                                        lambda: mkldnn_linear_bf16(x_bf16.to_mkldnn()))
