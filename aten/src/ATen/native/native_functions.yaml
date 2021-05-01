@@ -6371,10 +6371,10 @@
   dispatch:
     CUDA: _amp_foreach_non_finite_check_and_unscale_cuda_
 
-- func: _amp_update_scale(Tensor(a!) growth_tracker, Tensor current_scale, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor
+- func: _amp_update_scale_(Tensor(a!) self, Tensor(b!) growth_tracker, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor(a!)
   variants: function
   dispatch:
-    CUDA: _amp_update_scale_cuda
+    CUDA: _amp_update_scale_cuda_
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
@@ -8937,7 +8937,7 @@
 - func: _linalg_qr_helper(Tensor self, str mode) -> (Tensor, Tensor)
   variants: function
   dispatch:
-    CPU: _linalg_qr_helper_cpu
+    CPU: _linalg_qr_helper_default
     CUDA: _linalg_qr_helper_cuda
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
@@ -9003,7 +9003,7 @@
   cpp_no_default_args: ['a', 'b']
   python_module: nn
 
-- func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False) -> Tensor
+- func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: segment_reduce_kernel
