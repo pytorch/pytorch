@@ -66,7 +66,8 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   Stream getDefaultStream(Device d) const override {
     return getDefaultCUDAStream(d.index());
   }
-  Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false) const override {
+  Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false)
+      const override {
     return getStreamFromPool(isHighPriority, d.index());
   }
   // NB: These do NOT set the current device
