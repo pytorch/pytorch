@@ -693,9 +693,14 @@ if(NOT MSVC)
       # https://bugs.launchpad.net/ubuntu/+source/deal.ii/+bug/1841577
       message(WARNING "Refusing to use gold when USE_MPI=1")
     else()
-      execute_process(COMMAND ${CMAKE_C_COMPILER} -fuse-ld=gold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE LD_VERSION)
+      execute_process(
+        COMMAND
+        "${CMAKE_C_COMPILER}" -fuse-ld=gold -Wl,--version
+         ERROR_QUIET
+         OUTPUT_VARIABLE LD_VERSION)
       if(NOT "${LD_VERSION}" MATCHES "GNU gold")
-        message(WARNING "USE_GOLD_LINKER was set but ld.gold isn't available")
+        message(WARNING "USE_GOLD_LINKER was set but ld.gold isn't available, turning it off")
+        set(USE_GOLD_LINKER OFF)
       else()
         message(STATUS "ld.gold is available, using it to link")
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold")
