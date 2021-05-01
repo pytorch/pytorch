@@ -372,11 +372,9 @@ struct TEWrapper {
   void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_) {
     cg = std::move(cg_);
   }
-  template <typename... Ts>
-  void operator()(const Ts&... ts) {
-    std::vector<tensorexpr::CodeGen::CallArg> args(
-        {tensorexpr::CodeGen::CallArg(ts)...});
-    cg->call(args);
+
+  void call(const std::vector<void*>& args) {
+    cg->call_raw(args);
   }
 
   inline bool supports(const at::Tensor& t) {
@@ -423,6 +421,9 @@ struct TEWrapper {
   TEWrapper() = default;
   template <typename... Ts>
   void operator()(const Ts&... ts) {
+    DCHECK(0 && "Invalid call");
+  }
+  void call(const std::vector<void*>& args) {
     DCHECK(0 && "Invalid call");
   }
 
@@ -518,7 +519,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
       at::native::threshold_out(in0_t, 0, 0, out_t);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+      int64_t nn = in0_t.numel();
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
   };
 });
@@ -537,7 +539,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
       at::cpu::tanh_out(out_t, in0_t);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+      int64_t nn = in0_t.numel();
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
   };
 });
@@ -559,8 +562,8 @@ REGISTER_OPERATOR_FUNCTOR(
           at::cpu::sigmoid_out(out_t, in0_t);
         } else {
           at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-          (*te)(
-              out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+          int64_t nn = in0_t.numel();
+          te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
         }
       };
     });
@@ -586,7 +589,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       at::native::logit_out(in0_t, in1_d, out_t);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+      int64_t nn = in0_t.numel();
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
   };
 });
@@ -1347,6 +1351,21 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
         p_node->Input(2).toIntVector(), // dim
         p_node->Input(3).toBool(), // keepdim
         out_t);
+  };
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    const auto& in1_t = p_node->Input(1).toTensor();
+
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::matmul_out(in0_t, in1_t, out_t);
   };
 });
 
