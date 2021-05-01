@@ -2001,7 +2001,7 @@ REGISTER_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 
 void ormqr_kernel(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
 #if defined(USE_CUSOLVER)
-  return ormqr_cusolver(input, tau, other, left, transpose);
+  ormqr_cusolver(input, tau, other, left, transpose);
 #else
   TORCH_CHECK(false,
       "Calling torch.ormqr on a CUDA tensor requires compiling ",
