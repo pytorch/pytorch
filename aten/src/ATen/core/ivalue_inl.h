@@ -614,7 +614,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       for (const c10::DeviceIndex& idx : devices_) {
         // FIXME Should we find a way to allow to change the priority of
         // streams?
-        streams.push_back(impl_->getStreamFromPool(
+        streams.push_back(impl_->getStreamFromGlobalPool(
             c10::Device(impl_->type(), idx), /*isHighPriority=*/false));
       }
 
