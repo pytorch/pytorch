@@ -1315,7 +1315,8 @@ Tensor* computeSoftmax(
         });
     return new Tensor(
         result->buf(),
-        new tensorexpr::Block({max->stmt(), e->stmt(), sum->stmt(), result->stmt()}));
+        new tensorexpr::Block(
+            {max->stmt(), e->stmt(), sum->stmt(), result->stmt()}));
   }
 
   auto log_sum = Compute(
@@ -2551,6 +2552,12 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           });
     } break;
 
+<<<<<<< HEAD
+    case aten::conv2d: {
+      return computeConv2d(v);
+    }
+=======
+>>>>>>> 71dfb264c3 ([nnc] ported conv2d lowering over)
 
     default: {
       throw std::runtime_error("Unhandled node kind");
@@ -2874,7 +2881,6 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
   }
   return result;
 }
-
 
 
 template <typename T>
