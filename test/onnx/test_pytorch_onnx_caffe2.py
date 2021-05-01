@@ -1779,7 +1779,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 )
                 return output
 
-        feature = torch.Tensor(img_count, A, H, W)
+        feature = torch.empty(img_count, A, H, W)
         im_info = torch.ones(img_count, 3, dtype=torch.float32)
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (feature, im_info, anchors)

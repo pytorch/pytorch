@@ -277,5 +277,3 @@ class TensorRTTransformTest(TestCase):
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_trt = namedtupledict('Outputs', net_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
-
-

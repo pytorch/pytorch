@@ -997,6 +997,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/python/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/jit/tensorexpr/*.h',
+                'include/torch/csrc/jit/tensorexpr/operators/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/torch/csrc/tensor/*.h',
@@ -1024,6 +1025,9 @@ if __name__ == '__main__':
                 'utils/benchmark/utils/*.cpp',
                 'utils/benchmark/utils/valgrind_wrapper/*.cpp',
                 'utils/benchmark/utils/valgrind_wrapper/*.h',
+                'utils/model_dump/skeleton.html',
+                'utils/model_dump/code.js',
+                'utils/model_dump/*.mjs',
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',

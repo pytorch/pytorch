@@ -30,16 +30,26 @@ class TestUnsupportedOps(JitTestCase):
         def ones():
             return torch.ones([2], requires_grad=True)
 
+        with self.assertRaisesRegexWithHighlight(Exception,
+                                                 "Keyword argument requires_grad unknown",
+                                                 "torch.ones"):
+            torch.jit.script(ones)
+
         def randn():
             return torch.randn([2], requires_grad=True)
+
+        with self.assertRaisesRegexWithHighlight(Exception,
+                                                 "Keyword argument requires_grad unknown",
+                                                 "torch.randn"):
+            torch.jit.script(randn)
 
         def zeros():
             return torch.zeros([2], requires_grad=True)
 
-        for func in [ones, randn, zeros]:
-            func()
-            with self.assertRaisesRegex(Exception, "Keyword argument requires_grad unknown"):
-                torch.jit.script(func)
+        with self.assertRaisesRegexWithHighlight(Exception,
+                                                 "Keyword argument requires_grad unknown",
+                                                 "torch.zeros"):
+            torch.jit.script(zeros)
 
     @unittest.skipIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")
     def test_init_ops(self):

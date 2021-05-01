@@ -45,8 +45,8 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   return self;
 }
 
-Tensor& resize_(
-    Tensor& self,
+const Tensor& resize_(
+    const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   if (torch::jit::tracer::isTracing()) {
@@ -57,13 +57,14 @@ Tensor& resize_(
 
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    // NOLINTNEXTLINE(performance-move-const-arg)
     self.resize_(size, std::move(optional_memory_format));
   }
   return self;
 }
 
-Tensor& resize_as_(
-    Tensor& self,
+const Tensor& resize_as_(
+    const Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
   if (torch::jit::tracer::isTracing()) {
@@ -73,6 +74,7 @@ Tensor& resize_as_(
 
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    // NOLINTNEXTLINE(performance-move-const-arg)
     self.resize_as_(the_template, std::move(optional_memory_format));
   }
   return self;
