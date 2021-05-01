@@ -5,7 +5,6 @@ from string import ascii_lowercase
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.fx as fx
-from torch.fx import PythonTensor
 from nnc_compile import nnc_compile
 from types import FunctionType, CodeType
 import functorch
@@ -63,11 +62,12 @@ class Foo(torch.nn.Module):
 
 
 model = Foo()
-def f(x, w):
-    return F.conv2d(x, w, None)
-model.linear.weight.requires_grad = True
-inps = (torch.randn(1,1, 3,10,10, requires_grad=True), model.linear.weight)
-print(fx.symbolic_trace(wrap_key(vmap(f, in_dims=(0,None)), inps)))
+def f(x):
+    return torch.ones_like(x)
+inps = (torch.randn(1,1, 3,10,10, requires_grad=True),)
+fx_graph = fx.symbolic_trace(wrap_key(f, inps))
+print(fx_graph)
+fx_graph(*inps)
 exit(0)
 vmap_f = vmap(f, in_dims=(0,None))
 vmap_f(*inps)

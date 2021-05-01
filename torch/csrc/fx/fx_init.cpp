@@ -1,6 +1,4 @@
-#include <torch/csrc/fx/fx_init.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace fx {
@@ -118,7 +116,7 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
   return Py_None;
 }
 
-PyObject* torch_module;
+
 void initFx(PyObject* module) {
   static std::array<PyMethodDef, 2> PatchMethods = {{
       {"patch_function", patch_function, METH_VARARGS, "Save"},
@@ -140,6 +138,5 @@ void initFx(PyObject* module) {
     throw python_error();
   }
 }
-
 } // namespace fx
 } // namespace torch
