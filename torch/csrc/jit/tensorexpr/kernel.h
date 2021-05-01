@@ -35,6 +35,28 @@ using ArgValue = c10::variant<
     BufList,
     IntList,
     ArgNone>;
+
+inline std::string getArgValueName(const ArgValue& a) {
+  if (c10::get_if<tensorexpr::BufHandle>(&a)) {
+    return "BufHandle";
+  } else if (c10::get_if<tensorexpr::VarHandle>(&a)) {
+    return "VarHandle";
+  } else if (c10::get_if<double>(&a)) {
+    return "double";
+  } else if (c10::get_if<int64_t>(&a)) {
+    return "int64_t";
+  } else if (c10::get_if<bool>(&a)) {
+    return "bool";
+  } else if (c10::get_if<BufList>(&a)) {
+    return "BufList";
+  } else if (c10::get_if<IntList>(&a)) {
+    return "IntList";
+  } else if (c10::get_if<ArgNone>(&a)) {
+    return "None";
+  } else {
+    throw std::runtime_error("ArgValue type not handled in string conversion");
+  }
+}
 template <class T>
 std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   std::vector<T> res;
