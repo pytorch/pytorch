@@ -548,8 +548,8 @@ TEST(Expr, LogicalOps03) {
   ExprHandle d(0.69f);
 
   // Bool types
-  ExprHandle bool_f1 = (a > b) && BoolImm::make(1);
-  ExprHandle bool_f2 = (c <= d) || BoolImm::make(1);
+  ExprHandle bool_f1 = (a > b) && BoolImm::make(true);
+  ExprHandle bool_f2 = (c <= d) || BoolImm::make(true);
 
   // Int types
   ExprHandle int_f1 = (a > b) && IntImm::make(1);
