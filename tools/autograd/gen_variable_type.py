@@ -686,7 +686,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         if get_view_info(fn) is not None or modifies_arguments(f):
             guard = 'at::AutoDispatchBelowAutograd guard;'
         else:
-            guard = 'at::AutoDispatchBelowInplaceOrView guard;'
+            guard = 'at::AutoDispatchBelowADInplaceOrView guard;'
 
         if not modifies_arguments(f) and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
