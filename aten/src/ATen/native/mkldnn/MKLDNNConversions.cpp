@@ -78,7 +78,7 @@ Tensor mkldnn_reorder_conv2d_weight(
     int64_t groups) {
   if (self.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_reorder_conv2d_weight: bf16 path needs cpu support for avx512vl and avx512dq");
   }
 
   auto w = itensor_from_mkldnn(self);
@@ -120,7 +120,7 @@ Tensor mkldnn_reorder_conv3d_weight(
     int64_t groups) {
   if (self.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_reorder_conv3d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_reorder_conv3d_weight: bf16 path needs cpu support for avx512vl and avx512dq");
   }
 
   auto w = itensor_from_mkldnn(self);
