@@ -196,7 +196,7 @@ void batch_norm_update_stats_and_invert(
       .promote_inputs_to_common_dtype(false)
       .build();
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, running_mean.scalar_type(),
                                   "batch_norm_update_stats_cuda", [&] {
       using acc_t = at::acc_type<scalar_t, true>;
       const auto bessel_correction_factor = static_cast<acc_t>(
@@ -222,7 +222,7 @@ void batch_norm_calc_invstd(const Tensor& out_invstd, const Tensor& running_var,
       .check_all_same_dtype(false)
       .build();
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1),
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, running_var.scalar_type(),
                                   "batch_norm_invert_std_cuda", [&] {
     using acc_t = at::acc_type<scalar_t, true>;
     auto eps = static_cast<acc_t>(epsilon);
