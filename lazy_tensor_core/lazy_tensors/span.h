@@ -63,6 +63,8 @@ class Span {
   using pointer = T*;
 
   constexpr Span() noexcept = default;
+  constexpr Span(pointer array, size_t length) noexcept
+      : impl_(array, length) {}
 
   // Implicit reference constructor for a read-only `Span<const T>` type
   template <typename V, typename = EnableIfConvertibleFrom<V>,
