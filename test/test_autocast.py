@@ -1,30 +1,6 @@
-from itertools import repeat, chain, product
-from typing import NamedTuple
 import collections
-import gc
-import io
-import os
-import pickle
-import queue
-import sys
-import tempfile
-import threading
-import unittest
-
 import torch
-from torch import multiprocessing as mp
-from torch.nn.parallel import scatter_gather
-from torch.utils.checkpoint import checkpoint_sequential
-from torch._six import inf, nan
-
-from test_torch import AbstractTestCases
-
-from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
-    _compare_trilu_indices, _compare_large_trilu_indices
-from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
-    NO_MULTIPROCESSING_SPAWN, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
-    slowTest, TEST_NUMPY
-
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.autocast_test_lists import AutocastCPUTestLists
 
 class TestAutocastCPU(TestCase):
