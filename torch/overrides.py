@@ -182,6 +182,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.set_autocast_enabled,
         torch.is_autocast_enabled,
         torch.clear_autocast_cache,
+        torch.set_autocast_dtype,
+        torch.get_autocast_dtype,
         torch.autocast_increment_nesting,
         torch.autocast_decrement_nesting,
         torch.nn.functional.hardswish,

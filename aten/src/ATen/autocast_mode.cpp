@@ -13,7 +13,6 @@ namespace at {
 namespace autocast {
 
 bool is_enabled() {
-  //return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
   return !c10::impl::tls_is_dispatch_keyset_excluded(autocast_dispatch_keyset);
 }
 
@@ -53,8 +52,8 @@ thread_local int nesting = 0;
 }
 
 namespace {
-// target_dtype is setted by frontend API
-thread_local at::ScalarType target_dtype = at::kBFloat16;
+// autocast_dtype is setted by frontend API
+thread_local at::ScalarType autocast_dtype = at::kBFloat16;
 }
 
 void clear_cache() {
@@ -70,11 +69,12 @@ int decrement_nesting() {
 }
 
 at::ScalarType get_autocast_dtype() {
-  return target_dtype;
+  return autocast_dtype;
 }
 
 void set_autocast_dtype(at::ScalarType dtype) {
-  target_dtype = dtype;
+  TORCH_CHECK((dtype == at::kBFloat16) || (dtype == at::kHalf), "Currently, Autocast only support Bfloat16 and Half as the autocast_dtype");
+  autocast_dtype = dtype;
 }
 
 // Overload to catch Tensor args
@@ -196,7 +196,7 @@ template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::user_defined_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(autocast_dispatch_keyset);
-    return (*F)(cached_cast(target_dtype, args)...);
+    return (*F)(cached_cast(autocast_dtype, args)...);
   }
 };
 
@@ -205,7 +205,7 @@ template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::promote_user_defined_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(autocast_dispatch_keyset);
-    auto to_type = promote_type(target_dtype, args...);
+    auto to_type = promote_type(autocast_dtype, args...);
     return (*F)(cached_cast(to_type, args)...);
   }
 };
