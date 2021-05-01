@@ -30,7 +30,7 @@ gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 def has_bf16_support():
     import subprocess
     try:
-        cmd = "grep avx512bw /proc/cpuinfo | grep avx512vl | grep avx512dq"
+        cmd = "grep avx512vl /proc/cpuinfo | grep avx512dq"
         subprocess.check_output(cmd, shell=True)
         return True
     except subprocess.CalledProcessError:
