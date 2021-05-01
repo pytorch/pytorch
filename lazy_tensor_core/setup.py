@@ -220,8 +220,8 @@ absl_files = list(
 torch_ltc_sources = (
     glob.glob('lazy_tensor_core/csrc/*.cpp') + glob.glob('lazy_tensor_core/csrc/ops/*.cpp') +
     glob.glob('lazy_tensor_core/csrc/compiler/*.cpp') + glob.glob('lazy_tensors/client/*.cc') +
-    glob.glob('lazy_tensors/*.cc') + glob.glob('lazy_tensors/client/lib/*.cc') + client_files +
-    absl_files)
+    glob.glob('lazy_tensors/*.cc') + glob.glob('lazy_tensors/client/lib/*.cc') +
+    glob.glob('lazy_tensors/core/platform/*.cc') + client_files + absl_files)
 
 # Constant known variables used throughout this file.
 lib_path = os.path.join(base_dir, 'lazy_tensor_core/lib')

@@ -28,3 +28,23 @@
 #define TF_ARRAYSIZE(a)         \
   ((sizeof(a) / sizeof(*(a))) / \
    static_cast<size_t>(!(sizeof(a) % sizeof(*(a)))))
+
+#if defined(__GXX_EXPERIMENTAL_CXX0X__) || __cplusplus >= 201103L || \
+    (defined(_MSC_VER) && _MSC_VER >= 1900)
+// Define this to 1 if the code is compiled in C++11 mode; leave it
+// undefined otherwise.  Do NOT define it to 0 -- that causes
+// '#ifdef LANG_CXX11' to behave differently from '#if LANG_CXX11'.
+#define LANG_CXX11 1
+#endif
+
+#if defined(__clang__) && defined(LANG_CXX11) && defined(__has_warning)
+#if __has_feature(cxx_attributes) && __has_warning("-Wimplicit-fallthrough")
+#define TF_FALLTHROUGH_INTENDED [[clang::fallthrough]]  // NOLINT
+#endif
+#endif
+
+#ifndef TF_FALLTHROUGH_INTENDED
+#define TF_FALLTHROUGH_INTENDED \
+  do {                          \
+  } while (0)
+#endif
