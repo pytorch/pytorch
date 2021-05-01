@@ -8,7 +8,7 @@ import torch.fx as fx
 from nnc_compile import nnc_compile
 from types import FunctionType, CodeType
 import functorch
-from functorch import wrap_key, WrapModule, jacrev, vmap, grad
+from functorch import wrap_key, WrapModule, jacrev, vmap, grad, pythonkey_trace
 torch._C._debug_only_display_vmap_fallback_warnings(True)
 
 
@@ -61,14 +61,15 @@ class Foo(torch.nn.Module):
         # return list(self.parameters())
 
 
+
 model = Foo()
 def f(x):
     return torch.ones_like(x)
 inps = (torch.randn(1,1, 3,10,10, requires_grad=True),)
-fx_graph = fx.symbolic_trace(wrap_key(f, inps))
+fx_graph = pythonkey_trace(WrapModule(model, inps))
 print(fx_graph)
-fx_graph(*inps)
 exit(0)
+
 vmap_f = vmap(f, in_dims=(0,None))
 vmap_f(*inps)
 exit(0)
