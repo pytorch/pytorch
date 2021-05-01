@@ -40,6 +40,7 @@ void layer_norm_cpu_out(
   for (size_t idx = 0; idx < axis; ++idx) {
     stat_shape.emplace_back(input_shape[idx]);
   }
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t idx = axis; idx < input.dim(); ++idx) {
     stat_shape.emplace_back(1);
   }
@@ -165,7 +166,9 @@ Tensor layer_norm(
   return std::get<0>(at::native_layer_norm(input, normalized_shape, weight, bias, eps));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(LayerNormKernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(LayerNormBackwardKernel);
 
 // Ported from pytorch/xla repo
@@ -183,10 +186,12 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   auto gamma = std::get<1>(inputs);
   auto beta = std::get<2>(inputs);
   auto M = std::get<3>(inputs);
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
   auto N = std::get<4>(inputs);
   auto input_shape = input.sizes();
   const auto input_ndim = input.dim();
   const int normalized_ndim = normalized_shape.size();
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int axis = input_ndim - normalized_ndim;
   at::Tensor input_reshaped = input.view({1, M, -1});
   // Unlike Batch Normalization, which applies scalar scale and bias for each
@@ -208,9 +213,11 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   at::Tensor mean = std::get<1>(outputs);
   at::Tensor rstd = std::get<2>(outputs);
   std::vector<int64_t> stat_shape;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t idx = 0; idx < axis; ++idx) {
     stat_shape.push_back(input_shape[idx]);
   }
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t idx = axis; idx < input.dim(); ++idx) {
     stat_shape.push_back(1);
   }
