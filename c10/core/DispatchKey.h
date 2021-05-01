@@ -224,7 +224,8 @@ enum class DispatchKey : uint8_t {
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
-  Autocast,
+  //AutocastCPU,
+  AutocastCUDA,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // There are a number of alternative modes which may want to handle before
@@ -294,6 +295,7 @@ enum class DispatchKey : uint8_t {
   PrivateUse1_PreAutograd = AutogradPrivateUse1,
   PrivateUse2_PreAutograd = AutogradPrivateUse2,
   PrivateUse3_PreAutograd = AutogradPrivateUse3,
+  Autocast = AutocastCUDA,
 };
 
 // Note [Private use DispatchKey]

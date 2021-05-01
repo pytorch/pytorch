@@ -1321,3 +1321,32 @@ class DistributedDataParallel(Module):
                 "DDP runtime logging sample rate should be equal or greater than 1"
             )
         self.reducer._set_ddp_runtime_logging_sample_rate(sample_rate)
+
+    def _set_static_graph(self):
+        """
+        Users can explicitly let DDP know the trained graph is static,
+        when 1) the set of used and unused parameters will not change
+        during the whole training loop; in this case, it does not matter
+        whether users set find_unsued_parameters = true or not.
+        2) how the graph is trained will not change during the whole training
+        loop (meaning there is no control flow depending on iterations).
+        When graph is set to be static, DDP will support cases that can not
+        be supported in the past: 1) reentrant backwards
+        2) activation checkpointing multiple times 3)
+        activation checkpointing with find_unused_parameters = true.
+        4) not all output tensors are used in loss calculation.
+        5) there is model parameter that is outside of forward function.
+        6) potentially improve performance when find_unsued_parameters = true
+        or there are unused parameters, as DDP will not search graph in each
+        iteraton to detect unused parameters when static_graph is set to be True.
+
+        This API should be called after DistributedDataParallel construction, and
+        before training loops starts. Also it should be called in the same way for
+        all ranks. For example:
+            ddp_model = DistributedDataParallel(model)
+            ddp_model._set_static_graph()
+            for i in range(n):
+                .....
+        """
+        self.reducer._set_static_graph()
+        self.logger._set_static_graph()
