@@ -683,8 +683,8 @@ void batch_norm_elemt_cuda_template(const Tensor& output_, const Tensor& input_,
   auto invstd = packed_accessor_or_dummy<stat_accscalar_t, 1, RestrictPtrTraits, index_t>(invstd_);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-	// NOTE: We use transform_input_kernel in training mode, which ignores epsilon
-	const double dummy_epsilon = 1e-5;
+  // NOTE: We use transform_input_kernel in training mode, which ignores epsilon
+  const double dummy_epsilon = 1e-5;
 
   // The input_transform kernel is pointwise, but we need to balance reading parameters (save_var/mean,
   // weight/bias) - which we only do once and have a for loop afterwards - with having many threads and blocks

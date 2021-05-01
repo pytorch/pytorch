@@ -107,7 +107,7 @@ void batch_norm_elementwise(
 }
 
 void batch_norm_mean_var(const Tensor& self, Tensor& save_mean, Tensor& save_var) {
-	// NOTE: Epsilon is only used for InvStd, not Var. The value here is ignored.
+  // NOTE: Epsilon is only used for InvStd, not Var. The value here is ignored.
   const double dummy_epsilon = 1e-5;
   switch (batch_norm_choose_impl(self)) {
   case Impl::Contiguous: {
