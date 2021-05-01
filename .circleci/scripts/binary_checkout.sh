@@ -61,7 +61,6 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-# [No op] to re-trigger pipeline
 retry git clone -q https://github.com/pytorch/builder.git -b lts/release/1.8 "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
