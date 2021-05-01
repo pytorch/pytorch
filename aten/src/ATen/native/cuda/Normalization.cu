@@ -39,7 +39,6 @@ inline Impl batch_norm_choose_impl(const Tensor& self) {
 void batch_norm_elementwise(
     const Tensor& out, const Tensor& self, const c10::optional<Tensor>& weight_opt,
     const c10::optional<Tensor>& bias_opt, const Tensor& mean_, const Tensor& invstd_) {
-  const double dummy_epsilon = 1e-5;
   switch (batch_norm_choose_impl(self)) {
   case Impl::Contiguous: {
     c10::MaybeOwned<Tensor> weight = at::borrow_from_optional_tensor(weight_opt);
@@ -47,7 +46,7 @@ void batch_norm_elementwise(
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(),
                                     "batch_norm_elementwise_cuda", [&] {
       batch_norm_elemt_cuda_template<scalar_t, scalar_t, int32_t>(
-          out, self, *weight, *bias, mean_, invstd_, dummy_epsilon);
+          out, self, *weight, *bias, mean_, invstd_);
     });
     return;
   }
@@ -59,7 +58,7 @@ void batch_norm_elementwise(
         (!mean_.defined() || mean_.is_contiguous()) &&
         (!invstd_.defined() || invstd_.is_contiguous())) {
       batch_norm_elemt_channels_last_cuda_template(
-          out, self, *weight, *bias, mean_, invstd_, dummy_epsilon);
+          out, self, *weight, *bias, mean_, invstd_);
       return;
     }
     [[fallthrough]];
@@ -108,6 +107,7 @@ void batch_norm_elementwise(
 }
 
 void batch_norm_mean_var(const Tensor& self, Tensor& save_mean, Tensor& save_var) {
+	// NOTE: Epsilon is only used for InvStd, not Var. The value here is ignored.
   const double dummy_epsilon = 1e-5;
   switch (batch_norm_choose_impl(self)) {
   case Impl::Contiguous: {

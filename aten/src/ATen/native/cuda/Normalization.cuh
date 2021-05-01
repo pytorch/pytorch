@@ -666,8 +666,7 @@ void batch_norm_stats_cuda_template(
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
 void batch_norm_elemt_cuda_template(const Tensor& output_, const Tensor& input_, const Tensor& weight_,
-                                    const Tensor& bias_, const Tensor& mean_, const Tensor& invstd_,
-                                    double epsilon) {
+                                    const Tensor& bias_, const Tensor& mean_, const Tensor& invstd_) {
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
@@ -684,6 +683,9 @@ void batch_norm_elemt_cuda_template(const Tensor& output_, const Tensor& input_,
   auto invstd = packed_accessor_or_dummy<stat_accscalar_t, 1, RestrictPtrTraits, index_t>(invstd_);
   auto stream = at::cuda::getCurrentCUDAStream();
 
+	// NOTE: We use transform_input_kernel in training mode, which ignores epsilon
+	const double dummy_epsilon = 1e-5;
+
   // The input_transform kernel is pointwise, but we need to balance reading parameters (save_var/mean,
   // weight/bias) - which we only do once and have a for loop afterwards - with having many threads and blocks
   // and good occupancy. Quiet likely, we could go with even more blocks than 1024.
@@ -696,7 +698,7 @@ void batch_norm_elemt_cuda_template(const Tensor& output_, const Tensor& input_,
   blocks_trans.y = std::min(blocks_trans.y, MAX_GRID_SIZE);
   dim3 threads_trans(tf, tb);
   batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
-    (input, output, mean, invstd, weight, bias, epsilon);
+    (input, output, mean, invstd, weight, bias, dummy_epsilon);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -1304,7 +1306,6 @@ void batch_norm_elemt_channels_last_cuda_template(
     const at::Tensor& shift,  // bias of BN
     const at::Tensor& mean,
     const at::Tensor& inv_std,
-    double epsilon,
     const at::optional<at::Tensor>& z = c10::nullopt,  // bias after BN
     const bool fuse_relu = false) {
   const auto stride = input.sizes()[1];
