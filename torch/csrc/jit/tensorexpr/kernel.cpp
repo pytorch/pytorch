@@ -2532,7 +2532,6 @@ std::vector<VarHandle> squeezeIndices(
 
 } // namespace
 
-
 Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
   auto reduction_info = getReductionInfo(v->node());
   return Reduce(
@@ -3143,4 +3142,22 @@ void TensorExprKernel::runKernel(Stack& stack) {
   for (auto& o : outputs) {
     push_one(stack, std::move(o));
   }
+}
+
+void TensorExprKernel::runFast(
+    const std::vector<void*>& inputs,
+    const std::vector<void*>& outputs) {
+  KernelScope kernelScope(&kernelArena_);
+
+  std::vector<void*> args(inputs);
+  args.reserve(inputs.size() + outputs.size() + constants_.size());
+  args.insert(args.end(), outputs.begin(), outputs.end());
+
+  // TODO: we can consider preallocating and pre-filling the args vector.
+  for (auto c : constants_) {
+    args.push_back(c.ptr);
+  }
+
+  // Call the kernel.
+  codegen_->call_raw(args);
 }

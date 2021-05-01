@@ -38,8 +38,8 @@ using ArgValue = c10::variant<
 template <class T>
 std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   std::vector<T> res;
-  for (size_t idx = 0; idx < v.size(); idx++) {
-    res.push_back(c10::get<T>(v[idx]));
+  for (const auto& x : v) {
+    res.push_back(c10::get<T>(x));
   }
   return res;
 }
@@ -70,6 +70,9 @@ class TORCH_API TensorExprKernel {
   explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
 
   void run(Stack& stack);
+  void runFast(
+      const std::vector<void*>& inputs,
+      const std::vector<void*>& outputs);
 
   void fallback(Stack& stack) {
     InterpreterState(code_).run(stack);
