@@ -50,7 +50,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
 
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_batch_norm: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_batch_norm: bf16 path needs the cpu support for avx512vl and avx512dq");
   }
   TORCH_CHECK(weight.defined() && bias.defined(),
              "mkldnn_batch_norm: currently mkldnn only support affine model");
