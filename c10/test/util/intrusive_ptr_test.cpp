@@ -67,7 +67,8 @@ class ChildDestructableMock final : public DestructableMock {
 class NullType1 final {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static SomeClass singleton_;
-public:
+
+ public:
   static constexpr SomeClass* singleton() {
     return &singleton_;
   }
@@ -77,7 +78,8 @@ SomeClass NullType1::singleton_;
 class NullType2 final {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static SomeClass singleton_;
-public:
+
+ public:
   static constexpr SomeClass* singleton() {
     return &singleton_;
   }
@@ -934,7 +936,8 @@ TEST(IntrusivePtrTest, givenPtr_whenDestructed_thenDestructsObject) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_FALSE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
   }
@@ -948,7 +951,8 @@ TEST(
     givenPtr_whenMoveConstructed_thenDestructsObjectAfterSecondDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = std::move(obj);
     EXPECT_FALSE(resourcesReleased);
@@ -964,7 +968,8 @@ TEST(
     givenPtr_whenMoveConstructedToBaseClass_thenDestructsObjectAfterSecondDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
   {
     intrusive_ptr<DestructableMock> obj2 = std::move(obj);
     EXPECT_FALSE(resourcesReleased);
@@ -981,7 +986,8 @@ TEST(IntrusivePtrTest, givenPtr_whenMoveAssigned_thenDestructsOldObject) {
   bool wasDestructed = false;
   auto obj = make_intrusive<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_FALSE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = std::move(obj);
@@ -999,7 +1005,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_FALSE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = std::move(obj);
@@ -1017,7 +1024,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       auto copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -1040,8 +1048,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 =
-        make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 = make_intrusive<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -1064,7 +1072,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -1085,7 +1094,8 @@ TEST(
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = make_intrusive<DestructableMock>(&dummy, &dummy);
     obj2 = std::move(obj);
@@ -1103,7 +1113,8 @@ TEST(
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = make_intrusive<DestructableMock>(&dummy, &dummy);
     obj2 = std::move(obj);
@@ -1121,7 +1132,8 @@ TEST(
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       intrusive_ptr<DestructableMock> copy = obj;
@@ -1142,7 +1154,8 @@ TEST(
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_intrusive<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy = obj;
       EXPECT_FALSE(resourcesReleased);
@@ -1162,7 +1175,8 @@ TEST(
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     intrusive_ptr<DestructableMock> copy = obj;
     obj.reset();
     EXPECT_FALSE(resourcesReleased);
@@ -1179,7 +1193,8 @@ TEST(
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_intrusive<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     intrusive_ptr<DestructableMock> copy = obj;
     obj.reset();
     EXPECT_FALSE(resourcesReleased);
@@ -1197,7 +1212,8 @@ TEST(
   bool wasDestructed = false;
   bool dummy = false;
   {
-    auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy =
           make_intrusive<DestructableMock>(&dummy, &dummy);
@@ -1220,7 +1236,8 @@ TEST(
   bool wasDestructed = false;
   bool dummy = false;
   {
-    auto obj = make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_intrusive<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy =
           make_intrusive<DestructableMock>(&dummy, &dummy);
@@ -1245,7 +1262,8 @@ TEST(
   {
     auto copy = make_intrusive<DestructableMock>(&dummy, &dummy);
     {
-      auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+      auto obj =
+          make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
       copy = obj;
       EXPECT_FALSE(resourcesReleased);
       EXPECT_FALSE(wasDestructed);
@@ -1267,8 +1285,8 @@ TEST(
   {
     auto copy = make_intrusive<DestructableMock>(&dummy, &dummy);
     {
-      auto obj =
-          make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+      auto obj = make_intrusive<ChildDestructableMock>(
+          &resourcesReleased, &wasDestructed);
       copy = obj;
       EXPECT_FALSE(resourcesReleased);
       EXPECT_FALSE(wasDestructed);
@@ -1287,7 +1305,8 @@ TEST(IntrusivePtrTest, givenPtr_whenCopyAssigned_thenDestructsOldObject) {
   bool wasDestructed = false;
   auto obj = make_intrusive<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_FALSE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = obj;
@@ -1305,7 +1324,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_FALSE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = obj;
@@ -1323,7 +1343,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       auto copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -1346,8 +1367,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 =
-        make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 = make_intrusive<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -1370,7 +1391,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -1388,7 +1410,8 @@ TEST(
 TEST(IntrusivePtrTest, givenPtr_whenCallingReset_thenDestructs) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   EXPECT_FALSE(resourcesReleased);
   EXPECT_FALSE(wasDestructed);
   obj.reset();
@@ -1402,7 +1425,8 @@ TEST(
     givenPtrWithCopy_whenCallingReset_thenDestructsAfterCopyDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto copy = obj;
     obj.reset();
@@ -1420,7 +1444,8 @@ TEST(
     givenPtrWithCopy_whenCallingResetOnCopy_thenDestructsAfterOriginalDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto copy = obj;
     copy.reset();
@@ -1438,7 +1463,8 @@ TEST(
     givenPtrWithMoved_whenCallingReset_thenDestructsAfterMovedDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto moved = std::move(obj);
     // NOLINTNEXTLINE(bugprone-use-after-move)
@@ -1457,7 +1483,8 @@ TEST(
     givenPtrWithMoved_whenCallingResetOnMoved_thenDestructsImmediately) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto moved = std::move(obj);
     moved.reset();
@@ -1800,9 +1827,7 @@ TEST(IntrusivePtrTest, givenPtr_whenNonOwningReclaimed_thenDoesntCrash) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(
-    IntrusivePtrTest,
-    givenPtr_whenNonOwningReclaimed_thenIsDestructedAtEnd) {
+TEST(IntrusivePtrTest, givenPtr_whenNonOwningReclaimed_thenIsDestructedAtEnd) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
@@ -1840,7 +1865,9 @@ weak_intrusive_ptr<T> make_weak_only(Args&&... args) {
   auto intrusive = make_intrusive<T>(std::forward<Args>(args)...);
   return weak_intrusive_ptr<T>(intrusive);
 }
-template <class T, class NullType = c10::detail::intrusive_target_default_null_type<T>>
+template <
+    class T,
+    class NullType = c10::detail::intrusive_target_default_null_type<T>>
 weak_intrusive_ptr<T, NullType> make_invalid_weak() {
   return weak_intrusive_ptr<T, NullType>(intrusive_ptr<T, NullType>());
 }
@@ -1903,9 +1930,7 @@ TEST(
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(
-    WeakIntrusivePtrTest,
-    vector_insert_weak_intrusive) {
+TEST(WeakIntrusivePtrTest, vector_insert_weak_intrusive) {
   std::vector<weak_intrusive_ptr<SomeClass>> priorWorks;
   std::vector<intrusive_ptr<SomeClass>> wips;
   wips.push_back(make_intrusive<SomeClass>());
@@ -2139,8 +2164,10 @@ TEST(
 TEST(
     WeakIntrusivePtrTest,
     givenNullPtr_whenMoveAssigningToDifferentNullptr_thenHasNewNullptr) {
-  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
-  weak_intrusive_ptr<SomeClass, NullType2> obj2 = make_invalid_weak<SomeClass, NullType2>();
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 =
+      make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType2> obj2 =
+      make_invalid_weak<SomeClass, NullType2>();
   obj2 = std::move(obj1);
   EXPECT_NE(NullType1::singleton(), NullType2::singleton());
   // NOLINTNEXTLINE(bugprone-use-after-move)
@@ -2362,8 +2389,10 @@ TEST(
 TEST(
     WeakIntrusivePtrTest,
     givenNullPtr_whenCopyAssigningToDifferentNullptr_thenHasNewNullptr) {
-  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
-  weak_intrusive_ptr<SomeClass, NullType2> obj2 = make_invalid_weak<SomeClass, NullType2>();
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 =
+      make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType2> obj2 =
+      make_invalid_weak<SomeClass, NullType2>();
   obj2 = obj1;
   EXPECT_NE(NullType1::singleton(), NullType2::singleton());
   EXPECT_TRUE(obj1.expired());
@@ -2468,7 +2497,8 @@ TEST(
 TEST(
     WeakIntrusivePtrTest,
     givenNullPtr_whenMoveConstructingToDifferentNullptr_thenHasNewNullptr) {
-  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 =
+      make_invalid_weak<SomeClass, NullType1>();
   weak_intrusive_ptr<SomeClass, NullType2> obj2 = std::move(obj1);
   EXPECT_NE(NullType1::singleton(), NullType2::singleton());
   // NOLINTNEXTLINE(bugprone-use-after-move)
@@ -2575,7 +2605,8 @@ TEST(
 TEST(
     WeakIntrusivePtrTest,
     givenNullPtr_whenCopyConstructingToDifferentNullptr_thenHasNewNullptr) {
-  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 =
+      make_invalid_weak<SomeClass, NullType1>();
   weak_intrusive_ptr<SomeClass, NullType2> obj2 = obj1;
   EXPECT_NE(NullType1::singleton(), NullType2::singleton());
   EXPECT_TRUE(obj1.expired());
@@ -3175,7 +3206,8 @@ TEST(
     givenPtr_whenLastStrongPointerResets_thenReleasesResources) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   EXPECT_FALSE(resourcesReleased);
   EXPECT_FALSE(wasDestructed);
   obj.ptr.reset();
@@ -3192,7 +3224,8 @@ TEST(
     givenPtr_whenDestructedButStillHasStrongPointers_thenDoesntReleaseResources) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   EXPECT_FALSE(resourcesReleased);
   EXPECT_FALSE(wasDestructed);
   obj.weak.reset();
@@ -3208,7 +3241,8 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenDestructed_thenDestructsObject) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_TRUE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
   }
@@ -3222,7 +3256,8 @@ TEST(
     givenPtr_whenMoveConstructed_thenDestructsObjectAfterSecondDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = std::move(obj);
     EXPECT_TRUE(resourcesReleased);
@@ -3238,7 +3273,8 @@ TEST(
     givenPtr_whenMoveConstructedToBaseClass_thenDestructsObjectAfterSecondDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
   {
     weak_intrusive_ptr<DestructableMock> obj2 = std::move(obj);
     EXPECT_TRUE(resourcesReleased);
@@ -3255,7 +3291,8 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenMoveAssigned_thenDestructsOldObject) {
   bool wasDestructed = false;
   auto obj = make_weak_only<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_TRUE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = std::move(obj);
@@ -3273,7 +3310,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_TRUE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = std::move(obj);
@@ -3291,7 +3329,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       auto copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -3314,8 +3353,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 =
-        make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 = make_weak_only<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -3338,7 +3377,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -3359,7 +3399,8 @@ TEST(
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = make_weak_only<DestructableMock>(&dummy, &dummy);
     obj2 = std::move(obj);
@@ -3377,7 +3418,8 @@ TEST(
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = make_weak_only<DestructableMock>(&dummy, &dummy);
     obj2 = std::move(obj);
@@ -3395,7 +3437,8 @@ TEST(
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       weak_intrusive_ptr<DestructableMock> copy = obj;
@@ -3416,7 +3459,8 @@ TEST(
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_weak_only<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy = obj;
       EXPECT_TRUE(resourcesReleased);
@@ -3436,7 +3480,8 @@ TEST(
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     weak_intrusive_ptr<DestructableMock> copy = obj;
     obj.reset();
     EXPECT_TRUE(resourcesReleased);
@@ -3453,7 +3498,8 @@ TEST(
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_weak_only<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     weak_intrusive_ptr<DestructableMock> copy = obj;
     obj.reset();
     EXPECT_TRUE(resourcesReleased);
@@ -3471,7 +3517,8 @@ TEST(
   bool wasDestructed = false;
   bool dummy = false;
   {
-    auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy =
           make_weak_only<DestructableMock>(&dummy, &dummy);
@@ -3494,7 +3541,8 @@ TEST(
   bool wasDestructed = false;
   bool dummy = false;
   {
-    auto obj = make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_weak_only<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy =
           make_weak_only<DestructableMock>(&dummy, &dummy);
@@ -3519,7 +3567,8 @@ TEST(
   {
     auto copy = make_weak_only<DestructableMock>(&dummy, &dummy);
     {
-      auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+      auto obj =
+          make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
       copy = obj;
       EXPECT_TRUE(resourcesReleased);
       EXPECT_FALSE(wasDestructed);
@@ -3541,8 +3590,8 @@ TEST(
   {
     auto copy = make_weak_only<DestructableMock>(&dummy, &dummy);
     {
-      auto obj =
-          make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+      auto obj = make_weak_only<ChildDestructableMock>(
+          &resourcesReleased, &wasDestructed);
       copy = obj;
       EXPECT_TRUE(resourcesReleased);
       EXPECT_FALSE(wasDestructed);
@@ -3561,7 +3610,8 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenCopyAssigned_thenDestructsOldObject) {
   bool wasDestructed = false;
   auto obj = make_weak_only<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_TRUE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = obj;
@@ -3579,7 +3629,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_TRUE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = obj;
@@ -3597,7 +3648,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       auto copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -3620,8 +3672,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 =
-        make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 = make_weak_only<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -3644,7 +3696,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -3662,7 +3715,8 @@ TEST(
 TEST(WeakIntrusivePtrTest, givenPtr_whenCallingReset_thenDestructs) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   EXPECT_TRUE(resourcesReleased);
   EXPECT_FALSE(wasDestructed);
   obj.reset();
@@ -3676,7 +3730,8 @@ TEST(
     givenPtrWithCopy_whenCallingReset_thenDestructsAfterCopyDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto copy = obj;
     obj.reset();
@@ -3694,7 +3749,8 @@ TEST(
     givenPtrWithCopy_whenCallingResetOnCopy_thenDestructsAfterOriginalDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto copy = obj;
     copy.reset();
@@ -3712,7 +3768,8 @@ TEST(
     givenPtrWithMoved_whenCallingReset_thenDestructsAfterMovedDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto moved = std::move(obj);
     // NOLINTNEXTLINE(bugprone-use-after-move)
@@ -3731,7 +3788,8 @@ TEST(
     givenPtrWithMoved_whenCallingResetOnMoved_thenDestructsImmediately) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto moved = std::move(obj);
     moved.reset();

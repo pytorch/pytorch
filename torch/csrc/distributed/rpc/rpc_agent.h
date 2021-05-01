@@ -265,7 +265,7 @@ class TORCH_API RpcAgent {
 
   // Retrieves the device map for the provided destination worker.
   virtual std::unordered_map<c10::Device, c10::Device> getDeviceMap(
-      const WorkerInfo& dest) const;
+      const WorkerInfo& dst) const;
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
