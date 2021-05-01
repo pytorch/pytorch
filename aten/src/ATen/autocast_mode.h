@@ -5,7 +5,7 @@ namespace autocast {
 
 namespace {
   bool is_autocast_eligible(const Tensor& tensor) {
-    return (tensor.is_cuda() || tensor.is_xla()) && tensor.is_floating_point();
+    return (tensor.is_cuda() || tensor.is_xla() || tensor.is_cpu() || tensor.is_mkldnn()) && tensor.is_floating_point();
   }
 } // namespace
 
@@ -14,6 +14,8 @@ TORCH_API void set_enabled(bool enabled);
 TORCH_API void clear_cache();
 TORCH_API int increment_nesting();
 TORCH_API int decrement_nesting();
+TORCH_API at::ScalarType get_autocast_dtype();
+TORCH_API void set_autocast_dtype(at::ScalarType dtype);
 
 /********************************************************************
 Logic to extract the promote type from any Tensor or TensorList args.
@@ -35,6 +37,8 @@ inline at::ScalarType prioritize(at::ScalarType current, const Tensor& nextArg) 
       return at::kFloat; // prioritizes float over half
     } else if (current == at::kHalf && next == at::kHalf) {
       return at::kHalf;
+    } else if (current == at::kBFloat16 && next == at::kBFloat16) {
+      return at::kBFloat16;
     } else {
       AT_ERROR("Unexpected floating ScalarType in at::autocast::prioritize");
       return current;

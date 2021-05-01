@@ -412,4 +412,8 @@ inline std::ostream& operator<<(
   return stream << toString(scalar_type);
 }
 
+#define AT_FORAUTOCAST_SCALAR_TYPES(_) \
+  _(half, Half) /* 0 */                              \
+  _(bfloat16, BFloat16) /* 1 */                     \
+
 } // namespace c10
