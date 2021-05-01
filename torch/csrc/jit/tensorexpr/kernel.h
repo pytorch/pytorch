@@ -25,14 +25,24 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
 }
 using ArgNone = c10::monostate;
 using BufList = std::vector<tensorexpr::BufHandle>;
+using IntList = std::vector<int64_t>;
 using ArgValue = c10::variant<
     tensorexpr::BufHandle,
     tensorexpr::VarHandle,
-    BufList,
     double,
     int64_t,
     bool,
+    BufList,
+    IntList,
     ArgNone>;
+template <class T>
+std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
+  std::vector<T> res;
+  for (const auto& x : v) {
+    res.push_back(c10::get<T>(x));
+  }
+  return res;
+}
 
 enum ElementType {
   kAllTypes = 0,
