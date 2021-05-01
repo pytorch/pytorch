@@ -14,7 +14,7 @@ namespace lazy_tensors {
 
 class Literal {
  public:
-  Literal() { LTC_LOG(FATAL) << "Not implemented yet."; }
+  Literal() : shape_(ShapeUtil::MakeTupleShape({})) {}
 
   explicit Literal(const Shape& shape);
 
@@ -26,6 +26,13 @@ class Literal {
     LTC_CHECK(shape_index.empty()) << "Sub-literals not supported yet";
     return absl::MakeConstSpan(static_cast<const NativeT*>(value_.data_ptr()),
                                value_.numel());
+  }
+
+  template <typename NativeT>
+  lazy_tensors::Span<NativeT> data(const ShapeIndex& shape_index = {}) {
+    LTC_CHECK(shape_index.empty()) << "Sub-literals not supported yet";
+    return lazy_tensors::Span<NativeT>(static_cast<NativeT*>(value_.data_ptr()),
+                                       value_.numel());
   }
 
   const void* untyped_data(const ShapeIndex& shape_index = {}) const {
@@ -58,6 +65,9 @@ class Literal {
         std::vector<int64_t>(multi_index.begin(), multi_index.end()), options);
     value_.index_put_({at::indexing::TensorIndex(index_tensor)}, value);
   }
+
+  template <typename NativeT>
+  void PopulateR1(lazy_tensors::Span<const NativeT> values);
 
   const at::Tensor& value() const { return value_; }
 
@@ -102,6 +112,17 @@ inline void Literal::Set<lazy_tensors::complex128>(
     lazy_tensors::Span<const int64> multi_index,
     lazy_tensors::complex128 value) {
   LTC_LOG(FATAL) << "Not implemented yet.";
+}
+
+template <typename NativeT>
+inline void Literal::PopulateR1(lazy_tensors::Span<const NativeT> values) {
+  LTC_CHECK(shape().IsArray());
+  LTC_CHECK_EQ(shape().rank(), 1);
+  LTC_CHECK_EQ(ShapeUtil::ElementsIn(shape()), values.size());
+  LTC_CHECK_EQ(shape().element_type(),
+               primitive_util::NativeToPrimitiveType<NativeT>());
+  auto data_span = data<NativeT>();
+  std::copy(values.begin(), values.end(), data_span.begin());
 }
 
 class LiteralSlice {
