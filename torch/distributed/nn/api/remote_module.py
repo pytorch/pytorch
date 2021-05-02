@@ -172,10 +172,11 @@ class _RemoteModule(nn.Module):
         self.is_device_map_set = bool(
             agent._get_device_map(agent.get_worker_info(self.on))
         )
-        # This is a condition more strict than ``is_device_map_set``,
-        # in order to avoid introducing unnecessarily complex syntax in TorchScript template ``remote_module_template.py``,
-        # which may cause a type checking error if ``Tuple[Any]``` and ``Tuple[()]`` cannot be considered compatible in some setup.
-        enable_moving_cpu_tensors_to_cuda = self.device == "cuda"
+        # ``enable_moving_cpu_tensors_to_cuda`` is less strict than ``is_device_map_set``:
+        # If ``enable_moving_cpu_tensors_to_cuda`` is true, but the device map is not set,
+        # then any CPU tensors can still be moved to a cuda device to run forward,
+        # but the output must be moved back to CPU before being sent over the wire.
+        enable_moving_cpu_tensors_to_cuda = torch.device(self.device).type == "cuda"
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
