@@ -124,11 +124,11 @@ class TORCH_API BackendDebugHandleManager {
  public:
   BackendDebugHandleManager() = default;
   int64_t getNextDebugHandleForInlinedCallStackPtr(const Node* node);
-  std::unordered_map<DebugHandleType, DebugInfoPair> getCallStackPtrMap();
+  std::unordered_map<DebugHandleType, DebugInfoTuple> getCallStackPtrMap();
 
  private:
   static std::atomic<DebugHandleType> unique_debug_handle_;
-  std::unordered_map<DebugHandleType, DebugInfoPair>
+  std::unordered_map<DebugHandleType, DebugInfoTuple>
       handles_to_inlined_callstack_ptrs_;
 };
 
@@ -136,7 +136,7 @@ class TORCH_API BackendDebugHandleManager {
 // to avoid including that file.
 using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 using DelegateDebugInfoMapType =
-    std::unordered_map<DebugHandleType, DebugInfoPair>;
+    std::unordered_map<DebugHandleType, DebugInfoTuple>;
 
 /*
  * This class is used to generate debug info map (module's inline callstack ptr

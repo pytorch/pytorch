@@ -501,8 +501,7 @@ TEST(LiteInterpreterTest, ModuleInfoBasic) {
     }
   }
 
-  std::unordered_set<std::string> expected_result({"top(M)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(M).aten::mul"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -564,8 +563,9 @@ TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
     }
   }
 
-  std::set<std::string> expected_result({"top(B)", "top(B).A0(A)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::mul"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -599,7 +599,6 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
       std::string module_info = bc.get_forward_method_debug_info(pc);
       if (!module_info.empty() &&
           (module_info.find("debug_handle") == std::string::npos)) {
-        std::cout << "Module info:" << module_info << std::endl;
         module_debug_info_set.insert(module_info);
       }
       ++pc;
@@ -608,9 +607,9 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
     }
   }
 
-  std::set<std::string> expected_result(
-      {"top(C)", "top(C).A0(A)", "top(C).B0(B)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -675,9 +674,9 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //   def forward(self, x):
   //     return self.A0.forward(self.B0.forward(x))
 
-  std::set<std::string> expected_result(
-      {"top(C)", "top(C).A0(A)", "top(C).B0(B)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(C).prim::Return"));
+  AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -723,9 +722,9 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // "top(C).forward": for the add operator in top.
   // "top(C).B0(B).forward": for the add operator in B0.
   // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
-  std::set<std::string> expected_result(
-      {"top(C)", "top(C).B0(B)", "top(C).B0(B).A0(A)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(C).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(C).B0(B).A0(A).aten::add"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -783,9 +782,9 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   // "top(B).A0(A).forward": for the add operator in A0.
   // "top(B).A1(A).forward": for the add operator in A1.
 
-  std::set<std::string> expected_result(
-      {"top(B)", "top(B).A0(A)", "top(B).A1(A)"});
-  AT_ASSERT(module_debug_info_set == expected_result);
+  AT_ASSERT(module_debug_info_set.count("top(B).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
+  AT_ASSERT(module_debug_info_set.count("top(B).A1(A).aten::add"));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

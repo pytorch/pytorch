@@ -40,7 +40,7 @@ class MobileDebugTable {
   std::pair<std::string, std::string> getSourceDebugModuleHierarchyInfo(
       const std::vector<int64_t>& debug_handles,
       const std::string& top_module_type_name = "ModuleTypeUnknown") const;
-  ska::flat_hash_map<int64_t, DebugInfoPair> callstack_ptr_map_;
+  ska::flat_hash_map<int64_t, DebugInfoTuple> callstack_ptr_map_;
 };
 
 } // namespace jit

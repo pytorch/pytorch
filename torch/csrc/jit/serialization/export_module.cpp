@@ -308,11 +308,12 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
   if (map) {
     const auto& map_val = map.value();
     // This map is map of debug handle-to-delegateDebugInfoType
-    // DebugInfoPair = <source range, inlined_cs_ptr>
+    // DebugInfoTuple = <source range, node name, inlined_cs_ptr>
     for (const auto& it : map_val) {
+      auto& source_range = std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
       sr_records.emplace_back(
-          std::numeric_limits<size_t>::max(), it.second.first);
-      auto cs_ptr = it.second.second;
+          std::numeric_limits<size_t>::max(), source_range);
+      auto cs_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
       if (cs_ptr) {
         for (const auto& e : cs_ptr->vec()) {
           const auto sr = std::get<kSourceRange>(e);
