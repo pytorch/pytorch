@@ -159,6 +159,7 @@ TESTS = [
     'distributed/elastic/utils/logging_test',
     'distributed/elastic/utils/util_test',
     'distributed/elastic/utils/distributed_test',
+    'distributed/elastic/multiprocessing/api_test',
 ]
 
 # Tests need to be run with pytest.
@@ -225,6 +226,7 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_worker',
     'distributed/optim/test_zero_redundancy_optimizer',
     "distributed/elastic/agent/server/test/api_test",
+    'distributed/elastic/multiprocessing/api_test',
 ]
 
 ROCM_BLOCKLIST = [
