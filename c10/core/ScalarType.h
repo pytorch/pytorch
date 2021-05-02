@@ -429,7 +429,7 @@ inline std::ostream& operator<<(
 }
 
 #define AT_FORAUTOCAST_SCALAR_TYPES(_) \
-  _(half, Half) /* 0 */                              \
-  _(bfloat16, BFloat16) /* 1 */                     \
+  _(half, Half) /* 0 */                \
+  _(bfloat16, BFloat16) /* 1 */
 
 } // namespace c10
