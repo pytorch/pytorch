@@ -45,37 +45,42 @@ int64_t decrementKernel(const Tensor& tensor, int64_t input) {
 }
 
 void expectCallsIncrement(DispatchKey dispatch_key) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(6, result[0].toInt());
 }
 
 void expectCallsDecrement(DispatchKey dispatch_key) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(4, result[0].toInt());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
   expectCallsIncrement(DispatchKey::CPU);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegisteredInConstructor_thenCanBeCalled) {
   auto registrar = RegisterOperators("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
   expectCallsIncrement(DispatchKey::CPU);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
       .op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel)
@@ -83,12 +88,14 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMultipleOperatorsA
   expectCallsIncrement(DispatchKey::CPU);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
   auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
   auto registrar2 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", &errorKernel);
   expectCallsIncrement(DispatchKey::CPU);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
     auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
@@ -100,12 +107,14 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegistr
   expectDoesntFindOperator("_test::my_op");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool was_called = false;
 
 void kernelWithoutOutput(const Tensor&) {
   was_called = true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::no_return(Tensor dummy) -> ()", &kernelWithoutOutput);
 
@@ -122,6 +131,7 @@ std::tuple<> kernelWithZeroOutputs(const Tensor&) {
   return std::make_tuple();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithZeroOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::zero_outputs(Tensor dummy) -> ()", &kernelWithZeroOutputs);
 
@@ -137,6 +147,7 @@ int64_t kernelWithIntOutput(Tensor, int64_t a, int64_t b) {
   return a + b;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_output(Tensor dummy, int a, int b) -> int", &kernelWithIntOutput);
@@ -144,6 +155,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntOutpu
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_output", ""});
   ASSERT_TRUE(op.has_value());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(DispatchKey::CPU), 3, 6);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(9, result[0].toInt());
@@ -153,6 +165,7 @@ Tensor kernelWithTensorOutput(const Tensor& input) {
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::returning_tensor(Tensor input) -> Tensor", &kernelWithTensorOutput);
@@ -173,6 +186,7 @@ std::vector<Tensor> kernelWithTensorListOutput(const Tensor& input1, const Tenso
   return {input1, input2, input3};
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]", &kernelWithTensorListOutput);
@@ -192,6 +206,7 @@ std::vector<int64_t> kernelWithIntListOutput(const Tensor&, int64_t input1, int6
   return {input1, input2, input3};
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor dummy, int input1, int input2, int input3) -> int[]", &kernelWithIntListOutput);
@@ -199,6 +214,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListO
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto result = callOp(*op, dummyTensor(DispatchKey::CPU), 2, 4, 6);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(3, result[0].toIntVector().size());
@@ -213,6 +229,7 @@ std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<st
   dict.insert("second", dummyTensor(DispatchKey::CUDA));
   return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
     dummyTensor(DispatchKey::CUDA),
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     5,
     {dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)},
     c10::optional<int64_t>(c10::in_place, 0),
@@ -220,6 +237,7 @@ std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<st
   );
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
      .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", &kernelWithMultipleOutputs);
@@ -248,6 +266,7 @@ Tensor kernelWithTensorInputByReferenceWithOutput(const Tensor& input1) {
 Tensor kernelWithTensorInputByValueWithOutput(Tensor input1) {
   return input1;
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> Tensor", &kernelWithTensorInputByReferenceWithOutput);
@@ -264,6 +283,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> Tensor", &kernelWithTensorInputByValueWithOutput);
@@ -280,6 +300,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 Tensor captured_input;
 
 void kernelWithTensorInputByReferenceWithoutOutput(const Tensor& input1) {
@@ -290,6 +311,7 @@ void kernelWithTensorInputByValueWithoutOutput(Tensor input1) {
   captured_input = input1;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> ()", &kernelWithTensorInputByReferenceWithoutOutput);
@@ -306,6 +328,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> ()", &kernelWithTensorInputByValueWithoutOutput);
@@ -322,12 +345,14 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int64_t captured_int_input = 0;
 
 void kernelWithIntInputWithoutOutput(Tensor, int64_t input1) {
   captured_int_input = input1;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> ()", &kernelWithIntInputWithoutOutput);
@@ -345,6 +370,7 @@ int64_t kernelWithIntInputWithOutput(Tensor, int64_t input1) {
   return input1 + 1;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> int", &kernelWithIntInputWithOutput);
@@ -357,12 +383,14 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntInput
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int64_t captured_input_list_size = 0;
 
 void kernelWithIntListInputWithoutOutput(Tensor, const std::vector<int64_t>& input1) {
   captured_input_list_size = input1.size();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> ()", &kernelWithIntListInputWithoutOutput);
@@ -371,6 +399,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_input_list_size);
@@ -380,6 +409,7 @@ int64_t kernelWithIntListInputWithOutput(Tensor, const std::vector<int64_t>& inp
   return input1.size();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> int", &kernelWithIntListInputWithOutput);
@@ -387,6 +417,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(3, outputs[0].toInt());
@@ -396,6 +427,7 @@ void kernelWithTensorListInputWithoutOutput(const std::vector<Tensor>& input1) {
   captured_input_list_size = input1.size();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()", &kernelWithTensorListInputWithoutOutput);
@@ -413,6 +445,7 @@ int64_t kernelWithTensorListInputWithOutput(const std::vector<Tensor>& input1) {
   return input1.size();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int", &kernelWithTensorListInputWithOutput);
@@ -429,6 +462,7 @@ void kernelWithLegacyTensorVectorInputWithoutOutput(const std::vector<Tensor>& i
   captured_input_list_size = input1.size();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorVectorInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()", &kernelWithLegacyTensorVectorInputWithoutOutput);
@@ -446,6 +480,7 @@ int64_t kernelWithLegacyTensorVectorInputWithOutput(const std::vector<Tensor>& i
   return input1.size();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorVectorInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int", &kernelWithLegacyTensorVectorInputWithOutput);
@@ -462,6 +497,7 @@ void kernelWithLegacyTensorListInputWithoutOutput(std::vector<Tensor> input1) {
   captured_input_list_size = input1.size();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()", &kernelWithLegacyTensorListInputWithoutOutput);
@@ -479,6 +515,7 @@ int64_t kernelWithLegacyTensorListInputWithOutput(std::vector<Tensor> input1) {
   return input1.size();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int", &kernelWithLegacyTensorListInputWithOutput);
@@ -495,6 +532,7 @@ std::vector<std::string> kernelWithStringListOutput(std::vector<std::string> inp
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithStringListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::stringlist_output(str[] input) -> str[]", &kernelWithStringListOutput);
@@ -512,12 +550,14 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithStringLi
   EXPECT_EQ("value2", output.get(1).toString()->string());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int captured_dict_size = 0;
 
 void kernelWithDictInputWithoutOutput(Dict<string, Tensor> input1) {
   captured_dict_size = input1.size();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, Tensor) input) -> ()", &kernelWithDictInputWithoutOutput);
@@ -538,6 +578,7 @@ string kernelWithDictInputWithOutput(Dict<string, string> input1) {
   return input1.at("key2");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, str) input) -> str", &kernelWithDictInputWithOutput);
@@ -557,6 +598,7 @@ Dict<string, string> kernelWithDictOutput(Dict<string, string> input) {
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", &kernelWithDictOutput);
@@ -580,6 +622,7 @@ void kernelWithUnorderedMapInputWithoutOutput(std::unordered_map<string, Tensor>
   captured_dict_size = input1.size();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnorderedMapInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, Tensor) input) -> ()", &kernelWithUnorderedMapInputWithoutOutput);
@@ -600,6 +643,7 @@ string kernelWithUnorderedMapInputWithOutput(std::unordered_map<string, string> 
   return input1.at("key2");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnorderedMapInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, str) input) -> str", &kernelWithUnorderedMapInputWithOutput);
@@ -619,6 +663,7 @@ std::unordered_map<string, string> kernelWithUnorderedMapOutput(std::unordered_m
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnorderedMapOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", &kernelWithUnorderedMapOutput);
@@ -642,6 +687,7 @@ std::unordered_map<string, std::vector<int64_t>> kernelWithMapOfIntList(std::uno
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMapOfList_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, int[]) input) -> Dict(str, int[])", &kernelWithMapOfIntList);
@@ -650,7 +696,9 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMapOfLis
   ASSERT_TRUE(op.has_value());
 
   c10::Dict<string, c10::List<int64_t>> dict;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.insert("key1", c10::List<int64_t>({10, 20}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict.insert("key2", c10::List<int64_t>({30, 40}));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
@@ -669,6 +717,7 @@ std::unordered_map<string, std::vector<std::unordered_map<int64_t, string>>> ker
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMapOfListOfMap_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, Dict(int,str)[]) input) -> Dict(str, Dict(int,str)[])", &kernelWithMapOfListOfMap);
@@ -678,11 +727,15 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMapOfLis
 
   c10::Dict<string, c10::List<c10::Dict<int64_t, string>>> dict;
   c10::Dict<int64_t, string> dict1;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict1.insert(10, "10");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict1.insert(20, "20");
   dict.insert("key1", c10::List<c10::Dict<int64_t, string>>({dict1}));
   c10::Dict<int64_t, string> dict2;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict2.insert(30, "30");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict2.insert(40, "40");
   dict.insert("key2", c10::List<c10::Dict<int64_t, string>>({dict2}));
   auto outputs = callOp(*op, dict);
@@ -703,6 +756,7 @@ std::vector<std::unordered_map<string, int64_t>> kernelWithListOfMap(std::vector
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMap_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Dict(str, int)[] input) -> Dict(str, int)[]", &kernelWithListOfMap);
@@ -734,6 +788,7 @@ std::vector<std::unordered_map<string, std::vector<int64_t>>> kernelWithListOfMa
   return input;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMapOfIntList_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Dict(str, int[])[] input) -> Dict(str, int[])[]", &kernelWithListOfMapOfIntList);
@@ -745,7 +800,9 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMa
   dict1.insert("1", c10::List<int64_t>({1, 2}));
   dict1.insert("3", c10::List<int64_t>({3, 4}));
   c10::Dict<string, c10::List<int64_t>> dict2;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict2.insert("5", c10::List<int64_t>({5, 6}));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dict2.insert("7", c10::List<int64_t>({7, 8}));
   c10::List<c10::Dict<string, c10::List<int64_t>>> list({ dict1, dict2 });
   auto outputs = callOp(*op, list);
@@ -768,12 +825,14 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMa
   EXPECT_EQ(8, output.get(1).toGenericDict().at("7").toIntVector()[1]);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool called = false;
 
 void kernelWithoutInputs() {
   called = true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
@@ -793,6 +852,7 @@ int64_t kernelWithoutTensorInputs(int64_t arg) {
   return arg + 1;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
@@ -808,8 +868,11 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenFallbackKernelWith
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 c10::optional<Tensor> called_arg2 = c10::nullopt;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 c10::optional<int64_t> called_arg3 = c10::nullopt;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 c10::optional<std::string> called_arg4 = c10::nullopt;
 
 void kernelWithOptInputWithoutOutput(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
@@ -819,6 +882,7 @@ void kernelWithOptInputWithoutOutput(Tensor arg1, const c10::optional<Tensor>& a
   called_arg4 = arg4;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> ()", &kernelWithOptInputWithoutOutput);
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
@@ -854,6 +918,7 @@ c10::optional<Tensor> kernelWithOptInputWithOutput(Tensor arg1, const c10::optio
   return arg2;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> Tensor?", &kernelWithOptInputWithOutput);
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
@@ -888,6 +953,7 @@ kernelWithOptInputWithMultipleOutputs(Tensor arg1, const c10::optional<Tensor>& 
   return std::make_tuple(arg2, arg3, arg4);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> (Tensor?, int?, str?)", &kernelWithOptInputWithMultipleOutputs);
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
@@ -911,7 +977,7 @@ std::string concatKernel(const Tensor& tensor1, std::string a, const std::string
 }
 
 void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowAutograd mode;
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
@@ -920,6 +986,7 @@ void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
   EXPECT_EQ("123", result);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", &concatKernel);
   expectCallsConcatUnboxed(DispatchKey::CPU);
@@ -929,6 +996,7 @@ std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, 
   return {};
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenInfersSchema) {
   auto registrar = RegisterOperators()
       .op("_test::no_schema_specified", &kernelForSchemaInference);
@@ -947,6 +1015,7 @@ template<class... Args> struct kernel_func<void, Args...> final {
   static void func(Args...) {}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_withDifferentNumArguments_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
@@ -983,6 +1052,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   );
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_withDifferentArgumentType_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
@@ -1002,6 +1072,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   );
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_withDifferentNumReturns_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
@@ -1061,6 +1132,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   );
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_withDifferentReturnTypes_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()

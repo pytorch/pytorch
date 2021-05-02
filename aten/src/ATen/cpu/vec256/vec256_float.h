@@ -21,7 +21,8 @@ private:
   __m256 values;
 public:
   using value_type = float;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 8;
   }
   Vec256() {}
@@ -102,6 +103,9 @@ public:
     __m256 cmp = _mm256_cmp_ps(values, _mm256_set1_ps(0.0f), _CMP_EQ_OQ);
     return _mm256_movemask_ps(cmp);
   }
+  Vec256<float> isnan() const {
+    return _mm256_cmp_ps(values, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
+  }
   Vec256<float> map(float (*f)(float)) const {
     __at_align32__ float tmp[size()];
     store(tmp);
@@ -146,6 +150,9 @@ public:
   }
   Vec256<float> atan2(const Vec256<float> &b) const {
     return Vec256<float>(Sleef_atan2f8_u10(values, b));
+  }
+  Vec256<float> copysign(const Vec256<float> &sign) const {
+    return Vec256<float>(Sleef_copysignf8(values, sign));
   }
   Vec256<float> erf() const {
     return Vec256<float>(Sleef_erff8_u10(values));

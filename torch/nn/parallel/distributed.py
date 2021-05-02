@@ -290,15 +290,6 @@ class DistributedDataParallel(Module):
         Using ``DistributedDataParallel`` in conjunction with the
         :ref:`distributed-rpc-framework` is experimental and subject to change.
 
-    .. warning::
-        The ``gradient_as_bucket_view`` mode  does not yet work with Automatic
-        Mixed Precision (AMP). AMP maintains stashed gradients that are used for
-        unscaling gradients. With ``gradient_as_bucket_view=True``, these
-        stashed gradients will point to communication buckets in the first
-        iteration. In the next iteration, the communication buckets are mutated
-        and thus these stashed gradients will be unexpectedly mutated as well,
-        which might lead to wrong results.
-
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices.
@@ -345,8 +336,7 @@ class DistributedDataParallel(Module):
                                unused can be detached from the autograd graph
                                using ``torch.Tensor.detach``. (default: ``False``)
         check_reduction: This argument is deprecated.
-        gradient_as_bucket_view (bool): This is a prototype feature and subject
-                      to changes. When set to ``True``, gradients will be views
+        gradient_as_bucket_view (bool): When set to ``True``, gradients will be views
                       pointing to different offsets of ``allreduce`` communication
                       buckets. This can reduce peak memory usage, where the
                       saved memory size will be equal to the total gradients
@@ -736,55 +726,56 @@ class DistributedDataParallel(Module):
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def forward(self, *inputs, **kwargs):
-        self.reducer.save_thread_local_state()
-        if torch.is_grad_enabled() and self.require_backward_grad_sync:
-            self.logger.set_runtime_stats_and_log()
-            self.reducer.prepare_for_forward()
-        if self.ddp_uneven_inputs_config.ddp_join_enabled:
-            ones = torch.ones(1, device=self.device)
-            work = dist.all_reduce(ones, group=self.process_group, async_op=True)
-            self.reducer._set_forward_pass_work_handle(
-                work,
-                self.ddp_uneven_inputs_config.ddp_join_divide_by_initial_world_size,
-            )
+        with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
+            self.reducer.save_thread_local_state()
+            if torch.is_grad_enabled() and self.require_backward_grad_sync:
+                self.logger.set_runtime_stats_and_log()
+                self.reducer.prepare_for_forward()
+            if self.ddp_uneven_inputs_config.ddp_join_enabled:
+                ones = torch.ones(1, device=self.device)
+                work = dist.all_reduce(ones, group=self.process_group, async_op=True)
+                self.reducer._set_forward_pass_work_handle(
+                    work,
+                    self.ddp_uneven_inputs_config.ddp_join_divide_by_initial_world_size,
+                )
 
-        # Calling _rebuild_buckets before forward compuation,
-        # It may allocate new buckets before deallocating old buckets
-        # inside _rebuild_buckets. To save peak memory usage,
-        # call _rebuild_buckets before the peak memory usage increases
-        # during forward computation.
-        # This should be called only once during whole training period.
-        if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
-            logging.info("Reducer buckets have been rebuilt in this iteration.")
+            # Calling _rebuild_buckets before forward compuation,
+            # It may allocate new buckets before deallocating old buckets
+            # inside _rebuild_buckets. To save peak memory usage,
+            # call _rebuild_buckets before the peak memory usage increases
+            # during forward computation.
+            # This should be called only once during whole training period.
+            if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
+                logging.info("Reducer buckets have been rebuilt in this iteration.")
 
-        if self.require_forward_param_sync:
-            self._sync_params()
+            if self.require_forward_param_sync:
+                self._sync_params()
 
-        if self.ddp_uneven_inputs_config.ddp_join_enabled:
-            # Notify joined ranks whether they should sync in backwards pass or not.
-            self._check_global_requires_backward_grad_sync(is_joined_rank=False)
+            if self.ddp_uneven_inputs_config.ddp_join_enabled:
+                # Notify joined ranks whether they should sync in backwards pass or not.
+                self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
-        if self.device_ids:
-            inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
-            output = self.module(*inputs[0], **kwargs[0])
-        else:
-            output = self.module(*inputs, **kwargs)
-
-        if torch.is_grad_enabled() and self.require_backward_grad_sync:
-            self.require_forward_param_sync = True
-            # We'll return the output object verbatim since it is a freeform
-            # object. We need to find any tensors in this object, though,
-            # because we need to figure out which parameters were used during
-            # this forward pass, to ensure we short circuit reduction for any
-            # unused parameters. Only if `find_unused_parameters` is set.
-            if self.find_unused_parameters:
-                self.reducer.prepare_for_backward(list(_find_tensors(output)))
+            if self.device_ids:
+                inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
+                output = self.module(*inputs[0], **kwargs[0])
             else:
-                self.reducer.prepare_for_backward([])
-        else:
-            self.require_forward_param_sync = False
+                output = self.module(*inputs, **kwargs)
 
-        return output
+            if torch.is_grad_enabled() and self.require_backward_grad_sync:
+                self.require_forward_param_sync = True
+                # We'll return the output object verbatim since it is a freeform
+                # object. We need to find any tensors in this object, though,
+                # because we need to figure out which parameters were used during
+                # this forward pass, to ensure we short circuit reduction for any
+                # unused parameters. Only if `find_unused_parameters` is set.
+                if self.find_unused_parameters:
+                    self.reducer.prepare_for_backward(list(_find_tensors(output)))
+                else:
+                    self.reducer.prepare_for_backward([])
+            else:
+                self.require_forward_param_sync = False
+
+            return output
 
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
@@ -796,6 +787,8 @@ class DistributedDataParallel(Module):
 
         def to_map(obj):
             if isinstance(obj, torch.Tensor):
+                if obj.device == torch.device("cuda", target_gpu):
+                    return (obj,)
                 if not self.use_side_stream_for_tensor_copies:
                     return (obj.to(target_gpu),)
                 else:
@@ -1247,7 +1240,6 @@ class DistributedDataParallel(Module):
                     assert (
                         self.device_type != "cpu"
                     ), "SyncBatchNorm layers only work with GPU modules"
-                    layer._specify_ddp_gpu_num(1)
 
     def _check_comm_hook(self, hook):
         if not callable(hook):
@@ -1303,11 +1295,15 @@ class DistributedDataParallel(Module):
     def get_ddp_logging_data(self):
         r"""
         This interface can be called after DistributedDataParallel() is
-        constructed. It returns DDPLoggingData for debugging and analysis.
-        More detailed explanation of the fields in DDPLoggingData are in
-        ``torch/c10/util/Logging.h``.
+        constructed. It returns a dictionary of logging data. It could help
+        for debugging and analysis. The loggind data includes DistributedDataParallel
+        constructor input parameters, some internal states of DistributedDataParallel
+        and performance metrics. Simply print the dictorinary and see what
+        these metrics are.
+        THis is a prototype interface and subject to change in the future.
         """
-        return self.logger._get_ddp_logging_data()
+        ddp_logging_data = self.logger._get_ddp_logging_data()
+        return {**ddp_logging_data.strs_map, **ddp_logging_data.ints_map}
 
     def set_ddp_runtime_logging_sample_rate(self, sample_rate):
         r"""
@@ -1318,9 +1314,39 @@ class DistributedDataParallel(Module):
         default, runtime stats are recorded for the first 10 iterations,
         after 10 iterations runtime stats are recorded once every
         "kDDPRuntimeLoggingSampleRate=100" training iterations.
+        This is a prototype interface and subject to change in the future.
         """
         if sample_rate < 1:
             raise ValueError(
                 "DDP runtime logging sample rate should be equal or greater than 1"
             )
         self.reducer._set_ddp_runtime_logging_sample_rate(sample_rate)
+
+    def _set_static_graph(self):
+        """
+        Users can explicitly let DDP know the trained graph is static,
+        when 1) the set of used and unused parameters will not change
+        during the whole training loop; in this case, it does not matter
+        whether users set find_unsued_parameters = true or not.
+        2) how the graph is trained will not change during the whole training
+        loop (meaning there is no control flow depending on iterations).
+        When graph is set to be static, DDP will support cases that can not
+        be supported in the past: 1) reentrant backwards
+        2) activation checkpointing multiple times 3)
+        activation checkpointing with find_unused_parameters = true.
+        4) not all output tensors are used in loss calculation.
+        5) there is model parameter that is outside of forward function.
+        6) potentially improve performance when find_unsued_parameters = true
+        or there are unused parameters, as DDP will not search graph in each
+        iteraton to detect unused parameters when static_graph is set to be True.
+
+        This API should be called after DistributedDataParallel construction, and
+        before training loops starts. Also it should be called in the same way for
+        all ranks. For example:
+            ddp_model = DistributedDataParallel(model)
+            ddp_model._set_static_graph()
+            for i in range(n):
+                .....
+        """
+        self.reducer._set_static_graph()
+        self.logger._set_static_graph()

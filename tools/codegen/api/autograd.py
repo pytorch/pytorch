@@ -3,7 +3,7 @@ import re
 from typing import Optional, Sequence, List, Tuple, Match
 
 from tools.codegen.api import cpp
-from tools.codegen.api.types import Binding
+from tools.codegen.api.types import Binding, NamedCType
 from tools.codegen.model import NativeFunction, Type, SchemaKind
 from tools.codegen.utils import IDENT_REGEX
 
@@ -12,13 +12,9 @@ from tools.codegen.utils import IDENT_REGEX
 # we could save `other.scalar_type()` instead of the entire `other` tensor.
 @dataclass(frozen=True)
 class SavedAttribute:
-    # Name of the saved attribute.
-    # Suffix is appended if it's derived property, e.g.: `other_scalar_type`
-    name: str
-
-    # The cpp type string.
-    # TODO: change from raw string to model.Type
-    type: str
+    # The NamedCType holds the updated name and cpp type of the attribute
+    # for the name, Suffix is appended if it's derived property, e.g.: `other_scalar_type`
+    nctype: NamedCType
 
     # The expression to read the derived property at save time, e.g.:
     # `other.scalar_type()`.
@@ -297,7 +293,7 @@ def gen_differentiable_outputs(fn: NativeFunctionWithDifferentiabilityInfo) -> L
     f = fn.func
     info = fn.info
     outputs: List[DifferentiableOutput] = [
-        DifferentiableOutput(name=name, type=ret.type, cpp_type=cpp.return_type(ret))
+        DifferentiableOutput(name=name, type=ret.type, cpp_type=cpp.return_type(ret).cpp_type())
         for name, ret in zip(cpp.return_names(f), f.func.returns)]
     output_differentiability = info.output_differentiability if info else None
     if output_differentiability is not None:

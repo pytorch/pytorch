@@ -19,6 +19,9 @@ jobs:
     steps:
       - name: Download artifact
         uses: actions/github-script@v3
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          LINT_NAME: ${{ matrix.name }}
         with:
           # https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
           script: |
@@ -44,9 +47,6 @@ jobs:
                 Buffer.from(download.data),
               );
             }
-        env:
-          RUN_ID: ${{ github.event.workflow_run.id }}
-          LINT_NAME: ${{ matrix.name }}
       - name: Unzip artifact
         id: unzip
         run: |
@@ -57,10 +57,10 @@ jobs:
       - if: steps.unzip.outputs.sha
         name: Add annotations
         uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           check_name: ${{ matrix.name }}
           linter_output_path: annotations.json
           commit_sha: ${{ steps.unzip.outputs.sha }}
           mode: json
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
