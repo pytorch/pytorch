@@ -61,8 +61,10 @@ ProcessGroup::Work::Work(
   if (profilingTitle != nullptr) {
     auto recordingFunction =
         std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
-    recordingFunction->_setAsync();
     if (recordingFunction->isActive()) {
+      // Work events follow a future like pattern and can potentially be marked
+      // as complete by different threads, so explicitly set as async event.
+      recordingFunction->_setAsync();
       // Passing input tensor to recordFunction allows for shape information in
       // profiling output.
       std::vector<c10::IValue> inputs;

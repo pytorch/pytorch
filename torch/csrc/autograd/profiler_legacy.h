@@ -120,7 +120,8 @@ struct TORCH_API LegacyEvent {
         thread_id_(thread_id),
         handle_(handle),
         shapes_(shapes),
-        node_id_(node_id), is_async_(is_async) {
+        node_id_(node_id),
+        is_async_(is_async) {
     record(record_cuda);
   }
 
