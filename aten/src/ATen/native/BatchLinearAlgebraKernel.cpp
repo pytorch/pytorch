@@ -13,6 +13,50 @@ namespace at { namespace native {
 namespace {
 
 /*
+  Computes the Cholesky decomposition of matrices stored in `input`.
+  This is an in-place routine and the content of 'input' is overwritten with the result.
+
+  Args:
+  * `input` - [in] Input tensor for the Cholesky decomposition
+              [out] Cholesky decomposition result
+  * `info` -  [out] Tensor filled with LAPACK error codes,
+                    positive values indicate that the matrix is not positive definite.
+  * `upper` - controls whether the upper (true) or lower (false) triangular portion of `input` is used
+
+  For further details, please see the LAPACK documentation for POTRF.
+*/
+template <typename scalar_t>
+void apply_cholesky(const Tensor& input, const Tensor& info, bool upper) {
+#ifndef USE_LAPACK
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.cholesky on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  char uplo = upper ? 'U' : 'L';
+  auto input_data = input.data_ptr<scalar_t>();
+  auto info_data = info.data_ptr<int>();
+  auto input_matrix_stride = matrixStride(input);
+  auto batch_size = batchCount(input);
+  auto n = input.size(-2);
+  auto lda = std::max<int64_t>(1, n);
+
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    int* info_working_ptr = &info_data[i];
+    lapackCholesky<scalar_t>(uplo, n, input_working_ptr, lda, info_working_ptr);
+  }
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_cholesky'
+void cholesky_kernel(const Tensor& input, const Tensor& infos, bool upper) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cpu", [&]{
+    apply_cholesky<scalar_t>(input, infos, upper);
+  });
+}
+
+/*
 Copies the lower (or upper) triangle of the square matrix to the other half and conjugates it.
 This operation is performed in-place.
 */
@@ -723,6 +767,14 @@ void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bo
 }
 
 } // anonymous namespace
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_ARCH_DISPATCH(cholesky_stub, DEFAULT, &cholesky_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX_DISPATCH(cholesky_stub, &cholesky_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX2_DISPATCH(cholesky_stub, &cholesky_kernel);
+REGISTER_VSX_DISPATCH(cholesky_stub, &cholesky_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ARCH_DISPATCH(cholesky_inverse_stub, DEFAULT, &cholesky_inverse_kernel_impl);
