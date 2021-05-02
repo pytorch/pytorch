@@ -4910,6 +4910,18 @@ class TestLinalg(TestCase):
         self.assertEqual(res1, res2)
         self.assertEqual(res2, out_holder)
 
+        # m is Fortran-contiguous, now test the C-contiguous input
+        self.assertTrue(m.transpose(-2, -1).is_contiguous())
+
+        a = m.contiguous()
+        out = torch.empty_like(mat1)
+
+        res1 = q @ mat2
+        res2 = torch.ormqr(a, tau, mat2, left=True, transpose=False)
+        torch.ormqr(a, tau, mat2, out=out_holder)
+        self.assertEqual(res1, res2)
+        self.assertEqual(res2, out_holder)
+
     @skipCUDAIfRocm
     def test_blas_empty(self, device):
         def fn(torchfn, *args, test_out=False, **kwargs):

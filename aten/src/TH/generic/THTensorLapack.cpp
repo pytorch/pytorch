@@ -218,6 +218,8 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, bo
 
   THTensor *ra__ = NULL;
   ra__ = THTensor_(cloneColumnMajor)(ra_, c);
+  THTensor *a_ = NULL;
+  a_ = THTensor_(cloneColumnMajor)(a_, a);
 
   int m = c->size(0);
   int n = c->size(1);
@@ -236,14 +238,14 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, bo
   /* Dry-run to query the suggested size of the workspace. */
   int info = 0;
   scalar_t wkopt = 0;
-  THLapack_(ormqr)(side, trans, m, n, k, a->data<scalar_t>(), lda,
+  THLapack_(ormqr)(side, trans, m, n, k, a_->data<scalar_t>(), lda,
                    tau->data<scalar_t>(), ra__->data<scalar_t>(), ldc,
                    &wkopt, -1, &info);
 
   /* Allocate the workspace and call LAPACK to do the real work. */
   int lwork = (int)wkopt;
   THTensor *work = THTensor_(newWithSize1d)(lwork);
-  THLapack_(ormqr)(side, trans, m, n, k, a->data<scalar_t>(), lda,
+  THLapack_(ormqr)(side, trans, m, n, k, a_->data<scalar_t>(), lda,
                    tau->data<scalar_t>(), ra__->data<scalar_t>(), ldc,
                    work->data<scalar_t>(), lwork, &info);
 
@@ -254,6 +256,7 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, bo
                            "ormqr", info,"");
   THTensor_(freeCopyTo)(ra__, ra_);
   c10::raw::intrusive_ptr::decref(work);
+  c10::raw::intrusive_ptr::decref(a_);
 }
 
 #endif
