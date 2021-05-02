@@ -131,7 +131,6 @@ MobileDebugTable::MobileDebugTable(
     callstack_ptr_map_ = unpickler.unpickle(
         std::move(callstack_data), callstack_data_size, source_range_map, cu);
   }
-  auto cs = callstack_ptr_map_[2];
 }
 
 std::string MobileDebugTable::getModuleHierarchyInfo(
