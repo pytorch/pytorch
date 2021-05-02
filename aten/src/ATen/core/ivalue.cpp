@@ -337,6 +337,7 @@ size_t IValue::hash(const IValue& v) {
       // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
       // the tensor to emulate it
       return c10::get_hash(v.payload.as_tensor.unsafeGetTensorImpl());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case Tag::Storage:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::Int:
@@ -507,6 +508,7 @@ std::ostream& IValue::repr(
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
@@ -932,6 +934,34 @@ getClassConverter() {
   return classConverter;
 }
 
+// Needs to be in this .cpp file to access the full definition of PyObjectHolder
+std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDataPtrs(
+    const at::IValue& value) {
+  std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+  // getSubValues works poorly on Python objects: it only works if they can be
+  // converted to a "regular" IValue type hence, for example, it doesn't support
+  // custom subclasses. Thus, instead, we extract the tensors through pickling.
+  if (value.isPyObject()) {
+    std::vector<at::Tensor> tensors =
+        value.toPyObjectHolder()->extractTensors();
+    data_ptrs.reserve(tensors.size());
+    for (const at::Tensor& tensor : tensors) {
+      data_ptrs.emplace_back(tensor.storage().data_ptr());
+    }
+  } else {
+    at::IValue::HashAliasedIValues sub_values;
+    // Prefer getSubValues() over visit() as the latter is a silent no-op for
+    // some unsupported types, whereas the former at least fails loudly.
+    value.getSubValues(sub_values);
+    for (const at::IValue& sub_value : sub_values) {
+      if (sub_value.isTensor()) {
+        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+      }
+    }
+  }
+  return data_ptrs;
+}
+
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     List<intrusive_ptr<ivalue::Future>> srcs) {
   struct Ctx {
@@ -939,6 +969,8 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
         : remaining(srcs.size()),
           srcFutures(std::move(srcs)),
           asIvalue(srcFutures),
+          // No need to pass devices, because dstFuture won't directly contain
+          // the value, it will contain the srcFutures (which have no DataPtrs).
           dstFuture(make_intrusive<ivalue::Future>(asIvalue.type())) {}
     std::atomic<int32_t> remaining{0};
     List<intrusive_ptr<ivalue::Future>> srcFutures;
@@ -979,21 +1011,23 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     return res;
   }
   TypePtr typePtr = srcs.get(0)->elementType();
+  const std::vector<c10::Device>& devices = srcs.get(0)->devices();
   for (const auto i : c10::irange(srcs.size())) {
     if (srcs.get(i)->completed()) {
       return srcs.get(i);
     }
     TORCH_CHECK(i == 0 || (*typePtr == *srcs.get(i)->elementType()));
+    TORCH_CHECK(i == 0 || (devices == srcs.get(i)->devices()));
   }
   struct Ctx {
-    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs, TypePtr typePtr)
+    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs, TypePtr typePtr, std::vector<c10::Device> devices)
         : srcFutures(std::move(srcs)),
-          dstFuture(make_intrusive<ivalue::Future>(typePtr)) {}
+          dstFuture(make_intrusive<ivalue::Future>(typePtr, std::move(devices))) {}
     std::atomic<bool> done{false};
     List<intrusive_ptr<ivalue::Future>> srcFutures;
     intrusive_ptr<ivalue::Future> dstFuture;
   };
-  auto ctx = std::make_shared<Ctx>(std::move(srcs), typePtr);
+  auto ctx = std::make_shared<Ctx>(std::move(srcs), typePtr, devices);
   std::function<void(size_t)> func = [ctx](size_t index) {
     if (!ctx->done.exchange(true)) {
       intrusive_ptr<ivalue::Future> dst = ctx->dstFuture;
@@ -1004,7 +1038,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
       if (src->hasError()) {
         dst->setError(src->exception_ptr());
       } else {
-        dst->markCompleted(src->constValue());
+        dst->markCompleted(src->constValue(), src->dataPtrs());
       }
     }
   };

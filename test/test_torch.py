@@ -6195,7 +6195,7 @@ else:
         x = torch.empty(0, device="cpu")
         y = torch.empty(0, device=device)
         self.assertRaisesRegex(
-            RuntimeError, "multinomial arguments must have the same device",
+            RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
     @deviceCountAtLeast(2)
@@ -6204,7 +6204,7 @@ else:
         x = torch.empty(0, device=devices[0])
         y = torch.empty(0, device=devices[1])
         self.assertRaisesRegex(
-            RuntimeError, "multinomial arguments must have the same device",
+            RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
     @deviceCountAtLeast(2)
@@ -6653,8 +6653,13 @@ else:
                 _test_helper(x, op, unary=True)
 
     @skipMeta
-    def test_dlpack_conversion(self, device):
-        x = torch.randn(1, 2, 3, 4, device=device, dtype=torch.float)
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_dlpack_conversion(self, device, dtype):
+        # DLpack does not explicitly support bool
+        # It does it through uint8 type
+        if dtype is torch.bool:
+            return
+        x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
@@ -6786,6 +6791,36 @@ else:
             self.assertEqual(sample_indices.dim(), 1, msg="wrong number of dimensions")
             self.assertEqual(prob_dist.dim(), 1, msg="wrong number of prob_dist dimensions")
             self.assertEqual(sample_indices.size(0), n_sample, msg="wrong number of samples")
+
+        # CUDA misalignment issue (#46702)
+        n_row, n_col = 2, 3
+        prob_dist = make_prob_dist([n_row, n_col], True)
+        n_sample = 1
+        sample_indices = torch.multinomial(prob_dist, n_sample, True)
+        self.assertEqual(sample_indices.dim(), 2, msg="wrong number of dimensions")
+        self.assertEqual(sample_indices.size(1), n_sample, msg="wrong number of samples")
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half)
+    def test_multinomial_deterministic(self, device, dtype):
+        gen = torch.Generator(device=device)
+
+        trials = 5
+        seed = 0
+        prob_dist = torch.rand(10000, 1000, device=device, dtype=dtype)
+        n_sample = 1
+
+        for i in range(trials):
+            gen.manual_seed(seed)
+            samples_1 = torch.multinomial(prob_dist, n_sample, True, generator=gen)
+
+            gen.manual_seed(seed)
+            samples_2 = torch.multinomial(prob_dist, n_sample, True, generator=gen)
+
+            self.assertEqual(samples_1, samples_2)
+            self.assertEqual(samples_1.dim(), 2, msg="wrong number of dimensions")
+            self.assertEqual(samples_1.size(1), n_sample, msg="wrong number of samples")
+
 
     @slowTest
     @dtypes(torch.float)
@@ -7734,10 +7769,6 @@ tensor_op_tests = [
     ('mode', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('mode', 'dim', _small_3d, lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('mode', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('mvlgamma', '2d_p=1', lambda t, d: _small_2d(t, d).clamp(0.1, 10), lambda t, d: [1],
-        1e-5, 1e-5, 1e-5, _float_types_no_half),
-    ('mvlgamma', '2d_p=2', lambda t, d: _small_2d(t, d).clamp(0.6, 10), lambda t, d: [2],
-        1e-5, 1e-5, 1e-5, _float_types_no_half),
     ('remainder', 'value', _small_3d, lambda t, d: [3], 1e-1, 1e-2, 1e-5, _signed_types),
     ('remainder', 'negative_value', _small_3d, lambda t, d: [-3], 1e-1, 1e-2, 1e-5, _signed_types),
     ('remainder', 'tensor', _small_3d,
@@ -7847,7 +7878,7 @@ tensor_op_tests = [
     ('geqrf', '', _new_t((20, 20)), lambda t, d: [],
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
+        1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA, skipIfRocm]),
 ]
 
 # Creates and decorates a generic test and adds it to the class.
@@ -8002,6 +8033,16 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         # ensure sharing is not broken
         c = deepcopy([a, a.grad])
         self.assertTrue(c[0].grad is c[1])
+
+    def test_tensor_base_init(self):
+        # Direct construction not OK
+        self.assertRaises(TypeError, lambda: torch._C._TensorBase())
+
+        # But construction of subclass is OK
+        class T(torch._C._TensorBase):
+            pass
+
+        T()
 
 # TODO: this empy class is temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed

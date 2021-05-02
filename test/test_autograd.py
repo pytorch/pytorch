@@ -21,9 +21,6 @@ import json
 # Autograd tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-# TODO(alband) Remove this when this flag is not needed anymore
-torch._C._set_forward_AD_enabled(True)
-
 from torch import nn
 from torch._six import inf, nan
 from torch.autograd.function import once_differentiable
@@ -2955,7 +2952,12 @@ class TestAutograd(TestCase):
     def test_sinc(self):
         # The derivative of sinc(x) at x=0 has to be special cased.
         # A naive computation will result in 0/0 -> NaN.
-        a = torch.tensor([0.0, 1.0], dtype=torch.double, requires_grad=True)
+        # We also need to be careful when we are very close to 0, as the
+        # derivative's denominator is squared, and there are some floats
+        # that are positive and whose squares are zero.
+        a = torch.tensor([0.0, torch.finfo(torch.double).tiny, 1.0],
+                         dtype=torch.double,
+                         requires_grad=True)
         gradcheck(torch.sinc, a)
 
     def test_igamma(self):
@@ -3010,16 +3012,12 @@ class TestAutograd(TestCase):
 
         self.assertFalse(torch.autograd._profiler_enabled())
 
-        last_end = 0
-        names = ['aten::mul', 'aten::to', 'aten::empty_strided', 'aten::copy_',
-                 'aten::empty', 'aten::add', 'aten::to', 'aten::empty_strided',
-                 'aten::copy_', 'aten::empty']
-        top_level_names = ['aten::mul', 'aten::add']
+        names = ['aten::mul', 'aten::add']
+        found_indices = set()
         for evt in p.function_events:
-            if evt.time_range.start > last_end:
-                self.assertTrue(evt.name in top_level_names)
-                last_end = evt.time_range.end
-            self.assertTrue(evt.name in names)
+            if evt.name in names:
+                found_indices.add(names.index(evt.name))
+        self.assertEquals(len(found_indices), len(names))
 
     def test_profiler_seq_nr(self):
         with profile(use_kineto=kineto_available()) as p:
@@ -3210,33 +3208,17 @@ class TestAutograd(TestCase):
 
         print(prof.function_events)
 
-        top_level_expected_events_and_shapes = [
-            ('aten::linear', [[128, 20], [30, 20], [30]]),
-            ('aten::linear', [[128, 30], [40, 30], [40]])
+        linear_expected_shapes = [
+            [[128, 20], [30, 20], [30]],
+            [[128, 30], [40, 30], [40]],
         ]
 
-        expected_iter = iter(top_level_expected_events_and_shapes)
-        last_end = 0
-
+        found_indices = set()
         for event in prof.function_events:
-            if event.time_range.start > last_end:
-                name_expected, input_shape_expected = next(expected_iter)
-                if name_expected is not None:
-                    self.assertEqual(event.name, name_expected)
-                self.assertEqual(event.input_shapes, input_shape_expected)
-                last_end = event.time_range.end
-
-    def test_profiler_no_cuda(self):
-        print("")
-        layer = torch.nn.Linear(20, 30)
-        x = torch.randn(128, 20)
-        with profile(use_cuda=False, use_kineto=kineto_available()) as prof:
-            layer(x)
-
-        prof_str = str(prof)
-        print(prof_str)
-        self.assertTrue('cpu' in prof_str.lower())
-        self.assertTrue('cuda' not in prof_str.lower())
+            if event.name == "aten::linear":
+                self.assertTrue(event.input_shapes in linear_expected_shapes)
+                found_indices.add(linear_expected_shapes.index(event.input_shapes))
+        self.assertEqual(len(found_indices), len(linear_expected_shapes))
 
     def test_profiler_aggregation_lstm(self):
         print("")
@@ -4151,7 +4133,7 @@ class TestAutograd(TestCase):
             self.assertFalse(gradcheck(fn, (x,), raise_exception=False, fast_mode=fast_mode))
 
             x_c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
-            with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
+            with self.assertRaisesRegex(RuntimeError, 'While considering the imaginary part of complex outputs only'):
                 gradcheck(fn, (x_c,), fast_mode=False)
             self.assertFalse(gradcheck(fn, (x_c,), raise_exception=False, fast_mode=False))
 
@@ -4160,7 +4142,7 @@ class TestAutograd(TestCase):
                 y.register_hook(lambda x: x + 1e-2)
                 return y
             x = torch.ones(2, 2, requires_grad=True)
-            with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
+            with self.assertRaisesRegex(RuntimeError, 'While considering the imaginary part of complex outputs only'):
                 gradcheck(fn2, (x,), fast_mode=False)
             self.assertFalse(gradcheck(fn2, (x,), raise_exception=False, fast_mode=False))
 
@@ -4168,7 +4150,7 @@ class TestAutograd(TestCase):
                 y = torch.real(x)
                 y.register_hook(lambda x: x + 1e-2)
                 return y
-            with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1'):
+            with self.assertRaisesRegex(RuntimeError, 'Jacobian mismatch for output 0 with respect to input 0'):
                 gradcheck(fn3, (x_c,), fast_mode=False)
             self.assertFalse(gradcheck(fn3, (x_c,), raise_exception=False, fast_mode=False))
         check(fast_mode=True)
@@ -4252,9 +4234,12 @@ class TestAutograd(TestCase):
         self.assertEqual(jacobian[0], 2 * torch.eye(4))
 
         with self.assertWarnsRegex(UserWarning, "get_numerical_jacobian was part of PyTorch's private API"):
-            jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6)
+            jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6, grad_out=1)
         self.assertEqual(jacobian[0], 2 * torch.eye(4))
         self.assertEqual(jacobian[1], 1 * torch.eye(4))
+
+        with self.assertRaisesRegex(ValueError, "Expected grad_out to be 1.0"):
+            jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6, grad_out=2.0)
 
     def test_gradcheck_get_analytical_jacobian(self):
         from torch.autograd.gradcheck import get_analytical_jacobian
@@ -4286,6 +4271,9 @@ class TestAutograd(TestCase):
         with self.assertWarnsRegex(UserWarning, "get_analytical_jacobian was part of PyTorch's private API"):
             jacobians, reentrant, correct_grad_sizes, correct_grad_types = get_analytical_jacobian((a,), outputs)
         self.assertFalse(reentrant)
+
+        with self.assertRaisesRegex(ValueError, "Expected grad_out to be 1.0"):
+            jacobians, _, _, _ = get_analytical_jacobian((a,), outputs, grad_out=2.0)
 
     def test_gradcheck_custom_error(self):
         from torch.autograd.gradcheck import GradcheckError
@@ -4656,6 +4644,12 @@ for shape in [(1,), ()]:
         a = torch.ones(1, 1, requires_grad=True)
         q, r = torch.linalg.qr(a, mode="reduced")
         self.assertEqual(q.grad_fn._saved_mode, "reduced")                # std::string -> str
+
+        a = torch.tensor([1.], requires_grad=True)
+        out = torch.div(a, 2., rounding_mode="trunc")
+        self.assertEqual(out.grad_fn._saved_rounding_mode, "trunc")       # c10::optional<std::string> -> str?
+        out = torch.div(a, 2., rounding_mode=None)
+        self.assertIsNone(out.grad_fn._saved_rounding_mode)               # c10::optional<std::string> -> str?
 
         x = torch.zeros(5, requires_grad=True)
         out = torch.threshold(x, threshold=(1 + 0j), value=(1 + 0j))
@@ -5416,10 +5410,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-separate_complex_tests = ['view_as_real', 'div', '__rdiv__', 'sub']
-
-# NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
-# for non-holomorphic functions
+separate_complex_tests = ['div', '__rdiv__', 'sub']
 
 # allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
@@ -5553,12 +5544,7 @@ def add_test(
                         inplace_name = name + '_'
                         # can't broadcast inplace to left hand side
                         skip_inplace = ('broadcast_lhs' in test_name or
-                                        'broadcast_all' in test_name or
-                                        'atanh' in test_name or
-                                        'acosh' in test_name or
-                                        'asinh' in test_name or
-                                        'abs_complex' in test_name or
-                                        'abs_scalar_complex' in test_name)
+                                        'broadcast_all' in test_name)
                         if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
@@ -5605,10 +5591,7 @@ def add_test(
                 inplace_name = name + '_'
                 # can't broadcast inplace to left hand side
                 broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-                # skip C -> R inplace tests
-                skip_c_to_r_inplace = 'abs_complex' in test_name or 'abs_scalar_complex' in test_name
-                skip_inplace = broadcast_skip_inplace or skip_c_to_r_inplace
-                if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
+                if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
                     check(inplace_name)
 
             assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
