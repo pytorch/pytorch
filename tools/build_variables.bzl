@@ -12,8 +12,8 @@ GENERATED_CPP = [
     "autograd/generated/TraceType_2.cpp",
     "autograd/generated/TraceType_3.cpp",
     "autograd/generated/TraceType_4.cpp",
-    "autograd/generated/InplaceOrViewType_0.cpp",
-    "autograd/generated/InplaceOrViewType_1.cpp",
+    "autograd/generated/ADInplaceOrViewType_0.cpp",
+    "autograd/generated/ADInplaceOrViewType_1.cpp",
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
@@ -51,8 +51,8 @@ def libtorch_generated_sources(gencode_pattern):
         "autograd/generated/TraceType_2.cpp",
         "autograd/generated/TraceType_3.cpp",
         "autograd/generated/TraceType_4.cpp",
-        "autograd/generated/InplaceOrViewType_0.cpp",
-        "autograd/generated/InplaceOrViewType_1.cpp",
+        "autograd/generated/ADInplaceOrViewType_0.cpp",
+        "autograd/generated/ADInplaceOrViewType_1.cpp",
     ]]
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
@@ -210,6 +210,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/remove_mutation.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
+    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/passes/frozen_conv_folding.cpp",
     "torch/csrc/jit/passes/frozen_ops_to_mkldnn.cpp",
     "torch/csrc/jit/passes/frozen_graph_optimizations.cpp",
@@ -553,7 +554,6 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
-    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
     "torch/csrc/jit/passes/onnx/eval_peephole.cpp",
