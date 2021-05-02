@@ -88,7 +88,7 @@ class TORCH_API RRefContext {
   c10::intrusive_ptr<OwnerRRef> getOrCreateOwnerRRef(
       const RRefId& rrefId,
       const TypePtr& type,
-      std::vector<c10::DeviceIndex> devices = {});
+      std::vector<c10::Device> devices = {});
 
   // Create an empty owner rref of type.
   // This method is called to first time generate an ``OwnerRRef``, e.g.,
@@ -98,7 +98,7 @@ class TORCH_API RRefContext {
   // 2) the TypePtr is presented.
   c10::intrusive_ptr<OwnerRRef> createOwnerRRef(
       const TypePtr& type,
-      std::vector<c10::DeviceIndex> devices = {});
+      std::vector<c10::Device> devices = {});
 
   // Returns a Future of the OwnerRRef, which will be marked completed when
   // ``OwnerRRef`` is created. This method is used when the TypePtr is not

@@ -5771,7 +5771,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
                 # the owner of the RRef.
                 v0 = rpc.RRef(
                     output,
-                    devices=[torch.device(local_device).index]
+                    devices=[torch.device(local_device)]
                 ).remote().sum().to_here().item()
                 v1 = output.sum().item()
                 self.assertEqual(v0, v1)

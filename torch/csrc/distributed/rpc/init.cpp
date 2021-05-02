@@ -230,11 +230,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               py::init<
                   const py::object&,
                   const py::object&,
-                  std::vector<c10::DeviceIndex>>(),
+                  std::vector<c10::Device>>(),
               py::arg("value"),
               py::arg("type_hint") = py::none(),
               py::kw_only(),
-              py::arg("devices") = std::vector<c10::DeviceIndex>())
+              py::arg("devices") = std::vector<c10::Device>())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
@@ -605,8 +605,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_device_map",
-          (std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>(
-              ProcessGroupAgent::*)(const WorkerInfo& dst) const) &
+          (std::unordered_map<c10::Device, c10::Device>(ProcessGroupAgent::*)(
+              const WorkerInfo& dst) const) &
               ProcessGroupAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(

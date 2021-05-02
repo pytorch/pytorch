@@ -19,7 +19,7 @@ class PYBIND11_EXPORT PyRRef {
   explicit PyRRef(
       const py::object& value,
       const py::object& type_hint,
-      std::vector<c10::DeviceIndex> devices = {});
+      std::vector<c10::Device> devices = {});
   explicit PyRRef(c10::intrusive_ptr<RRef> rref);
   ~PyRRef();
 
