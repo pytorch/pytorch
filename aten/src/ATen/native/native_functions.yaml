@@ -6184,18 +6184,12 @@
 
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutograd: cholesky_out
+    CPU, CUDA: cholesky_out
 
 - func: cholesky(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
-    CompositeExplicitAutograd: cholesky
-
-- func: _cholesky_helper(Tensor self, bool upper) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _cholesky_helper_cpu
-    CUDA: _cholesky_helper_cuda
+    CPU, CUDA: cholesky
 
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -9351,17 +9345,26 @@
 #
 # See linalg_det as an example.
 
-- func: linalg_cholesky(Tensor self) -> Tensor
+# "_ex" stands for experimental
+- func: linalg_cholesky_ex(Tensor self, *, bool check_errors=False) -> (Tensor L, Tensor info)
   python_module: linalg
   variants: function
   dispatch:
-    CompositeExplicitAutograd: linalg_cholesky
+    CPU, CUDA: linalg_cholesky_ex
+
+- func: linalg_cholesky_ex.L(Tensor self, *, bool check_errors=False, Tensor(a!) L, Tensor(b!) info) -> (Tensor(a!) L, Tensor(b!) info)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_cholesky_ex_out
+
+- func: linalg_cholesky(Tensor self) -> Tensor
+  python_module: linalg
+  variants: function
 
 - func: linalg_cholesky.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_cholesky_out
 
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg

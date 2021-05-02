@@ -89,6 +89,56 @@ Examples::
     True
 """)
 
+cholesky_ex = _add_docstr(_linalg.linalg_cholesky_ex, r"""
+linalg.cholesky_ex(input, *, check_errors=False, out=None) -> (Tensor, Tensor)
+
+Computes the Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
+
+Returns a namedtuple ``(L,info)``. ``L`` contains the result of the Cholesky decomposition.
+``info`` stores the LAPACK error codes.
+
+If :attr:`input` is not a Hermitian positive-definite matrix, or if it's a batch of matrices
+and one or more of them is not a Hermitian positive-definite matrix,
+then ``info`` stores a positive integer for the corresponding matrix.
+The positive integer indicates the order of the leading minor that is not positive-definite,
+and the decomposition could not be completed.
+``info`` filled with zeros indicates that the decomposition was successful.
+If ``check_errors=True`` and ``info`` contains positive integers, then a RuntimeError is thrown.
+
+.. note:: Given inputs on a CUDA device, this function may synchronize that device with the CPU.
+
+.. warning:: This function is "experimental" and it may change in a future PyTorch release.
+
+.. seealso::
+        :func:`torch.linalg.cholesky` is a NumPy compatible variant that always checks for errors.
+
+Args:
+    input (Tensor): the Hermitian `n \times n` matrix or the batch of such matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+    check_errors (bool, optional): controls whether to check the content of ``infos``. Default: `False`.
+
+Keyword args:
+    out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a = a @ a.t().conj()  # creates a Hermitian positive-definite matrix
+    >>> l, info = torch.linalg.cholesky_ex(a)
+    >>> a
+    tensor([[ 2.3792+0.0000j, -0.9023+0.9831j],
+            [-0.9023-0.9831j,  0.8757+0.0000j]], dtype=torch.complex128)
+    >>> l
+    tensor([[ 1.5425+0.0000j,  0.0000+0.0000j],
+            [-0.5850-0.6374j,  0.3567+0.0000j]], dtype=torch.complex128)
+    >>> info
+    tensor(0, dtype=torch.int32)
+
+""")
+
 inv = _add_docstr(_linalg.linalg_inv, r"""
 linalg.inv(A, *, out=None) -> Tensor
 
