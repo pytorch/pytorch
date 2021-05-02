@@ -563,7 +563,7 @@ class TestExamplesCorrectness(TestCase):
             return mse_loss(v_f, y2)
 
         task = sample_tasks(num_tasks, K)
-        
+
         # Compute with vmap+grad
         inner_losses = vmap(partial(get_loss_for_task, True))\
                             (task[0], task[1], task[2], task[3])
@@ -609,7 +609,7 @@ class TestExamplesCorrectness(TestCase):
             nn.MaxPool2d(2, 2),
             Flatten(),
             nn.Linear(64, n_way)).to(device).to(dtype)
-        
+
         params, buffers, fnet, _, _, = make_functional_with_buffers(net)
         net = (params, buffers, fnet)
 
@@ -739,7 +739,7 @@ class TestExamplesCorrectness(TestCase):
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_per_sample_grads(self, device):
-        # Straight out of opacus 
+        # Straight out of opacus
         def _replace_child(
             root: nn.Module, child_name: str, converter: Callable[[nn.Module], nn.Module]
         ) -> None:
