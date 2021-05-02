@@ -2590,6 +2590,15 @@ def sample_kwargs_clamp(device, dtype, input):
         min_val, max_val = (random.randint(-8, 0), random.randint(1, 8))
     return {'min': min_val, 'max': max_val}, {'a_min': min_val, 'a_max': max_val}
 
+def sample_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
+    sample0 = SampleInput(make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),
+                          args=(make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),))
+    sample1 = SampleInput(make_tensor((S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad),
+                          args=(make_tensor((S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad),),
+                          kwargs={'dim': 1})
+
+    return (sample0, sample1)
+
 def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
         # shrink values to be in the interval [-1, +1] for better precision in gradgradcheck
@@ -3960,6 +3969,15 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', device_type='cpu',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
                    )),
+    OpInfo('cross',
+           dtypesIfCPU=all_types_and_complex(),
+           dtypesIfCUDA=all_types_and(torch.half),
+           sample_inputs_func=sample_inputs_cross,
+           skips=(
+               # AssertionError: UserWarning not triggered :
+               # Resized a non-empty tensor but did not warn about it.
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
@@ -6071,8 +6089,6 @@ def method_tests():
         ('triu', (S, M, M), NO_ARGS, 'batched'),
         ('triu', (S, M, M), (2,), 'batched_idx'),
         ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
-        ('cross', (S, 3), ((S, 3),)),
-        ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
         ('fill_', (S, S, S), ((),), 'variable'),
