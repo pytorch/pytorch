@@ -2410,7 +2410,8 @@ Tensor* tensorexpr::computeOperandValue(
             return broadcast(A, indices);
           });
     }
-    case aten::mm:
+    case aten::mm: // aten::mm is a subset of aten::matmul where both inputs are
+                   // rank 2
     case aten::matmul: {
       return computeMatmul(inputs, outputShape, outputType);
     }
