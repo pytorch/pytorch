@@ -13,8 +13,10 @@ static bool compute_dispatch_trace_enabled() {
     if (strcmp(envar, "1") == 0) {
       return true;
     }
-    TORCH_WARN("ignoring invalid value for TORCH_SHOW_DISPATCH_TRACE: ", envar,
-               " valid values are 0 or 1.");
+    TORCH_WARN(
+        "ignoring invalid value for TORCH_SHOW_DISPATCH_TRACE: ",
+        envar,
+        " valid values are 0 or 1.");
   }
   return false;
 }

@@ -5,10 +5,9 @@ from string import ascii_lowercase
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.fx as fx
-from nnc_compile import nnc_compile
 from types import FunctionType, CodeType
 import functorch
-from functorch import wrap_key, WrapModule, jacrev, vmap, grad, pythonkey_trace
+from functorch import wrap_key, WrapModule, jacrev, vmap, grad, pythonkey_trace, nnc_compile
 torch._C._debug_only_display_vmap_fallback_warnings(True)
 
 

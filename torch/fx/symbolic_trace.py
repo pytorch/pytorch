@@ -289,11 +289,9 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
-        # if not self.is_leaf_module(m, module_qualified_name):
-        # import pdb; pdb.set_trace()
-        out = forward(*args, **kwargs)
-        return out
-        # return self.create_proxy('call_module', module_qualified_name, args, kwargs)
+        if not self.is_leaf_module(m, module_qualified_name):
+            return forward(*args, **kwargs)
+        return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
     def create_args_for_root(self, root_fn, is_module, concrete_args=None):
         """
@@ -345,7 +343,7 @@ class Tracer(TracerBase):
 
     parameter_proxy_cache : Dict[str, Proxy] = {}  # Reduce number of get_attr calls
 
-    def module_getattr(self, mod, attr, attr_val):
+    def module_getattr(self, attr, attr_val):
         if isinstance(attr_val, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
                 if attr_val is p:
@@ -410,7 +408,7 @@ class Tracer(TracerBase):
         @functools.wraps(_orig_module_getattr)
         def module_getattr_wrapper(mod, attr):
             attr_val = _orig_module_getattr(mod, attr)
-            return self.module_getattr(mod, attr, attr_val)
+            return self.module_getattr(attr, attr_val)
 
         @functools.wraps(_orig_module_call)
         def module_call_wrapper(mod, *args, **kwargs):

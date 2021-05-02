@@ -1450,8 +1450,7 @@ Tensor* computeMatmul(
   } else {
     return new Tensor(
         ResultBuf.node(),
-        ExternalCall::make(
-            ResultBuf, "nnc_aten_matmul", {a, b}, {}));
+        ExternalCall::make(ResultBuf, "nnc_aten_matmul", {a, b}, {}));
   }
 }
 
@@ -1502,10 +1501,9 @@ Tensor* computeConv2d(
   return new Tensor(ResultBuf.node(), s);
 }
 
-
 Tensor* tensorexpr::computeOperandValue(
     c10::Symbol op,
-    const std::vector<ArgValue> &inputs,
+    const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType) {
   switch (op) {
@@ -2369,47 +2367,48 @@ Tensor* tensorexpr::computeOperandValue(
       if (shape.size() == 1) {
         return new Tensor(c10::get<BufHandle>(inputs[0]).node(), nullptr);
       }
-      return computeOperandValue(aten::transpose, {inputs[0], (int64_t)1, (int64_t)0}, outputShape, outputType);
+      return computeOperandValue(
+          aten::transpose,
+          {inputs[0], (int64_t)1, (int64_t)0},
+          outputShape,
+          outputType);
     }
     case aten::transpose: {
       auto A = c10::get<BufHandle>(inputs[0]);
       auto start_dim = c10::get<int64_t>(inputs[1]);
       auto to_dim = c10::get<int64_t>(inputs[2]);
       return Compute(
-        "aten_transpose",
-        c10::fmap<DimArg>(outputShape),
-        [&](std::vector<VarHandle> axes) {
-          std::swap(axes[start_dim], axes[to_dim]);
-          return A.load(axes);
-        }
-      );
+          "aten_transpose",
+          c10::fmap<DimArg>(outputShape),
+          [&](std::vector<VarHandle> axes) {
+            std::swap(axes[start_dim], axes[to_dim]);
+            return A.load(axes);
+          });
     }
     case aten::permute: {
       auto A = c10::get<BufHandle>(inputs[0]);
       auto permute_dims = c10::get<IntList>(inputs[1]);
       return Compute(
-        "aten_transpose",
-        c10::fmap<DimArg>(outputShape),
-        [&](const std::vector<VarHandle> &axes) {
-          std::vector<VarHandle> new_axes;
-          assert(permute_dims.size() == axes.size());
-          for (auto i: permute_dims) {
-            new_axes.push_back(axes[i]);
-          }
-          return A.load(new_axes);
-        }
-      );
+          "aten_transpose",
+          c10::fmap<DimArg>(outputShape),
+          [&](const std::vector<VarHandle>& axes) {
+            std::vector<VarHandle> new_axes;
+            assert(permute_dims.size() == axes.size());
+            for (auto i : permute_dims) {
+              new_axes.push_back(axes[i]);
+            }
+            return A.load(new_axes);
+          });
     }
     case aten::expand: {
       auto A = c10::get<BufHandle>(inputs[0]);
       return Compute(
-        "aten_expand",
-        c10::fmap<DimArg>(outputShape),
-        [&](const std::vector<VarHandle>& axes) {
-          std::vector<ExprHandle> indices(axes.begin(), axes.end());
-          return broadcast(A, indices);
-        }
-      );
+          "aten_expand",
+          c10::fmap<DimArg>(outputShape),
+          [&](const std::vector<VarHandle>& axes) {
+            std::vector<ExprHandle> indices(axes.begin(), axes.end());
+            return broadcast(A, indices);
+          });
     }
     case aten::mm:
     case aten::matmul: {
