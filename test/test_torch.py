@@ -6195,7 +6195,7 @@ else:
         x = torch.empty(0, device="cpu")
         y = torch.empty(0, device=device)
         self.assertRaisesRegex(
-            RuntimeError, "multinomial arguments must have the same device",
+            RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
     @deviceCountAtLeast(2)
@@ -6204,7 +6204,7 @@ else:
         x = torch.empty(0, device=devices[0])
         y = torch.empty(0, device=devices[1])
         self.assertRaisesRegex(
-            RuntimeError, "multinomial arguments must have the same device",
+            RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
     @deviceCountAtLeast(2)
@@ -6653,8 +6653,13 @@ else:
                 _test_helper(x, op, unary=True)
 
     @skipMeta
-    def test_dlpack_conversion(self, device):
-        x = torch.randn(1, 2, 3, 4, device=device, dtype=torch.float)
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_dlpack_conversion(self, device, dtype):
+        # DLpack does not explicitly support bool
+        # It does it through uint8 type
+        if dtype is torch.bool:
+            return
+        x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
@@ -7764,10 +7769,6 @@ tensor_op_tests = [
     ('mode', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('mode', 'dim', _small_3d, lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('mode', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('mvlgamma', '2d_p=1', lambda t, d: _small_2d(t, d).clamp(0.1, 10), lambda t, d: [1],
-        1e-5, 1e-5, 1e-5, _float_types_no_half),
-    ('mvlgamma', '2d_p=2', lambda t, d: _small_2d(t, d).clamp(0.6, 10), lambda t, d: [2],
-        1e-5, 1e-5, 1e-5, _float_types_no_half),
     ('remainder', 'value', _small_3d, lambda t, d: [3], 1e-1, 1e-2, 1e-5, _signed_types),
     ('remainder', 'negative_value', _small_3d, lambda t, d: [-3], 1e-1, 1e-2, 1e-5, _signed_types),
     ('remainder', 'tensor', _small_3d,
