@@ -989,11 +989,6 @@ void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(simple_ir_eval_executed);
 }
 
-void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
-  throw std::runtime_error(
-      "SimpleIREvaluator::call_raw is not implemented yet");
-}
-
 void SimpleIREvaluator::bindArg(const BufferArg& buf, const CallArg& data) {
   if (!buf.isVar()) {
     impl_->bindBuf(buf.var(), data.data());
@@ -1003,7 +998,7 @@ void SimpleIREvaluator::bindArg(const BufferArg& buf, const CallArg& data) {
   switch (buf.dtype().scalar_type()) {
 #define TYPE_CASE(Type, Name)                     \
   case ScalarType::Name:                          \
-    impl_->bindVar(buf.var(), *data.Name##Ptr()); \
+    impl_->bindVar(buf.var(), data.Name##Data()); \
     break;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -1011,7 +1006,6 @@ void SimpleIREvaluator::bindArg(const BufferArg& buf, const CallArg& data) {
       throw unsupported_dtype();
   }
 }
-
 void SimpleIREvaluator::bindVar(const Var* v, const Expr* e) {
   impl_->bindVar(v, impl_->evaluateExpr(e));
 }
