@@ -5769,10 +5769,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
                 output = model.rpc_sync().forward(data)
                 # to_here() internally calls localValue as the caller is
                 # the owner of the RRef.
-                v0 = rpc.RRef(
-                    output,
-                    devices=[torch.device(local_device)]
-                ).remote().sum().to_here().item()
+                v0 = rpc.RRef(output).remote().sum().to_here().item()
                 v1 = output.sum().item()
                 self.assertEqual(v0, v1)
 

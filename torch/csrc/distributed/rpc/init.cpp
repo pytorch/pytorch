@@ -227,14 +227,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               >>> rpc.rpc_sync("worker1", f, args=(rref,))
           )")
           .def(
-              py::init<
-                  const py::object&,
-                  const py::object&,
-                  std::vector<c10::Device>>(),
+              py::init<const py::object&, const py::object&>(),
               py::arg("value"),
-              py::arg("type_hint") = py::none(),
-              py::kw_only(),
-              py::arg("devices") = std::vector<c10::Device>())
+              py::arg("type_hint") = py::none())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
