@@ -179,11 +179,7 @@ class PythonCode:
 
 
 def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
-    def repr2(a):
-        if isinstance(a, torch.device):
-            return f'torch.{repr(a)}'
-        return repr(a)
-    args_s = ', '.join(repr2(a) for a in args)
+    args_s = ', '.join(repr(a) for a in args)
     kwargs_s = ', '.join(f'{k} = {repr(v)}' for k, v in kwargs.items())
     if args_s and kwargs_s:
         return f'{args_s}, {kwargs_s}'
@@ -796,7 +792,7 @@ class Graph:
 
             Returns: the global name that should be used to reference 'obj' in generated source.
             """
-            if _is_from_torch(obj):
+            if _is_from_torch(obj) and name_hint != 'device':
                 # HACK: workaround for how torch custom ops are registered. We
                 # can't import them like normal modules so they must retain their
                 # fully qualified name.
@@ -807,7 +803,6 @@ class Graph:
             if global_name in globals_:
                 assert globals_[global_name] is obj
                 return global_name
-
             globals_[global_name] = obj
             return global_name
 

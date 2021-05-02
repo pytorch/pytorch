@@ -8,6 +8,7 @@ import torch.fx as fx
 from types import FunctionType, CodeType
 import functorch
 from functorch import wrap_key, WrapModule, jacrev, vmap, grad, pythonkey_trace, nnc_compile
+
 torch._C._debug_only_display_vmap_fallback_warnings(True)
 
 
@@ -65,8 +66,8 @@ model = Foo()
 def f(x):
     return torch.ones_like(x)
 inps = (torch.randn(1,1, 3,10,10, requires_grad=True),)
-fx_graph = pythonkey_trace(WrapModule(model, inps))
-print(fx_graph)
+fx_graph = pythonkey_trace(wrap_key(f, inps))
+print(fx_graph(*inps))
 exit(0)
 
 vmap_f = vmap(f, in_dims=(0,None))
