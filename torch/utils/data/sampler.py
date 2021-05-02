@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from typing import Iterator, Optional, Sequence, List, TypeVar, Generic, Sized
+from typing import Iterator, Optional, Sequence, List, TypeVar, Generic, Sized, Union
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -188,6 +188,33 @@ class WeightedRandomSampler(Sampler[int]):
 
     def __len__(self) -> int:
         return self.num_samples
+
+
+class SamplerWrapper(Sampler[int]):
+    r"""Wrapper for sampler to sample from desired data source.
+
+    Args:
+        data_source (sequence): a sequence of indices
+        sampler (Sampler and Sized): Sampler to be used
+
+    Example:
+        >>> list(SamplerWrapper([100, 102, 104, 106, 108], WeightedRandomSampler([5, 5, 3, 2, 1], 8)))
+        [100, 102, 104, 100, 104, 102, 108, 100]
+        >>> data_source = [-10, -4, 2]
+        >>> list(SamplerWrapper(data_source, RandomSampler(data_source)))
+        [2, -4, -10]
+    """
+    data_source: Sequence[int]
+
+    def __init__(self, data_source: Sequence[int], sampler: Union[Sampler, Sized]):
+        self.data_source = data_source
+        self.sampler = sampler
+
+    def __iter__(self) -> Iterator[int]:
+        return (self.data_source[i] for i in iter(self.sampler))
+
+    def __len__(self) -> int:
+        return len(self.sampler)
 
 
 class BatchSampler(Sampler[List[int]]):
