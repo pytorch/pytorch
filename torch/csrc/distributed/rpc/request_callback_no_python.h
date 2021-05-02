@@ -65,8 +65,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      const std::shared_ptr<JitFuture>& responseFuture) const;
 
   void processScriptRRefFetchCall(
       RpcCommandBase& rpc,
@@ -77,8 +76,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   virtual void processPythonRRefFetchCall(
       RpcCommandBase& rpc,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      const std::shared_ptr<JitFuture>& responseFuture) const;
 
   void processRRefUserDelete(
       RpcCommandBase& rpc,
@@ -95,8 +93,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   void processForwardAutogradReq(
       RpcCommandBase& rpc,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      const std::shared_ptr<JitFuture>& responseFuture) const;
 
   void processBackwardAutogradReq(
       RpcCommandBase& rpc,
@@ -118,15 +115,13 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       RpcCommandBase& rpc,
       const MessageType& messageType,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      const std::shared_ptr<JitFuture>& responseFuture) const;
 
   virtual void processRpcWithErrors(
       RpcCommandBase& rpc,
       const MessageType& messageType,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      const std::shared_ptr<JitFuture>& responseFuture) const;
 
   IValue handleError(
       const std::exception& e,
