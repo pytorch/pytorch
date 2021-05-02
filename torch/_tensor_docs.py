@@ -4379,7 +4379,7 @@ add_docstr_all('expand_dims_',
                r"""
 expand_dims_(dim) -> Tensor
 
-See :func:`torch.Tensor.unsqueeze_`
+In-place version of :meth:`~Tensor.expand_dims`
 """)
 
 add_docstr_all('sum_to_size',
