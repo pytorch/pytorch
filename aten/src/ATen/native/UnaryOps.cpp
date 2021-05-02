@@ -137,7 +137,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
 
-TORCH_IMPL_FUNC(logit_out) (const Tensor& self, c10::optional<double> eps, Tensor& result) {
+TORCH_IMPL_FUNC(logit_out) (const Tensor& self, c10::optional<double> eps, const Tensor& result) {
   logit_stub(device_type(), *this, Scalar(eps ? eps.value() : -1.0));
 }
 
