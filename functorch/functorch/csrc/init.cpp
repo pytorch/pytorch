@@ -5,6 +5,7 @@
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
 #include <functorch/csrc/VmapTransforms.h>
+#include <functorch/csrc/PythonKey.h>
 
 namespace at {
 namespace functorch {
@@ -183,4 +184,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("_unwrap_for_grad", &at::functorch::_unwrap_for_grad, "add batch dim");
   m.def("dlevel", &at::functorch::dlevel, "add batch dim");
   m.def("dump_tensor", &at::functorch::dump_tensor, "add batch dim");
+
+  m.def(
+      "addPythonKey",
+      &at::functorch::addPythonKey,
+      py::return_value_policy::copy); // not sure if needed - cargo cult
+  m.def("removePythonKey", &at::functorch::removePythonKey);
+  m.def("hasPythonKey", &at::functorch::hasPythonKey);
 }
