@@ -4,7 +4,8 @@ from . import _C
 from ._src.vmap import vmap
 from ._src.eager_transforms import grad, grad_and_value, vjp, jacrev
 from ._src.make_functional import make_functional, make_functional_with_buffers
-from ._src.python_key import wrap_key, WrapModule
+from ._src.python_key import wrap_key, WrapModule, PythonTensor, pythonkey_trace
+from ._src.nnc_compile import nnc_compile
 
 
 # Monkeypatching lol
