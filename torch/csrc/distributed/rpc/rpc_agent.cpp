@@ -58,7 +58,8 @@ std::shared_ptr<JitFuture> RpcAgent::sendWithRetries(
       retryOptions.rpcRetryDuration.count() >= 0,
       "rpcRetryDuration cannot be negative.");
 
-  auto originalFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+  auto originalFuture =
+      std::make_shared<JitFuture>(at::AnyClassType::get(), getDevices());
   steady_clock_time_point newTime =
       computeNewRpcRetryTime(retryOptions, /* retryCount */ 0);
   // Making a copy of the message so it can be retried after the first send.
@@ -291,6 +292,12 @@ std::unordered_map<c10::Device, c10::Device> RpcAgent::getDeviceMap(
     const WorkerInfo& /* unused */) const {
   // Default implementation has no device map.
   return {};
+}
+
+const std::vector<c10::Device>& RpcAgent::getDevices() const {
+  // By default the agent is CPU-only.
+  static const std::vector<c10::Device> noDevices = {};
+  return noDevices;
 }
 
 std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {
