@@ -56,14 +56,6 @@ class EventList(list):
         return self.table()
 
     def _remove_dup_nodes(self):
-        # ndist = 0
-        # for e in self:
-        #     if any(n in e.name for n in ["mpi", "gloo", "nccl"]):
-        #         ndist +=1
-        #         assert e.is_async
-        #     if e.is_async:
-        #         assert e.cpu_parent is None
-        # print(f" --- {ndist} dist --- ")
         while True:
             to_delete = []
             for idx in range(len(self)):
