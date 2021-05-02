@@ -2551,13 +2551,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           });
     } break;
 
-<<<<<<< HEAD
-    case aten::conv2d: {
-      return computeConv2d(v);
-    }
-=======
->>>>>>> 71dfb264c3 ([nnc] ported conv2d lowering over)
-
     default: {
       throw std::runtime_error("Unhandled node kind");
     }
