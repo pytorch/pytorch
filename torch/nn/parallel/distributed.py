@@ -958,11 +958,14 @@ class DistributedDataParallel(Module):
         modifications to the model or data loading is required.
 
         .. warning::
-            If the model or training loop this context manager is wrapepd around
+            If the model or training loop this context manager is wrapped around
             has additional distributed collective operations, such as
             ``SyncBatchNorm`` in the model's forward pass, then the flag
             ``throw_on_early_termination`` must be enabled. This is because this
             context manager is not aware of non-DDP collective communication.
+            This flag will cause all ranks to throw when any one rank
+            exhausts inputs, allowing these errors to be caught and recovered
+            from across all ranks.
 
         Args:
             divide_by_initial_world_size (bool): If ``True``, will divide
@@ -993,7 +996,8 @@ class DistributedDataParallel(Module):
                 of data. If ``False``, will continue training with a smaller
                 effective world size until all ranks are joined. Note that if
                 this flag is specified, then the flag
-                ``divide_by_initial_world_size`` would be ignored.
+                ``divide_by_initial_world_size`` would be ignored. Default
+                is ``False``. 
 
 
         Example::
