@@ -969,8 +969,6 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
         : remaining(srcs.size()),
           srcFutures(std::move(srcs)),
           asIvalue(srcFutures),
-          // No need to pass devices, because dstFuture won't directly contain
-          // the value, it will contain the srcFutures (which have no DataPtrs).
           dstFuture(make_intrusive<ivalue::Future>(asIvalue.type())) {}
     std::atomic<int32_t> remaining{0};
     List<intrusive_ptr<ivalue::Future>> srcFutures;
@@ -1011,23 +1009,21 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     return res;
   }
   TypePtr typePtr = srcs.get(0)->elementType();
-  const std::vector<c10::Device>& devices = srcs.get(0)->devices();
   for (const auto i : c10::irange(srcs.size())) {
     if (srcs.get(i)->completed()) {
       return srcs.get(i);
     }
     TORCH_CHECK(i == 0 || (*typePtr == *srcs.get(i)->elementType()));
-    TORCH_CHECK(i == 0 || (devices == srcs.get(i)->devices()));
   }
   struct Ctx {
-    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs, TypePtr typePtr, std::vector<c10::Device> devices)
+    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs, TypePtr typePtr)
         : srcFutures(std::move(srcs)),
-          dstFuture(make_intrusive<ivalue::Future>(typePtr, std::move(devices))) {}
+          dstFuture(make_intrusive<ivalue::Future>(typePtr)) {}
     std::atomic<bool> done{false};
     List<intrusive_ptr<ivalue::Future>> srcFutures;
     intrusive_ptr<ivalue::Future> dstFuture;
   };
-  auto ctx = std::make_shared<Ctx>(std::move(srcs), typePtr, devices);
+  auto ctx = std::make_shared<Ctx>(std::move(srcs), typePtr);
   std::function<void(size_t)> func = [ctx](size_t index) {
     if (!ctx->done.exchange(true)) {
       intrusive_ptr<ivalue::Future> dst = ctx->dstFuture;
