@@ -501,6 +501,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL(ADD_NS(std), "std", Tensor (const Tensor &, bool), fp32)
   KERNEL(ADD_NS(std), "std.dim", Tensor (const Tensor &, IntArrayRef, bool, bool), fp32)
   KERNEL(ADD_NS(instance_norm), "instance_norm", Tensor (const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, const c10::optional<Tensor>&, const c10::optional<Tensor>&, bool, double, double, bool), fp32)
+  KERNEL(ADD_NS(fake_quantize_per_tensor_affine), "fake_quantize_per_tensor_affine", Tensor (const Tensor &, double, int64_t, int64_t, int64_t), fp32)
 
   // promote
   KERNEL(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote_user_defined_dtype)
