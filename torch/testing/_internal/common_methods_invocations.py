@@ -158,6 +158,10 @@ class OpInfo(object):
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
+                 backward_dtypes=None,  # backward dtypes this function is expected to work with
+                 backward_dtypesIfCPU=None,  # backward dtypes this function is expected to work with on CPU
+                 backward_dtypesIfCUDA=None,  # backward dtypes this function is expected to work with on CUDA
+                 backward_dtypesIfROCM=None,  # backward dtypes this function is expected to work with on ROCM
                  default_test_dtypes=None,  # dtypes to test with by default. Gets intersected
                                             # with the dtypes support on the tested device
                  assert_autodiffed=False,  # if a op's aten::node is expected to be symbolically autodiffed
@@ -179,8 +183,6 @@ class OpInfo(object):
                  supports_autograd=True,  # support for autograd
                  supports_gradgrad=True,  # support second order gradients (this value is ignored if supports_autograd=False)
                  supports_inplace_autograd=None,  # whether the operation supports inplace autograd
-                                                  # defaults to supports_autograd's value
-                 supports_complex_autograd=None,  # whether the operation supports complex autograd
                                                   # defaults to supports_autograd's value
                  supports_sparse=False,  # whether the op supports sparse inputs
                  gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs),  # wrapper function for gradcheck
@@ -204,6 +206,15 @@ class OpInfo(object):
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
         self.dtypesIfCUDA = set(dtypesIfCUDA) if dtypesIfCUDA is not None else self.dtypes
         self.dtypesIfROCM = set(dtypesIfROCM) if dtypesIfROCM is not None else self.dtypesIfCUDA
+
+        self.backward_dtypes = set(backward_dtypes) if backward_dtypes is not None else self.dtypes
+        self.backward_dtypesIfCPU = set(backward_dtypesIfCPU) if backward_dtypesIfCPU is not None else (
+            self.dtypesIfCPU if dtypesIfCPU is not None else self.backward_dtypes)
+        self.backward_dtypesIfCUDA = set(backward_dtypesIfCUDA) if backward_dtypesIfCUDA is not None else (
+            self.dtypesIfCUDA if dtypesIfCUDA is not None else self.backward_dtypes)
+        self.backward_dtypesIfROCM = set(backward_dtypesIfROCM) if backward_dtypesIfROCM is not None else (
+            self.dtypesIfROCM if dtypesIfROCM is not None else self.backward_dtypesIfCUDA)
+
         self._default_test_dtypes = set(default_test_dtypes) if default_test_dtypes is not None else None
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
@@ -234,9 +245,6 @@ class OpInfo(object):
         self.supports_inplace_autograd = supports_inplace_autograd
         if self.supports_inplace_autograd is None:
             self.supports_inplace_autograd = supports_autograd
-        self.supports_complex_autograd = supports_complex_autograd
-        if self.supports_complex_autograd is None:
-            self.supports_complex_autograd = supports_autograd
 
         self.gradcheck_wrapper = gradcheck_wrapper
         self.supports_gradgrad = supports_gradgrad
@@ -305,6 +313,24 @@ class OpInfo(object):
         else:
             return self.dtypes
 
+    def supported_backward_dtypes(self, device_type):
+        if device_type == 'cpu':
+            return self.backward_dtypesIfCPU
+        if device_type == 'cuda':
+            return self.backward_dtypesIfROCM if TEST_WITH_ROCM else self.backward_dtypesIfCUDA
+        else:
+            return self.backward_dtypes
+
+    def supports_complex_autograd(self, device_type):
+        if device_type == 'cpu':
+            return any(dtype.is_complex for dtype in self.backward_dtypesIfCPU)
+        if device_type == 'cuda':
+            if TEST_WITH_ROCM:
+                return any(dtype.is_complex for dtype in self.backward_dtypesIfROCM)
+            else:
+                return any(dtype.is_complex for dtype in self.backward_dtypesIfCUDA)
+        else:
+            return any(dtype.is_complex for dtype in self.backward_dtypes)
 
     def supports_dtype(self, dtype, device_type):
         return dtype in self.supported_dtypes(device_type)
@@ -888,6 +914,40 @@ def sample_inputs_xlogy(self, device, dtype, requires_grad, **kwargs):
             )
         ),
     )
+
+
+def sample_inputs_xlog1py(self, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def generator():
+        # same shape
+        yield SampleInput(make_arg((S, S)), args=(make_arg((S, S), low=-1),))
+        # rhs broadcast
+        yield SampleInput(make_arg((S, S)), args=(make_arg((S,), low=-1),))
+        # all zero `x`
+        with torch.no_grad():
+            x = make_arg((S, S))
+            x.fill_(0)
+        yield SampleInput(x, args=(make_arg((S, S), low=-1),))
+
+        # randomly zero-masked `x`
+        x = make_arg((S, S))
+        y = make_arg((S, S), low=-1)
+        with torch.no_grad():
+            x[torch.rand(x.shape) > 0.5] = 0
+        yield SampleInput(x, args=(y,))
+
+        # Scalar x
+        # `input` has to be a tensor
+        # yield SampleInput(0, args=(make_arg((S, S), low=-1),))
+        # yield SampleInput(2.1, args=(make_arg((S, S), low=-1),))
+
+        # Scalar y
+        yield SampleInput(make_arg((S, S)), args=(-0.5,))
+        yield SampleInput(make_arg((S, S)), args=(1.2,))
+
+    return list(generator())
+
 
 def sample_inputs_logsumexp(self, device, dtype, requires_grad):
     inputs = (
@@ -2466,11 +2526,8 @@ def sample_inputs_linalg_qr(op_info, device, dtype, requires_grad=False, **kwarg
     This function generates input for torch.linalg.qr
     The input is generated as the itertools.product of 'batches' and 'ns'.
     """
-    # TODO: add 0 to 'ns' and (0, ) to 'batches'
-    # Currently tests fail most probably because of
-    # https://github.com/pytorch/pytorch/issues/50576
-    batches = [(), (2, ), (1, 1)]
-    ns = [2, 5]
+    batches = [(), (0,), (2, ), (1, 1)]
+    ns = [5, 2, 0]
     out = []
     for batch, (m, n) in product(batches, product(ns, ns)):
         a = torch.randn(*batch, m, n, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -2817,6 +2874,67 @@ def sample_inputs_polygamma(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(make_arg(shape), args=(n,))
 
     return list(generator())
+
+
+def sample_inputs_mvlgamma(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    tensor_shapes = ((S, S), ())
+    ns = (1, 2, 3, 4, 5)
+
+    # Since the accepted lower bound for input
+    # to mvlgamma depends on `p` argument,
+    # the following function computes the lower bound
+    # which we pass to `make_tensor`.
+    def compute_min_val(p):
+        return (p - 1.) / 2
+
+    def generator():
+        for shape, n in product(tensor_shapes, ns):
+            min_val = compute_min_val(n)
+            yield SampleInput(make_arg(shape, low=min_val), args=(n,))
+
+    return list(generator())
+
+
+# Since `mvlgamma` has multiple entries,
+# there are multiple common skips for the additional
+# entries. Following function is a helper to that end.
+def skips_mvlgamma(skip_redundant=False):
+    skips = (
+        # outside domain values are hard error for mvlgamma op.
+        SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
+    )
+    if not skip_redundant:
+        # Redundant tests
+        skips = skips + (  # type: ignore[assignment]
+            SkipInfo('TestGradients'),
+            SkipInfo('TestOpInfo'),
+            SkipInfo('TestCommon'),
+        )
+    return skips
+
+
+# To test reference numerics against multiple values of argument `p`,
+# we make multiple OpInfo entries with each entry corresponding to different value of p.
+# We run the op tests from test_ops.py only for `p=1` to avoid redundancy in testing.
+# Class `MvlGammaInfo` already contains the basic information related to the operator,
+# it only takes arguments like `domain`, `skips` and `sample_kwargs`, which
+# differ between the entries.
+class MvlGammaInfo(UnaryUfuncInfo):
+    def __init__(self, variant_test_name, domain, skips, sample_kwargs):
+        super(MvlGammaInfo, self).__init__(
+            'mvlgamma',
+            ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
+            variant_test_name=variant_test_name,
+            domain=domain,
+            decorators=(precisionOverride({torch.float16: 5e-2}),),
+            dtypes=floating_types(),
+            dtypesIfCPU=floating_types(),
+            dtypesIfCUDA=floating_types_and(torch.half),
+            sample_inputs_func=sample_inputs_mvlgamma,
+            supports_out=False,
+            skips=skips,
+            sample_kwargs=sample_kwargs)
 
 
 def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
@@ -3296,6 +3414,14 @@ def reference_polygamma(x, n):
     np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
     return scipy.special.polygamma(n, x).astype(np_dtype)
 
+
+def reference_mvlgamma(x, d):
+    if x.dtype == np.float16:
+        return scipy.special.multigammaln(x, d).astype(np.float16)
+
+    return scipy.special.multigammaln(x, d)
+
+
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     """Gradcheck wrapper for functions that take Hermitian matrices as input.
 
@@ -3347,14 +3473,14 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   # "rsqrt_cpu" not implemented for 'BFloat16'
+                   backward_dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    assert_autodiffed=True,
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
                    safe_casts_outputs=True,
                    skips=(
-                       # "rsqrt_cpu" not implemented for 'BFloat16'
-                       SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestGradients', 'test_fn_grad',
@@ -3372,12 +3498,12 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   # "rsqrt_cuda" not implemented for 'BFloat16'
+                   backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    supports_inplace_autograd=False,
                    skips=(
-                       # "rsqrt_cuda" not implemented for 'BFloat16'
-                       SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -3518,12 +3644,11 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           backward_dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+           backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
            supports_inplace_autograd=False,
            skips=(
-               # "addmv_impl_cpu" not implemented for 'Half'
-               # at::cuda::blas::gemv: not implemented for N3c108BFloat16E
-               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16, torch.bfloat16)),
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),),
@@ -3570,10 +3695,10 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   # "rsqrt_cpu" not implemented for 'BFloat16'
+                   backward_dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    assert_autodiffed=True,
                    skips=(
-                       # "rsqrt_cpu" not implemented for 'BFloat16'
-                       SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -3592,12 +3717,12 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   # "rsqrt_cuda" not implemented for 'BFloat16'
+                   backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    supports_inplace_autograd=False,
                    skips=(
-                       # "rsqrt_cuda" not implemented for 'BFloat16'
-                       SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -3699,9 +3824,9 @@ op_db: List[OpInfo] = [
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('cholesky_inverse',
            dtypes=floating_and_complex_types(),
+           backward_dtypes=floating_types(),
            # TODO: RuntimeError: cholesky_inverse does not support automatic differentiation for outputs
            # with complex dtype.
-           supports_complex_autograd=False,
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky_inverse,
            gradcheck_wrapper=gradcheck_wrapper_triangular_input,
@@ -3787,13 +3912,13 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   # "sin_cuda" not implemented for 'BFloat16'
+                   backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    assert_autodiffed=True,
                    handles_large_floats=False,
                    safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
-                       # "sin_cuda" not implemented for 'BFloat16'
-                       SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cpu',
@@ -4133,10 +4258,11 @@ op_db: List[OpInfo] = [
            op=torch.linalg.det,
            aliases=('det', ),
            dtypes=floating_and_complex_types(),
+           # det doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/57358
+           backward_dtypes=floating_types(),
            aten_name='linalg_det',
            sample_inputs_func=sample_inputs_linalg_det,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-           supports_complex_autograd=False,
            supports_inplace_autograd=False,
            skips=(
                # The following tests fail only on ROCm. This is probably
@@ -4159,7 +4285,19 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
+           ),
+    OpInfo('linalg.cholesky_ex',
+           aten_name='linalg_cholesky_ex',
+           dtypes=floating_and_complex_types(),
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_linalg_cholesky,
+           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
@@ -4251,6 +4389,9 @@ op_db: List[OpInfo] = [
            aten_name='linalg_qr',
            op=torch.linalg.qr,
            dtypes=floating_and_complex_types(),
+           # batched gradients do not work for empty inputs
+           # https://github.com/pytorch/pytorch/issues/50743#issuecomment-767376085
+           check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_qr,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -4507,6 +4648,22 @@ op_db: List[OpInfo] = [
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_mode,),
+    MvlGammaInfo(variant_test_name='mvlgamma_p_1',
+                 domain=(1e-4, float('inf')),
+                 skips=skips_mvlgamma(),
+                 sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
+    MvlGammaInfo(variant_test_name='mvlgamma_p_3',
+                 domain=(1.1, float('inf')),
+                 skips=skips_mvlgamma(skip_redundant=True) + (
+                     SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
+                 ),
+                 sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
+    MvlGammaInfo(variant_test_name='mvlgamma_p_5',
+                 domain=(2.1, float('inf')),
+                 skips=skips_mvlgamma(skip_redundant=True) + (
+                     SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
+                 ),
+                 sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
     OpInfo('ne',
            aliases=('not_equal',),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -4522,11 +4679,10 @@ op_db: List[OpInfo] = [
     OpInfo('dist',
            op=torch.dist,
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           # "pow" not implemented for 'BFloat16' or 'half'
+           backward_dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_dist,
            skips=(
-               # "pow" not implemented for 'BFloat16' or 'half'
-               SkipInfo('TestOpInfo', 'test_supported_backward',
-                        dtypes=(torch.bfloat16, torch.float16)),
                # dist does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            )),
@@ -4543,23 +4699,19 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_permute),
     OpInfo('pow',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
+           # Due to AVX2 curently not being fully supported for Float16, log_vml_cpu can't be enabled
+           # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
+           # unsupported on CPU.
+           backward_dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_pow,
            supports_inplace_autograd=False,
-           assert_autodiffed=True,
-           skips=(
-               # Due to AVX2 curently not being fully supported for Float16, log_vml_cpu can't be enabled
-               # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
-               # unsupported on CPU.
-               SkipInfo('TestOpInfo', 'test_supported_backward',
-                        device_type='cpu', dtypes=[torch.float16]),
-           )
-           ),
+           assert_autodiffed=True),
     OpInfo('prod',
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           # "cumprod_cuda" not implemented for 'BFloat16'
+           backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16),
            skips=(
-               # "cumprod_cuda" not implemented for 'BFloat16'
-               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
                # prod does not support the (Tensor, *, out) overload
                SkipInfo('TestCommon', 'test_out',
                         dtypes=[torch.float32]),
@@ -4570,6 +4722,9 @@ op_db: List[OpInfo] = [
            op=torch.qr,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_qr,
+           # batched gradients do not work for empty inputs
+           # https://github.com/pytorch/pytorch/issues/50743#issuecomment-767376085
+           check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # cuda gradchecks are slow
@@ -4733,10 +4888,11 @@ op_db: List[OpInfo] = [
     OpInfo('std',
            dtypes=floating_types_and(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           # std doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/57358
+           backward_dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: std does support out in some signatures
            supports_out=False,
-           supports_complex_autograd=False,
            # std has only partial support for complex and half (#51127)
            skips=(SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                            dtypes=[torch.half, torch.complex64, torch.complex128]),),
@@ -4775,12 +4931,11 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   # "tanh_backward_cpu" not implemented for 'BFloat16'
+                   backward_dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    assert_autodiffed=True,
                    safe_casts_outputs=True,
                    skips=(
-                       # "tanh_backward_cpu" not implemented for 'BFloat16'
-                       SkipInfo('TestOpInfo', 'test_supported_backward',
-                                dtypes=(torch.bfloat16,)),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
@@ -5071,6 +5226,7 @@ op_db: List[OpInfo] = [
     OpInfo('polar',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_polar),
+    # TODO(@kshitij12345): Refactor similar to `mvlgamma` entries.
     # To test reference numerics against multiple values of argument `n`,
     # we make multiple OpInfo entries with each entry corresponding to different value of n (currently 0 to 4).
     # We run the op tests from test_ops.py only for `n=0` to avoid redundancy in testing.
@@ -5355,10 +5511,11 @@ op_db: List[OpInfo] = [
     OpInfo('var',
            dtypes=floating_types_and(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           # var doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/57358
+           backward_dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: revisit, some var signatures do support out (see std, too)
            supports_out=False,
-           supports_complex_autograd=False,
            # var has only partial support for complex and half (#51127)
            skips=(SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                            dtypes=[torch.half, torch.complex64, torch.complex128]),),
@@ -5371,10 +5528,18 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=True,
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_xlogy),
+    OpInfo('special.xlog1py',
+           aten_name='special_xlog1py',
+           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+           safe_casts_outputs=True,
+           skips=(
+               SkipInfo('TestOpInfo', 'test_supported_backward',
+                        device_type='cpu', dtypes=[torch.float16]),
+           ),
+           sample_inputs_func=sample_inputs_xlog1py),
     OpInfo('logsumexp',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
-           supports_complex_autograd=False,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_logsumexp),
     OpInfo('trace',
@@ -5447,9 +5612,11 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   # sigmoid doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/48552
+                   backward_dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                   backward_dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16),
                    safe_casts_outputs=True,
-                   assert_autodiffed=True,
-                   supports_complex_autograd=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
+                   assert_autodiffed=True),
     UnaryUfuncInfo('digamma',
                    ref=scipy.special.digamma if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 5e-1}),),
@@ -5519,9 +5686,9 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   # "digamma" not implemented for 'BFloat16'
+                   backward_dtypesIfCPU=all_types_and(torch.bool),
                    skips=(
-                       # "digamma" not implemented for 'BFloat16'
-                       SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
                        # Reference: https://github.com/pytorch/pytorch/pull/50140#discussion_r552615345
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 dtypes=[torch.bfloat16]),
@@ -5794,10 +5961,6 @@ def method_tests():
         ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
         ('renorm', (S, S, S), (inf, 2, 0.5), 'norm_inf'),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
-        ('mvlgamma', torch.empty(S,).uniform_(0.5, 1), [1], "p=1"),
-        ('mvlgamma', torch.empty(S,).uniform_(1, 2), [2], "p=2"),
-        ('mvlgamma', torch.empty(S, S).uniform_(1.5, 3), [3], "p=3"),
-        ('mvlgamma', torch.empty(S, S).uniform_(2.5, 5), [5], "p=5"),
         ('zero_', (S, S, S), NO_ARGS),
         ('zero_', (), NO_ARGS, 'scalar'),
         ('norm', (S, S), (), 'default'),
