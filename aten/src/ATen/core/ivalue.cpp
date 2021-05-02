@@ -1034,7 +1034,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
       if (src->hasError()) {
         dst->setError(src->exception_ptr());
       } else {
-        dst->markCompleted(src->constValue());
+        dst->markCompleted(src->constValue(), src->dataPtrs());
       }
     }
   };
