@@ -145,6 +145,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               &RpcAgent::getWorkerInfos,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_get_device_map",
+              &RpcAgent::getDeviceMap,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "get_debug_info",
               &RpcAgent::getDebugInfo,
               py::call_guard<py::gil_scoped_release>())
@@ -223,14 +227,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               >>> rpc.rpc_sync("worker1", f, args=(rref,))
           )")
           .def(
-              py::init<
-                  const py::object&,
-                  const py::object&,
-                  std::vector<c10::DeviceIndex>>(),
+              py::init<const py::object&, const py::object&>(),
               py::arg("value"),
-              py::arg("type_hint") = py::none(),
-              py::kw_only(),
-              py::arg("devices") = std::vector<c10::DeviceIndex>())
+              py::arg("type_hint") = py::none())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
@@ -601,8 +600,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_device_map",
-          (std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>(
-              ProcessGroupAgent::*)(const WorkerInfo& dest) const) &
+          (std::unordered_map<c10::Device, c10::Device>(ProcessGroupAgent::*)(
+              const WorkerInfo& dst) const) &
               ProcessGroupAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -717,7 +716,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_device_map",
-          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dest) const) &
+          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
               TensorPipeAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(

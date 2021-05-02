@@ -856,17 +856,20 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                          messageId,
                          requestMessage{std::move(requestMessage)},
                          ctx{std::move(ctx)}]() mutable {
-          // create guards again as this function runs on a different thread
-          c10::MultiStreamGuard guard(ctx->getReservedStreams());
           VLOG(1) << "RPC agent for " << workerInfo_.name_
                   << " is running request #" << messageId << " from "
                   << pipe->getRemoteName() << " in thread pool";
 
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
-            // The `ctx` needs to be propagated to `process***Call` methods
-            // to synchronize CUDA streams there to make sure that we fetch
-            // the correct value from `to_here()` call.
+            // Instead of creating a MultiStreamGuard here, the ctx is passed
+            // to the callback and the MultiStreamGuard is created there,
+            // because subsequent processing can switch threads due to 1)
+            // waiting for RRef arguments to become ready 2) async_execution.
+            // Besides, the `ctx` also needs to be propagated to
+            // `process***Call` methods to synchronize CUDA streams there
+            // to make sure that we fetch the correct value from `to_here()`
+            // call.
             futureResponseMessage = cb_->operator()(requestMessage, ctx);
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
@@ -1441,12 +1444,16 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
   }
 }
 
-DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dest) const {
-  auto it = opts_.deviceMaps.find(dest.name_);
+DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dst) const {
+  auto it = opts_.deviceMaps.find(dst.name_);
   if (it == opts_.deviceMaps.end()) {
     return {};
   }
   return it->second;
+}
+
+const std::vector<c10::Device>& TensorPipeAgent::getDevices() const {
+  return devices_;
 }
 
 size_t TensorPipeAgent::timeoutMapSize() {
