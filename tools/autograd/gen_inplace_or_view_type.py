@@ -122,7 +122,7 @@ m.impl("${unqual_operator_name_with_overload}",
 
 INPLACE_REDISPATCH = CodeTemplate("""\
 {
-  at::AutoDispatchBelowInplaceOrView guard;
+  at::AutoDispatchBelowADInplaceOrView guard;
   at::redispatch::${api_name}(${unpacked_args});
 }
 """)
@@ -133,7 +133,7 @@ ${return_values} = ${rhs_value};
 
 VIEW_REDISPATCH = CodeTemplate("""\
 ${assign_return_values} ([&]() {
-  at::AutoDispatchBelowInplaceOrView guard;
+  at::AutoDispatchBelowADInplaceOrView guard;
   return at::redispatch::${api_name}(${unpacked_args});
 })();
 """)
@@ -330,9 +330,9 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    # code-generated InplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
+    # code-generated ADInplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
     # See Note [Plumbing Keys Through The Dispatcher] for details.
-    dispatch_key_set = 'ks & c10::after_InplaceOrView_keyset'
+    dispatch_key_set = 'ks & c10::after_ADInplaceOrView_keyset'
     redispatch_args = ', '.join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
@@ -395,7 +395,7 @@ def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityI
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,
         type_wrapper_name=type_wrapper_name(f),
-        class_type='InplaceOrView',
+        class_type='ADInplaceOrView',
     )
 
 def use_derived(fn: NativeFunctionWithDifferentiabilityInfo) -> bool:
@@ -409,8 +409,8 @@ def gen_inplace_or_view_type_shard(
 
     filtered_fns_with_infos = list(filter(use_derived, fns_with_infos))
 
-    fm.write_with_template('InplaceOrViewType%s.cpp' % suffix, 'InplaceOrViewType.cpp', lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/InplaceOrViewType.cpp',
+    fm.write_with_template('ADInplaceOrViewType%s.cpp' % suffix, 'ADInplaceOrViewType.cpp', lambda: {
+        'generated_comment': f'@generated from {fm.template_dir}/ADInplaceOrViewType.cpp',
         'inplace_or_view_method_definitions': list(mapMaybe(inplace_or_view_method_definition, filtered_fns_with_infos)),
         'inplace_or_view_wrapper_registrations': list(mapMaybe(inplace_or_view_method_registration, filtered_fns_with_infos)),
     })

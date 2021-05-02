@@ -143,11 +143,11 @@ enum class DispatchKey : uint8_t {
 
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
-  // be directly after InplaceOrView and all of the autograd keys.
+  // be directly after ADInplaceOrView and all of the autograd keys.
   FuncTorchDynamicLayerBackMode,
 
-  // Note [InplaceOrView key]
-  // InplaceOrView key is used by inplace or view ops to register a kernel
+  // Note [ADInplaceOrView key]
+  // ADInplaceOrView key is used by inplace or view ops to register a kernel
   // that does additional setup for future autograd computation.
   //
   // 1. For inplace ops this kernel does version bump
@@ -165,12 +165,12 @@ enum class DispatchKey : uint8_t {
   // torch::Tensor my_functional_op(...) {
   //   {
   //     // Note for every op in VariableType, you need to go through
-  //     // `AutoDispatchBelowInplaceOrView` guard exactly once to add the
+  //     // `AutoDispatchBelowADInplaceOrView` guard exactly once to add the
   //     // key to TLS excluded set. If you don't go through it at all,
   //     // inplace/view ops called through `at::` inside your backend
-  //     // kernel will dispatch to InplaceOrView kernels and do a lot
+  //     // kernel will dispatch to ADInplaceOrView kernels and do a lot
   //     // of extra work.
-  //     at::AutoDispatchBelowInplaceOrView guard;
+  //     at::AutoDispatchBelowADInplaceOrView guard;
   //     at::redispatch::my_functional_op(...);
   //   }
   // }
@@ -178,10 +178,10 @@ enum class DispatchKey : uint8_t {
   // for all ops and it's non-trivial overhead at model level(a few percents).
   // Thus our current approach takes advantage of the fact every kernel go
   // through VariableType kernel first and pulls the
-  // `at::AutoDispatchBelowInplaceOrView` guard of functional ops
+  // `at::AutoDispatchBelowADInplaceOrView` guard of functional ops
   // up to the `VariableType` kernel. Thus we only add the extra dispatch
   // to view/inplace ops to minimize its perf impact to real models.
-  InplaceOrView,
+  ADInplaceOrView,
 
   // Note [Alias Dispatch Key : Autograd]
   // All backends are oblivious to autograd; autograd is handled as a
