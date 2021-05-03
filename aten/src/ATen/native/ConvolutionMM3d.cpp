@@ -67,6 +67,7 @@ static inline void slow_conv3d_shape_check(
   const int64_t dim_width = 4;
 
   // Allow for empty batch size but not other dimensions
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   bool valid_empty = ndim == 5 && input.size(dim_batch) == 0 &&
       input.size(dim_planes) != 0 && input.size(dim_depth) != 0 &&
       input.size(dim_height) != 0 && input.size(dim_width) != 0;
@@ -155,6 +156,7 @@ static inline void slow_conv3d_shape_check(
 
 static Tensor view_weight_2d(const Tensor& weight_) {
   Tensor weight = weight_.contiguous();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (weight.dim() == 5) {
     const int64_t s1 = weight.size(0);
     const int64_t s2 =
@@ -370,7 +372,7 @@ void slow_conv3d_backward_out_cpu_template(
   const int64_t batch_size = input.size(0);
   at::parallel_for(
       0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-        AutoDispatchBelowInplaceOrView non_variable_type_mode;
+        AutoDispatchBelowADInplaceOrView non_variable_type_mode;
         for (int64_t t = start; t < end; t++) {
           Tensor grad_input_t = grad_input[t];
           Tensor grad_output_t = grad_output_contiguous[t];
@@ -564,6 +566,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(const Tensor& 
   const Tensor input = self.contiguous();
   const Tensor weight_2d = view_weight_2d(weight);
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
   const int64_t ndim = input.dim();
   const int64_t dim_planes = 1;
   const int64_t dim_depth = 2;
@@ -597,7 +600,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(const Tensor& 
 
   at::parallel_for(
       0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-        AutoDispatchBelowInplaceOrView non_variable_type_mode;
+        AutoDispatchBelowADInplaceOrView non_variable_type_mode;
         for (int64_t t = start; t < end; t++) {
           Tensor input_t = input[t];
           Tensor output_t = output[t];
@@ -678,6 +681,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(const Tensor&
         self,
         weight,
         finput,
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<Tensor&>(
             fgrad_input), // cast away auto-generated const of buffer
         kernel_size,
