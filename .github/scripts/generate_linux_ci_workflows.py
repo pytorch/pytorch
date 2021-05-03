@@ -33,6 +33,7 @@ class PyTorchLinuxWorkflow:
             f"workflows/{self.build_environment}.yml"
         )
         with open(output_file_path, "w") as output_file:
+            output_file.writelines(["# @generated DO NOT EDIT MANUALLY\n"])
             output_file.write(
                 workflow_template.render(
                     build_environment=self.build_environment,
@@ -52,6 +53,7 @@ WORKFLOWS = [
     PyTorchLinuxWorkflow(
         build_environment="pytorch-linux-xenial-py3.6-gcc5.4",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        on_pull_request=True,
     ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4",
