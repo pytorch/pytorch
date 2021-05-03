@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 #include <c10/util/Optional.h>
@@ -631,13 +632,20 @@ static void eraseListUnpack(Node* n, int opset_version) {
   }
 
   if (n->kind() == prim::ListUnpack) {
+    if (opset_version < OPSET_VERSION_11) {
+      // onnx::SequenceAt was introduced in onnx opset version 11
+      throw std::runtime_error(
+          "Unsupported: ONNX export of prim::ListUnpack in opset " +
+          c10::to_string(opset_version) + ". Please try opset version 11.");
+    }
+
     auto g = n->owningGraph();
     for (size_t i = 0; i < n->outputs().size(); ++i) {
-      Node* seq_idx_n = g->create(onnx::Constant, 1);
+      auto seq_idx_n = g->create(onnx::Constant, 1);
       seq_idx_n->t_(attr::value, at::scalar_to_tensor(at::Scalar(int64_t(i))));
       seq_idx_n->insertBefore(n);
 
-      Node* seq_at_n = g->create(onnx::SequenceAt, 1);
+      auto seq_at_n = g->create(onnx::SequenceAt, 1);
       seq_at_n->addInput(n->input());
       seq_at_n->addInput(seq_idx_n->output());
       seq_at_n->output()->setType(n->output(i)->type());
@@ -648,11 +656,6 @@ static void eraseListUnpack(Node* n, int opset_version) {
 }
 
 static void eraseListUnpack(Block* block, int opset_version) {
-  if (opset_version < OPSET_VERSION_11) {
-    // onnx::SequenceAt was introduced in onnx opset version 11
-    return;
-  }
-
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* n = *it;
@@ -953,6 +956,10 @@ void PeepholeOptimizeONNX(
   fuseListConstructListUnpack(graph->block());
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
+  EliminateDeadCode(
+      graph->block(),
+      true,
+      DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
   eraseListUnpack(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
   removeSequenceSplitConcat(graph->block());
