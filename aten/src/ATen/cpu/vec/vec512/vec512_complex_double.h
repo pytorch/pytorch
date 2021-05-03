@@ -54,19 +54,35 @@ public:
       case 0:
         return a;
       case 1:
-        return _mm512_mask_blend_pd(0x03, a.values, b.values);
+        return _mm512_mask_blend_pd(0x03, a.values, b.values); //b0000 0001 = b0000 0011
       case 2:
-        return _mm512_mask_blend_pd(0x0C, a.values, b.values);
+        return _mm512_mask_blend_pd(0x0C, a.values, b.values); //b0000 0010 = b0000 1100
       case 3:
-        return _mm512_mask_blend_pd(0X0F, a.values, b.values);
+        return _mm512_mask_blend_pd(0x0F, a.values, b.values); //b0000 0011 = b0000 1111
       case 4:
-        return _mm512_mask_blend_pd(0x30, a.values, b.values);
+        return _mm512_mask_blend_pd(0x30, a.values, b.values); //b0000 0100 = b0011 0000
       case 5:
-        return _mm512_mask_blend_pd(0x33, a.values, b.values);
+        return _mm512_mask_blend_pd(0x33, a.values, b.values); //b0000 0101 = b0011 0011
       case 6:
-        return _mm512_mask_blend_pd(0X3C, a.values, b.values);
+        return _mm512_mask_blend_pd(0x3C, a.values, b.values); //b0000 0110 = b0011 1100
       case 7:
-        return _mm512_mask_blend_pd(0x3F, a.values, b.values);
+        return _mm512_mask_blend_pd(0x3F, a.values, b.values); //b0000 0111 = b0011 1111
+      case 8:
+        return _mm512_mask_blend_pd(0xC0, a.values, b.values); //b0000 1000 = b1100 0000
+      case 9:
+        return _mm512_mask_blend_pd(0xC3, a.values, b.values); //b0000 1001 = b1100 0011
+      case 10:
+        return _mm512_mask_blend_pd(0xCC, a.values, b.values); //b0000 1010 = b1100 1100
+      case 11:
+        return _mm512_mask_blend_pd(0xCF, a.values, b.values); //b0000 1011 = b1100 1111
+      case 12:
+        return _mm512_mask_blend_pd(0xF0, a.values, b.values); //b0000 1100 = b1111 0000
+      case 13:
+        return _mm512_mask_blend_pd(0xF3, a.values, b.values); //b0000 1101 = b1111 0011
+      case 14:
+        return _mm512_mask_blend_pd(0xFC, a.values, b.values); //b0000 1110 = b1111 1100
+      case 15:
+        return _mm512_mask_blend_pd(0xFF, a.values, b.values); //b0000 1111 = b1111 1111
     }
     return b;
   }
@@ -75,16 +91,17 @@ public:
                                                 const Vectorize<c10::complex<double>>& mask) {
     // convert c10::complex<V> index mask to V index mask: xy -> xxyy
     auto mask_ = _mm512_unpacklo_pd(mask.values, mask.values);
-    return _mm512_permutex2var_pd(a.values, _mm512_castpd_si512(mask_), b.values);
-
+    auto all_ones = _mm512_set1_epi64(0xFFFFFFFFFFFFFFFF);
+    auto mmask = _mm512_cmp_epi64_mask(_mm512_castpd_si512(mask_), all_ones, _MM_CMPINT_EQ);
+    return _mm512_mask_blend_pd(mmask, a.values, b.values);
   }
   template<typename step_t>
   static Vectorize<c10::complex<double>> arange(c10::complex<double> base = 0., 
                                                 step_t step = static_cast<step_t>(1)) {
     return Vectorize<c10::complex<double>>(base,
+                                           base + c10::complex<double>(1)*step,
                                            base + c10::complex<double>(2)*step,
-                                           base + c10::complex<double>(3)*step,
-                                           base + c10::complex<double>(4)*step);
+                                           base + c10::complex<double>(3)*step);
   }
   static Vectorize<c10::complex<double>> set(const Vectorize<c10::complex<double>>& a,
                                              const Vectorize<c10::complex<double>>& b,
@@ -178,7 +195,7 @@ public:
     return _mm512_sqrt_pd(abs_2_());                // abs     abs
   }
   Vectorize<c10::complex<double>> abs() const {
-    const __m512d real_mask = _mm512_castsi512_pd(_mm512_set_epi64(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+    const __m512d real_mask = _mm512_castsi512_pd(_mm512_setr_epi64(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
                                                                     0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
                                                                     0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
                                                                     0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
@@ -186,7 +203,7 @@ public:
   }
   __m512d angle_() const {
     //angle = atan2(b/a)
-    auto b_a = _mm512_permute_pd(values, 0x05);     // b        a
+    auto b_a = _mm512_permute_pd(values, 0x55);     // b        a
     return Sleef_atan2d8_u10(values, b_a);          // 90-angle angle
   }
   Vectorize<c10::complex<double>> angle() const {
@@ -194,7 +211,7 @@ public:
                                                                     0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
                                                                     0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
                                                                     0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
-    auto angle = _mm512_permute_pd(angle_(), 0x05); // angle    90-angle
+    auto angle = _mm512_permute_pd(angle_(), 0x55); // angle    90-angle
     return _mm512_and_pd(angle, real_mask);         // angle    0
   }
   Vectorize<c10::complex<double>> sgn() const {
@@ -227,7 +244,7 @@ public:
     return _mm512_and_pd(values, imag_mask);
   }
   Vectorize<c10::complex<double>> imag() const {
-    return _mm512_permute_pd(imag_(), 0x05);           //b        a
+    return _mm512_permute_pd(imag_(), 0x55);           //b        a
   }
   __m512d conj_() const {
     const __m512d sign_mask = _mm512_setr_pd(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
@@ -259,17 +276,17 @@ public:
     const __m512d one = _mm512_set1_pd(1);
 
     auto conj = conj_();
-    auto b_a = _mm512_permute_pd(conj, 0x05);                         //-b        a
+    auto b_a = _mm512_permute_pd(conj, 0x55);                         //-b        a
     auto ab = _mm512_mul_pd(conj, b_a);                               //-ab       -ab
     auto im = _mm512_add_pd(ab, ab);                                  //-2ab      -2ab
 
     auto val_2 = _mm512_mul_pd(values, values);                       // a*a      b*b
-    auto re = hsub_pd(val_2, _mm512_permute_pd(val_2, 0x05));  // a*a-b*b  b*b-a*a
+    auto re = hsub_pd(val_2, _mm512_permute_pd(val_2, 0x55));  // a*a-b*b  b*b-a*a
     re = _mm512_sub_pd(one, re);
 
-    auto root = Vectorize(_mm512_mask_blend_pd(0x0A, re, im)).sqrt();         //sqrt(re + i*im)
+    auto root = Vectorize(_mm512_mask_blend_pd(0xAA, re, im)).sqrt();         //sqrt(re + i*im)
     auto ln = Vectorize(_mm512_add_pd(b_a, root)).log();                 //ln(iz + sqrt())
-    return Vectorize(_mm512_permute_pd(ln.values, 0x05)).conj();         //-i*ln()
+    return Vectorize(_mm512_permute_pd(ln.values, 0x55)).conj();         //-i*ln()
   }
   Vectorize<c10::complex<double>> acos() const {
     // acos(x) = pi/2 - asin(x)
@@ -291,10 +308,10 @@ public:
     //exp(a + bi)
     // = exp(a)*(cos(b) + sin(b)i)
     auto exp = Sleef_expd8_u10(values);                               //exp(a)           exp(b)
-    exp = _mm512_mask_blend_pd(0x0A, exp, _mm512_permute_pd(exp, 0x05));   //exp(a)           exp(a)
+    exp = _mm512_mask_blend_pd(0xAA, exp, _mm512_permute_pd(exp, 0x55));   //exp(a)           exp(a)
 
     auto sin_cos = Sleef_sincosd8_u10(values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
-    auto cos_sin = _mm512_mask_blend_pd(0x0A, _mm512_permute_pd(sin_cos.y, 0x05),
+    auto cos_sin = _mm512_mask_blend_pd(0xAA, _mm512_permute_pd(sin_cos.y, 0x55),
                                    sin_cos.x);                  //cos(b)           sin(b)
     return _mm512_mul_pd(exp, cos_sin);
   }
@@ -422,7 +439,7 @@ template <> Vectorize<c10::complex<double>> inline operator*(const Vectorize<c10
   const __m512d sign_mask = _mm512_setr_pd(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
   auto ac_bd = _mm512_mul_pd(a, b);         //ac       bd
 
-  auto d_c = _mm512_permute_pd(b, 0x05);    //d        c
+  auto d_c = _mm512_permute_pd(b, 0x55);    //d        c
   d_c = _mm512_xor_pd(sign_mask, d_c);      //d       -c
   auto ad_bc = _mm512_mul_pd(a, d_c);       //ad      -bc
 
@@ -438,7 +455,7 @@ template <> Vectorize<c10::complex<double>> inline operator/(const Vectorize<c10
   const __m512d sign_mask = _mm512_setr_pd(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0);
   auto ac_bd = _mm512_mul_pd(a, b);         //ac       bd
 
-  auto d_c = _mm512_permute_pd(b, 0x05);    //d        c
+  auto d_c = _mm512_permute_pd(b, 0x55);    //d        c
   d_c = _mm512_xor_pd(sign_mask, d_c);      //-d       c
   auto ad_bc = _mm512_mul_pd(a, d_c);       //-ad      bc
 

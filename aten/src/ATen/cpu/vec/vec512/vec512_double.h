@@ -44,7 +44,9 @@ public:
   }
   static Vectorize<double> blendv(const Vectorize<double>& a, const Vectorize<double>& b,
                                const Vectorize<double>& mask) {
-    return _mm512_permutex2var_pd(a.values, _mm512_castpd_si512(mask.values), b.values);
+    auto all_ones = _mm512_set1_epi64(0xFFFFFFFFFFFFFFFF);
+    auto mmask = _mm512_cmp_epi64_mask(_mm512_castpd_si512(mask.values), all_ones, _MM_CMPINT_EQ);
+    return _mm512_mask_blend_pd(mmask, a.values, b.values);
   }
   template<typename step_t>
   static Vectorize<double> arange(double base = 0., step_t step = static_cast<step_t>(1)) {

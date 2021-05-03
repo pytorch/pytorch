@@ -1,4 +1,4 @@
-#include <ATen/test/vec256_test_all_types.h>
+#include <ATen/test/vec_test_all_types.h>
 namespace {
 #if GTEST_HAS_TYPED_TEST
     template <typename T>
@@ -964,6 +964,28 @@ namespace {
         auto actual = vec::arange(base, step);
         AssertVectorize<vec>(NAME_INFO(test_arange), expected, actual).check();
     }
+#if defined(CPU_CAPABILITY_AVX512)
+    TEST(ComplexTests, TestComplexFloatImagRealConj) {
+        float aa[] = { 1.5488e-28,2.5488e-28,3.5488e-28,4.5488e-28,5.5488e-28,6.5488e-28,7.5488e-28,8.5488e-28,
+                       9.5488e-28,10.5488e-28,11.5488e-28,12.5488e-28,13.5488e-28,14.5488e-28,15.5488e-28,16.5488e-28};
+        float exp[] = { aa[0],0,aa[2],0,aa[4],0,aa[6],0,aa[8],0,aa[10],0,aa[12],0,aa[14],0 };
+        float exp3[] = { aa[1],0,aa[3],0,aa[5],0,aa[7],0,aa[9],0,aa[11],0,aa[13],0,aa[15],0 };
+        float exp4[] = { 1.5488e-28, -2.5488e-28,3.5488e-28,-4.5488e-28,
+                         5.5488e-28,-6.5488e-28,7.5488e-28,-8.5488e-28,
+                         9.5488e-28,-10.5488e-28,11.5488e-28,-12.5488e-28,
+                         13.5488e-28,-14.5488e-28,15.5488e-28,-16.5488e-28 };
+        auto a = vcomplex::loadu(aa);
+        auto actual1 = a.real();
+        auto actual3 = a.imag();
+        auto actual4 = a.conj();
+        auto expected1 = vcomplex::loadu(exp);
+        auto expected3 = vcomplex::loadu(exp3);
+        auto expected4 = vcomplex::loadu(exp4);
+        AssertVectorize<vcomplex>(NAME_INFO(complex real), expected1, actual1).check();
+        AssertVectorize<vcomplex>(NAME_INFO(complex imag), expected3, actual3).check();
+        AssertVectorize<vcomplex>(NAME_INFO(complex conj), expected4, actual4).check();
+    }
+#else
     TEST(ComplexTests, TestComplexFloatImagRealConj) {
         float aa[] = { 1.5488e-28,2.5488e-28,3.5488e-28,4.5488e-28,5.5488e-28,6.5488e-28,7.5488e-28,8.5488e-28 };
         float exp[] = { aa[0],0,aa[2],0,aa[4],0,aa[6],0 };
@@ -980,6 +1002,7 @@ namespace {
         AssertVectorize<vcomplex>(NAME_INFO(complex imag), expected3, actual3).check();
         AssertVectorize<vcomplex>(NAME_INFO(complex conj), expected4, actual4).check();
     }
+#endif
     TYPED_TEST(QuantizationTests, Quantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;

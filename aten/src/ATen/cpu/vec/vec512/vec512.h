@@ -182,9 +182,9 @@ inline interleave2<float>(const Vectorize<float>& a, const Vectorize<float>& b) 
   //    {a8, b8, a9, b9, a10, b10, a11, b11, a12, b12, a13, b13, a14, b14, a15, b15}
   __m512i idx1 = _mm512_set_epi32(23, 7, 22, 6, 21, 5, 20, 4,
                                   19, 3, 18, 2, 17, 1, 16, 0);
-  __m512i idx2 = _mm512_set_epi32(31, 5, 30, 14, 29, 13, 28, 12, 
+  __m512i idx2 = _mm512_set_epi32(31, 15, 30, 14, 29, 13, 28, 12, 
                                   27, 11, 26, 10, 25, 9, 24, 8);
-  return std::make_pair(_mm512_mask_permutex2var_ps(a, 0xfffe, idx1, b),
+  return std::make_pair(_mm512_mask_permutex2var_ps(a, 0xffff, idx1, b),
                         _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b));
 }
 
@@ -203,7 +203,7 @@ inline deinterleave2<double>(const Vectorize<double>& a, const Vectorize<double>
   __m512i idx1 = _mm512_set_epi64(14, 12, 10, 8, 6, 4, 2, 0);
   __m512i idx2 = _mm512_set_epi64(15, 13, 11, 9, 7, 5, 3, 1);
 
-  return std::make_pair(_mm512_mask_permutex2var_pd(a, 0xfe, idx1, b),
+  return std::make_pair(_mm512_mask_permutex2var_pd(a, 0xff, idx1, b),
                         _mm512_mask_permutex2var_pd(a, 0xff, idx2, b));
 }
 
@@ -221,7 +221,7 @@ inline deinterleave2<float>(const Vectorize<float>& a, const Vectorize<float>& b
   __m512i idx2 = _mm512_set_epi32(31, 29, 27, 25, 23, 21, 19, 17,
                                   15, 13, 11, 9, 7, 5, 3, 1);
 
-  return std::make_pair(_mm512_mask_permutex2var_ps(a, 0xfffe, idx1, b),
+  return std::make_pair(_mm512_mask_permutex2var_ps(a, 0xffff, idx1, b),
                         _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b));
 }
 

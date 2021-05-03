@@ -1575,7 +1575,7 @@ endif()
 # ---[ Test binaries.
 if(BUILD_TEST)
 
-  foreach(test_src ${ATen_VEC256_TEST_SRCS})
+  foreach(test_src ${ATen_VEC_TEST_SRCS})
     foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
         get_filename_component(test_name ${test_src} NAME_WE)
         list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)

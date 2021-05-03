@@ -133,10 +133,10 @@ inline void __attribute__((always_inline)) QuantizeAvx512(
       0x0c, 0x08, 0x04, 0x00);
   // clang-format on
   __m512i permute_mask_v =
-      _mm512_set_epi32(0x0f, 0x07, 0x0e, 0x06, 0x0d, 0x05, 0x0c, 0x04,
-                       0x0b, 0x03, 0x0a, 0x02, 0x09, 0x01, 0x08, 0x00);
+      _mm512_set_epi32(0x0f, 0x0b, 0x0e, 0x0a, 0x0d, 0x09, 0x0c, 0x08,
+                       0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
   __m512i permute_mask_l8_v =
-      _mm512_set_epi32(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      _mm512_set_epi32(0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0c, 0x08,
                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
   int len_aligned = len / (VLEN * 4) * (VLEN * 4);
   for (; i < len_aligned; i += 4 * VLEN) {
@@ -367,8 +367,8 @@ __m512i RequantizeAvx512(
   constexpr auto min_val = std::numeric_limits<T>::min();
   constexpr auto max_val = std::numeric_limits<T>::max();
   __m512i permute_mask_v =
-      _mm512_set_epi32(0x0f, 0x07, 0x0e, 0x06, 0x0d, 0x05, 0x0c, 0x04,
-                       0x0b, 0x03, 0x0a, 0x02, 0x09, 0x01, 0x08, 0x00);
+      _mm512_set_epi32(0x0f, 0x0b, 0x0e, 0x0a, 0x0d, 0x09, 0x0c, 0x08,
+                       0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
   __m512 x_scaled_v = _mm512_mul_ps(_mm512_cvtepi32_ps(inp[0]), multiplier);
   __m512 y_scaled_v = _mm512_mul_ps(_mm512_cvtepi32_ps(inp[1]), multiplier);
   __m512 z_scaled_v = _mm512_mul_ps(_mm512_cvtepi32_ps(inp[2]), multiplier);
@@ -675,20 +675,20 @@ struct Vectorize<c10::quint8> : public Vectorizeqi {
     }
 
     int_vec_return_type widening_subtract(Vectorize<c10::quint8> b) const {
-      __m128i int_val0 = _mm_set_epi64x(vals[7], vals[6]);
-      __m128i int_val1 = _mm_set_epi64x(vals[5], vals[4]);
-      __m128i int_val2 = _mm_set_epi64x(vals[3], vals[2]);
-      __m128i int_val3 = _mm_set_epi64x(vals[1], vals[0]);
+      __m128i int_val0 = _mm_set_epi64x(vals[1], vals[0]);
+      __m128i int_val1 = _mm_set_epi64x(vals[3], vals[2]);
+      __m128i int_val2 = _mm_set_epi64x(vals[5], vals[4]);
+      __m128i int_val3 = _mm_set_epi64x(vals[7], vals[6]);
 
       __m512i int32_val0 = cvtepu8_epi32(int_val0);
       __m512i int32_val1 = cvtepu8_epi32(int_val1);
       __m512i int32_val2 = cvtepu8_epi32(int_val2);
       __m512i int32_val3 = cvtepu8_epi32(int_val3);
 
-      __m128i int_b0 = _mm_set_epi64x(b.vals[7], b.vals[6]);
-      __m128i int_b1 = _mm_set_epi64x(b.vals[5], b.vals[4]);
-      __m128i int_b2 = _mm_set_epi64x(b.vals[3], b.vals[2]);
-      __m128i int_b3 = _mm_set_epi64x(b.vals[1], b.vals[0]);
+      __m128i int_b0 = _mm_set_epi64x(b.vals[1], b.vals[0]);
+      __m128i int_b1 = _mm_set_epi64x(b.vals[3], b.vals[2]);
+      __m128i int_b2 = _mm_set_epi64x(b.vals[5], b.vals[4]);
+      __m128i int_b3 = _mm_set_epi64x(b.vals[7], b.vals[6]);
 
       __m512i int32_b0 = cvtepu8_epi32(int_b0);
       __m512i int32_b1 = cvtepu8_epi32(int_b1);

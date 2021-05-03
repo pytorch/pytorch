@@ -47,7 +47,9 @@ public:
   }
   static Vectorize<float> blendv(const Vectorize<float>& a, const Vectorize<float>& b,
                               const Vectorize<float>& mask) {
-    return _mm512_permutex2var_ps(a.values, _mm512_castps_si512(mask.values), b.values);
+    auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
+    auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask.values), all_ones, _MM_CMPINT_EQ);
+    return _mm512_mask_blend_ps(mmask, a.values, b.values);
   }
   template<typename step_t>
   static Vectorize<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
@@ -126,7 +128,9 @@ public:
     return static_cast<int32_t>(cmp);
   }
   Vectorize<float> isnan() const {
-    return _mm512_cmp_ps_mask(values, _mm512_set1_ps(0.0f), _CMP_UNORD_Q);
+    auto mask =  _mm512_cmp_ps_mask(values, _mm512_set1_ps(0.0f), _CMP_UNORD_Q);
+    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
+                                                      0xFFFFFFFF));
   }
   Vectorize<float> map(float (*f)(float)) const {
     __at_align64__ float tmp[size()];

@@ -57,11 +57,11 @@ public:
   }
   template <int64_t mask>
   static Vectorize<int64_t> blend(Vectorize<int64_t> a, Vectorize<int64_t> b) {
-    return _mm512_mask_blend_epi64(mask, a, b);
+    return _mm512_mask_blend_epi64(mask, a.values, b.values);
   }
   static Vectorize<int64_t> blendv(const Vectorize<int64_t>& a, const Vectorize<int64_t>& b,
                                 const Vectorize<int64_t>& mask) {
-    auto msb_one = _mm512_set1_epi64(0x8000000000000000);
+    auto msb_one = _mm512_set1_epi64(0xFFFFFFFFFFFFFFFF);
     auto mask_ = _mm512_cmp_epi64_mask(mask, msb_one, _MM_CMPINT_EQ);
     return _mm512_mask_blend_epi64(mask_, a.values, b.values);
   }
@@ -191,11 +191,11 @@ public:
   }
   template <int64_t mask>
   static Vectorize<int32_t> blend(Vectorize<int32_t> a, Vectorize<int32_t> b) {
-    return _mm512_mask_blend_epi32(mask, a, b);
+    return _mm512_mask_blend_epi32(mask, a.values, b.values);
   }
   static Vectorize<int32_t> blendv(const Vectorize<int32_t>& a, const Vectorize<int32_t>& b,
                                 const Vectorize<int32_t>& mask) {
-    auto msb_one = _mm512_set1_epi32(0x80000000);
+    auto msb_one = _mm512_set1_epi32(0xFFFFFFFF);
     auto mask_ = _mm512_cmp_epi32_mask(mask, msb_one, _MM_CMPINT_EQ);
     return _mm512_mask_blend_epi32(mask_, a.values, b.values);
   }
@@ -392,11 +392,11 @@ public:
   }
   template <int64_t mask>
   static Vectorize<int16_t> blend(Vectorize<int16_t> a, Vectorize<int16_t> b) {
-    return _mm512_mask_blend_epi16(mask, a, b);
+    return _mm512_mask_blend_epi16(mask, a.values, b.values);
   }
   static Vectorize<int16_t> blendv(const Vectorize<int16_t>& a, const Vectorize<int16_t>& b,
                                 const Vectorize<int16_t>& mask) {
-    auto msb_one = _mm512_set1_epi16(0x8000);
+    auto msb_one = _mm512_set1_epi16(0xFFFF);
     auto mask_ = _mm512_cmp_epi16_mask(mask, msb_one, _MM_CMPINT_EQ);
     return _mm512_mask_blend_epi16(mask_, a.values, b.values);
   }
@@ -597,11 +597,11 @@ public:
   }
   template <int64_t mask>
   static Vectorize<int8_t> blend(Vectorize<int8_t> a, Vectorize<int8_t> b) {
-    return _mm512_mask_blend_epi8(mask, a, b);
+    return _mm512_mask_blend_epi8(mask, a.values, b.values);
   }
   static Vectorize<int8_t> blendv(const Vectorize<int8_t>& a, const Vectorize<int8_t>& b,
                                const Vectorize<int8_t>& mask) {
-    auto msb_one = _mm512_set1_epi8(0x80);
+    auto msb_one = _mm512_set1_epi8(0xFF);
     auto mask_ = _mm512_cmp_epi8_mask(mask, msb_one, _MM_CMPINT_EQ);
     return _mm512_mask_blend_epi8(mask_, a.values, b.values);
   }
