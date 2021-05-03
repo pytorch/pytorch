@@ -1913,7 +1913,7 @@ torch.cuda.synchronize()
                                                              inv_scale)
 
         if TEST_MULTIGPU:
-            with self.assertRaisesRegex(RuntimeError, r"scaled_grads must be on the same device."):
+            with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device"):
                 torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(device="cuda:1")],
                                                                  found_inf,
                                                                  inv_scale)
@@ -1962,16 +1962,16 @@ torch.cuda.synchronize()
         found_inf = torch.full((1,), 0.0, dtype=torch.float, device="cuda:0")
 
         # Simulates 2 consecutive unskipped iterations
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 1)
         self.assertEqual(scale, 4.0)
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 8.0)
 
         # Simulates a skipped iteration
         found_inf.fill_(1.0)
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 2.0)
 
@@ -3457,6 +3457,53 @@ torch.cuda.synchronize()
         # dummy allocation triggers process_events, Hopefully successfully processes b's end-of-life event.
         c = torch.zeros((3,), device="cuda")
 
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_grad_scaling(self):
+        scaler = torch.cuda.amp.GradScaler(init_scale=4.)
+        g = torch.cuda._Graph()
+        s = torch.cuda.Stream()
+
+        weight = torch.ones((100,), device="cuda", requires_grad=True)
+        opt = torch.optim.SGD([weight], lr=0.1)
+        static_input = torch.ones_like(weight)
+        static_grad = torch.ones_like(weight)
+
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            # warmup
+            weight.grad = (scaler.scale(static_grad) * static_input).half().float()
+            # capture
+            g.capture_begin()
+            weight.grad = (scaler.scale(static_grad) * static_input).half().float()
+            # The above simulates a rudimentary backward pass.
+            # TODO: Once full-backward() capture is enabled (see https://github.com/pytorch/pytorch/pull/54227)
+            # change to
+            # loss = (w.half() * static_input).sum()
+            # scaler.scale(loss).backward()
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        input_vals = [5, 20000, 5, 40000]
+        # If the scale gets updated properly, these are the scale, growth tracker,
+        # and grad values we expect.
+        expected_scales = [4, 2, 2, 1]
+        expected_growth_trackers = [1, 0, 1, 0]
+        expected_grad_vals = [5 * 4, float("inf"), 5 * 2, float("inf")]
+
+        for data, scale, growth_tracker, grad_val in zip(input_vals,
+                                                         expected_scales,
+                                                         expected_growth_trackers,
+                                                         expected_grad_vals):
+            static_input.fill_(data)
+            g.replay()
+            self.assertEqual(weight.grad, torch.full_like(weight.grad, grad_val))
+            scaler.step(opt)
+            scaler.update()
+            self.assertEqual(scaler._scale, scale)
+            self.assertEqual(scaler._growth_tracker, growth_tracker)
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
         mean, invstd = torch.batch_norm_gather_stats(
@@ -3832,16 +3879,16 @@ class TestCudaComm(TestCase):
     def test_matmul_device_mismatch(self):
         cpu = torch.rand((10, 10))
         cuda = cpu.cuda()
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
             cpu @ cuda
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
             cuda @ cpu
 
         for s, m1, m2 in product((cpu, cuda), repeat=3):
             if s.device == m1.device == m2.device:
                 torch.addmm(s, m1, m2)
             else:
-                with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     torch.addmm(s, m1, m2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
