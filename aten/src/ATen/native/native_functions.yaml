@@ -6321,11 +6321,14 @@
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: polygamma.out
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: polygamma
