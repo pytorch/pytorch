@@ -109,5 +109,9 @@ TORCH_LIBRARY_IMPL(aten, XLA, m) {
 ${dispatch_registrations}
 
 }
+TORCH_LIBRARY_IMPL(aten, AutogradXLA, m) {
+${dispatch_autograd_registrations}
+
+}
 
 }  // namespace torch_xla
