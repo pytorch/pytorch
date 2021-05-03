@@ -1627,6 +1627,7 @@ class TestFrozenOptimizations(JitTestCase):
         with set_default_dtype(torch.float):
             for module, trace in product([nn.Conv2d, nn.Conv3d], [False, True]):
                 mod = module(3, 32, kernel_size=3, stride=2).eval()
+                inps = [4, 3, 4]
                 if module == nn.Conv2d:
                     inps.append(inps[-1])
                 if module == nn.Conv3d:
