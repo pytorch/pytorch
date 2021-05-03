@@ -84,3 +84,11 @@ Tensor Operations
 
     tensorinv
     tensorsolve
+
+Experimental Functions
+----------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    cholesky_ex
