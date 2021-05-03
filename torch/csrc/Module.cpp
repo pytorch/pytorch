@@ -399,6 +399,9 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   // out of scope. When the destructor is called, the dlMTensor is destructed too.
   auto atensor = at::fromDLPack(dlMTensor);
 
+  // Make sure this capsule will never be used again.
+  PyCapsule_SetName(data, "used_dltensor");
+
   // It is possible that the call to at::fromDLPack is the very first
   // call to create a Tensor in PyTorch. If so, then _lazy_init has
   // not been called, and the attempt to call createPyObject will fail
@@ -408,8 +411,6 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   if(atensor.is_cuda()) {
     py::module::import("torch.cuda").attr("init")();
   }
-  // Make sure this capsule will never be used again.
-  PyCapsule_SetName(data, "used_dltensor");
   return THPVariable_Wrap(std::move(atensor));
   END_HANDLE_TH_ERRORS
 }
