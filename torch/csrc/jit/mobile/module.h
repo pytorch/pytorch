@@ -1,11 +1,8 @@
 #pragma once
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/mobile/debug_info.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/method.h>
-
-#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-#include <torch/csrc/jit/mobile/debug_info.h>
-#endif
 
 namespace torch {
 namespace jit {
@@ -113,22 +110,18 @@ class TORCH_API Module {
     return or_else;
   }
 
-#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   void setDebugTable(MobileDebugTable&& debug_table) {
     debug_table_ = std::move(debug_table);
   }
   const MobileDebugTable& getDebugTable() const {
     return debug_table_;
   }
-#endif
 
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
-#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table_;
-#endif
 };
 } // namespace mobile
 } // namespace jit
