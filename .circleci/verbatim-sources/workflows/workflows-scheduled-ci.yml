@@ -9,28 +9,28 @@
                 - master
     jobs:
       - docker_build_job:
-          name: "docker-pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
-          image_name: "pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
+          name: "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
       - pytorch_linux_build:
-          name: periodic_pytorch_xenial_cuda11_2_cudnn8_gcc7_build
+          name: periodic_pytorch_xenial_cuda11_3_cudnn8_gcc7_build
           requires:
-            - "docker-pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
-          build_environment: "pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
+            - "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          build_environment: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
       - pytorch_linux_test:
-          name: periodic_pytorch_xenial_cuda11_2_cudnn8_gcc7_test
+          name: periodic_pytorch_xenial_cuda11_3_cudnn8_gcc7_test
           requires:
-            - periodic_pytorch_xenial_cuda11_2_cudnn8_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
+            - periodic_pytorch_xenial_cuda11_3_cudnn8_gcc7_build
+          build_environment: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
-          name: periodic_libtorch_xenial_cuda11_2_cudnn8_gcc7_build
+          name: periodic_libtorch_xenial_cuda11_3_cudnn8_gcc7_build
           requires:
-            - "docker-pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
-          build_environment: "pytorch-libtorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
+            - "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          build_environment: "pytorch-libtorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11.2"
@@ -71,30 +71,30 @@
   debuggable-scheduled-ci:
     jobs:
       - docker_build_job:
-          name: "docker-pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
-          image_name: "pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
+          name: "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
           filters:
             branches:
               only:
                 - /ci-all\/.*/
                 - /release\/.*/
       - pytorch_linux_build:
-          name: pytorch_linux_xenial_cuda11_2_cudnn8_py3_gcc7_build
+          name: pytorch_linux_xenial_cuda11_3_cudnn8_py3_gcc7_build
           requires:
-            - "docker-pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
-          build_environment: "pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
+            - "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          build_environment: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
           filters:
             branches:
               only:
                 - /ci-all\/.*/
                 - /release\/.*/
       - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda11_2_cudnn8_py3_gcc7_test
+          name: pytorch_linux_xenial_cuda11_3_cudnn8_py3_gcc7_test
           requires:
-            - pytorch_linux_xenial_cuda11_2_cudnn8_py3_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
+            - pytorch_linux_xenial_cuda11_3_cudnn8_py3_gcc7_build
+          build_environment: "pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
           filters:
@@ -103,11 +103,11 @@
                 - /ci-all\/.*/
                 - /release\/.*/
       - pytorch_linux_build:
-          name: pytorch_libtorch_linux_xenial_cuda11_2_cudnn8_py3_gcc7_build
+          name: pytorch_libtorch_linux_xenial_cuda11_3_cudnn8_py3_gcc7_build
           requires:
-            - "docker-pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
-          build_environment: "pytorch-libtorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
+            - "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
+          build_environment: "pytorch-libtorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
           filters:
             branches:
               only:

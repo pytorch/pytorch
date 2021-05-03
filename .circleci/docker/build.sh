@@ -140,8 +140,8 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.2.0 # Deviating from major.minor to conform to nvidia's Docker image names
+  pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=7
