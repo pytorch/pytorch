@@ -70,9 +70,10 @@ run_tests() {
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
         "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
-        if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
+        if [[ "${CIRCLE_JOB}" == "pytorch_windows_vs2019_py36_cuda10.1_on_cpu_test1" ||
+              "${CIRCLE_JOB}" == "pytorch_windows_vs2019_py36_cpu_test2" ]]; then
           export PYTORCH_COLLECT_COVERAGE=1
-          export COVERAGE_RCFILE="$PWD/.coveragerc" # coverage config file needed for plug-ins and settings to work
+          export COVERAGE_RCFILE=$PWD/.coveragerc # coverage config file needed for plug-ins and settings to work
         fi
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
@@ -92,7 +93,8 @@ run_tests
 assert_git_not_dirty
 echo "TEST PASSED"
 
-if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
+if [[ "${JOB_BASE_NAME}" == "pytorch_windows_vs2019_py36_cuda10.1_on_cpu_test1" ||
+      "${JOB_BASE_NAME}" == "pytorch_windows_vs2019_py36_cpu_test2" ]]; then
   pushd "$TEST_DIR"
   python -mpip install coverage==5.5
   python -mpip install -e "$PROJECT_DIR/tools/coverage_plugins_package"
