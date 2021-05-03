@@ -997,7 +997,7 @@ class DistributedDataParallel(Module):
                 effective world size until all ranks are joined. Note that if
                 this flag is specified, then the flag
                 ``divide_by_initial_world_size`` would be ignored. Default
-                is ``False``. 
+                is ``False``.
 
 
         Example::
