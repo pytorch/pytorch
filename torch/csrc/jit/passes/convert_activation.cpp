@@ -7,8 +7,13 @@ namespace jit {
 
 namespace {
 static const std::unordered_set<Symbol> inplace_activation_ops = {
+    aten::hardsigmoid_,
+    aten::hardtanh_,
+    aten::hardswish_,
     aten::relu_,
-    aten::sigmoid_};
+    aten::relu6_,
+    aten::sigmoid_,
+    aten::tanh_};
 } // namespace
 
 FunctionalActivationRewriter::FunctionalActivationRewriter(
@@ -74,6 +79,7 @@ bool FunctionalActivationRewriter::FunctionalToInplaceActivation(Block* block) {
     // now that we have removed a mutating op, the write cache is stale
     // TODO: don't strictly need to reset write cache, evaluate on models
     // getOrCreateAliasDb()->buildWrittenToLocationsIndex();
+
     node->destroy();
   }
   return changed;
