@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/convert_activation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
@@ -387,6 +388,16 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) {
             RemoveListMutation(g);
             return RemoveTensorMutation(g);
+          })
+      .def(
+          "_jit_pass_functional_to_inplace_activation",
+          [](std::shared_ptr<Graph>& g) {
+            return FunctionalToInplaceActivation(g);
+          })
+      .def(
+          "_jit_pass_inplace_to_functional_activation",
+          [](std::shared_ptr<Graph>& g) {
+            return InplaceToFunctionalActivation(g);
           })
       .def(
           "_jit_pass_inline_functional_graphs",

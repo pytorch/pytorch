@@ -176,6 +176,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
     "torch/csrc/jit/passes/constant_pooling.cpp",
     "torch/csrc/jit/passes/constant_propagation.cpp",
+    "torch/csrc/jit/passes/convert_activation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
