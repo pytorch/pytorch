@@ -141,9 +141,9 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     """
     def __init__(self, *args, **kwargs):
         cls = self.__class__
-        warnings.warn(f"{cls} should not be instantiated. For new-style autograd functions "
-                       "`apply` is a class method, so you can invoke its `.apply()` "
-                       "directly. Instantiating autograd functions will raise an "
+        warnings.warn(f"{cls} should not be instantiated. Methods on autograd functions"
+                       "are all static, so you should invoke them on the class itself. "
+                       "Instantiating an autograd function will raise an "
                        "error in a future version of PyTorch.", DeprecationWarning)
 
     def __call__(self, *args, **kwargs):
