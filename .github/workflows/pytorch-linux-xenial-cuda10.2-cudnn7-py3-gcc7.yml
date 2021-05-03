@@ -192,6 +192,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   render_test_results:
+    if: always()
     needs:
       - test
     runs-on: ubuntu-18.04
