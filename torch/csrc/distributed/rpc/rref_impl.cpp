@@ -314,7 +314,7 @@ void OwnerRRef::recordAllStreams(
 void OwnerRRef::blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx) {
   if (ctx) {
     for (c10::Event& event : events_) {
-      event.block(ctx->getStream(event.device_index()));
+      event.block(ctx->getStream(event.device()));
     }
   }
 }
