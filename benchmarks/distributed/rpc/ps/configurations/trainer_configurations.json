@@ -1,0 +1,26 @@
+{
+    "DdpNcclTrainer":{
+        "trainer_class":"DdpNcclTrainer",
+        "configurations":{
+            "epochs": 10
+        }
+    },
+    "DdpSparseRpcTrainer":{
+        "trainer_class":"DdpSparseRpcTrainer",
+        "configurations":{
+            "ps_name": "AverageParameterServer",
+            "backend": "nccl",
+            "use_cuda_rpc": false,
+            "epochs": 2
+        }
+    },
+    "DdpSparseRpcTrainerBatch":{
+        "trainer_class":"DdpSparseRpcTrainer",
+        "configurations":{
+            "ps_name": "AverageBatchParameterServer",
+            "backend": "nccl",
+            "use_cuda_rpc": false,
+            "epochs": 2
+        }
+    }
+}

@@ -1,0 +1,9 @@
+{
+    "AverageParameterServer":{
+        "ps_class":"AverageParameterServer",
+        "configurations":{
+            "use_cuda_rpc":false,
+            "backend":"nccl"
+        }
+    }
+}

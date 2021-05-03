@@ -1,0 +1,26 @@
+{
+    "1":{
+        "trainer_count":2,
+        "parameter_server_count": 0,
+        "rpc_async_timeout": 15,
+        "batch_size": 5
+    },
+    "2":{
+        "trainer_count":2,
+        "parameter_server_count": 0,
+        "rpc_async_timeout": 15,
+        "batch_size": 5
+    },
+    "3":{
+        "trainer_count":2,
+        "parameter_server_count": 0,
+        "rpc_async_timeout": 15,
+        "batch_size": 5
+    },
+    "4":{
+        "trainer_count":2,
+        "parameter_server_count": 1,
+        "rpc_async_timeout": 15,
+        "batch_size": 20
+    }
+}
