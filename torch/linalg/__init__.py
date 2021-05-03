@@ -1129,7 +1129,7 @@ Examples::
 """)
 
 matrix_norm = _add_docstr(_linalg.linalg_matrix_norm, r"""
-linalg.matrix_norm(A, ord=None, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+linalg.matrix_norm(A, ord='fro', dim=(-2, -1), keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes a matrix norm.
 
@@ -1138,9 +1138,7 @@ If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
 
-- If :attr:`dim`\ `= None`, the norm will be computed over the last two dimensions
-  and the other dimensions will be treated as batch dimensions.
-- If :attr:`dim` is a `2`-`tuple`, the norm will be computed over these two dimensions
+- The norm will be computed over the dimensions specified by the 2-tuple :attr:`dim`
   and the other dimensions will be treated as batch dimensions.
 
 :attr:`ord` defines the matrix norm that is computed. The following norms are supported:
@@ -1148,8 +1146,7 @@ Also supports batched inputs, and, if the input is batched, the output is batche
 ======================   ========================================================
 :attr:`ord`              matrix norm
 ======================   ========================================================
-`None` (default)         Frobenius norm
-`'fro'`                  Frobenius norm
+`'fro'` (default)        Frobenius norm
 `'nuc'`                  nuclear norm
 `inf`                    `max(sum(abs(x), dim=1))`
 `-inf`                   `min(sum(abs(x), dim=1))`

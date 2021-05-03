@@ -1520,7 +1520,8 @@ class TestLinalg(TestCase):
                 self.assertEqual(result, result_out, msg=msg)
 
             check(torch.linalg.norm)
-            check(torch.linalg.matrix_norm)
+            if ord is not None and dim is not None:
+                check(torch.linalg.matrix_norm)
 
         ord_matrix = [1, -1, 2, -2, inf, -inf, 'nuc', 'fro', None]
         S = 10
@@ -1771,7 +1772,9 @@ class TestLinalg(TestCase):
                 result_n = np.linalg.norm(x_n, ord=ord)
                 self.assertEqual(result, result_n, msg=msg)
 
+    @skipMeta  # https://github.com/pytorch/pytorch/issues/54082
     @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 2e-5})
     def test_matrix_norm(self, device, dtype):
@@ -1890,18 +1893,21 @@ class TestLinalg(TestCase):
     def test_norm_matrix_degenerate_shapes(self, device, dtype):
         def run_test_case(input, ord, dim, keepdim, should_error):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
-
             input_numpy = input.cpu().numpy()
+            ops = [torch.linalg.norm]
+
+            if ord is not None and dim is not None:
+                ops.append(torch.linalg.matrix_norm)
 
             if should_error:
                 with self.assertRaises(ValueError):
                     np.linalg.norm(input_numpy, ord, dim, keepdim)
-                for op in [torch.linalg.norm, torch.linalg.matrix_norm]:
+                for op in ops:
                     with self.assertRaises(IndexError):
                         op(input, ord, dim, keepdim)
             else:
                 result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
-                for op in [torch.linalg.norm, torch.linalg.matrix_norm]:
+                for op in ops:
                     result = op(input, ord, dim, keepdim)
                     self.assertEqual(result, result_numpy, msg=msg)
 
