@@ -869,7 +869,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   Variable size_var;
   {
     // Make sure this scalar to tensor isn't traced!
-    at::AutoDispatchBelowInplaceOrView guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     size_var = scalar_to_tensor(at::Scalar(var.size(dim)));
   }
   auto* value = getValueTrace(var);
