@@ -589,6 +589,95 @@ class TestLinalg(TestCase):
         for upper in [True, False]:
             run_test(upper)
 
+    # Test for issue
+    # https://github.com/pytorch/pytorch/issues/57032
+    # torch.cholesky with upper=True for batched CUDA inputs was wrong
+    # it was using the lower triangular part instead of the upper one
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_old_cholesky_batched_upper(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        batchsize = 2
+        A = random_hermitian_pd_matrix(3, batchsize, dtype=dtype, device=device)
+        A_triu = A.triu()  # fill the lower triangular part with zero
+
+        U = torch.cholesky(A_triu, upper=True)
+
+        reconstruct_A = U.conj().transpose(-2, -1) @ U
+        self.assertEqual(A, reconstruct_A)
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_cholesky_ex(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_test(n, batch):
+            A = random_hermitian_pd_matrix(n, *batch, dtype=dtype, device=device)
+            expected_L = np.linalg.cholesky(A.cpu().numpy())
+            expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
+            actual_L, actual_info = torch.linalg.cholesky_ex(A)
+
+            # For fp32 individual entries in matrices can differ between PyTorch and NumPy
+            # Let's compare the norms of matrices instead
+            if A.numel() > 0 and dtype in [torch.float32, torch.complex64]:
+                # axis is specified to calculate matrix norm for batched input
+                expected_norm = np.linalg.norm(expected_L, ord=1, axis=(-2, -1))
+                actual_norm = torch.linalg.norm(actual_L, ord=1, axis=(-2, -1))
+                # Compare the norms with standard tolerances
+                self.assertEqual(actual_norm, expected_norm)
+                # and individual values with a higher tolerance
+                self.assertEqual(actual_L, expected_L, atol=1e-2, rtol=1e-5)
+            else:
+                self.assertEqual(actual_L, expected_L)
+            self.assertEqual(actual_info, expected_info)
+
+        ns = (0, 3, 5)
+        batches = ((), (2, ), (2, 1))
+        for n, batch in itertools.product(ns, batches):
+            run_test(n, batch)
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_cholesky_ex_non_pd(self, device, dtype):
+        # if the input matrix is not positive definite, info with positive integer is returned
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        A[-1, -1] = 0  # Now A is singular
+        _, info = torch.linalg.cholesky_ex(A)
+        self.assertEqual(info, 3)
+        with self.assertRaisesRegex(RuntimeError, r'U\(3,3\) is zero, singular U\.'):
+            torch.linalg.cholesky_ex(A, check_errors=True)
+
+        # if at least one matrix in the batch is not positive definite,
+        # batched info with positive integer for the corresponding matrix is returned
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        A = A.reshape((1, 3, 3))
+        A = A.repeat(5, 1, 1)
+        A[3, -2, -2] = 0  # Now A[3] is singular
+        _, info = torch.linalg.cholesky_ex(A)
+
+        expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
+        expected_info[3] = 2
+        self.assertEqual(info, expected_info)
+        with self.assertRaisesRegex(RuntimeError, r'For batch 3: U\(2,2\) is zero, singular U\.'):
+            torch.linalg.cholesky_ex(A, check_errors=True)
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_cholesky_ex_out_info_error(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        # dtype for info must be torch.int32
+        A = random_hermitian_pd_matrix(3, dtype=dtype, device=device)
+        L = torch.empty(A.shape, dtype=dtype, device=device)
+        info = torch.empty(A.shape[:-2], dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(RuntimeError, "but got info with dtype Long"):
+            torch.linalg.cholesky_ex(A, out=(L, info))
+
     @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.float64, torch.complex128)
@@ -4796,22 +4885,6 @@ class TestLinalg(TestCase):
         torch.cross(x, y, out=res2)
         self.assertEqual(res1, res2)
 
-    # TODO: This test should be removed and OpInfo should enable complex
-    #       types after this PR is merged:
-    #       https://github.com/pytorch/pytorch/pull/55483
-    @dtypes(torch.cdouble)
-    def test_cross_autograd(self, device, dtype):
-        x = torch.rand(100, 3, dtype=dtype, device=device, requires_grad=True)
-        y = torch.rand(100, 3, dtype=dtype, device=device, requires_grad=True)
-
-        if torch.device(device).type == 'cuda' and dtype.is_complex:
-            # TODO: Remove this error when cross CUDA supports complex
-            with self.assertRaisesRegex(RuntimeError, r'_th_cross_kernel_out not supported on CUDAType for Complex'):
-                gradcheck(torch.cross, [x, y])
-        else:
-            gradcheck(torch.cross, [x, y])
-            gradgradcheck(torch.cross, [x, y], atol=1e-3, check_batched_grad=False)
-
     @onlyCPU
     @dtypes(torch.float)
     def test_cross_with_and_without_dim(self, device, dtype):
@@ -4907,6 +4980,18 @@ class TestLinalg(TestCase):
         res1 = torch.mm(mat2, q.t())
         res2 = torch.ormqr(m, tau, mat2, left=False, transpose=True)
         torch.ormqr(m, tau, mat2, left=False, transpose=True, out=out_holder)
+        self.assertEqual(res1, res2)
+        self.assertEqual(res2, out_holder)
+
+        # m is Fortran-contiguous, now test the C-contiguous input
+        self.assertTrue(m.transpose(-2, -1).is_contiguous())
+
+        a = m.contiguous()
+        out = torch.empty_like(mat1)
+
+        res1 = q @ mat2
+        res2 = torch.ormqr(a, tau, mat2, left=True, transpose=False)
+        torch.ormqr(a, tau, mat2, out=out_holder)
         self.assertEqual(res1, res2)
         self.assertEqual(res2, out_holder)
 
