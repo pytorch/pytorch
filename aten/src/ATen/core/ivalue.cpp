@@ -337,6 +337,7 @@ size_t IValue::hash(const IValue& v) {
       // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
       // the tensor to emulate it
       return c10::get_hash(v.payload.as_tensor.unsafeGetTensorImpl());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case Tag::Storage:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::Int:
@@ -507,6 +508,7 @@ std::ostream& IValue::repr(
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
@@ -930,6 +932,34 @@ getClassConverter() {
   static std::unordered_map<std::string, std::function<PyObject*(void*)>>
       classConverter;
   return classConverter;
+}
+
+// Needs to be in this .cpp file to access the full definition of PyObjectHolder
+std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDataPtrs(
+    const at::IValue& value) {
+  std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+  // getSubValues works poorly on Python objects: it only works if they can be
+  // converted to a "regular" IValue type hence, for example, it doesn't support
+  // custom subclasses. Thus, instead, we extract the tensors through pickling.
+  if (value.isPyObject()) {
+    std::vector<at::Tensor> tensors =
+        value.toPyObjectHolder()->extractTensors();
+    data_ptrs.reserve(tensors.size());
+    for (const at::Tensor& tensor : tensors) {
+      data_ptrs.emplace_back(tensor.storage().data_ptr());
+    }
+  } else {
+    at::IValue::HashAliasedIValues sub_values;
+    // Prefer getSubValues() over visit() as the latter is a silent no-op for
+    // some unsupported types, whereas the former at least fails loudly.
+    value.getSubValues(sub_values);
+    for (const at::IValue& sub_value : sub_values) {
+      if (sub_value.isTensor()) {
+        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+      }
+    }
+  }
+  return data_ptrs;
 }
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
