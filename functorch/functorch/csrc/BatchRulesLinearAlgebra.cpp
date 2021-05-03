@@ -22,6 +22,7 @@ slogdet_batch_rule(const Tensor& self, optional<int64_t> self_bdim) {
 }
 
 std::tuple<Tensor, optional<int64_t>> dot_batch_rule(const Tensor& A, optional<int64_t> A_bdim, const Tensor& B, optional<int64_t> B_bdim) {
+  TORCH_CHECK(A.dim() - A_bdim.has_value() == 1 && B.dim() - B_bdim.has_value() == 1, "Got wrong shapes for dot");
   auto A_ = moveBatchDimToFront(A, A_bdim);
   auto B_ = moveBatchDimToFront(B, B_bdim);
   if (A_bdim && B_bdim) {
