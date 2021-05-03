@@ -17,6 +17,7 @@ c10::IValue preprocess(
   c10::Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
   for (const auto& method : mod.get_methods()) {
     const auto graph = method.function().graph()->copy();
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto key = method.name();
     std::stringstream ss;
     for (const auto& node : graph->nodes()) {
@@ -25,6 +26,7 @@ c10::IValue preprocess(
           ss << node->kind().toDisplayString() << "#"
              << toIValue(node->output()).value();
           break;
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         case aten::add:
           ss << node->kind().toQualString();
           break;
@@ -52,6 +54,7 @@ c10::IValue preprocess(
 }
 
 constexpr auto backend_name = "backend_with_compiler_demo";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto pre_reg = backend_preprocess_register(backend_name, preprocess);
 } // namespace
 
