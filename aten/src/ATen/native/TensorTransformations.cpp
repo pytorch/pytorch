@@ -60,7 +60,7 @@ static TensorIterator make_index_iterator(const Tensor input, const std::vector<
 
 Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
   if(dims.size() == 0) {
-    return self;
+    return self.clone();
   }
 
   auto input = self;
