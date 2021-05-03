@@ -26,8 +26,10 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
   constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
 
-  const SourceRange& range = std::get<kDebugInfoTupleSourceRangeIndex>(source_callstack);
-  InlinedCallStackPtr callstack_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(source_callstack);
+  const SourceRange& range =
+      std::get<kDebugInfoTupleSourceRangeIndex>(source_callstack);
+  InlinedCallStackPtr callstack_ptr =
+      std::get<kDebugInfoTupleInlinedCSIndex>(source_callstack);
   std::string module_info;
   if (!callstack_ptr) {
     // If not cs then top level node
@@ -85,7 +87,8 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
   // Only last entry in the callstack will have a node name of interest.
   // Rest are likely CallMethod/CallFunction nodes
   auto last_entry = source_callstacks.back();
-  const std::string& node_name = std::get<kDebugInfoTupleNodeNameIndex>(last_entry);
+  const std::string& node_name =
+      std::get<kDebugInfoTupleNodeNameIndex>(last_entry);
   module_info += "." + node_name;
   std::ostringstream ss;
   ss << "Module hierarchy:" << module_info << "\n";

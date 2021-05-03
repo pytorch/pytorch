@@ -178,7 +178,8 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
 // {source range, node name, InlinedCallStack}
 // We store node name because same debug infor will be used for
 // profiling as well, so we need to know op names as well.
-using DebugInfoTuple = std::tuple<SourceRange, std::string, InlinedCallStackPtr>;
+using DebugInfoTuple =
+    std::tuple<SourceRange, std::string, InlinedCallStackPtr>;
 constexpr size_t kDebugInfoTupleSourceRangeIndex{0};
 constexpr size_t kDebugInfoTupleNodeNameIndex{1};
 constexpr size_t kDebugInfoTupleInlinedCSIndex{2};

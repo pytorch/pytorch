@@ -16,13 +16,7 @@ c10::IValue InlinedCallStackSerializer::serialize(
     return cs_it->second;
   }
   // Inlined callstack pointer is serialized as tuple of 3 elements
-  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack), function name}
-  // Note function name is serialized separately because Function is only in memory
-  // structure. It gets constructed by JIT from serialized Code at runtime.
-  // As such even InlinedCallStack get constructed by JIT at runtime during graph
-  // inlining. However, we introduce serialization/deserialization of it in order
-  // to generate callstack debug information, _when_ equivalent InlinedCallStack cannot
-  // be constructed at runtime. For example, in lite interpreter or delegated backend.
+  // {IValue(module_instance_info), source_range_tag, IValue(InlinedCallStack)}
   std::vector<c10::IValue> elements;
   elements.reserve(3);
   elements.emplace_back(
@@ -87,7 +81,8 @@ std::vector<char> CallStackDebugInfoPickler::pickle(
     elements.reserve(3);
     elements.emplace_back(debug_handle);
     int64_t source_range_tag{-1};
-    const auto source_range = std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
+    const auto source_range =
+        std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
     const SourceRange& sr = source_range.findSourceRangeThatGenerated()
         ? source_range.findSourceRangeThatGenerated().value()
         : source_range;
@@ -97,7 +92,8 @@ std::vector<char> CallStackDebugInfoPickler::pickle(
     }
     elements.emplace_back(source_range_tag);
     elements.emplace_back(std::get<kDebugInfoTupleNodeNameIndex>(it.second));
-    const auto inlined_cs_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
+    const auto inlined_cs_ptr =
+        std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
     elements.emplace_back(css_.serialize(inlined_cs_ptr, source_range_tags));
     c10::IValue tuple = c10::ivalue::Tuple::create(elements);
     ivalues.emplace_back(tuple);
@@ -221,7 +217,9 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
         callstack_ptrs.count(debug_handle) == 0,
         "Debug handles should be unique.");
     callstack_ptrs[debug_handle] = std::make_tuple(
-        source_range, node_name, csds_.deserialize(tup_elems[3], source_range_map, cu));
+        source_range,
+        node_name,
+        csds_.deserialize(tup_elems[3], source_range_map, cu));
   }
   return callstack_ptrs;
 }
