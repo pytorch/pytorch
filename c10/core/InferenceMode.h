@@ -10,28 +10,28 @@ namespace c10 {
 // construction, and sets it back to the original value upon destruction.
 struct TORCH_API InferenceMode {
   // Note [Expected TLS state in InferenceMode]:
-  //   InferenceMode: InplaceOrView not in
+  //   InferenceMode: ADInplaceOrView not in
   //   raw_local_dispatch_key_set.included(),
   //                  Autograd in raw_local_dispatch_key_set.excluded()
   //                  GradMode is disabled.
-  //   NormalMode: InplaceOrView in raw_local_dispatch_key_set.included(),
+  //   NormalMode: ADInplaceOrView in raw_local_dispatch_key_set.included(),
   //               Autograd not in raw_local_dispatch_key_set.excluded()
   //               GradMode is enabled by default unless toggled manually
   //               through other APIs, e.g. NoGradGuard.
   //
   // Invariant:
-  // - InplaceOrView is never in the excluded set
+  // - ADInplaceOrView is never in the excluded set
   // - Autograd is never in the included set
   // - Setting InferenceMode will set GradMode accordingly, but not vice versa.
   //
-  //  1. Why do we put InplaceOrView in included set outside InferenceMode?
+  //  1. Why do we put ADInplaceOrView in included set outside InferenceMode?
   //
   //     Inplace update to inference tensor outside InferenceMode is not
   //     allowed. See Note [Inplace update inference tensor] for more details.
-  //     Without going through InplaceOrView kernel, we cannot throw error
+  //     Without going through ADInplaceOrView kernel, we cannot throw error
   //     for `inference_tensor.add_(1)` case.
   //
-  // 2. Why not put InplaceOrView in the excluded set inside InferenceMode?
+  // 2. Why not put ADInplaceOrView in the excluded set inside InferenceMode?
   //
   //    For example:
   //    torch::Tensor a = torch::ones({1, 2, 3}).set_requires_grad(true);
@@ -40,7 +40,7 @@ struct TORCH_API InferenceMode {
   //      c10::InferenceMode guard(true);
   //      k.add_(2);
   //    }
-  //    `k.add_(2)` still need to go through InplaceOrView kernel so that it's
+  //    `k.add_(2)` still need to go through ADInplaceOrView kernel so that it's
   //    prepared for future autograd.
   //
   // 3. Why does setting InferenceMode also set GradMode?
@@ -55,8 +55,8 @@ struct TORCH_API InferenceMode {
         grad_mode(at::AutoGradMode(!enabled)) {
     set_enabled(enabled);
     DispatchKeySet included = enabled
-        ? prev_keyset.included_.remove(c10::DispatchKey::InplaceOrView)
-        : prev_keyset.included_.add(c10::DispatchKey::InplaceOrView);
+        ? prev_keyset.included_.remove(c10::DispatchKey::ADInplaceOrView)
+        : prev_keyset.included_.add(c10::DispatchKey::ADInplaceOrView);
     DispatchKeySet excluded = enabled
         ? (prev_keyset.excluded_ | c10::autograd_dispatch_keyset)
         : (prev_keyset.excluded_ - c10::autograd_dispatch_keyset);
