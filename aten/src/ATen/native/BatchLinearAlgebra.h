@@ -17,6 +17,9 @@ enum class LapackLstsqDriverType : int64_t { Gels, Gelsd, Gelsy, Gelss};
 // linear algebra operations
 
 template <class scalar_t>
+void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info);
+
+template <class scalar_t>
 void lapackCholeskyInverse(char uplo, int n, scalar_t *a, int lda, int *info);
 
 template <class scalar_t, class value_t=scalar_t>
@@ -155,6 +158,9 @@ void lapackLstsq(
 
 #endif
 
+using cholesky_fn = void (*)(const Tensor& /*input*/, const Tensor& /*info*/, bool /*upper*/);
+DECLARE_DISPATCH(cholesky_fn, cholesky_stub);
+
 using cholesky_inverse_fn = Tensor& (*)(Tensor& /*result*/, Tensor& /*infos*/, bool /*upper*/);
 
 DECLARE_DISPATCH(cholesky_inverse_fn, cholesky_inverse_stub);
@@ -167,10 +173,10 @@ using linalg_eig_fn = void (*)(Tensor& /*eigenvalues*/, Tensor& /*eigenvectors*/
 
 DECLARE_DISPATCH(linalg_eig_fn, linalg_eig_stub);
 
-using geqrf_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/, int64_t /*m*/, int64_t /*n*/);
+using geqrf_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/);
 DECLARE_DISPATCH(geqrf_fn, geqrf_stub);
 
-using orgqr_fn = Tensor& (*)(Tensor& /*result*/, const Tensor& /*tau*/, int64_t /*n_columns*/);
+using orgqr_fn = Tensor& (*)(Tensor& /*result*/, const Tensor& /*tau*/);
 DECLARE_DISPATCH(orgqr_fn, orgqr_stub);
 
 using linalg_eigh_fn = void (*)(
