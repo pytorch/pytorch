@@ -205,6 +205,7 @@ jobs:
         name: Download PyTorch Test Reports
         with:
           name: test-reports
+          path: test-reports/
       - uses: actions/setup-python@v2
         with:
           python-version: 3.9
@@ -213,4 +214,4 @@ jobs:
           pip install junitparser rich
       - name: Output Test Results (Click Me)
         run: |
-          python tools/render_junit.py .
+          python tools/render_junit.py test-reports
