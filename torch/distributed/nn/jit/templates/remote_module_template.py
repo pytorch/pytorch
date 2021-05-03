@@ -57,6 +57,7 @@ _generated_methods = [
 # This template may cause typing error (the mismatch between ``Tuple[()]`` and ``Tuple[Any]``)
 # even if the code is only used for instaniation but not execution.
 # Therefore, only include handling moving CPU tensors to a cuda device if necessary.
+# TODO: Merge these two templates together in the future once TorchScript syntax is improved.
 _REMOTE_FORWARD_TEMPLATE_ENABLE_MOVING_CPU_TENSORS_TO_CUDA = """
 def _remote_forward(
     module_rref: RRef[module_interface_cls], device: str, is_device_map_set: bool, {arg_types}){arrow_and_return_type}:
