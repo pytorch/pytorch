@@ -690,13 +690,13 @@ void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
 
 std::vector<uint8_t> TCPStore::compareSet(
     const std::string& key,
-    const std::vector<uint8_t>& currentValue,
-    const std::vector<uint8_t>& newValue) {
+    const std::vector<uint8_t>& expectedValue,
+    const std::vector<uint8_t>& desiredValue) {
   std::string regKey = regularPrefix_ + key;
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::COMPARE_SET);
   tcputil::sendString(storeSocket_, regKey, true);
-  tcputil::sendVector<uint8_t>(storeSocket_, currentValue);
-  tcputil::sendVector<uint8_t>(storeSocket_, newValue);
+  tcputil::sendVector<uint8_t>(storeSocket_, expectedValue);
+  tcputil::sendVector<uint8_t>(storeSocket_, desiredValue);
   return tcputil::recvVector<uint8_t>(storeSocket_);
 }
 

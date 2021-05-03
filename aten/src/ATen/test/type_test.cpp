@@ -24,7 +24,7 @@ TEST(TypeCustomPrinter, Basic) {
   EXPECT_EQ(type->annotation_str(printer), "CustomTensor");
 
   // Unrelated types shoudl not be affected
-  const auto intType = IntType::create();
+  const auto intType = IntType::get();
   EXPECT_EQ(intType->annotation_str(printer), intType->annotation_str());
 }
 
