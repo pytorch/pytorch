@@ -126,6 +126,8 @@ class TORCH_API ExprHandle {
   ExprHandle operator<=(const ExprHandle& other) const;
   ExprHandle operator&(const ExprHandle& other) const;
   ExprHandle operator|(const ExprHandle& other) const;
+  ExprHandle operator&&(const ExprHandle& other) const;
+  ExprHandle operator||(const ExprHandle& other) const;
   ExprHandle operator^(const ExprHandle& other) const;
   ExprHandle operator<<(const ExprHandle& other) const;
   ExprHandle operator>>(const ExprHandle& other) const;
@@ -210,6 +212,15 @@ class TORCH_API Buf : public ExprNode<Buf> {
   const Expr* initializer() const {
     return initializer_;
   };
+
+  bool hasConstantDims() const {
+    for (auto d : dims_) {
+      if (!d->isConstant()) {
+        return false;
+      }
+    }
+    return true;
+  }
 
  private:
   const Var* base_handle_;

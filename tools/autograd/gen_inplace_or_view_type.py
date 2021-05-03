@@ -14,6 +14,7 @@ from tools.codegen.model import (
 from typing import List, Optional, Sequence, Tuple
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
+from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
 )
@@ -121,7 +122,7 @@ m.impl("${unqual_operator_name_with_overload}",
 
 INPLACE_REDISPATCH = CodeTemplate("""\
 {
-  at::AutoDispatchBelowInplaceOrView guard;
+  at::AutoDispatchBelowADInplaceOrView guard;
   at::redispatch::${api_name}(${unpacked_args});
 }
 """)
@@ -132,7 +133,7 @@ ${return_values} = ${rhs_value};
 
 VIEW_REDISPATCH = CodeTemplate("""\
 ${assign_return_values} ([&]() {
-  at::AutoDispatchBelowInplaceOrView guard;
+  at::AutoDispatchBelowADInplaceOrView guard;
   return at::redispatch::${api_name}(${unpacked_args});
 })();
 """)
@@ -321,6 +322,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
 def modifies_arguments(f: NativeFunction) -> bool:
     return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
 
+@with_native_function_with_differentiability_info
 def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     f = fn.func
     inplace_view_body: List[str] = []
@@ -328,9 +330,9 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    # code-generated InplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
+    # code-generated ADInplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
     # See Note [Plumbing Keys Through The Dispatcher] for details.
-    dispatch_key_set = 'ks & c10::after_InplaceOrView_keyset'
+    dispatch_key_set = 'ks & c10::after_ADInplaceOrView_keyset'
     redispatch_args = ', '.join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
@@ -373,6 +375,7 @@ def gen_formals(f: NativeFunction) -> str:
          for a in f.func.schema_order_arguments()]
     )
 
+@with_native_function_with_differentiability_info
 def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
     if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
@@ -384,6 +387,7 @@ def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInf
         type_definition_body=emit_inplace_or_view_body(fn),
     )
 
+@with_native_function_with_differentiability_info
 def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
     if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
@@ -391,7 +395,7 @@ def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityI
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,
         type_wrapper_name=type_wrapper_name(f),
-        class_type='InplaceOrView',
+        class_type='ADInplaceOrView',
     )
 
 def use_derived(fn: NativeFunctionWithDifferentiabilityInfo) -> bool:
@@ -405,8 +409,8 @@ def gen_inplace_or_view_type_shard(
 
     filtered_fns_with_infos = list(filter(use_derived, fns_with_infos))
 
-    fm.write_with_template('InplaceOrViewType%s.cpp' % suffix, 'InplaceOrViewType.cpp', lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/InplaceOrViewType.cpp',
+    fm.write_with_template('ADInplaceOrViewType%s.cpp' % suffix, 'ADInplaceOrViewType.cpp', lambda: {
+        'generated_comment': f'@generated from {fm.template_dir}/ADInplaceOrViewType.cpp',
         'inplace_or_view_method_definitions': list(mapMaybe(inplace_or_view_method_definition, filtered_fns_with_infos)),
         'inplace_or_view_wrapper_registrations': list(mapMaybe(inplace_or_view_method_registration, filtered_fns_with_infos)),
     })
