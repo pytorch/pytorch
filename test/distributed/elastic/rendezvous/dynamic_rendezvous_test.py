@@ -31,11 +31,13 @@ class RendezvousTimeoutTest(TestCase):
             timedelta(seconds=50),
             timedelta(seconds=60),
             timedelta(seconds=70),
+            timedelta(seconds=80),
         )
 
         self.assertEqual(timeout.join, timedelta(seconds=50))
         self.assertEqual(timeout.last_call, timedelta(seconds=60))
         self.assertEqual(timeout.close, timedelta(seconds=70))
+        self.assertEqual(timeout.heartbeat, timedelta(seconds=80))
 
     def test_init_initializes_timeout_if_no_timeout_is_specified(self) -> None:
         timeout = RendezvousTimeout()
@@ -43,6 +45,7 @@ class RendezvousTimeoutTest(TestCase):
         self.assertEqual(timeout.join, timedelta(seconds=600))
         self.assertEqual(timeout.last_call, timedelta(seconds=30))
         self.assertEqual(timeout.close, timedelta(seconds=30))
+        self.assertEqual(timeout.heartbeat, timedelta(seconds=5))
 
     def test_init_raises_error_if_timeout_is_not_positive(self) -> None:
         join_timeouts = [timedelta(seconds=0), timedelta(seconds=-1)]
