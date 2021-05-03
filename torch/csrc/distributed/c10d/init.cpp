@@ -169,8 +169,8 @@ class PythonStore : public ::c10d::Store {
   // return a py::bytes instead of a std::vector<uint8_t>.
   std::vector<uint8_t> compareSet(
       const std::string& key,
-      const std::vector<uint8_t>& currentValue,
-      const std::vector<uint8_t>& newValue) override {
+      const std::vector<uint8_t>& expectedValue,
+      const std::vector<uint8_t>& desiredValue) override {
     pybind11::gil_scoped_acquire gil;
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "compare_set");
@@ -180,7 +180,7 @@ class PythonStore : public ::c10d::Store {
     // std::vector<uint8_t>. There is no API for directly accessing
     // the contents of the py::bytes object.
     std::string str =
-        pybind11::cast<py::bytes>(fn(key, currentValue, newValue));
+        pybind11::cast<py::bytes>(fn(key, expectedValue, desiredValue));
     return std::vector<uint8_t>(str.begin(), str.end());
   }
 
@@ -405,6 +405,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "_set_ddp_runtime_logging_sample_rate",
           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
           py::arg("sample_rate"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_static_graph",
+          &::c10d::Reducer::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -436,6 +440,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_set_uneven_input_join",
           &::c10d::Logger::set_uneven_input_join,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_static_graph",
+          &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
@@ -567,39 +575,37 @@ Example::
               "compare_set",
               [](::c10d::Store& store,
                  const std::string& key,
-                 const std::string& current_value,
-                 const std::string& new_value) -> py::bytes {
-                std::vector<uint8_t> currentValue_(
-                    current_value.begin(), current_value.end());
-                std::vector<uint8_t> newValue_(
-                    new_value.begin(), new_value.end());
-                auto value = store.compareSet(key, currentValue_, newValue_);
+                 const std::string& expected_value,
+                 const std::string& desired_value) -> py::bytes {
+                std::vector<uint8_t> expectedValue_(
+                    expected_value.begin(), expected_value.end());
+                std::vector<uint8_t> desiredValue_(
+                    desired_value.begin(), desired_value.end());
+                auto value =
+                    store.compareSet(key, expectedValue_, desiredValue_);
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
-performs comparison between ``new_value`` and ``current_value`` before inserting. ``new_value``
-will only be placed if ``current_value`` for the ``key`` already exists in the store.
-
-.. warning::
-    The ``compare_set`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
-    with the :class:`~torch.distributed.FileStore` or class:`~torch.distributed.HashStore` will result in an exception.
+performs comparison between ``expected_value`` and ``desired_value`` before inserting. ``desired_value``
+will only be set if ``expected_value`` for the ``key`` already exists in the store or if ``expected_value``
+is an empty string.
 
 Arguments:
     key (str): The key to be checked in the store.
-    current_value (str): The value associated with ``key`` to be checked before insertion.
-    new_value (str): The value associated with ``key`` to be added to the store.
+    expected_value (str): The value associated with ``key`` to be checked before insertion.
+    desired_value (str): The value associated with ``key`` to be added to the store.
 
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
     >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
-    >>> store.set("first_key", "first_value")
-    >>> store.compare_set("first_key", "second_value", "first_value")
+    >>> store.set("key", "first_value")
+    >>> store.compare_set("key", "first_value", "second_value")
     >>> # Should return "second_value"
-    >>> store.get("first_key")
+    >>> store.get("key")
 )")
           // Convert from std::vector<uint8_t> to py::bytes.
           // The returned value is not guaranteed to be valid UTF-8.
