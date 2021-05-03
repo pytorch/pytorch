@@ -103,6 +103,7 @@ def _dump_DDP_relevant_env_vars():
 class _DDPUnevenInputsConfig(NamedTuple):
     ddp_join_enabled: bool
     ddp_join_divide_by_initial_world_size: bool
+    ddp_join_throw_on_early_termination: bool
 
 
 class DistributedDataParallel(Module):
@@ -290,15 +291,6 @@ class DistributedDataParallel(Module):
         Using ``DistributedDataParallel`` in conjunction with the
         :ref:`distributed-rpc-framework` is experimental and subject to change.
 
-    .. warning::
-        The ``gradient_as_bucket_view`` mode  does not yet work with Automatic
-        Mixed Precision (AMP). AMP maintains stashed gradients that are used for
-        unscaling gradients. With ``gradient_as_bucket_view=True``, these
-        stashed gradients will point to communication buckets in the first
-        iteration. In the next iteration, the communication buckets are mutated
-        and thus these stashed gradients will be unexpectedly mutated as well,
-        which might lead to wrong results.
-
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices.
@@ -345,8 +337,7 @@ class DistributedDataParallel(Module):
                                unused can be detached from the autograd graph
                                using ``torch.Tensor.detach``. (default: ``False``)
         check_reduction: This argument is deprecated.
-        gradient_as_bucket_view (bool): This is a prototype feature and subject
-                      to changes. When set to ``True``, gradients will be views
+        gradient_as_bucket_view (bool): When set to ``True``, gradients will be views
                       pointing to different offsets of ``allreduce`` communication
                       buckets. This can reduce peak memory usage, where the
                       saved memory size will be equal to the total gradients
@@ -442,7 +433,9 @@ class DistributedDataParallel(Module):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.ddp_uneven_inputs_config = _DDPUnevenInputsConfig(
-            ddp_join_enabled=False, ddp_join_divide_by_initial_world_size=False
+            ddp_join_enabled=False,
+            ddp_join_divide_by_initial_world_size=False,
+            ddp_join_throw_on_early_termination=False,
         )
         self.gradient_as_bucket_view = gradient_as_bucket_view
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
@@ -744,10 +737,23 @@ class DistributedDataParallel(Module):
             if self.ddp_uneven_inputs_config.ddp_join_enabled:
                 ones = torch.ones(1, device=self.device)
                 work = dist.all_reduce(ones, group=self.process_group, async_op=True)
-                self.reducer._set_forward_pass_work_handle(
-                    work,
-                    self.ddp_uneven_inputs_config.ddp_join_divide_by_initial_world_size,
-                )
+                if self.ddp_uneven_inputs_config.ddp_join_throw_on_early_termination:
+                    # Active ranks schedule an allreduce with zeros, inactive
+                    # ranks schedule them with 1. If the result != 0 it
+                    # indicates at least one rank has terminated and we should
+                    # throw.
+                    zeros = torch.zeros(1, device=self.device)
+                    dist.all_reduce(zeros, group=self.process_group)
+                    should_throw_stop_iteration = zeros.item()
+                    if should_throw_stop_iteration:
+                        raise RuntimeError(
+                            "Detected at least one rank that exhausted inputs. Throwing across all ranks."
+                        )
+                else:
+                    self.reducer._set_forward_pass_work_handle(
+                        work,
+                        self.ddp_uneven_inputs_config.ddp_join_divide_by_initial_world_size,
+                    )
 
             # Calling _rebuild_buckets before forward compuation,
             # It may allocate new buckets before deallocating old buckets
@@ -920,7 +926,12 @@ class DistributedDataParallel(Module):
         self.process_group.allreduce(locally_used_param_maps)
 
     @contextmanager
-    def join(self, divide_by_initial_world_size=True, enable=True):
+    def join(
+        self,
+        divide_by_initial_world_size=True,
+        enable=True,
+        throw_on_early_termination=False,
+    ):
         r"""
         A context manager to be used in conjunction with an instance of
         :class:`torch.nn.parallel.DistributedDataParallel` to be
@@ -932,7 +943,10 @@ class DistributedDataParallel(Module):
         DDP processes. This will ensure each collective call has a corresponding
         call by already-joined DDP processes, preventing hangs or errors that
         would otherwise happen when training with uneven inputs across
-        processes.
+        processes. Alternatively, if the flag ``throw_on_early_termination`` is
+        specified to be ``True``, all trainers will throw an error once one rank
+        runs out of inputs, allowing these errors to be caught and handled
+        according to application logic.
 
         Once all DDP processes have joined, the context manager will broadcast
         the model corresponding to the last joined process to all processes to
@@ -944,9 +958,11 @@ class DistributedDataParallel(Module):
         modifications to the model or data loading is required.
 
         .. warning::
-            This module currently does not support custom distributed collective
-            operations in the forward pass, such as ``SyncBatchNorm`` or other
-            custom defined collectives in the model's forward pass.
+            If the model or training loop this context manager is wrapepd around
+            has additional distributed collective operations, such as
+            ``SyncBatchNorm`` in the model's forward pass, then the flag
+            ``throw_on_early_termination`` must be enabled. This is because this
+            context manager is not aware of non-DDP collective communication.
 
         Args:
             divide_by_initial_world_size (bool): If ``True``, will divide
@@ -971,6 +987,13 @@ class DistributedDataParallel(Module):
                 in ``enable=False`` to disable in cases where you know that
                 inputs are even across participating processes. Default is
                 ``True``.
+            throw_on_early_termination (bool): Whether to throw an error
+                or continue training when at least one rank has exhausted
+                inputs. If ``True``, will throw upon the first rank reaching end
+                of data. If ``False``, will continue training with a smaller
+                effective world size until all ranks are joined. Note that if
+                this flag is specified, then the flag
+                ``divide_by_initial_world_size`` would be ignored.
 
 
         Example::
@@ -1006,6 +1029,7 @@ class DistributedDataParallel(Module):
             self.ddp_uneven_inputs_config = _DDPUnevenInputsConfig(
                 ddp_join_enabled=enable,
                 ddp_join_divide_by_initial_world_size=divide_by_initial_world_size,
+                ddp_join_throw_on_early_termination=throw_on_early_termination,
             )
             yield
         except Exception as e:
@@ -1037,6 +1061,16 @@ class DistributedDataParallel(Module):
                         all_procs_joined = True
                     else:
                         # Some DDP process still needs to be joined.
+                        if self.ddp_uneven_inputs_config.ddp_join_throw_on_early_termination:
+                            # Schedule allreduce telling active ranks to terminate
+                            ones = torch.ones(1, device=self.device)
+                            dist.all_reduce(ones, group=self.process_group)
+                            # Raising StopIteration doesn't throw error in python 3.6
+                            # and throws RuntimeError in 3.7+ (PEP 479), so just
+                            # raise RuntimeError here.
+                            raise RuntimeError(
+                                f"Rank {self._distributed_rank} exhausted all inputs."
+                            )
                         if is_last_joiner:
                             is_last_joiner = False
                         # It will rebuild buckets only once during training period
@@ -1331,3 +1365,32 @@ class DistributedDataParallel(Module):
                 "DDP runtime logging sample rate should be equal or greater than 1"
             )
         self.reducer._set_ddp_runtime_logging_sample_rate(sample_rate)
+
+    def _set_static_graph(self):
+        """
+        Users can explicitly let DDP know the trained graph is static,
+        when 1) the set of used and unused parameters will not change
+        during the whole training loop; in this case, it does not matter
+        whether users set find_unsued_parameters = true or not.
+        2) how the graph is trained will not change during the whole training
+        loop (meaning there is no control flow depending on iterations).
+        When graph is set to be static, DDP will support cases that can not
+        be supported in the past: 1) reentrant backwards
+        2) activation checkpointing multiple times 3)
+        activation checkpointing with find_unused_parameters = true.
+        4) not all output tensors are used in loss calculation.
+        5) there is model parameter that is outside of forward function.
+        6) potentially improve performance when find_unsued_parameters = true
+        or there are unused parameters, as DDP will not search graph in each
+        iteraton to detect unused parameters when static_graph is set to be True.
+
+        This API should be called after DistributedDataParallel construction, and
+        before training loops starts. Also it should be called in the same way for
+        all ranks. For example:
+            ddp_model = DistributedDataParallel(model)
+            ddp_model._set_static_graph()
+            for i in range(n):
+                .....
+        """
+        self.reducer._set_static_graph()
+        self.logger._set_static_graph()
