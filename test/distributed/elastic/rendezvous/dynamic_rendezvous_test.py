@@ -166,14 +166,14 @@ class DynamicRendezvousHandlerTest(TestCase):
 
         self.assertEqual(handler.get_backend(), self._backend.name)
         self.assertEqual(handler.get_run_id(), self._run_id)
-        self.assertEqual(handler.run_id, self._run_id)
-        self.assertEqual(handler.min_nodes, self._min_nodes)
-        self.assertEqual(handler.max_nodes, self._max_nodes)
+        self.assertEqual(handler.settings.run_id, self._run_id)
+        self.assertEqual(handler.settings.min_nodes, self._min_nodes)
+        self.assertEqual(handler.settings.max_nodes, self._max_nodes)
 
         if self._timeout is None:
-            self.assertIsNotNone(handler.timeout)
+            self.assertIsNotNone(handler.settings.timeout)
         else:
-            self.assertIs(handler.timeout, self._timeout)
+            self.assertIs(handler.settings.timeout, self._timeout)
 
     def test_init_initializes_handler_if_timeout_is_not_specified(self) -> None:
         self._timeout = None
@@ -240,11 +240,11 @@ class CreateHandlerTest(TestCase):
 
         self.assertEqual(handler.get_backend(), self._backend.name)
         self.assertEqual(handler.get_run_id(), self._params.run_id)
-        self.assertEqual(handler.min_nodes, self._params.min_nodes)
-        self.assertEqual(handler.max_nodes, self._params.max_nodes)
-        self.assertEqual(handler.timeout.join, self._expected_timeout.join)
-        self.assertEqual(handler.timeout.last_call, self._expected_timeout.last_call)
-        self.assertEqual(handler.timeout.close, self._expected_timeout.close)
+        self.assertEqual(handler.settings.min_nodes, self._params.min_nodes)
+        self.assertEqual(handler.settings.max_nodes, self._params.max_nodes)
+        self.assertEqual(handler.settings.timeout.join, self._expected_timeout.join)
+        self.assertEqual(handler.settings.timeout.last_call, self._expected_timeout.last_call)
+        self.assertEqual(handler.settings.timeout.close, self._expected_timeout.close)
 
     def test_create_handler_returns_handler_if_timeout_is_not_specified(self) -> None:
         del self._params.config["join_timeout"]
