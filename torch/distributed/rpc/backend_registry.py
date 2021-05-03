@@ -206,12 +206,12 @@ def _tensorpipe_check_local_device_maps(name, options):
                 f"Invalid device_map configuration for {worker_name}, "
                 f"not 1-to-1 mapping:\ndevice_maps = {device_map}"
             )
-        local_devices.update(options.device_maps[worker_name].keys())
+        local_devices.update(key_set)
 
-    if len(local_devices) > 0 and not all([
-        max(local_devices) < torch.cuda.device_count(),
-        min(local_devices) >= 0,
-    ]):
+    if not all(
+        (0 <= d.index < torch.cuda.device_count() if d.type == "cuda" else True)
+        for d in local_devices
+    ):
         raise ValueError(
             f"Invalid device in TensorPipe options on {name}:\n"
             f"device_maps = {options.device_maps},\n"
@@ -235,12 +235,11 @@ def _tensorpipe_check_remote_device_maps(agent, options):
             remote_device_count = all_device_counts[remote_name]
             if remote_name in device_maps:
                 device_map = device_maps[remote_name]
-                key_set = set(device_map.keys())
                 val_set = set(device_map.values())
-                if not all([
-                    min(val_set) >= 0,
-                    max(val_set) < remote_device_count  # check remote range
-                ]):
+                if not all(
+                    (0 <= d.index < remote_device_count if d.type == "cuda" else True)
+                    for d in val_set
+                ):
                     raise ValueError(
                         f"Invalid device_map configuration on {name} "
                         f"for {remote_name}, remote device out of range:\n"
