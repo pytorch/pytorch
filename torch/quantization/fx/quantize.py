@@ -41,7 +41,6 @@ from .pattern_utils import (
     is_match,
     get_default_quant_patterns,
     get_default_output_activation_post_process_map,
-    input_output_observed,
     Pattern,
 )
 
@@ -1059,7 +1058,7 @@ class Quantizer:
             # and activation is fp16 (since we will output fp32 currently for fp16
             # converter
             if not activation_is_int8_quantized(qconfig) or \
-               not input_output_observed(obj):
+               not obj.input_output_observed():
                 quantized = False
             if node_return_type_is_int(node):
                 quantized = False
@@ -1515,7 +1514,7 @@ class Quantizer:
                 root_node, matched_nodes, matched_pattern, quantize_handler, \
                     qconfig = matches[node.name]
                 if root_node is node and \
-                        input_output_observed(quantize_handler):
+                        quantize_handler.input_output_observed():
                     # matched_nodes[-1] is the first op in the sequence and
                     # matched_nodes[0] is the last op in the sequence
                     # inputs
