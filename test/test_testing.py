@@ -793,14 +793,6 @@ def assert_fns_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
 
 
 class TestAsserts(TestCase):
-    def test_complex_support(self):
-        actual = torch.ones(1, dtype=torch.float32)
-        expected = torch.ones(1, dtype=torch.complex64)
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaises(UsageError):
-                fn(check_dtype=False)
-
     def test_sparse_support(self):
         actual = torch.empty(())
         expected = torch.sparse_coo_tensor(size=())
@@ -935,6 +927,21 @@ class TestAsserts(TestCase):
         for inputs in make_assert_inputs(a, b):
             torch.testing.assert_close(*inputs, equal_nan=True)
 
+    def test_assert_close_equal_nan_complex(self):
+        a = torch.tensor(complex(1, float("NaN")))
+        b = torch.tensor(complex(float("NaN"), 1))
+
+        for inputs in make_assert_inputs(a, b):
+            with self.assertRaises(AssertionError):
+                torch.testing.assert_close(*inputs, equal_nan=True)
+
+    def test_assert_close_equal_nan_complex_relaxed(self):
+        a = torch.tensor(complex(1, float("NaN")))
+        b = torch.tensor(complex(float("NaN"), 1))
+
+        for inputs in make_assert_inputs(a, b):
+            torch.testing.assert_close(*inputs, equal_nan="relaxed")
+
     def test_mismatching_values_msg_mismatches(self):
         actual = torch.tensor([1, 2, 3, 4])
         expected = torch.tensor([1, 2, 5, 6])
@@ -957,6 +964,22 @@ class TestAsserts(TestCase):
 
         for fn in assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("Greatest relative difference: 0.5 at (0, 1)")):
+                fn()
+
+    def test_mismatching_values_msg_complex_real(self):
+        actual = torch.tensor(complex(0, 1))
+        expected = torch.tensor(complex(1, 1))
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the real part")):
+                fn()
+
+    def test_mismatching_values_msg_complex_imag(self):
+        actual = torch.tensor(complex(1, 0))
+        expected = torch.tensor(complex(1, 1))
+
+        for fn in assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the imaginary part")):
                 fn()
 
     def test_assert_close_mismatching_values_msg_rtol(self):
