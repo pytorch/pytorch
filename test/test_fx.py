@@ -2311,6 +2311,7 @@ class TestOperatorSignatures(JitTestCase):
                            'linalg.multi_dot',
                            'polygamma',
                            'repeat',
+                           'reshape_as',
                            'stack',
                            'view',
                            'view_as',

@@ -5472,6 +5472,15 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_view_reshape,
            supports_out=False,
            ),
+    OpInfo('reshape_as',
+           op=lambda x, other: x.reshape_as(other),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_view_as_reshape_as,
+           skips=(
+               # Because view does not have a function variant.
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
+           supports_out=False,
+           ),
     OpInfo('view',
            op=lambda x, shape: x.view(shape),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
