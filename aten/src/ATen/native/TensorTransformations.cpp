@@ -59,6 +59,10 @@ static TensorIterator make_index_iterator(const Tensor input, const std::vector<
 
 
 Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
+  if(dims.size() == 0) {
+    return self;
+  }
+
   auto input = self;
   const int64_t total_dims = input.dim();
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
