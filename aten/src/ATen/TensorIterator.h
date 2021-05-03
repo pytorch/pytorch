@@ -472,7 +472,7 @@ class TORCH_API TensorIteratorConfig final {
 public:
   friend struct TensorIteratorBase;
   friend struct TensorIterator;
-  friend struct BinaryTensorIteratorBase;
+  friend class BinaryTensorIteratorBase;
 
   TensorIteratorConfig() {}
 

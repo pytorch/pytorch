@@ -1,6 +1,7 @@
 #include <ATen/BinaryTensorIterator.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/TypeProperties.h>
 #include <c10/util/Exception.h>
 
 namespace at {
@@ -38,16 +39,18 @@ void BinaryTensorIteratorBase::setup(
   // ===================================================================
 
   TORCH_INTERNAL_ASSERT(!config.is_reduction_, "not supported -_-");
+  TORCH_INTERNAL_ASSERT(!config.static_shape_, "not supported -_-");
+  TORCH_INTERNAL_ASSERT(!config.static_dtype_and_device_, "not supported -_-");
 
   // ===================== Memory Overlap Check ==================
   if (config.check_mem_overlap_) {
     switch (convention_) {
       case FunctionConvention::OUT:
-        // TODO: OUT with resize is somewhat like "functional"
         assert_no_partial_overlap(a_, out_);
         assert_no_partial_overlap(b_, out_);
         // fall through
       case FunctionConvention::INPLACE:
+        // TODO: if out is contiguous, this check can be skipped.
         assert_no_internal_overlap(out_);
         // fall through
       case FunctionConvention::FUNCTIONAL:;
@@ -56,33 +59,34 @@ void BinaryTensorIteratorBase::setup(
   }
 
   // =================== Compute Names ==============================
-  // TODO: skip for now...
+  bool should_infer_names = a_.has_names() || b_.has_names() || (out_.defined() && out_.has_names());
+  if (should_infer_names) {
+    TORCH_INTERNAL_ASSERT(false, "infer names is not not supported yet -_-");
+  }
 
   // ==================== Shape Compute && Check Output Size && Numel
   // =============================
-  if (config.static_shape_) {
-    // easy job!
-    shape_ = *config.static_shape_;
+  if (a_.sizes().equals(b_.sizes())) {
+    shape_ = a_.sizes();
+    input_needs_broadcast_ = false;
   } else {
-    if (a_.sizes().equals(b_.sizes())) {
-      shape_ = a_.sizes();
-    } else {
-      shape_ = infer_size_dimvector(a_.sizes(), b_.sizes());
-    }
+    shape_ = infer_size_dimvector(a_.sizes(), b_.sizes());
+    input_needs_broadcast_ = true;
+  }
 
-    switch (convention_) {
-      case FunctionConvention::OUT:
-        if (config.resize_outputs_) {
-          needs_to_resize_out_ = !out_.sizes().equals(shape_);
-          break;
-        }
-        // if not resize output, check is same for OUT and INPLACE, fall through
-      case FunctionConvention::INPLACE:
-        TORCH_INTERNAL_ASSERT(out_.sizes().equals(shape_));
-        // fall through
-      case FunctionConvention::FUNCTIONAL:;
-        // nothing to do
-    }
+  switch (convention_) {
+    case FunctionConvention::OUT:
+      if (config.resize_outputs_) {
+        output_needs_resize_ = !out_.sizes().equals(shape_);
+        break;
+      }
+      // if not resize output,
+      // fall through
+    case FunctionConvention::INPLACE:
+      TORCH_INTERNAL_ASSERT(out_.sizes().equals(shape_));
+      // fall through
+    case FunctionConvention::FUNCTIONAL:;
+      // nothing to do
   }
 
   // compute numel
@@ -95,7 +99,19 @@ void BinaryTensorIteratorBase::setup(
   // =========== Behemoth, so put them into a method .... ===================
   setup_type_and_device(config);
 
-  // set output, assume contiguous case
+  // Check fast setup
+  TORCH_CHECK(
+      !(input_needs_broadcast_ || input_needs_type_promotion_ ||
+        output_needs_resize_ || output_needs_type_promotion_),
+      "unsupported -_-");
+
+  // TODO: the out check can be skipped for INPLACE, by similar switch...
+  bool all_contiguous = a_.is_contiguous(at::MemoryFormat::Contiguous) &&
+      b_.is_contiguous(at::MemoryFormat::Contiguous) &&
+      (!out_.defined() || out_.is_contiguous(at::MemoryFormat::Contiguous));
+  TORCH_CHECK(all_contiguous, "unsupported -_-");
+
+  // set output with contiguous
   // cannot call into a pure virtual function in constructor
   set_output(
       0,
@@ -108,11 +124,37 @@ void BinaryTensorIteratorBase::setup(
       names_);
 }
 
-    void
-    BinaryTensorIteratorBase::setup_type_and_device(
-        const TensorIteratorConfig& config) {
-  common_dtype_ = a_.scalar_type();
-  common_device_ = a_.device();
+void BinaryTensorIteratorBase::setup_type_and_device(
+    const TensorIteratorConfig& config) {
+  // Common device
+  if (a_.device() == b_.device()) {
+    common_device_ = a_.device();
+  }
+  else if (a_.device().is_cpu() && a_.dim() == 0) {
+    common_device_ = b_.device();
+  }
+  else if (b_.device().is_cpu() && b_.dim() == 0) {
+    common_device_ = a_.device();
+  }
+  else {
+    TORCH_CHECK(false, "different device!");
+  }
+
+  TORCH_CHECK(!out_.defined() || out_.device() == common_device_, "output tensor device is wrong!");
+
+  // Common dtype
+  ScalarType a_scalar_type = a_.scalar_type(), b_scalar_type = b_.scalar_type();
+  if (a_scalar_type == b_scalar_type) {
+    common_dtype_ = a_scalar_type;
+    input_needs_type_promotion_ = false;
+  } else {
+    compute_type_promotion();
+    input_needs_type_promotion_ = true;
+  }
+
+  if (out_.defined() && out_.scalar_type() != common_dtype_) {
+    output_needs_type_promotion_ = true;
+  }
 }
 
 void BinaryTensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
@@ -197,12 +239,21 @@ void BinaryTensorIteratorBase::set_output(
     IntArrayRef strides,
     TensorOptions options,
     DimnameList names) {
-  TORCH_INTERNAL_ASSERT(!needs_to_resize_out_, "not supported -_-");
+  TORCH_INTERNAL_ASSERT(!output_needs_resize_, "not supported -_-");
 
   if (convention_ == FunctionConvention::FUNCTIONAL) {
     out_ = maybe_get_output(output_idx);
     TORCH_INTERNAL_ASSERT(out_.defined());
   }
+}
+
+void BinaryTensorIteratorBase::compute_type_promotion() {
+  at::native::ResultTypeState state = {};
+
+  state = at::native::update_result_type_state(a_, state);
+  state = at::native::update_result_type_state(b_, state);
+  common_dtype_ = at::native::result_type(state);
+  TORCH_INTERNAL_ASSERT(common_dtype_ != ScalarType::Undefined);
 }
 
 } // namespace at

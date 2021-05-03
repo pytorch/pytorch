@@ -597,7 +597,8 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
           iter.unsafe_replace_operand(0, self_data);
           iter.unsafe_replace_operand(1, self_data);
           iter.unsafe_replace_operand(2, source_data);
-//          add_stub(iter.device_type(), iter, alpha);
+          TORCH_INTERNAL_ASSERT(false, "index_add is not supported");
+          //          add_stub(iter.device_type(), iter, alpha);
       }
     });
   }

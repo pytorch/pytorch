@@ -95,12 +95,18 @@ class TORCH_API BinaryTensorIteratorBase : public impl::MetaBase {
   Device common_device_ = kCPU;
 
   int64_t numel_ = -1;
-  bool needs_to_resize_out_ = false;
+
+  bool input_needs_broadcast_ = false;
+  bool input_needs_type_promotion_ = false;
+  bool output_needs_resize_ = false;
+  bool output_needs_type_promotion_ = false;
 
   void setup_type_and_device(const TensorIteratorConfig& config);
   int ntensors() const {
     return 3;
   }
+
+  void compute_type_promotion();
 
   StrideVector get_strides() const;
   PtrVector get_base_ptrs() const;
