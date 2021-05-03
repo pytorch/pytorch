@@ -41,10 +41,14 @@ popd
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest
 
-:: TODO: All sharded configs run coverage. We should change that to be only one config, but right now we will just
-:: install coverage everywhere. Tracked: https://github.com/pytorch/pytorch/issues/56264
-python -mpip install coverage==5.5
-python -mpip install -e tools/coverage_plugins_package
+:: Only Windows CPU test run coverage, but it's not the most clear: https://github.com/pytorch/pytorch/issues/56264
+if "%BUILD_ENVIRONMENT%"=="pytorch-win-vs2019-cpu-py3" (
+    :: coverage config file needed for plug-ins and settings to work
+    set COVERAGE_RCFILE="%PWD%/.coveragerc"
+    set PYTORCH_COLLECT_COVERAGE=1
+    python -mpip install coverage==5.5
+    python -mpip install -e tools/coverage_plugins_package
+)
 
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
 
