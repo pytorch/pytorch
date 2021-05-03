@@ -60,7 +60,6 @@ from .quantization_patterns import (
     CopyNodeQuantizeHandler,
     CustomModuleQuantizeHandler,
     DefaultQuantizeHandler,
-    FixedQParamsOpQuantizeHandler,
     QuantizeHandler,
     StandaloneModuleQuantizeHandler,
 )
@@ -1042,10 +1041,7 @@ class Quantizer:
             # of FixedQParamsQuantizeHandler
             # TODO: we may want to try to remove the special case here
             # as well
-            if type(obj) in [
-                    CopyNodeQuantizeHandler,
-                    FixedQParamsOpQuantizeHandler
-            ]:
+            if obj.should_mark_output_quantized_from_input_quantized_status():
                 assert node.op in [
                     'call_module',
                     'call_function',
