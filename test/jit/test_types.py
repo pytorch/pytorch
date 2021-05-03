@@ -22,10 +22,10 @@ if __name__ == '__main__':
 
 class TestTypesAndAnnotation(JitTestCase):
     def test_pep585_type(self):
-        def fn(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-            xl: list[torch.Tensor] = []
+        def fn(x: torch.Tensor) -> Tuple[torch.Tensor, Tuple[torch.Tensor]]:
+            xl: list[tuple[torch.Tensor]] = []
             xd: dict[str, torch.Tensor] = {}
-            xl.append(x)
+            xl.append((x,))
             xd['foo'] = x
             return xl.pop(), xd['foo']
 

@@ -26,7 +26,7 @@ std::string collectQualname(const Select& select) {
 TypePtr ScriptTypeParser::subscriptToType(
     const std::string& typeName,
     const Subscript& subscript) const {
-  if (typeName == "Tuple") {
+  if (typeName == "Tuple" || typename == "tuple") {
     if (subscript.subscript_exprs().size() == 1 &&
         subscript.subscript_exprs()[0].kind() == TK_TUPLE_LITERAL) {
       // `typing.Tuple` special cases syntax for empty tuple annotations,
