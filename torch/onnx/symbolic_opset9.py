@@ -1566,19 +1566,30 @@ def clamp(g, self, min, max):
     elif sym_help._is_none(max):
         return clamp_min(g, self, min)
     else:
-        min = _parse_arg(min, 'f')
-        max = _parse_arg(max, 'f')
-        return g.op("Clip", self, min_f=min, max_f=max)
+        if sym_help._is_constant(min) and sym_help._is_constant(max):
+            return g.op("Clip", self, min_f=_parse_arg(min, 'f'), max_f=_parse_arg(max, 'f'))
+        else:
+            return clamp_max(g, clamp_min(g, self, min), max)
 
 
-@parse_args('v', 'f')
+@parse_args('v', 'v')
 def clamp_min(g, self, min):
-    return g.op("Clip", self, min_f=min)
+    if sym_help._is_constant(min):
+        return g.op("Clip", self, min_f=_parse_arg(min, 'f'))
+    else:
+        dtype = self.type().scalarType()
+        min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+        return g.op("Max", self, min)
 
 
-@parse_args('v', 'f')
+@parse_args('v', 'v')
 def clamp_max(g, self, max):
-    return g.op("Clip", self, max_f=max)
+    if sym_help._is_constant(max):
+        return g.op("Clip", self, max_f=_parse_arg(max, 'f'))
+    else:
+        dtype = self.type().scalarType()
+        max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+        return g.op("Min", self, max)
 
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
