@@ -130,7 +130,10 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
   TORCH_CHECK(
-      id >= 0 && id < allWorkerInfo_.size(), "Invalid destination: ", id);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+      id >= 0 && id < allWorkerInfo_.size(),
+      "Invalid destination: ",
+      id);
   return allWorkerInfo_[id];
 }
 
@@ -267,7 +270,7 @@ std::shared_ptr<JitFuture> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
     const float rpcTimeoutSeconds,
-    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
+    const std::unordered_map<c10::Device, c10::Device>& /* unused */) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
@@ -364,6 +367,7 @@ std::shared_ptr<JitFuture> ProcessGroupAgent::send(
 }
 
 void ProcessGroupAgent::handleSend(const SendWork& work) {
+  // NOLINTNEXTLINE(clang-diagnostic-pessimizing-move)
   auto serializedPayload = std::make_unique<std::string>(std::move(
       wireSerialize(work.message_.payload(), work.message_.tensors())));
 
@@ -426,6 +430,7 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
 }
 
 void ProcessGroupAgent::sendToSelf(Message&& message) {
+  // NOLINTNEXTLINE(modernize-avoid-bind)
   threadPool_.run(std::bind(
       [this](const Message& message) {
         // Unlike the other cases, need to add a tensor deleter, since the
@@ -460,6 +465,7 @@ void ProcessGroupAgent::sendToSelf(Message&& message) {
 
 void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
+  // NOLINTNEXTLINE(modernize-avoid-bind)
   threadPool_.run(std::bind(
       [this](const SendWork& work) {
         try {
@@ -585,6 +591,7 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
 }
 
 void ProcessGroupAgent::enqueueRecv(RecvWork work) {
+  // NOLINTNEXTLINE(modernize-avoid-bind)
   threadPool_.run(std::bind(
       [&](RecvWork& work) {
         try {

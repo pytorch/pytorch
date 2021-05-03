@@ -2,12 +2,13 @@ import pathlib
 import argparse
 import os
 import yaml
-from typing import List, Dict, Union, Tuple, Sequence, Optional
+from collections import namedtuple
+from typing import List, Dict, Union, Sequence, Optional
 from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import Target, concatMap
+from tools.codegen.utils import Target, concatMap, context
 import tools.codegen.dest as dest
 import tools.codegen.api.dispatcher as dispatcher
 
@@ -15,16 +16,17 @@ try:
     # use faster C loader if available
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
 # Returns a Tuple of (backend_key, autograd_key, cpp_namespace, updated BackendIndex mapping)
+ParsedExternalYaml = namedtuple('ParsedExternalYaml', ['backend_key', 'autograd_key', 'cpp_namespace', 'backend_indices'])
 def parse_backend_yaml(
         backend_yaml_path: str,
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
         backend_indices: Dict[DispatchKey, BackendIndex]
-) -> Tuple[Optional[DispatchKey], Optional[DispatchKey], str, Dict[DispatchKey, BackendIndex]]:
+) -> ParsedExternalYaml:
 
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
@@ -39,6 +41,7 @@ def parse_backend_yaml(
 
     backend = yaml_values.pop('backend', None)
     assert backend is not None, 'You must provide a value for "backend"'
+
     cpp_namespace = yaml_values.pop('cpp_namespace', None)
     assert cpp_namespace is not None, 'You must provide a value for "cpp_namespace"'
 
@@ -46,6 +49,7 @@ def parse_backend_yaml(
     if supported is None:
         supported = []  # Allow an empty list of supported ops
     assert isinstance(supported, list), f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
+
     supported_autograd = yaml_values.pop('autograd', [])
     assert isinstance(supported, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
 
@@ -53,12 +57,7 @@ def parse_backend_yaml(
         f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
 Only the following keys are supported: {", ".join(valid_keys)}'
 
-    def add_backend_index(backend_ops: List[str], backend: str, *, is_autograd: bool = False) -> DispatchKey:
-        if is_autograd:
-            # TODO: add better error messages here (later PR)
-            backend_key = DispatchKey.parse(f'Autograd{backend}')
-        else:
-            backend_key = DispatchKey.parse(backend)
+    def create_backend_index(backend_ops: List[str], dispatch_key: DispatchKey) -> BackendIndex:
         metadata: Dict[OperatorName, BackendMetadata] = {}
         for op in backend_ops:
             op_name = OperatorName.parse(op)
@@ -66,23 +65,51 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             # See Note [External Backends Follow Dispatcher API]
             kernel_name = dispatcher.name(native_functions_map[op_name].func)
             # TODO: allow structured external backends later.
-            m = BackendMetadata(kernel=kernel_name, structured=False, external=True)
+            m = BackendMetadata(kernel=kernel_name, structured=False)
             metadata[op_name] = m
-        assert backend_key not in backend_indices
         # TODO: currently hardcoding the fact that XLA implements out/inplace in terms of functional ops,
         # this should eventually be toggleable per-backend.
-        backend_indices[backend_key] = BackendIndex(dispatch_key=backend_key, use_out_as_primary=False, index=metadata)
-        return backend_key
+        return BackendIndex(dispatch_key=dispatch_key, use_out_as_primary=False, external=True, index=metadata)
 
     backend_key: Optional[DispatchKey] = None
     if len(supported) > 0:
-        backend_key = add_backend_index(supported, backend)
+        with context(f'The provided value for "backend" must be a valid DispatchKey, but got {backend}.'):
+            backend_key = DispatchKey.parse(backend)
+
+        backend_idx = create_backend_index(supported, backend_key)
+        assert backend_key not in backend_indices
+        backend_indices[backend_key] = backend_idx
 
     autograd_key: Optional[DispatchKey] = None
     if len(supported_autograd) > 0:
-        autograd_key = add_backend_index(supported_autograd, backend, is_autograd=True)
+        with context(f'The "autograd" key was specified, which indicates that you would like to override \
+the behavior of autograd for some operators on your backend. However "Autograd{backend}" is not a valid DispatchKey.'):
+            autograd_key = DispatchKey.parse(f'Autograd{backend}')
 
-    return backend_key, autograd_key, cpp_namespace, backend_indices
+        autograd_idx = create_backend_index(supported_autograd, autograd_key)
+        assert autograd_key not in backend_indices
+        backend_indices[autograd_key] = autograd_idx
+
+    for g in grouped_native_functions:
+        if isinstance(g, NativeFunction):
+            forward_kernels = [] if backend_key is None else [m for m in [backend_indices[backend_key].get(g)] if m is not None]
+            backward_kernels = [] if autograd_key is None else [m for m in [backend_indices[autograd_key].get(g)] if m is not None]
+        else:
+            forward_kernels = [] if backend_key is None else [m for m in [
+                backend_indices[backend_key].get(f) for f in g.functions()]
+                if m is not None]
+            backward_kernels = [] if autograd_key is None else [m for m in [
+                backend_indices[autograd_key].get(f) for f in g.functions()]
+                if m is not None]
+
+        forward_kernels = [f for f in forward_kernels if f is not None]
+        backward_kernels = [f for f in backward_kernels if f is not None]
+        assert len(forward_kernels) == 0 or len(backward_kernels) == 0, \
+            f'Currently, all variants of an op must either be registered to a backend key, or to a backend\'s \
+autograd key. They can not be mix and matched. If this is something you need, feel free to create an issue! \
+{forward_kernels[0].kernel} is listed under "supported", but {backward_kernels[0].kernel} is listed under "autograd".'
+
+    return ParsedExternalYaml(backend_key, autograd_key, cpp_namespace, backend_indices)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate backend stub files')
@@ -110,10 +137,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
     fm = make_file_manager(output_dir)
 
     native_yaml_path = os.path.join(pytorch_root, 'aten/src/ATen/native/native_functions.yaml')
-    native_functions, backend_indices = parse_native_yaml(native_yaml_path)
+    parsed_yaml = parse_native_yaml(native_yaml_path)
+    native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = get_grouped_native_functions(native_functions)
-    backend_key, autograd_key, cpp_namespace, backend_indices = parse_backend_yaml(
-        source_yaml, grouped_native_functions, backend_indices)
+    parsed_backend_yaml = parse_backend_yaml(source_yaml, grouped_native_functions, backend_indices)
+    backend_key = parsed_backend_yaml.backend_key
+    autograd_key = parsed_backend_yaml.autograd_key
+    cpp_namespace = parsed_backend_yaml.cpp_namespace
+    backend_indices = parsed_backend_yaml.backend_indices
 
     selector = SelectiveBuilder.get_nop_selector()
 

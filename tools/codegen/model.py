@@ -118,12 +118,22 @@ class DispatchKey(Enum):
     def lower(self) -> str:
         return str(self).lower()
 
+    def is_autograd_key(self) -> bool:
+        return 'Autograd' in str(self)
+
     @staticmethod
     def parse(value: str) -> 'DispatchKey':
         for k, v in DispatchKey.__members__.items():
             if k == value:
                 return v
         raise AssertionError(f'unknown dispatch key {value}')
+
+    @staticmethod
+    def try_parse(value: str) -> Optional['DispatchKey']:
+        try:
+            return DispatchKey.parse(value)
+        except AssertionError:
+            return None
 
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
@@ -147,6 +157,10 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
 # otherwise use old-style
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:
     return dk in STRUCTURED_DISPATCH_KEYS
+
+class DeviceCheckType(Enum):
+    NoCheck = 0
+    ExactSame = 1
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -175,6 +189,9 @@ class NativeFunction:
 
     # Whether or not to omit automatic generation of a DeviceGuard
     device_guard: bool
+
+    # How to emit automatic generation of device check
+    device_check: DeviceCheckType
 
     # What python module to put the function in
     python_module: Optional[str]
@@ -285,6 +302,14 @@ class NativeFunction:
         device_guard = e.pop('device_guard', True)
         assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
 
+        device_check_s = e.pop('device_check', None)
+        assert device_check_s is None or isinstance(device_check_s, str), f'not a str: {device_check_s}'
+        device_check: DeviceCheckType
+        if device_check_s is None:
+            device_check = DeviceCheckType.ExactSame
+        else:
+            device_check = DeviceCheckType[device_check_s]
+
         structured = e.pop('structured', False)
         assert isinstance(structured, bool), f'not a bool: {structured}'
 
@@ -349,7 +374,7 @@ class NativeFunction:
         # Why is 'structured' included? External backends (e.g. XLA) opt into which ops are structured
         # independently of which in-tree ops are structured
         backend_metadata = {k: {func.name: BackendMetadata(
-            kernel=v, structured=structured and is_structured_dispatch_key(k), external=False)} for k, v in dispatch.items()}
+            kernel=v, structured=structured and is_structured_dispatch_key(k))} for k, v in dispatch.items()}
 
         # don't care if it exists or not; make it easier to use this function
         # with other yaml parsers that aren't setting __line__ in the dict
@@ -375,12 +400,14 @@ class NativeFunction:
             python_module=python_module,
             category_override=category_override,
             device_guard=device_guard,
+            device_check=device_check,
             loc=loc,
             cpp_no_default_args=cpp_no_default_args,
             is_abstract=is_abstract,
             has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
             has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
         ), backend_metadata
+
 
     def validate_unstructured(self) -> None:
         # TODO: probably better to accumulate these errors and report them all
@@ -421,6 +448,10 @@ class NativeFunction:
         assert len(invalid_args) == 0, f'Invalid cpp_no_default_args: {invalid_args}'
         if self.structured_inherits is not None:
             assert self.structured, "structured_inherits must also imply structured: True"
+        if str(self.func.name).startswith('_foreach'):
+            assert self.device_check == DeviceCheckType.NoCheck, \
+                "foreach kernels fall back to slow path when tensor are on different devices, " \
+                "device_check not allowed to be enabled"
 
     @property
     def has_composite_kernel(self) -> bool:
@@ -564,8 +595,7 @@ class BackendMetadata:
     # in native_functions.yaml.
     # However, external backends like XLA can indendently toggle which ops are structured.
     structured: bool
-    # Whether or not this op is an in-tree (e.g. CPU/CUDA) or out-of-tree backend (e.g. XLA)
-    external: bool
+    #
 
 
 # The BackendIndex encodes per-operator information that is potentially different
@@ -580,6 +610,9 @@ class BackendIndex:
     # Mainly important for structured kernels, this determines which variant in the operator group is used to implement the others.
     # All in-tree ops use out kernels, while XLA uses functional kernels.
     use_out_as_primary: bool
+    # Whether the backend is in-tree (CPU/CUDA) or out-of-tree (XLA)
+    external: bool
+    # Other backend-specific information that is on a per-operator basis
     index: Dict['OperatorName', BackendMetadata]
 
     @staticmethod
@@ -599,13 +632,8 @@ class BackendIndex:
             return g.functional
 
     def has_backend(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> bool:
-        if isinstance(g, NativeFunction):
-            f = g
-        elif isinstance(g, NativeFunctionsGroup):
-            f = self.primary(g)
-        else:
-            assert_never(f)
-        return f.func.name in self.index
+        m = self.get(g)
+        return m is not None
 
 
     def get(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> Optional[BackendMetadata]:
@@ -618,35 +646,6 @@ class BackendIndex:
         if f.func.name not in self.index:
             return None
         return self.index[f.func.name]
-
-    def kernel(self, f: NativeFunction) -> Optional[str]:
-        m = self.get(f)
-        if m is None:
-            return None
-        return m.kernel
-
-    def structured(self, f: Union[NativeFunction, NativeFunctionsGroup]) -> Optional[bool]:
-        if isinstance(f, NativeFunction):
-            m = self.get(f)
-        elif isinstance(f, NativeFunctionsGroup):
-            m = self.get(self.primary(f))
-        else:
-            assert_never(f)
-
-        if m is None:
-            return None
-        return m.structured
-
-    def is_external(self, f: Union[NativeFunction, NativeFunctionsGroup]) -> Optional[bool]:
-        if isinstance(f, NativeFunction):
-            m = self.get(f)
-        elif isinstance(f, NativeFunctionsGroup):
-            m = self.get(self.primary(f))
-        else:
-            assert_never(f)
-        if m is None:
-            return None
-        return m.external
 
 
 # The function schema is undoubtedly the most important data structure
@@ -1463,7 +1462,6 @@ class OperatorName:
             return f"{self.name}.{self.overload_name}"
         else:
             return f"{self.name}"
-
 
 # Helper functions for parsing argument lists (both inputs and returns)
 

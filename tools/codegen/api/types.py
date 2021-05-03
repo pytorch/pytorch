@@ -483,14 +483,11 @@ class NativeSignature:
 
 # Helper functions
 
-def kernel_signature(f: NativeFunction, backend_index: BackendIndex) -> Optional[Union['NativeSignature', 'DispatcherSignature']]:
-    m = backend_index.get(f)
-    if m is None:
-        return None
+def kernel_signature(f: NativeFunction, backend_index: BackendIndex) -> Union['NativeSignature', 'DispatcherSignature']:
     # Note [External Backends Follow Dispatcher API]
     # Kernel signatures for in-tree backends follow the "native" API,
     # while kernels for out-of-tree backends follow the dispatcher API.
-    if m.external:
+    if backend_index.external:
         return DispatcherSignature.from_schema(f.func)
     else:
         return NativeSignature(f.func)

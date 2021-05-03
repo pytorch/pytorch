@@ -10,28 +10,25 @@ import tools.codegen.api.structured as structured
 @with_native_function_and_index
 def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional[str]:
     sig = kernel_signature(f, backend_index)
-    name = backend_index.kernel(f)
-    is_external = backend_index.is_external(f)
-    # sigh... I should be able to better enforce that these are all or nothing.
-    if sig is None or name is None or is_external is None:
+    metadata = backend_index.get(f)
+    if metadata is None:
         return None
-    if "legacy::" in name:
+    if "legacy::" in metadata.kernel:
         return None
     else:
-        prefix = 'static' if is_external else 'TORCH_API'
-        return f"{prefix} {sig.decl(name=name)};"
+        prefix = 'static' if backend_index.external else 'TORCH_API'
+        return f"{prefix} {sig.decl(name=metadata.kernel)};"
 
 @with_native_function_and_index
 def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> List[str]:
     meta_name = meta.name(g)
     out_args = structured.impl_arguments(g)
-    name = backend_index.kernel(backend_index.primary(g))
-    is_external = backend_index.is_external(g)
-    if name is None or is_external is None:
+    metadata = backend_index.get(g)
+    if metadata is None:
         return []
-    prefix = 'static' if is_external else 'TORCH_API'
+    prefix = 'static' if backend_index.external else 'TORCH_API'
     return [f"""\
-struct {prefix} structured_{name} : public at::meta::{meta_name} {{
+struct {prefix} structured_{metadata.kernel} : public at::meta::{meta_name} {{
 void impl({', '.join(a.decl() for a in out_args)});
 }};
 """]
@@ -43,11 +40,10 @@ def compute_native_function_declaration(
         g: Union[NativeFunctionsGroup, NativeFunction],
         backend_index: BackendIndex
 ) -> List[str]:
-    structured = backend_index.structured(g)
-    is_external = backend_index.is_external(g)
+    metadata = backend_index.get(g)
     if isinstance(g, NativeFunctionsGroup):
-        if structured:
-            if is_external:
+        if metadata is not None and metadata.structured:
+            if backend_index.external:
                 # Structured hasn't been tested with external backends yet.
                 raise AssertionError("Structured external backend functions are not implemented yet.")
             else:

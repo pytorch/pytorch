@@ -53,7 +53,7 @@ def gen_autograd(
 
     template_path = os.path.join(autograd_dir, 'templates')
 
-    native_funcs, _ = parse_native_yaml(native_functions_path)
+    native_funcs = parse_native_yaml(native_functions_path).native_functions
     fns = list(sorted(filter(
         operator_selector.is_native_function_selected_for_training,
         native_funcs), key=lambda f: cpp.name(f.func)))

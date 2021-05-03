@@ -8,11 +8,13 @@ from tools.codegen.context import method_with_native_function
 from tools.codegen.utils import Target, mapMaybe
 from tools.codegen.model import (DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind,
-                                 TensorOptionsArguments, assert_never,
+                                 TensorOptionsArguments,
+                                 DeviceCheckType, Argument,
+                                 assert_never,
                                  is_cuda_dispatch_key, BackendIndex)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      CppSignature, CppSignatureGroup,
-                                     DispatcherSignature, Expr, MutRefCType,
+                                     Expr, MutRefCType,
                                      NativeSignature, tensorT, NamedCType)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
@@ -55,6 +57,19 @@ class RegisterDispatchKey:
     # Whether or not we are actually code-genning for ROCm
     rocm: bool
 
+    @staticmethod
+    def gen_device_check(type: DeviceCheckType, args: List[Argument], method_name: str) -> str:
+        if type == DeviceCheckType.NoCheck:
+            return '  // No device check\n'
+
+        device_check = 'c10::optional<Device> common_device = nullopt;'
+        for arg in args:
+            # Only tensor like arguments are eligible
+            if arg.type.is_tensor_like():
+                device_check += f"""
+  c10::impl::check_and_update_common_device(common_device, {arg.name}, "{method_name}", "{arg.name}");"""
+        return device_check
+
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         if isinstance(f, NativeFunctionsGroup):
@@ -71,6 +86,7 @@ class RegisterDispatchKey:
             assert_never(f)
 
     def gen_structured(self, g: NativeFunctionsGroup) -> List[str]:
+        metadata = self.backend_index.get(g)
         if self.backend_index.dispatch_key == DispatchKey.Meta:
             assert not self.backend_index.has_backend(g.out), \
                 "Do not explicitly specify Meta dispatch key on structured " \
@@ -79,10 +95,8 @@ class RegisterDispatchKey:
             assert not self.backend_index.has_backend(g.out), \
                 "Do not explicitly specify CompositeExplicitAutograd dispatch key on structured " \
                 "functions, they will be automatically generated for you"
-        elif not self.backend_index.structured(g):
+        elif metadata is None or not metadata.structured:
             return list(mapMaybe(self.gen_unstructured, g.functions()))
-        elif not self.backend_index.has_backend(g.out):
-            return []
 
         structured_gen = StructuredRegisterDispatchKey(
             self.backend_index,
@@ -100,7 +114,7 @@ class RegisterDispatchKey:
             if (self.backend_index.dispatch_key == DispatchKey.Meta and
                     f.func.kind() is SchemaKind.inplace and
                     # Defer to composites for meta implementation
-                    f.has_composite_kernel and
+                    not f.has_composite_kernel and
                     # Inplace list operations are not supported
                     len(f.func.returns) == 1):
                 inplace_meta = True
@@ -152,12 +166,22 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 }}
 """
 
-            impl_name = f"at::native::{self.backend_index.kernel(f)}"
+            metadata = self.backend_index.get(f)
+            if metadata is None:
+                return None
+            impl_name = f"at::native::{metadata.kernel}"
 
             args_exprs_str = ', '.join(a.name for a in args)
 
-            device_guard = "// DeviceGuard omitted"  # default
+            device_check = '  // No device check\n'
+            if is_cuda_dispatch_key(self.backend_index.dispatch_key):
+                device_check_args = itertools.chain(
+                    f.func.arguments.out,
+                    f.func.arguments.flat_positional
+                )
+                device_check = RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), name)
 
+            device_guard = "// DeviceGuard omitted"  # default
             if f.device_guard and is_cuda_dispatch_key(self.backend_index.dispatch_key):
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                 if has_tensor_options:
@@ -185,6 +209,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 namespace {{
 
 {returns_type} {name}({args_str}) {{
+  {device_check}
+
   {device_guard}
   return {impl_name}({args_exprs_str});
 }}
@@ -196,7 +222,6 @@ namespace {{
             if f.manual_kernel_registration:
                 return None
             else:
-                dispatcher_sig = DispatcherSignature.from_schema(f.func)
                 payload = f"TORCH_FN({name})"
                 return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
@@ -425,8 +450,17 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
                 parent_class = f"at::meta::{meta.name(self.g)}"
             else:
-                class_name = f"structured_{self.backend_index.kernel(self.g.out)}_{k.name}"
-                parent_class = f"at::native::structured_{self.backend_index.kernel(self.g.out)}"
+                metadata = self.backend_index.get(self.g)
+                assert metadata is not None
+                class_name = f"structured_{metadata.kernel}_{k.name}"
+                parent_class = f"at::native::structured_{metadata.kernel}"
+
+            if is_cuda_dispatch_key(self.backend_index.dispatch_key):
+                device_check_args = itertools.chain(
+                    f.func.arguments.out,
+                    f.func.arguments.flat_positional
+                )
+                sig_body.append(RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), sig.name()))
 
             if k is SchemaKind.functional:
                 sig_body.append(f"{class_name} op;")
