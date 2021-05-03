@@ -656,14 +656,58 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
 Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Scalar> & min, const optional<Scalar> & max) {
   // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
   if (max && min) {
-    return grad * ((self >= *min) * (self <= *max)).type_as(grad);
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where((self >= *min).logical_and_(self <= *max), grad, zero);
   } else if (min) {
-    return grad * (self >= *min).type_as(grad);
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where(self >= *min, grad, zero);
   } else if (max) {
-    return grad * (self <= *max).type_as(grad);
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where(self <= *max, grad, zero);
   } else {
     return grad;
   }
+}
+
+Tensor clamp_backward(const Tensor & grad, const Tensor &self, const Tensor& min, const Tensor& max) {
+  // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
+  if (max.defined() && min.defined()) {
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where((self >= min).logical_and_(self <= max), grad, zero);
+  } else if (min.defined()) {
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where(self >= min, grad, zero);
+  } else if (max.defined()) {
+    auto zero = at::scalar_tensor(0., grad.options());
+    return where(self <= max, grad, zero);
+  } else {
+    return grad;
+  }
+}
+
+std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
+    const Tensor& grad, const Tensor& self, const Tensor& min, const Tensor& max,
+    const std::array<bool, 2>& grad_input_mask) {
+  // If min > max, min has no gradient
+  std::tuple<at::Tensor, at::Tensor> ret;
+  if (!grad.defined()) {
+    return ret;
+  }
+
+  auto zero = at::scalar_tensor(0., grad.options());
+  if (max.defined() && min.defined()) {
+    if (grad_input_mask[0]) {
+      std::get<0>(ret) = where((self < min).logical_and_(min < max) , grad, zero);
+    }
+    if (grad_input_mask[1]) {
+      std::get<1>(ret) = where((self > max).logical_or_(max < min), grad, zero);
+    }
+  } else if (min.defined() && grad_input_mask[0]) {
+    std::get<0>(ret) = where(self < min, grad, zero);
+  } else if (max.defined() && grad_input_mask[1]) {
+    std::get<1>(ret) = where(self > max, grad, zero);
+  }
+  return ret;
 }
 
 // This function is used by load_derivatives.py to replace tensor.strides()
