@@ -1070,8 +1070,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // First let NCCL streams wait for input tensors allocation streams
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
 
-  // Work itself will create the CUDA events on all GPUs of tensors
+  // TODO: Below restriction was necessary when using NCCLFuture, but should be
+  // removed with CUDAFuture that can support multiple devices: #56836
   bool can_profile = outputs.size() == 1;
+  // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(devices, rank_, opType, can_profile ? profilingTitle : nullptr, can_profile ? c10::optional<std::vector<at::Tensor>>(inputs) : c10::nullopt);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
@@ -1163,8 +1165,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   // First let NCCL streams wait for input tensors allocation streams
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
 
-  // Work itself will create the CUDA events on all GPUs of tensors
+  // TODO: Below restriction was necessary when using NCCLFuture, but should be
+  // removed with CUDAFuture that can support multiple devices: #56836
   bool can_profile = tensors.size() == 1;
+  // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(
       devices,
       rank_,
