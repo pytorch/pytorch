@@ -10,7 +10,11 @@ if TYPE_CHECKING:
     from .graph import Graph
 
 BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor, torch.device]
+<<<<<<< HEAD
+base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
+=======
 base_types = BaseArgumentTypes.__args__  # type: ignore
+>>>>>>> 79ba2f1ed7 ([WIP] Added skeleton of python dispatch key)
 
 Target = Union[Callable[..., Any], str]
 
