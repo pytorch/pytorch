@@ -4422,7 +4422,7 @@ class DistributedTest:
             self.assertGreaterEqual(events[0].count, 1)
             self.assertEqual(events[0].name, all_reduce_event_name)
             # Ensure searching unused parameters was profiled
-            events = get_profiling_event("search_unused_parameters",prof)
+            events = get_profiling_event("search_unused_parameters", prof)
             self.assertEqual(len(events), 1)
 
         @require_backend({"gloo", "nccl"})
