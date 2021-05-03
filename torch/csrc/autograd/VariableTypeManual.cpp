@@ -7,6 +7,7 @@
 #include <ATen/TracerMode.h>
 #include <ATen/RedispatchFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 using namespace at;
@@ -18,7 +19,7 @@ std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::
   std::vector<DeprecatedTypeProperties*> res;
   res.reserve(backends.size());
   for (auto p : backends) {
-    for (int64_t s = 0; s < static_cast<int64_t>(ScalarType::NumOptions); s++) {
+    for(const auto s : c10::irange(static_cast<int64_t>(ScalarType::NumOptions))) {
       auto& type = getDeprecatedTypeProperties(static_cast<Backend>(p), static_cast<ScalarType>(s));
       res.emplace_back(&type);
     }
@@ -89,7 +90,7 @@ Tensor _fw_primal(const Tensor & self, int64_t level) {
     grad_fn->set_next_edges(collect_next_edges( self ));
   }
   auto tmp = ([&]() {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     return self_.alias();
   })();
   std::function<at::Tensor(const at::Tensor&)> func=nullptr;
@@ -130,10 +131,9 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     grad_fn->src_device = src.device();
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
-  increment_version(self);
   rebase_history(self , std::move(grad_fn));
 
   if (isDifferentiableType(self.scalar_type()) &&
@@ -156,9 +156,9 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   return self;
 }
 
-Tensor& resize_(
+const Tensor& resize_(
     c10::DispatchKeySet ks,
-    Tensor& self,
+    const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
@@ -166,7 +166,7 @@ Tensor& resize_(
     AT_ERROR("cannot resize variables that require grad");
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::resize_(ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
   }
 
@@ -177,9 +177,9 @@ Tensor& resize_(
   return self;
 }
 
-Tensor& resize_as_(
+const Tensor& resize_as_(
     c10::DispatchKeySet ks,
-    Tensor& self,
+    const Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
@@ -188,7 +188,7 @@ Tensor& resize_as_(
     AT_ERROR("cannot resize variables that require grad");
   }
   {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoDispatchBelowAutograd mode;
     at::redispatch::resize_as_(ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
   }
 
@@ -282,4 +282,22 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
 }
 
 }  // namespace
-}}} // namespace torch::autograd::VariableType
+}} // namespace autograd::VariableType
+
+namespace InplaceOrView {
+  Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
+    {
+      at::AutoDispatchBelowInplaceOrView guard;
+      at::redispatch::copy_(ks & c10::after_InplaceOrView_keyset, self, src, non_blocking);
+    }
+    torch::autograd::increment_version(self);
+    return self;
+  }
+
+  namespace {
+    TORCH_LIBRARY_IMPL(aten, InplaceOrView, m) {
+      m.impl("copy_", torch::dispatch(DispatchKey::InplaceOrView, TORCH_FN(InplaceOrView::copy_)));
+    }
+  } // namespace
+} // namespace InplaceOrView
+} // namespace torch

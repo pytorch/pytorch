@@ -10,14 +10,18 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
   auto packed_weight = packed_w;
   at::Tensor weight_origin;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (bit_rate_ == 8 || bit_rate_ == 4) {
     const auto input_rows = packed_weight.size(0);
     const auto input_columns = packed_weight.size(1);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int scale_bias_bytes;
     const auto num_elem_per_byte = 8 / bit_rate_;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (bit_rate_ == 8) {
       // The last 2 values are used to store the FP32 scale and zero_point
       // values per row.
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       scale_bias_bytes = 8;
     } else {
       scale_bias_bytes = 4;
@@ -37,9 +41,11 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
         w_zp.data(), w_zp.size(), device(c10::kCPU).dtype(c10::kFloat));
 
     auto output_columns = output_shape[1];
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint8_t* output_data;
 
     // Allocate output weight tensor based on the bit_width
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (bit_rate_ == 8) {
       weight_origin = at::_empty_per_channel_affine_quantized(
           output_shape,
@@ -70,6 +76,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
         uint8_t* output_row =
             output_data + row * output_columns / num_elem_per_byte;
 
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (std::size_t col = 0; col < output_columns / num_elem_per_byte;
              ++col) {
           output_row[col] = input_row[col];
@@ -90,15 +97,31 @@ namespace native {
 namespace {
 
 Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
-  const auto input_rows = packed_weight.size(0);
-  const auto input_columns = packed_weight.size(1);
-
+  // The "last" dimension of an N-Dimensioned batch of embedding bags is
+  // quantization channel. E.g. for a 2D embedding bag, this has
+  // [ row, col ] dimensions, for batched of embedding bags, dimensions might be
+  // [ batch, row, col ].
+  //
+  // Python Batched Embedding Example:
+  // weights = torch.from_numpy((np.random.random_sample((
+  //          2, 10, 3)).squeeze() + 1).astype(np.float32))
+  // assert(weights.size() == torch.Size([2, 10, 3]))
+  // # NOTE: 8 bytes (columns) are added due to fp32 zero_point and scales
+  // packed_weights = torch.ops.quantized.embedding_bag_byte_prepack(weights)
+  // assert(packed_weights.size() == torch.Size([2, 10, 11]))
+  // unpacked_weights = torch.ops.quantized.embedding_bag_byte_unpack(packed_weights)
+  // assert(unpacked_weights.size() == torch.Size([2, 10, 3]))
+  const auto packed_weight_sizes = packed_weight.sizes();
+  const auto col_dim = packed_weight_sizes.size() - 1;
+  const int32_t input_rows = c10::size_to_dim_(col_dim, packed_weight_sizes);
+  const int32_t input_columns = packed_weight_sizes[col_dim];
   // The last 2 values are used to store the FP32 scale and zero_point values
   // per row.
-  int output_columns = input_columns - 2 * sizeof(float);
+  const int32_t output_columns = input_columns - 2 * sizeof(float);
+  const auto* input_data = packed_weight.data_ptr<uint8_t>();
 
-  const auto* input = packed_weight.data_ptr<uint8_t>();
-  std::vector<int64_t> output_shape = {input_rows, output_columns};
+  std::vector<int64_t> output_shape = packed_weight_sizes.vec();
+  output_shape[col_dim] = output_columns;
   at::Tensor output = at::empty(
       output_shape,
       packed_weight.options().dtype(kFloat),
@@ -110,7 +133,7 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
       0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
         for (int64_t row = start_idx; row < end_idx; ++row) {
           fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloat(
-            input + row * input_columns,
+            input_data + row * input_columns,
             1,
             input_columns,
             output_data + row * output_columns);
@@ -118,7 +141,7 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
       });
 #else
   for (std::size_t row = 0; row < input_rows; ++row) {
-    const std::uint8_t* input_row = input + row * input_columns;
+    const std::uint8_t* input_row = input_data + row * input_columns;
     const float* input_row_scale_zp =
         reinterpret_cast<const float*>(input_row + output_columns);
     float* output_row = output_data + row * output_columns;
@@ -138,6 +161,7 @@ Tensor _qembeddingbag_nbit_unpack_helper(
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
   const auto* input_data = packed_weight.data_ptr<uint8_t>();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
 
   // The last 4 bytes per row are two fp16 scale and zero_point.

@@ -41,7 +41,9 @@ class TestStringFormatting(JitTestCase):
         def fn(arg1: str) -> str:
             return "%s in template %" % arg1    # noqa: F501
 
-        with self.assertRaisesRegex(RuntimeError, "Incomplete format specifier"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "Incomplete format specifier",
+                                                 "\"%s in template %\" % arg1"):
             fn("foo")
 
     def test_string_interpolation_with_string_placeholder_and_digit_variable(self):
@@ -64,7 +66,9 @@ class TestStringFormatting(JitTestCase):
         def fn(arg1: str) -> str:
             return "%d in template" % arg1
 
-        with self.assertRaisesRegex(RuntimeError, "%d requires a number for formatting, but got String"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "%d requires a number for formatting, but got String",
+                                                 "\"%d in template\" % arg1"):
             fn("1")
 
     def test_string_interpolation_with_exponent_placeholder_and_string_variable(self):
@@ -72,7 +76,9 @@ class TestStringFormatting(JitTestCase):
         def fn(arg1: str) -> str:
             return "%e in template" % arg1
 
-        with self.assertRaisesRegex(RuntimeError, "%e requires a number for formatting, but got String"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "%e requires a number for formatting, but got String",
+                                                 "\"%e in template\" % arg1"):
             fn("1")
 
     def test_string_interpolation_with_lowercase_exponent_placeholder_and_digit_variable(self):
@@ -110,7 +116,9 @@ class TestStringFormatting(JitTestCase):
         def fn(arg1: str) -> str:
             return "%c in template" % arg1
 
-        with self.assertRaisesRegex(RuntimeError, "%c requires an int or char for formatting, but got String"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "%c requires an int or char for formatting, but got String",
+                                                 "\"%c in template\" % arg1"):
             fn("foo")
 
     def test_string_interpolation_with_multiple_placeholders(self):
@@ -128,7 +136,9 @@ class TestStringFormatting(JitTestCase):
         def fn(arg1: str) -> str:
             return "%s %s in template" % arg1
 
-        with self.assertRaisesRegex(RuntimeError, "Too few arguments for format string"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "Too few arguments for format string",
+                                                 "\"%s %s in template\" % arg1"):
             fn("foo")
 
     def test_string_interpolation_with_too_many_arguments(self):
@@ -136,7 +146,9 @@ class TestStringFormatting(JitTestCase):
         def fn(arg1: str, arg2: str) -> str:
             return "%s in template" % (arg1, arg2)    # noqa: F507
 
-        with self.assertRaisesRegex(RuntimeError, "Too many arguments for format string"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "Too many arguments for format string",
+                                                 "\"%s in template\" % (arg1, arg2"):
             fn("foo", "bar")
 
     def test_string_interpolation_with_unknown_format_specifier(self):
@@ -144,5 +156,7 @@ class TestStringFormatting(JitTestCase):
         def fn(arg1: str) -> str:
             return "%a in template" % arg1    # noqa: F501
 
-        with self.assertRaisesRegex(RuntimeError, "The specifier %a is not supported in TorchScript format strings"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "The specifier %a is not supported in TorchScript format strings",
+                                                 "\"%a in template\" % arg1"):
             fn("foo")

@@ -1,13 +1,22 @@
+import collections
+import functools
+import itertools
+import math
+import os
+import random
+import re
+import unittest
+from typing import Any, Callable, Iterator, List, Tuple
+
 import torch
 
-import math
-import random
-
 from torch.testing._internal.common_utils import \
-    (TestCase, make_tensor, run_tests, slowTest)
+    (IS_SANDCASTLE, IS_WINDOWS, TestCase, make_tensor, run_tests, skipIfRocm, slowTest)
 from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
+    (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyOnCPUAndCUDA)
+from torch.testing._asserts import UsageError
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -436,9 +445,9 @@ class TestTesting(TestCase):
 
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
-        def check(size, low, high, requires_grad, discontiguous):
+        def check(size, low, high, requires_grad, noncontiguous):
             t = make_tensor(size, device, dtype, low=low, high=high,
-                            requires_grad=requires_grad, discontiguous=discontiguous)
+                            requires_grad=requires_grad, noncontiguous=noncontiguous)
 
             self.assertEqual(t.shape, size)
             self.assertEqual(t.device, torch.device(device))
@@ -456,7 +465,7 @@ class TestTesting(TestCase):
                 self.assertFalse(t.requires_grad)
 
             if t.numel() > 1:
-                self.assertEqual(t.is_contiguous(), not discontiguous)
+                self.assertEqual(t.is_contiguous(), not noncontiguous)
             else:
                 self.assertTrue(t.is_contiguous())
 
@@ -681,6 +690,440 @@ class TestFrameworkUtils(TestCase):
                 sorted_shard_tests = sorted(calculated_shards[0][1] + calculated_shards[1][1])
                 # All the tests should be represented by some shard
                 self.assertEqual(sorted_tests, sorted_shard_tests)
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+    @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+    def test_filtering_env_var(self):
+        # Test environment variable selected device type test generator.
+        test_filter_file_template = """\
+#!/usr/bin/env python
+
+import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
+class TestEnvironmentVariable(TestCase):
+
+    def test_trivial_passing_test(self, device):
+        x1 = torch.tensor([0., 1.], device=device)
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
+
+instantiate_device_type_tests(
+    TestEnvironmentVariable,
+    globals(),
+)
+
+if __name__ == '__main__':
+    run_tests()
+"""
+        test_bases_count = len(get_device_type_test_bases())
+        # Test without setting env var should run everything.
+        env = dict(os.environ)
+        for k in ['IN_CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
+            if k in env.keys():
+                del env[k]
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn(f'Ran {test_bases_count} test', stderr.decode('ascii'))
+
+        # Test with setting only_for should only run 1 test.
+        env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn('Ran 1 test', stderr.decode('ascii'))
+
+        # Test with setting except_for should run 1 less device type from default.
+        del env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY]
+        env[PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn(f'Ran {test_bases_count-1} test', stderr.decode('ascii'))
+
+        # Test with setting both should throw exception
+        env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertNotIn('OK', stderr.decode('ascii'))
+
+
+class TestAsserts(TestCase):
+    def get_assert_fns(self) -> List[Callable]:
+        """Gets assert functions to be tested.
+
+        Returns:
+            List(Callable): Top-level assert functions from :mod:`torch.testing`.
+        """
+        return [torch.testing.assert_equal, torch.testing.assert_close]
+
+    def make_inputs(self, actual: Any, expected: Any) -> List[Tuple[Any, Any]]:
+        """Makes inputs for assert functions based on two examples.
+
+        Args:
+            actual (Any): Actual input.
+            expected (Any): Expected input.
+
+        Returns:
+            List[Tuple[Any, Any]]: Pair of example inputs, as well as the example inputs wrapped in sequences
+            (:class:`tuple`, :class:`list`), and mappings (:class:`dict`, :class:`~collections.OrderedDict`).
+        """
+        return [
+            (actual, expected),
+            ((actual,), (expected,)),
+            ([actual], [expected]),
+            ({"t": actual}, {"t": expected}),
+            (collections.OrderedDict([("t", actual)]), collections.OrderedDict([("t", expected)])),
+        ]
+
+    def assert_fns_with_inputs(self, actual: Any, expected: Any) -> Iterator[Callable]:
+        """Yields assert functions with included positional inputs based on two examples.
+
+        .. note::
+
+            This is a valid product of combinations from :meth:`get_assert_fns` and :meth:`make_inputs`. Every test
+            that does not test for anything specific should iterate over this to maximize the coverage.
+
+        Args:
+            actual (Any): Actual input.
+            expected (Any): Expected input.
+
+        Yields:
+            List[Callable]: Assert functions with predefined positional inputs.
+        """
+        for assert_fn, inputs in itertools.product(self.get_assert_fns(), self.make_inputs(actual, expected)):
+            yield functools.partial(assert_fn, *inputs)
+
+    @onlyCPU
+    def test_complex_support(self, device):
+        actual = torch.ones(1, dtype=torch.float32, device=device)
+        expected = torch.ones(1, dtype=torch.complex64, device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaises(UsageError):
+                fn(check_dtype=False)
+
+    @onlyCPU
+    def test_sparse_support(self, device):
+        actual = torch.empty((), device=device)
+        expected = torch.sparse_coo_tensor(size=(), device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaises(UsageError):
+                fn()
+
+    @onlyCPU
+    def test_quantized_support(self, device):
+        val = 1
+        actual = torch.tensor([val], dtype=torch.int32, device=device)
+        expected = torch._empty_affine_quantized(actual.shape, scale=1, zero_point=0, dtype=torch.qint32, device=device)
+        expected.fill_(val)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaises(UsageError):
+                fn()
+
+    @onlyCPU
+    def test_mismatching_shape(self, device):
+        actual = torch.empty((), device=device)
+        expected = actual.clone().reshape((1,))
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "shape"):
+                fn()
+
+    @onlyCUDA
+    def test_mismatching_device(self, device):
+        actual = torch.empty((), device=device)
+        expected = actual.clone().cpu()
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "device"):
+                fn()
+
+    @onlyCUDA
+    def test_mismatching_device_no_check(self, device):
+        actual = torch.rand((), device=device)
+        expected = actual.clone().cpu()
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            fn(check_device=False)
+
+    @onlyCPU
+    def test_mismatching_dtype(self, device):
+        actual = torch.empty((), dtype=torch.float, device=device)
+        expected = actual.clone().to(torch.int)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "dtype"):
+                fn()
+
+    @onlyCPU
+    def test_mismatching_dtype_no_check(self, device):
+        actual = torch.ones((), dtype=torch.float, device=device)
+        expected = actual.clone().to(torch.int)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            fn(check_dtype=False)
+
+    @onlyCPU
+    def test_mismatching_stride(self, device):
+        actual = torch.empty((2, 2), device=device)
+        expected = torch.as_strided(actual.clone().t().contiguous(), actual.shape, actual.stride()[::-1])
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "stride"):
+                fn()
+
+    @onlyCPU
+    def test_mismatching_stride_no_check(self, device):
+        actual = torch.rand((2, 2), device=device)
+        expected = torch.as_strided(actual.clone().t().contiguous(), actual.shape, actual.stride()[::-1])
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            fn(check_stride=False)
+
+    @onlyCPU
+    def test_mismatching_values(self, device):
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn()
+
+    @onlyCPU
+    def test_assert_equal(self, device):
+        actual = torch.tensor(1, device=device)
+        expected = actual.clone()
+
+        torch.testing.assert_equal(actual, expected)
+
+    @onlyCPU
+    def test_assert_close(self, device):
+        actual = torch.tensor(1.0, device=device)
+        expected = actual.clone()
+
+        torch.testing.assert_close(actual, expected)
+
+    @onlyCPU
+    def test_assert_close_only_rtol(self, device):
+        actual = torch.empty((), device=device)
+        expected = actual.clone()
+
+        with self.assertRaises(UsageError):
+            torch.testing.assert_close(actual, expected, rtol=0.0)
+
+    @onlyCPU
+    def test_assert_close_only_atol(self, device):
+        actual = torch.empty((), device=device)
+        expected = actual.clone()
+
+        with self.assertRaises(UsageError):
+            torch.testing.assert_close(actual, expected, atol=0.0)
+
+    @onlyCPU
+    def test_assert_close_mismatching_values_rtol(self, device):
+        eps = 1e-3
+        actual = torch.tensor(1.0, device=device)
+        expected = torch.tensor(1.0 + eps, device=device)
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_close(actual, expected, rtol=eps / 2, atol=0.0)
+
+    @onlyCPU
+    def test_assert_close_matching_values_rtol(self, device):
+        eps = 1e-3
+        actual = torch.tensor(1.0, device=device)
+        expected = torch.tensor(1.0 + eps, device=device)
+
+        torch.testing.assert_close(actual, expected, rtol=eps * 2, atol=0.0)
+
+    @onlyCPU
+    def test_assert_close_mismatching_values_atol(self, device):
+        eps = 1e-3
+        actual = torch.tensor(0.0, device=device)
+        expected = torch.tensor(eps, device=device)
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_close(actual, expected, rtol=0.0, atol=eps / 2)
+
+    @onlyCPU
+    def test_assert_close_matching_values_atol(self, device):
+        eps = 1e-3
+        actual = torch.tensor(0.0, device=device)
+        expected = torch.tensor(eps, device=device)
+
+        torch.testing.assert_close(actual, expected, rtol=0.0, atol=eps * 2)
+
+    def test_assert_close_nan(self, device):
+        a = torch.tensor(float("NaN"), device=device)
+        b = torch.tensor(float("NaN"), device=device)
+
+        for inputs in self.make_inputs(a, b):
+            with self.assertRaises(AssertionError):
+                torch.testing.assert_close(*inputs)
+
+    @onlyCPU
+    def test_assert_close_equal_nan(self, device):
+        a = torch.tensor(float("NaN"), device=device)
+        b = torch.tensor(float("NaN"), device=device)
+
+        for inputs in self.make_inputs(a, b):
+            torch.testing.assert_close(*inputs, equal_nan=True)
+
+    @onlyCPU
+    def test_mismatching_values_msg_mismatches(self, device):
+        actual = torch.tensor([1, 2, 3, 4], device=device)
+        expected = torch.tensor([1, 2, 5, 6], device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Mismatched elements: 2 / 4 (50.0%)")):
+                fn()
+
+    @onlyCPU
+    def test_mismatching_values_msg_abs_diff(self, device):
+        actual = torch.tensor([[1, 2], [3, 4]], device=device)
+        expected = torch.tensor([[1, 2], [5, 4]], device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at (1, 0)")):
+                fn()
+
+    @onlyCPU
+    def test_mismatching_values_msg_rel_diff(self, device):
+        actual = torch.tensor([[1, 2], [3, 4]], device=device)
+        expected = torch.tensor([[1, 4], [3, 4]], device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest relative difference: 0.5 at (0, 1)")):
+                fn()
+
+    @onlyCPU
+    def test_assert_close_mismatching_values_msg_rtol(self, device):
+        rtol = 1e-3
+
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
+
+        for inputs in self.make_inputs(actual, expected):
+            with self.assertRaisesRegex(
+                AssertionError, re.escape(f"Greatest relative difference: 0.5 at 0 (up to {rtol} allowed)")
+            ):
+                torch.testing.assert_close(*inputs, rtol=rtol, atol=0.0)
+
+    @onlyCPU
+    def test_assert_close_mismatching_values_msg_atol(self, device):
+        atol = 1e-3
+
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
+
+        for inputs in self.make_inputs(actual, expected):
+            with self.assertRaisesRegex(
+                AssertionError, re.escape(f"Greatest absolute difference: 1 at 0 (up to {atol} allowed)")
+            ):
+                torch.testing.assert_close(*inputs, rtol=0.0, atol=atol)
+
+    @onlyCPU
+    def test_sequence_mismatching_len(self, device):
+        actual = (torch.empty((), device=device),)
+        expected = ()
+
+        for fn in self.get_assert_fns():
+            with self.assertRaises(AssertionError):
+                fn(actual, expected)
+
+    @onlyCPU
+    def test_sequence_mismatching_values_msg(self, device):
+        t1 = torch.tensor(1, device=device)
+        t2 = torch.tensor(2, device=device)
+
+        actual = (t1, t1)
+        expected = (t1, t2)
+
+        for fn in self.get_assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"index\s+1"):
+                fn(actual, expected)
+
+    @onlyCPU
+    def test_mapping_mismatching_keys(self, device):
+        actual = {"a": torch.empty((), device=device)}
+        expected = {}
+
+        for fn in self.get_assert_fns():
+            with self.assertRaises(AssertionError):
+                fn(actual, expected)
+
+    @onlyCPU
+    def test_mapping_mismatching_values_msg(self, device):
+        t1 = torch.tensor(1, device=device)
+        t2 = torch.tensor(2, device=device)
+
+        actual = {"a": t1, "b": t1}
+        expected = {"a": t1, "b": t2}
+
+        for fn in self.get_assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"key\s+'b'"):
+                fn(actual, expected)
+
+    @onlyCPU
+    def test_type_inequality(self, device):
+        actual = torch.empty(2, device=device)
+        expected = actual.tolist()
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(UsageError, str(type(expected))):
+                fn()
+
+    @onlyCPU
+    def test_unknown_type(self, device):
+        actual = "0"
+        expected = "0"
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(UsageError, str(type(actual))):
+                fn()
+
+    @onlyCPU
+    def test_numpy(self, device):
+        tensor = torch.rand(2, 2, dtype=torch.float32, device=device)
+        actual = tensor.numpy()
+        expected = actual.copy()
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            fn()
+
+    @onlyCPU
+    def test_scalar(self, device):
+        tensor = torch.rand(1, device=device)
+        actual = expected = tensor.item()
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            fn()
+
+    @onlyCPU
+    def test_msg_str(self, device):
+        msg = "Custom error message!"
+
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=msg)
+
+    @onlyCPU
+    def test_msg_callable(self, device):
+        msg = "Custom error message!"
+
+        def make_msg(actual, expected, trace):
+            return msg
+
+        actual = torch.tensor(1, device=device)
+        expected = torch.tensor(2, device=device)
+
+        for fn in self.assert_fns_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=make_msg)
+
+
+instantiate_device_type_tests(TestAsserts, globals())
 
 
 if __name__ == '__main__':

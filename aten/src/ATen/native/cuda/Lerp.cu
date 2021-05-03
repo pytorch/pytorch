@@ -59,53 +59,53 @@ namespace native {
 
 Tensor& lerp_cuda_tensor_out(const Tensor& self,
                             const Tensor& end, const Tensor& weight, Tensor& result) {
-  Tensor b_self, b_end, b_weight;
+  c10::MaybeOwned<Tensor> b_self, b_end, b_weight;
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_out_cuda");
-  lerp_cuda(result, b_self, b_end, b_weight);
+  lerp_cuda(result, *b_self, *b_end, *b_weight);
   return result;
 }
 
 Tensor& lerp_cuda_scalar_out(const Tensor& self,
                             const Tensor& end, const Scalar& weight, Tensor& result) {
-  Tensor b_self, b_end;
+  c10::MaybeOwned<Tensor> b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_out_cuda");
-  lerp_scalar_cuda(result, b_self, b_end, weight);
+  lerp_scalar_cuda(result, *b_self, *b_end, weight);
   return result;
 }
 
 Tensor& lerp_cuda_tensor_(Tensor& self, const Tensor& end, const Tensor& weight) {
-  Tensor b_self, b_end, b_weight;
+  c10::MaybeOwned<Tensor> b_self, b_end, b_weight;
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp__cuda");
-  TORCH_CHECK(b_self.sizes() == self.sizes(),
+  TORCH_CHECK(b_self->sizes() == self.sizes(),
            "output with shape ", self.sizes(),
-           " doesn't match the broadcast shape ", b_self.sizes());
-  lerp_cuda(self, b_self, b_end, b_weight);
+           " doesn't match the broadcast shape ", b_self->sizes());
+  lerp_cuda(self, *b_self, *b_end, *b_weight);
   return self;
 }
 
 Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, const Scalar& weight) {
-  Tensor b_self, b_end;
+  c10::MaybeOwned<Tensor> b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp__cuda");
-  TORCH_CHECK(b_self.sizes() == self.sizes(),
+  TORCH_CHECK(b_self->sizes() == self.sizes(),
            "output with shape ", self.sizes(),
-           " doesn't match the broadcast shape ", b_self.sizes());
-  lerp_scalar_cuda(self, b_self, b_end, weight);
+           " doesn't match the broadcast shape ", b_self->sizes());
+  lerp_scalar_cuda(self, *b_self, *b_end, weight);
   return self;
 }
 
 Tensor lerp_cuda_tensor(const Tensor& self, const Tensor& end, const Tensor& weight) {
-  Tensor b_self, b_end, b_weight;
+  c10::MaybeOwned<Tensor> b_self, b_end, b_weight;
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_cuda");
-  Tensor result = at::empty_like(b_self, b_self.suggest_memory_format());
-  lerp_cuda(result, b_self, b_end, b_weight);
+  Tensor result = at::empty_like(*b_self, b_self->suggest_memory_format());
+  lerp_cuda(result, *b_self, *b_end, *b_weight);
   return result;
 }
 
 Tensor lerp_cuda_scalar(const Tensor& self, const Tensor& end, const Scalar& weight) {
-  Tensor b_self, b_end;
+  c10::MaybeOwned<Tensor> b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_cuda");
-  Tensor result = at::empty_like(b_self, b_self.suggest_memory_format());
-  lerp_scalar_cuda(result, b_self, b_end, weight);
+  Tensor result = at::empty_like(*b_self, b_self->suggest_memory_format());
+  lerp_scalar_cuda(result, *b_self, *b_end, weight);
   return result;
 }
 
