@@ -159,7 +159,7 @@ graph(%a : Tensor, %b : Tensor):
     def test_kernel_shape_prop_module(self):
         class TestModule(torch.nn.Module):
             def forward(self, x, y):
-                return x*x + y
+                return x * x + y
 
         graph = torch.jit.script(TestModule()).graph
 
