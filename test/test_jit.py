@@ -4061,6 +4061,18 @@ def foo(xyz):
         with self.assertRaisesRegex(RuntimeError, 'test_jit.py\", line {}'.format(lineno + 3)):
             loaded(torch.rand(3, 4), torch.rand(30, 40))
 
+    def test_ignorable_args(self):
+        def fn():
+            val = torch.tensor([[1, 2, 3, 4, 9, 9], [1, 2, 3, 4, 9, 9]])
+            return val[2::, :1:]
+        scripted = torch.jit.script(fn)
+        src = str(scripted.code)
+        # we ignore trailing arguments after start=2 for dim 0
+        # and after end=1 for dim 1
+        FileCheck().check("torch.slice(torch.slice(val, 0, 2), 1, 0, 1)").run(src)
+        # making sure ignoring arguments don't actually break the functionality
+        self.checkScript(fn, ())
+
     def test_serialized_source_ranges_graph(self):
 
         class FooTest3(torch.jit.ScriptModule):

@@ -5,6 +5,7 @@
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -1153,22 +1154,41 @@ struct PythonPrintImpl {
         printOpName(stmt, node->kind());
         const FunctionSchema& schema = node->schema();
         stmt << "(";
-        for (size_t i = 0; i < node->inputs().size(); ++i) {
-          if (i > 0) {
-            stmt << ", ";
-          }
-          auto v = useOf(node->inputs().at(i));
-          // print the kwarg name if it is a kwarg only argument.
-          if (i < schema.arguments().size()) {
-            auto arg = schema.arguments().at(i);
+        // only ignore arguments when we see non vararg schemas
+        if (!schema.is_vararg()) {
+          // calculate how many args are specified.
+          // see (https://github.com/pytorch/pytorch/pull/56079) for more
+          // details.
+          int necessary_args =
+              calculateNecessaryArgs(schema.arguments(), node->inputs());
+          for (int index = 0; index < necessary_args; ++index) {
+            if (index > 0)
+              stmt << ", ";
+            auto v = useOf(node->inputs().at(index));
+            auto arg = schema.arguments().at(index);
             if (arg.kwarg_only()) {
               stmt << arg.name() << "=";
             }
-          } else {
-            // vararg functions like format can have extra arguments
-            AT_ASSERT(schema.is_vararg());
+            stmt << *v;
           }
-          stmt << *v;
+        } else {
+          for (size_t i = 0; i < node->inputs().size(); ++i) {
+            if (i > 0) {
+              stmt << ", ";
+            }
+            auto v = useOf(node->inputs().at(i));
+            // print the kwarg name if it is a kwarg only argument.
+            if (i < schema.arguments().size()) {
+              auto arg = schema.arguments().at(i);
+              if (arg.kwarg_only()) {
+                stmt << arg.name() << "=";
+              }
+            } else {
+              // vararg functions like format can have extra arguments
+              AT_ASSERT(schema.is_vararg());
+            }
+            stmt << *v;
+          }
         }
         stmt << ")";
       } break;
