@@ -914,9 +914,6 @@ class Quantizer:
             model.graph, self.modules, self.patterns,
             custom_module_classes=custom_module_classes)
 
-        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]] = \
-            self._find_quants(model.graph, self.modules, matches)
-
         self.quantized_graph = Graph()
         env: Dict[str, Node] = {}
         # TODO: merge quant_env with env
