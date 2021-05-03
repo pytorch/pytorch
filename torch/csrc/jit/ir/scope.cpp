@@ -132,6 +132,18 @@ SourceRange InlinedCallStack::source_range() const {
   return source_range_;
 }
 
+Function* InlinedCallStack::function() const {
+  return fn_;
+}
+
+void InlinedCallStack::set_function_name(std::string fn_name) {
+  fn_name_ = std::move(fn_name);
+}
+
+std::string InlinedCallStack::function_name() const {
+  return fn_name_;
+}
+
 std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   std::vector<InlinedCallStackEntry> r;
   c10::optional<InlinedCallStackPtr> current = intrusive_from_this();
