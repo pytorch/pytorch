@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.fx as fx
 from types import FunctionType, CodeType
 import functorch
-from functorch import wrap_key, WrapModule, jacrev, vmap, grad, pythonkey_trace, nnc_compile
+from functorch import wrap_key, WrapModule, jacrev, vmap, grad, pythonkey_trace
 
 torch._C._debug_only_display_vmap_fallback_warnings(True)
 
@@ -61,13 +61,21 @@ class Foo(torch.nn.Module):
         # return list(self.parameters())
 
 
+batch_size = 4
+def f(x, w, b):
+    out = torch.conv2d(x, w, b)
+    return out
+ws = [torch.nn.Conv2d(3, 6, 3).weight for _ in range(batch_size)]
+ws = torch.stack(ws).detach()
 
-model = Foo()
-def f(x):
-    return torch.ones_like(x)
-inps = (torch.randn(1,1, 3,10,10, requires_grad=True),)
-fx_graph = pythonkey_trace(wrap_key(f, inps))
-print(fx_graph(*inps))
+bs = [torch.nn.Conv2d(3, 6, 3).bias for _ in range(batch_size)]
+bs = torch.stack(bs).detach()
+
+inps = (torch.randn(batch_size, 3, 3,10,10), ws, bs)
+
+print(torch.conv2d(inps[0][0], inps[1][0], None).shape)
+fx_graph = pythonkey_trace(wrap_key(vmap(f, in_dims=(0, 0, 0), out_dims=0), inps))
+print(fx_graph(*inps).shape)
 exit(0)
 
 vmap_f = vmap(f, in_dims=(0,None))

@@ -117,7 +117,7 @@ class TracerBase:
             return a.node
         elif isinstance(a, base_types) or a is None or a is ...:
             return a
-
+        import pdb; pdb.set_trace()
         raise NotImplementedError(f"argument of type: {type(a)}")
 
     def to_bool(self, obj: 'Proxy') -> bool:
