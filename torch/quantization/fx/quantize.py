@@ -116,8 +116,9 @@ def insert_observer(
     """
     # In eval mode fixed qparams node are the same as CopyNode and we
     # won't insert observer for them
-    if not model.training and isinstance(observer, torch.quantization.FixedQParamsFakeQuantize):
-        return
+    if not model.training:
+        assert not isinstance(observer, torch.quantization.FixedQParamsFakeQuantize), \
+            "Unexpected FixedQParamsFakeQuantize found when model.training is False."
     # respect device affinity when adding observers
     model_device = assert_and_get_unique_device(model)
     if model_device:
