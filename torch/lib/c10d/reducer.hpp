@@ -14,6 +14,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/comm.hpp>
+#include <c10d/Utils.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -61,7 +62,9 @@ class Reducer {
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
-      bool gradient_as_bucket_view);
+      bool gradient_as_bucket_view,
+      std::unordered_map<size_t, std::string>
+          paramNames);
 
   ~Reducer() noexcept(false);
 
@@ -119,8 +122,7 @@ class Reducer {
   // buckets once after the first iteration and never rebuild them if
   // find_unused_parameters_.
   inline bool should_rebuild_buckets() const {
-    return !find_unused_parameters_ && !has_rebuilt_bucket_
-      && (unused_parameters_.size() == 0);
+    return (static_graph_ || !find_unused_parameters_) && !has_rebuilt_bucket_;
   }
 
   // Pushes all parameters to be rebuilt.
@@ -153,7 +155,7 @@ class Reducer {
   // recorded once every "sample_rate" training iterations.
   void set_ddp_runtime_logging_sample_rate(int sample_rate);
 
-  // Speficy the training graph is static.
+  // Specify the training graph is static.
   void set_static_graph();
 
   // Delay all reduce to be after all gradients' calculation is complete.
@@ -442,25 +444,55 @@ class Reducer {
   // Division factor for reduction of gradients.
   int divFactor_;
 
-  bool static_graph_ = false;
+  bool static_graph_;
 
+  // Key: VariableIndex, Value: the number of times that a variable's autograd_hook()
+  // should be triggered before marking this variable's grad as ready for communication.
   // Map will not change after 1st iteration.
   std::unordered_map<VariableIndex, int, c10::hash<VariableIndex>> numGradHooksTriggeredMap_;
+  // Key: VariableIndex, Value: the number of times that a variable's autograd_hook()
+  // are left to be triggered before marking this variable's grad as ready for communication.
   // Map will change after 1st iteration to track a grad is ready for communication or not.
   std::unordered_map<VariableIndex, int, c10::hash<VariableIndex>> numGradHooksTriggeredMapPerIteration_;
 
  private:
+  // reset counting for buckets before backward starts
   void reset_bucket_counting();
+  // search unused parameters beore backward starts
   void search_unused_parameters(
       const std::vector<torch::autograd::Variable>& outputs);
   void set_divide_factor();
+  // kick off all reduce for the ready bucket
   void all_reduce_bucket(Bucket& bucket);
+  // kick off all reduce to local used map, it can help find global unused parameters
   void all_reduce_local_used_map();
+  // initialize locally used parameter maps
+  void initialize_local_used_map();
+  // get current cuda stream
+  const c10::Stream get_current_stream();
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
   // Current thread local state
   at::ThreadLocalState thread_local_state_;
+  // Debug level setting. It is parsed once when Reducer is constructed, and
+  // remains the same across a single invocation of DDP training.
+  DistributedDebugLevel ddp_debug_level_;
+  // Mapping of variable index to fully qualified name of model to notify users
+  // about errors when certain parameters do not get gradient.
+  std::unordered_map<size_t, std::string> param_names_;
+  // Per iteration set of parameter indices that have been marked ready.
+  std::unordered_set<size_t> perIterationReadyParams_;
+  // Retrieves parameter names that have not been marked as ready as part of
+  // previous iteration.
+  std::vector<std::string> getUnmarkedParamsForIteration();
+  // Retrives parameter indices that have not been marked as ready as part of
+  // previous iteration.
+  std::vector<size_t> getUnmarkedParamIndicesForIteration();
+  // Raises appropriate error if mark_variable_ready is called on the same
+  // variable twice, which is unexpected.
+  void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
+
   friend class Logger;
 };
 
@@ -475,12 +507,6 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},
     const std::vector<int64_t>& tensor_indices = {});
-
-// Verify model replicas in this process are the same with respect to no. of
-// params, requires grad, and matching dtype/size/layout.
-void verify_replicas_within_process(
-    std::vector<std::vector<at::Tensor>> model_replicas,
-    std::vector<std::vector<bool>> expect_sparse_gradients);
 
 // Verify models across all processes are the same as model on rank 0 with
 // respect to no. of params and matching dtype/size/layout.

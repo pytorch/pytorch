@@ -154,11 +154,7 @@ void HashProvider::visit(const Load* v) {
     ind->accept(this);
     indices_hash = hash_combine(indices_hash, hashOf(ind));
   }
-  v->mask()->accept(this);
-  putHash(
-      v,
-      hash_combine(
-          "load", hashOf(v->base_handle()), indices_hash, hashOf(v->mask())));
+  putHash(v, hash_combine("load", hashOf(v->base_handle()), indices_hash));
 }
 
 void HashProvider::visit(const Store* v) {
@@ -170,15 +166,10 @@ void HashProvider::visit(const Store* v) {
     indices_hash = hash_combine(indices_hash, hashOf(ind));
   }
   v->value()->accept(this);
-  v->mask()->accept(this);
   putHash(
       v,
       hash_combine(
-          "store",
-          hashOf(v->base_handle()),
-          indices_hash,
-          hashOf(v->value()),
-          hashOf(v->mask())));
+          "store", hashOf(v->base_handle()), indices_hash, hashOf(v->value())));
 }
 
 void HashProvider::visit(const Block* v) {
@@ -230,22 +221,12 @@ void HashProvider::visit(const IfThenElse* v) {
           hashOf(v->false_value())));
 }
 
-void HashProvider::visit(const BaseCallNode* v) {
-  CACHE_GUARD();
-  SimplifierHashType hash(te_hash(v->func_name()));
-  for (int i = 0; i < v->nparams(); i++) {
-    v->param(i)->accept(this);
-    hash = hash_combine(hash, hashOf(v->param(i)));
-  }
-
-  putHash(v, hash);
-}
-
 void HashProvider::visit(const Intrinsics* v) {
   CACHE_GUARD();
   // calls to rand are not symbolic and have a different value each time, they
   // should not hash to anything and this is the best we can do.
   if (v->op_type() == kRand) {
+    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
     putHash(v, (SimplifierHashType)rand());
     return;
   }

@@ -20,8 +20,10 @@ namespace jit {
 struct PeepholeOptimizeAliasSensitiveImpl {
   PeepholeOptimizeAliasSensitiveImpl(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)),
-        aliasDb_(torch::make_unique<AliasDb>(graph_)) {
-    run(graph_->block());
+        aliasDb_(torch::make_unique<AliasDb>(graph_)) {}
+
+  bool run() {
+    return runBlock(graph_->block());
   }
 
  private:
@@ -30,10 +32,11 @@ struct PeepholeOptimizeAliasSensitiveImpl {
     v->replaceAllUsesWith(v->owningGraph()->insertConstant(val));
   }
 
-  void run(Block* block) {
+  bool runBlock(Block* block) {
+    bool changed = false;
     for (Node* node : block->nodes()) {
       for (Block* b : node->blocks()) {
-        run(b);
+        changed |= runBlock(b);
       }
 
       // dim(conv(x)) extremely common and prevents Conv->BN fusion
@@ -47,6 +50,7 @@ struct PeepholeOptimizeAliasSensitiveImpl {
         }
         auto kind = node->kind();
         int64_t output_size =
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             kind == aten::conv1d ? 3 : (kind == aten::conv2d ? 4 : 5);
         // this is to handle potential resize_ calls, however unlikely
         // if we add more checks related to resize_ in the graph,
@@ -55,24 +59,28 @@ struct PeepholeOptimizeAliasSensitiveImpl {
           for (const Use& dim_use : dim_uses) {
             replaceWithIValue(dim_use.user->output(), output_size);
           }
+          changed = true;
         } else {
           for (const Use& dim_use : dim_uses) {
             if (aliasDb_->moveAfterTopologicallyValid(node, dim_use.user)) {
               replaceWithIValue(dim_use.user->output(), output_size);
+              changed = true;
             }
           }
         }
         continue;
       }
     }
+    return changed;
   }
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
 };
 
-void PeepholeOptimizeAliasSensitive(const std::shared_ptr<Graph>& graph) {
+bool PeepholeOptimizeAliasSensitive(const std::shared_ptr<Graph>& graph) {
   PeepholeOptimizeAliasSensitiveImpl opt(graph);
+  return opt.run();
 }
 
 } // namespace jit
