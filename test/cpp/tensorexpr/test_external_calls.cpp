@@ -228,6 +228,74 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ExternalCall, Addmm_float) {
+  KernelScope kernel_scope;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Placeholder Input("Input", kFloat, {100, 300});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Placeholder Mat1("Mat1", kFloat, {100, 200});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Placeholder Mat2("Mat2", kFloat, {200, 300});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  BufHandle ResultBuf("Result", {100, 300}, kFloat);
+  int64_t beta = 2;
+  int64_t alpha = 2;
+
+  Tensor* Result = new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_addmm",
+          {BufHandle(Input.data()),
+           BufHandle(Mat1.data()),
+           BufHandle(Mat2.data())},
+          {beta, alpha}));
+  LoopNest l({Result});
+  l.prepareForCodegen();
+  l.simplify();
+
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  at::Tensor input = at::ones({100, 300}, options) * 5.f;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  at::Tensor mat1 = at::ones({100, 200}, options) * 6.f;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  at::Tensor mat2 = at::ones({200, 300}, options) * 11.f;
+  at::Tensor ref = at::addmm(input, mat1, mat2, beta, alpha);
+
+  at::Tensor nnc_result;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::vector<float> input_buf(100 * 300, 5.f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::vector<float> mat1_buf(100 * 200, 6.f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::vector<float> mat2_buf(200 * 300, 11.f);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  std::vector<float> result_buf(100 * 300, -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Input, Mat1, Mat2, Result});
+
+  llvm_codegen.call({input_buf, mat1_buf, mat2_buf, result_buf});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Input, Mat1, Mat2, Result});
+
+  ir_eval.call({input_buf, mat1_buf, mat2_buf, result_buf});
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  nnc_result = at::from_blob(result_buf.data(), {100, 300}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, BinaryFloat) {
   KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor, at::Tensor)>;

@@ -26,7 +26,7 @@ at::Tensor& reshape_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
     const std::vector<int64_t>& proposed_shape,
-    bool infer_size = true) {
+    bool infer_size) {
   auto shape = infer_size ? at::infer_size(proposed_shape, self.numel())
                           : proposed_shape;
   at::native::resize_(out, shape, c10::nullopt);
@@ -1347,6 +1347,21 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
         p_node->Input(2).toIntVector(), // dim
         p_node->Input(3).toBool(), // keepdim
         out_t);
+  };
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    const auto& in1_t = p_node->Input(1).toTensor();
+
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::matmul_out(in0_t, in1_t, out_t);
   };
 });
 
