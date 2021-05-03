@@ -802,7 +802,7 @@ class TestTyping(TestCase):
         T = TypeVar('T', int, str)
 
 
-        class DP(IterDataPipe[T]):  # type: ignore
+        class DP(IterDataPipe[T]):  # type: ignore[no-redef]
             def __init__(self, ds):
                 self.ds = ds
 
@@ -820,7 +820,7 @@ class TestTyping(TestCase):
                 r"The type of data generated from `DataPipe` instance won't be validated")
 
 
-        class DP(IterDataPipe[T]):  # type: ignore
+        class DP(IterDataPipe[T]):  # type: ignore[no-redef]
             def __init__(self, ds):
                 self.ds = ds
 
