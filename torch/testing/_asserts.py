@@ -805,6 +805,70 @@ def assert_close(
     - ``max_rel_diff_idx`` (``Union[int, Tuple[int, ...]]``): Index of greatest relative difference.
 
     For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
+
+    Examples:
+        >>> expected = torch.tensor([1e0, 1e-1, 1e-2])
+        >>> actual = torch.acos(torch.cos(expected))
+        >>> torch.testing.assert_close(actual, expected)
+
+        >>> expected = torch.tensor([1e0, 1e-1, 1e-2])
+        >>> actual = torch.acos(torch.cos(expected))
+        >>> torch.testing.assert_close(actual, expected, rtol=1e-5, atol=0.0)
+        AssertionError: Tensors are not close!
+
+        >>> import math
+        >>> expected = math.sqrt(2.0)
+        >>> actual = 2.0 / math.sqrt(2.0)
+        >>> torch.testing.assert_close(actual, expected)
+
+        >>> import numpy as np
+        >>> expected = np.array([1e0, 1e-1, 1e-2])
+        >>> actual = np.arccos(np.cos(expected))
+        >>> torch.testing.assert_close(actual, expected)
+
+        >>> # The type of the sequences does not have to match. They only have to have the same
+        >>> # length and their elements have to match.
+        >>> expected = [torch.tensor([1.0]), 2.0, np.array(3.0)]
+        >>> actual = tuple(expected)
+        >>> torch.testing.assert_close(actual, expected)
+
+        >>> from collections import OrderedDict
+        >>> import numpy as np
+        >>> foo = torch.tensor(1.0)
+        >>> bar = 2.0
+        >>> baz = np.array(3.0)
+        >>> # The type and a possible ordering of mappings does not have to match. They only
+        >>> # have to have the same set of keys and their elements have to match.
+        >>> expected = OrderedDict([("foo", foo), ("bar", bar), ("baz", baz)])
+        >>> actual = {"baz": baz, "bar": bar, "foo": foo}
+        >>> torch.testing.assert_close(actual, expected)
+
+        >>> expected = torch.tensor([1.0, 2.0, 3.0])
+        >>> actual = expected.numpy()
+        >>> torch.testing.assert_close(actual, expected)
+        UsageError: Apart from a containers type equality is required, but got <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.
+
+        >>> expected = torch.tensor(complex(float("Nan")))
+        >>> actual = expected.clone()
+        >>> torch.testing.assert_close(actual, expected)
+        AssertionError: Tensors are not close!
+        >>> torch.testing.assert_close(actual, expected, equal_nan=True)
+
+        >>> actual = torch.tensor(complex(float("NaN"), 0))
+        >>> expected = torch.tensor(complex(0, float("NaN")))
+        >>> torch.testing.assert_close(actual, expected, equal_nan=True)
+        AssertionError: Tensors are not close!
+        >>> torch.testing.assert_close(actual, expected, equal_nan="relaxed")
+
+        >>> def custom_msg(actual, expected, diagnostic_info):
+        ...     return (
+        ...         f"Argh, we found {diagnostic_info.total_mismatches} mismatches! "
+        ...         f"That is {diagnostic_info.mismatch_ratio:.1%}!"
+        ...     )
+        >>> actual = torch.tensor([1.0, 2.0, 3.0])
+        >>> expected = torch.tensor([1.0, 4.0, 5.0])
+        >>> torch.testing.assert_close(actual, expected, msg=custom_msg)
+        AssertionError: Argh, we found 2 mismatches! That is 66.7%!
     """
     exc, parse_result = _parse_inputs(actual, expected)
     if exc:
