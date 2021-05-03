@@ -213,4 +213,4 @@ jobs:
           pip install junitparser rich
       - name: Output Test Results (Click Me)
         run: |
-          python tools/render_junit.py test
+          python tools/render_junit.py .
