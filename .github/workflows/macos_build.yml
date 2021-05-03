@@ -1,0 +1,33 @@
+name: MacOS CI (wow!)
+
+on:
+  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+  pull_request:
+  push:
+    branches:
+      - master
+      - release/*
+  workflow_dispatch:
+
+env:
+  BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-gcc5.4
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4
+  SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+  TORCH_CUDA_ARCH_LIST: 5.2
+  IN_CI: 1
+  # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
+  CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+
+jobs:
+  calculate-docker-image:
+    runs-on: ubuntu-18.04
+    outputs:
+      docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+      - name: Calculate docker image tag
+        id: calculate-tag
+        run: |
+          echo wow! I'm a github action!
