@@ -111,25 +111,46 @@ static inline void sort_pairs(
   }
 }
 
+namespace detail {
+
+template<typename scalar_t, class ScanOpT>
+C10_LAUNCH_BOUNDS_1(1)
+__global__ void transform_vals(scalar_t * a, scalar_t * b, scalar_t * out, ScanOpT scan_op){
+   *out = scan_op(*a, *b);
+}
+
+template<typename InputIteratorT, typename OutputIteratorT>
+C10_LAUNCH_BOUNDS_1(1)
+__global__ void copy(OutputIteratorT dest, InputIteratorT from) {
+  *dest = static_cast<output_t>(*from);
+}
+
+}
+
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT>
 void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
   // non synchronizing cub call
+  using input_t = decltype(*input);
+  using output_t = decltype(*output);
+  constexpr auto max_element_size = std::max(sizeof(input_t), sizeof(output_t));
+  auto allocator = c10::cuda::CUDACachingAllocator::get();
+  // need to save the first element for all iterations other than first
+  c10::DataPtr first_elem_ptr = allocator->allocate(max_element_size);
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
   // so split at int_max/2
   constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
   for (int64_t i = 0; i < num_items; i += max_cub_size) {
     int size_cub = std::min<int64_t>(num_items - i, max_cub_size);
-    Tensor first_elem; // need to save it for all iterations other than first
     if (i > 0) {
       // need to temporarily transform first element of the range we are
       // operating on; self might be multi-d, but we need to index a single
       // element
-      auto self_view = at::_unsafe_view(self, -1);
-      first_elem = self_view[i].clone();
-      transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-          self.data_ptr<scalar_t>() + i,
-          result.data_ptr<scalar_t>() + i - 1,
-          self.data_ptr<scalar_t>() + i,
+      detail::copy<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+        reinterpret_cast<input_t *>(first_elem.get()), input + i);
+      detail::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+          input + i,
+          output + i - 1,
+          input + i,
           scan_op);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
@@ -142,8 +163,8 @@ void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_o
     if (i > 0) {
       if (self.data_ptr<scalar_t>() != result.data_ptr<scalar_t>()) {
         // restore modified first element only if it's not an inplace operation
-        auto self_view = at::_unsafe_view(self, -1);
-        self_view[i].copy_(first_elem, /*non_blocking=*/true);
+        detail::copy<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+          input + i, reinterpret_cast<input_t *>(first_elem.get()));
       }
     }
   }
