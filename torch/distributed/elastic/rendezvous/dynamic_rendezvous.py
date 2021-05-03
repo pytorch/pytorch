@@ -169,7 +169,7 @@ class RendezvousSettings:
     keep_alive_max_attempt: int
 
 
-@dataclass(eq=True, frozen=True)
+@dataclass(eq=True, order=True, frozen=True)
 class _NodeDesc:
     """Describes a node in the rendezvous.
 
