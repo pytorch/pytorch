@@ -98,6 +98,7 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], importer: Optional[
     com = CodeOnlyModule(body)
 
     if 'tracer' not in body:
+        # For backwards compatibility with GraphModules that have been serialized and stored.
         from .symbolic_trace import Tracer
 
         # we shouldn't trace into any of the submodules, they were not
@@ -239,6 +240,9 @@ class GraphModule(torch.nn.Module):
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
 
         self.graph = graph
+
+        if hasattr(self.graph, 'tracer'):
+            self.tracer = self.graph.tracer
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -525,9 +529,6 @@ class {module_name}(torch.nn.Module):
         import_block = _format_import_block(python_code.globals, exporter.importer)
         module_code = import_block + self.code
         exporter.save_source_string(generated_module_name, module_code)
-
-        if hasattr(self._graph, 'tracer'):
-            self.tracer = self._graph.tracer
 
         dict_without_graph = self.__dict__.copy()
         del dict_without_graph['_graph']
