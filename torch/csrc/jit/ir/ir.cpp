@@ -870,6 +870,17 @@ void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
       uses_.end());
 }
 
+Value* Value::findFirstUseInBlock() {
+  const Block* this_block = this->node()->owningBlock();
+  for (const Use& u : uses()) {
+    Value* comparison = u.user->inputs_[u.offset];
+    if (comparison->node()->owningBlock() == this_block) {
+      return comparison;
+    }
+  }
+  return this;
+}
+
 size_t findArgument(
     const FunctionSchema& the_schema,
     const std::string& unqualName) {

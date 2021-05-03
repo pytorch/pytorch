@@ -189,7 +189,7 @@ struct Value {
   TORCH_API void inferTypeFrom(
       const c10::intrusive_ptr<c10::ivalue::Object>& output);
   const TypePtr& type() const {
-    AT_ASSERT(type_ != nullptr);
+    TORCH_INTERNAL_ASSERT(type_ != nullptr);
     return type_;
   }
   bool requires_grad() const {
@@ -274,6 +274,8 @@ struct Value {
     }
     return wrap_;
   }
+
+  TORCH_API Value* findFirstUseInBlock();
 
   virtual ~Value() {
     if (wrap_) {
@@ -1028,15 +1030,16 @@ struct Block {
   }
 
   Node* appendNode(Node* n) {
-    AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
+    TORCH_INTERNAL_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertBefore(output_);
     return n;
   }
   Node* prependNode(Node* n) {
-    AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
+    TORCH_INTERNAL_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertAfter(input_);
     return n;
   }
+
   // clone all inputs, nodes, and outputs from src and append them
   // to the inputs, nodes, and outputs of this block
   // value_map is used whenever a node in src references a free variable
@@ -1072,10 +1075,8 @@ struct Block {
   // having corner cases where the list is empty.
   Node* const output_;
   Node* const input_;
-  Node* const
-      owning_node_; // either the node that has this block or nullptr for root
-  // a managing wrapper for Python to allow invalidation
-  std::shared_ptr<Wrap<Block>> wrap_;
+  Node* const owning_node_;              // either the node that has this block or nullptr for root
+  std::shared_ptr<Wrap<Block>> wrap_;    // a managing wrapper for Python to allow invalidation
 };
 
 struct Graph {
@@ -1388,7 +1389,7 @@ inline Value::Value(Node* node_, size_t offset_)
 }
 
 inline Value* Value::setType(TypePtr type) {
-  AT_ASSERT(type);
+ TORCH_INTERNAL_ASSERT(type);
   type_ = std::move(type);
   for (Use& use : uses_) {
     use.user->op_ = nullptr;

@@ -1612,9 +1612,9 @@ struct to_ir {
         }
       }
 
-      // if both branches exit don't emit any variables
-      // if one branch exits then we allow the all variables in the other branch
-      // to escape scope since they are well-defined
+      // If both branches exit, don't emit any variables. If one branch
+      // exits, then we allow all the variables in the other branch to
+      // escape scope since they are well-defined
       if (true_exits && false_exits) {
         continue;
       } else if (true_exits) {
@@ -1996,7 +1996,8 @@ struct to_ir {
     exit_blocks.insert(environment_stack->block());
   }
 
-  // emit assserions as an if branch so that assertions will reuse the
+  // Under the hood, Python desugars 'assert' statements into an
+  // if-expression where the false branch raises an error
   void emitAssert(const Assert& stmt) {
     CondValue cond_value = emitCondExpr(stmt.test());
     List<Stmt> true_branch = List<Stmt>::create(stmt.range(), {});
@@ -2732,7 +2733,12 @@ struct to_ir {
               tree->range(), entry->asValue(starred.range(), method));
         }
       } else {
-        values.emplace_back(tree->range(), emitExpr(Expr(tree)));
+        auto val = emitExpr(Expr(tree));
+        std::string name("");
+        if (val->hasDebugName()) {
+          name = val->debugName();
+        }
+        values.emplace_back(tree->range(), name, val);
       }
     }
     return values;
@@ -2780,6 +2786,7 @@ struct to_ir {
     if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
       return emitApplySpecialForm(special_form->form(), apply, type_hint);
     }
+
     auto args = getNamedValues(apply.inputs(), true);
     auto kwargs = emitAttributes(apply.attributes());
     return sv->call(loc, method, args, kwargs, n_binders);

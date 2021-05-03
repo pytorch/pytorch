@@ -5,7 +5,7 @@ import torch
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS
 from collections import namedtuple
-from typing import List, Tuple, Optional, Dict
+from typing import Any, Dict, List, Optional, Tuple
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -452,6 +452,27 @@ class TestTyping(JitTestCase):
             return a, b, c, d, f, ten, ten1, ten2, x, y
 
         self.checkScript(test, ())
+
+    def test_inferred_narrowing_typing_unary_op(self):
+        def fn(x: Any):
+            return torch.clamp(x, min=-0.5, max=0.5)
+
+    def test_inferred_narrowing_typing_binary_op(self):
+        def fn(x: Any, y: Any):
+            return torch.allclose(x, y)
+
+    def test_inferred_narrowing_typing_no_inference_if_multiple_valid_schemas(self):
+        def fn(x: Any):
+            return torch.add(x, x)
+
+        with self.assertRaisesRegex(RuntimeError, "will only be "
+                                    "automatically converted to"):
+            torch.jit.script(fn)
+
+    def test_inferred_narrowing_typing_inferred_type_is_maintained(self):
+        def fn(x: Any):
+            z = torch.clamp(x, min=-0.5, max=0.5)
+            return torch.add(x, x)
 
     def test_opt_opt_refinement(self):
         @torch.jit.script

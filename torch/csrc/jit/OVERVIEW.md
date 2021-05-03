@@ -201,7 +201,7 @@ Values are Block-scoped. A Value is in scope for the remainder of the Block it i
 
 When Nodes are inserted into a Graph, they are inserted at a special "insertion point" that is part of the state of the Graph. On construction, this will go to the end of the Graph.
 
-Each block has two dummy nodes that are not included in the list of nodes in the block. The `prim::Param` node represents the inputs to block and does have a `prev()` or `next()` node. The `prim::Return` node represents the outputs of a block.
+Each block has two dummy nodes that are not included in the list of nodes in the block. The `prim::Param` node represents the inputs to the block and does not have a `prev()` or `next()` node. The `prim::Return` node represents the outputs of the block.
 The list of Nodes in a block is implemented as a circular linked list with the `prim::Return` Node serving as the beginning/end sentinel.  Inserting and deleting at arbitrary places is efficient. Developers may also encounter implementations inside of IR objects that use this fact (e.g. appending to a block is equivalent to putting the node before the `prim::Return` node).
 
 Iterators for the `nodes()` list are invalided when the current Node they point to is moved or deleted. Otherwise iterators remain valid.

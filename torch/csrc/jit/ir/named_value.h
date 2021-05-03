@@ -45,12 +45,6 @@ struct NamedValue {
   NamedValue(const std::string& name, T&& t)
       : NamedValue(name, IValue(std::forward<T>(t))) {}
 
-  SourceRange locOr(const SourceRange& backup_location) const {
-    if (!loc_)
-      return backup_location;
-    return loc();
-  }
-
   // note: this will insert a constant node into the graph at the current
   // insert point if this NamedValue is actually a constant
   Value* value(Graph& g) const {
@@ -58,6 +52,10 @@ struct NamedValue {
       return insertConstant(
           g, ivalue_); // use insertConstant to remove need to include ir.h here
     return value_;
+  }
+
+  bool hasName() const {
+    return name_.has_value();
   }
 
   const std::string& name() const {
@@ -68,6 +66,12 @@ struct NamedValue {
   const SourceRange& loc() const {
     AT_ASSERT(loc_);
     return *loc_;
+  }
+
+  SourceRange locOr(const SourceRange& backup_location) const {
+    if (!loc_)
+      return backup_location;
+    return loc();
   }
 
   at::TypePtr type() const;

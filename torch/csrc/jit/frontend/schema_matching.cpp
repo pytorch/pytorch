@@ -146,7 +146,8 @@ static Value* tryMatchArgument(
     std::ostream* failure_messages,
     const std::function<std::ostream&()>& err,
     bool allow_conversions,
-    TypeEnv& type_env) {
+    TypeEnv& type_env,
+    bool allow_narrowing_conversions=false) {
   Value* value = named_value.value(graph);
 
   // Some functions that take lists of integers or floats for fixed size arrays
@@ -182,8 +183,90 @@ static Value* tryMatchArgument(
   // Check if the value can be matched to the arg through any implicit
   // conversions
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
+
+  bool narrowed = false;
+
+  // *** WIP - PROTOTYPE ONLY ***
+  // Prototype for automatic type refinement for AnyType (or UnionType)
+  // variables. If we've been through all the schemas and we haven't
+  // been able to find an exact match or a match with regular type
+  // conversions, we'll try to find a match with narrowing conversions.
+  // In this case, we'll allow a value typed as `Any` to match to a more
+  // exact type in the schema. Then, once we've matched the schema,
+  // we'll manipulate the Graph by hand to make sure that the value
+  // is typed as `Any` only before its first use in the current block.
+  // In the current block, the value will be matched to some type `T`
+  // and will function as a `T` until program return.
+  if (allow_narrowing_conversions && value->type() == AnyType::get()) {
+    narrowed = true;
+    Value* first = value->findFirstUseInBlock();
+    Block* owning_block = value->node()->owningBlock();
+
+    // Add the `isinstance` and `if` Nodes to the Graph. If you call
+    // `graph.dump`, you'll now see something like:
+    //      %cond : bool = prim::isinstance[types=[T1]](%x)
+    //          = prim::If(%cond)
+    Node* isinstance_node = graph.createIsInstance(value, {concrete_type});
+    isinstance_node->insertAfter(first->node());
+    Node* if_node = graph.create(prim::If, {isinstance_node->output()}, 0);
+    if_node->insertAfter(isinstance_node);
+
+    Block* true_block = if_node->addBlock();
+    Block* false_block = if_node->addBlock();
+
+    // Create the true branch of the if-statement:
+    //    %load1 : Any = prim::Load[name="x"]()
+    //    %narrowed : T1 = prim::unchecked_cast(%load1)
+    //    %load2 : Any = prim::Load[name="x"]()
+    //     = prim::Store[name="x"](%narrowed)
+    //    %load3 : int = prim::Load[name="x"]()
+    // We need to add the loads/stores to ensure that we're actually
+    // changing the value we were looking at before. We don't want to
+    // just copy the value's metadata into a new value with the
+    // narrowed type
+    {
+      WithInsertPoint guard(true_block->param_node()->next());
+      Node* load1 = graph.createLoad(first->debugName(), first->type());
+      load1->insertAfter(true_block->param_node());
+      Value* narrowed = graph.insertUncheckedCast(load1->output(), concrete_type);
+      Node* load2 = graph.createLoad(first->debugName(), first->type());
+      load2->insertAfter(narrowed->node());
+      Node* store1 = graph.createStore(first->debugName(), narrowed);
+      store1->insertAfter(load2);
+      Node* load3 = graph.createLoad(first->debugName(), concrete_type);
+      load3->insertAfter(store1);
+    }
+
+    // Create the false branch of the if-statement:
+    //    %exception_msg : str = prim::Constant[value="AssertionError: "]()
+    //     = prim::RaiseException(%exception_msg)
+    //    %load4 : Any = prim::Load[name="x"]()
+    //    %exception_return : T1 = prim::Uninitialized()
+    //     = prim::Store[name="x"](%exception_return)
+    // This basically says: "if the narrowing conversion doesn't work,
+    // raise an exception."
+    {
+      WithInsertPoint guard(false_block->param_node()->next());
+      Value* exception_msg = graph.insertConstant("AssertionError: ");
+      Value* exception = graph.insert(prim::RaiseException, {exception_msg});
+      Node* load4 = graph.createLoad(first->debugName(), first->type());
+      load4->insertAfter(exception->node());
+      Node* exception_return = graph.createUninitialized(concrete_type);
+      exception_return->insertAfter(load4);
+      Node* store = graph.createStore(first->debugName(), exception_return->output());
+      store->insertAfter(exception_return);
+    }
+
+    // After the if-else branches, we can safely assume that the
+    // variable is the narrowed type
+    Node* res_node = graph.createLoad(first->debugName(), concrete_type);
+    res_node->insertAfter(if_node);
+    value->replaceAllUsesAfterNodeWith(if_node, res_node->output());
+    return res_node->output();
+  }
+
   std::stringstream ss;
-  if (!value->type()->isSubtypeOfExt(
+  if (!narrowed && !value->type()->isSubtypeOfExt(
           concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
     if (failure_messages) {
       auto& ostream = err()
@@ -311,7 +394,8 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     at::ArrayRef<NamedValue> kwargs,
     c10::optional<NamedValue> self,
     std::ostream* failure_messages,
-    bool allow_conversions) {
+    bool allow_conversions,
+    bool allow_narrowing_conversions=false) {
   if (isBlockListedSchema(schema)) {
     return c10::nullopt;
   }
@@ -327,88 +411,90 @@ static c10::optional<MatchedSchema> tryMatchSchema(
   std::vector<Value*> positional_inputs;
   std::vector<bool> used_kwarg(kwargs.size(), false);
 
-  // if we finish the loop will we have consumed all arguments?
+  // Check that we're consuming all the schema arguments and that we can
+  // match each argument to one of the given args/kwargs
   size_t used_args = 0;
-  for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
-    const auto& arg = schema.arguments()[schema_i];
-    c10::optional<NamedValue> actual_named_value;
-    if (arg.name() == "self" && self) {
-      actual_named_value = self;
-      self = c10::nullopt;
-    } else if (!arg.kwarg_only() && used_args < args.size()) {
-      // Try to convert all the remaining non-kwarg arguments (used_args) to a
-      // list. Allow zeros(IntArrayRef sizes) to work with zeros(1, 2) or
-      // zeros(1)
-      if (allow_conversions && varargsCanBeUsedAsList(schema, schema_i, arg)) {
-        auto value = args[used_args].value(graph);
-        const auto& actual_type = value->type();
-        // The actual cannot already be a list
-        if (actual_type->kind() != TypeKind::ListType &&
-            !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
-          auto formal_type = unwrapOptional(arg.type())
-                                 ->expectRef<ListType>()
-                                 .getElementType();
+    for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
+      const auto& arg = schema.arguments()[schema_i];
+      c10::optional<NamedValue> actual_named_value;
+      if (arg.name() == "self" && self) {
+        actual_named_value = self;
+        self = c10::nullopt;
+      } else if (!arg.kwarg_only() && used_args < args.size()) {
+        // Try to convert all the remaining non-kwarg arguments (used_args) to a
+        // list. Allow zeros(IntArrayRef sizes) to work with zeros(1, 2) or
+        // zeros(1)
+        if (allow_conversions && varargsCanBeUsedAsList(schema, schema_i, arg)) {
+          auto value = args[used_args].value(graph);
+          const auto& actual_type = value->type();
+          // The actual cannot already be a list
+          if (actual_type->kind() != TypeKind::ListType &&
+              !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
+            auto formal_type = unwrapOptional(arg.type())
+                                  ->expectRef<ListType>()
+                                  .getElementType();
 
-          Value* list = tryCreateList(
-              formal_type,
-              graph,
-              loc,
-              at::ArrayRef<NamedValue>(args).slice(used_args),
-              failure_messages,
-              err,
-              allow_conversions,
-              type_env);
-          if (!list) {
-            return c10::nullopt;
+            Value* list = tryCreateList(
+                formal_type,
+                graph,
+                loc,
+                at::ArrayRef<NamedValue>(args).slice(used_args),
+                failure_messages,
+                err,
+                allow_conversions,
+                type_env);
+            if (!list) {
+              return c10::nullopt;
+            }
+            used_args = args.size();
+            positional_inputs.push_back(list);
+            continue;
           }
-          used_args = args.size();
-          positional_inputs.push_back(list);
-          continue;
         }
-      }
 
-      // Set actual_named_value to the argument and mark the arg position as
-      // used
-      actual_named_value = args[used_args];
-      used_args++;
-    } else if (auto kwarg_idx = findInputWithName(arg.name(), kwargs)) {
-      const NamedValue& nv = kwargs[*kwarg_idx];
-      if (used_kwarg[*kwarg_idx]) {
+        // Set actual_named_value to the argument and mark the arg position as
+        // used
+        actual_named_value = args[used_args];
+        used_args++;
+      } else if (auto kwarg_idx = findInputWithName(arg.name(), kwargs)) {
+        const NamedValue& nv = kwargs[*kwarg_idx];
+        if (used_kwarg[*kwarg_idx]) {
+          if (failure_messages) {
+            err() << "Argument " << nv.name()
+                  << " specified twice in schema, submit a bug report!\n";
+          }
+          return c10::nullopt;
+        }
+        used_kwarg[*kwarg_idx] = true;
+        actual_named_value = nv;
+      } else if (arg.default_value()) {
+        // Argument has a default value and no value was provided, so use the
+        // default
+        actual_named_value = NamedValue(*arg.default_value());
+      } else {
         if (failure_messages) {
-          err() << "Argument " << nv.name()
-                << " specified twice in schema, submit a bug report!\n";
+          err() << "Argument " << schema.arguments()[schema_i].name()
+                << " not provided.\n";
         }
         return c10::nullopt;
       }
-      used_kwarg[*kwarg_idx] = true;
-      actual_named_value = nv;
-    } else if (arg.default_value()) {
-      // Argument has a default value and no value was provided, so use the
-      // default
-      actual_named_value = NamedValue(*arg.default_value());
-    } else {
-      if (failure_messages) {
-        err() << "Argument " << schema.arguments()[schema_i].name()
-              << " not provided.\n";
-      }
-      return c10::nullopt;
-    }
 
-    // Make sure the actual_named_value found matches the type of arg
-    Value* positional = tryMatchArgument(
-        arg,
-        graph,
-        loc,
-        *actual_named_value,
-        failure_messages,
-        err,
-        allow_conversions,
-        type_env);
-    if (!positional) {
-      return c10::nullopt;
+      // Make sure the actual_named_value found matches the type of arg
+      Value* positional = tryMatchArgument(
+          arg,
+          graph,
+          loc,
+          *actual_named_value,
+          failure_messages,
+          err,
+          allow_conversions,
+          type_env,
+          allow_narrowing_conversions);
+      if (!positional) {
+        return c10::nullopt;
+      }
+      positional_inputs.push_back(positional);
     }
-    positional_inputs.push_back(positional);
-  }
   // check for unused self argument
   if (self != c10::nullopt && failure_messages) {
     err() << "Provided self argument not used in schema.\n";
@@ -542,12 +628,39 @@ std::pair<size_t, MatchedSchema> matchSchemas(
           kwargs,
           self,
           render_errors ? &failure_messages : nullptr,
-          allow_conversions);
+          allow_conversions,
+          /*allow_narrowing_conversions=*/false);
       if (matched_schema) {
         return std::make_pair(i, *matched_schema);
       }
     }
   }
+
+  // Now we try narrowing conversions
+  std::vector<std::pair<size_t, MatchedSchema>> matches;
+  for (size_t i = 0; i < schemas.size(); ++i) {
+    const auto matched_schema = tryMatchSchema(
+        *schemas[i],
+        loc,
+        graph,
+        args,
+        kwargs,
+        self,
+        render_errors ? &failure_messages : nullptr,
+        /*allow_conversions=*/true,
+        /*allow_narrowing_conversions=*/true);
+    if (matched_schema) {
+      matches.push_back(std::pair<size_t, MatchedSchema>(i, *matched_schema));
+    }
+  }
+
+  // Only allow narrowing conversions if we find a single matching
+  // schema
+  if (matches.size() == 1) {
+    return matches[0];
+  }
+
+
   // we optimistically assume this call will not error, and avoid formatting the
   // error strings. If we discover it did error, then we replay it, recording
   // the errors.
@@ -556,11 +669,23 @@ std::pair<size_t, MatchedSchema> matchSchemas(
         schemas, loc, graph, args, kwargs, self, /*render_errors=*/true);
   }
 
+  if (matches.size() > 1) {
+    throw ErrorReport(loc) << "The type of values annotated with `Any`"
+                           << " will only be automatically converted "
+                           << "to a more specific type if it's possible"
+                           << " to uniquely identify that type from the"
+                           << " function call. Either change the type "
+                           << "annotation or add an assert statement "
+                           << "before the first use of this value\n"
+                           << "The following variants are available:\n"
+                           << prefixLine(failure_messages.str(), "  ")
+                           << "\nThe original call is";
+  }
   throw ErrorReport(loc) << "Arguments for call are not valid.\n"
                          << "The following variants are available:\n"
                          << prefixLine(failure_messages.str(), "  ")
                          << "\nThe original call is";
-  throw ErrorReport(loc) << failure_messages.str();
+
 }
 
 // pack outputs of a function following python rules. If there is a single value
@@ -614,7 +739,6 @@ Value* emitBuiltinCall(
     const c10::optional<NamedValue>& self) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
-
   std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
   schemas.reserve(variants.size());
@@ -646,8 +770,11 @@ Value* emitBuiltinCall(
     throw error;
   }
 
-  auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);
+  std::pair<size_t, MatchedSchema> matched = matchSchemas(schemas, loc, graph, args, kwargs, self);
 
+  // Check the index where we found the match (`matched.first`) to see
+  // if we have an Operator (one of the schemas in `variants`) or a
+  // BuiltinFunction (one of the schemas in `builtin_functions`)
   if (matched.first < variants.size()) {
     return emitBuiltinNode(matched.second, loc, graph, name);
   } else {
