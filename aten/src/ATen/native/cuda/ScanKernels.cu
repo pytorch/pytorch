@@ -473,7 +473,7 @@ void scan_dim(const Tensor& self, Tensor& result,
   Tensor result_ = result.contiguous();
 
   if (self.numel() == self.size(dim)) {
-    scan_cub<scalar_t>(self_.data_ptr<scalar_t>(), result_.data_ptr<scalar_t>(), binary_op, self.numel());
+    cuda::cub::inclusive_scan<scalar_t>(self_.data_ptr<scalar_t>(), result_.data_ptr<scalar_t>(), binary_op, self.numel());
   } else if (dim == ndim - 1) {
     scan_innermost_dim<scalar_t>(self_, result_, init, binary_op);
   } else {
