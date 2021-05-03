@@ -49,7 +49,7 @@ TEST(GradModeTest, TestRequiresGradViewOpExiting) {
 
     {
       torch::AutoGradMode mode(false);
-      view_out = a.view({2, 3});  // go through kernels: VariableType, InplaceOrView, CPU
+      view_out = a.view({2, 3});  // go through kernels: VariableType, ADInplaceOrView, CPU
       assert_tensor_creation_meta(view_out, torch::autograd::CreationMeta::NO_GRAD_MODE);
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
       ASSERT_TRUE(view_out.is_leaf());
@@ -64,7 +64,7 @@ TEST(GradModeTest, TestRequiresGradViewOpExiting) {
     }
 
     if (requires_grad) {
-      ASSERT_THROWS_WITH(view_out.mul_(2),  // go through kernels: VariableType, InplaceOrView, CPU
+      ASSERT_THROWS_WITH(view_out.mul_(2),  // go through kernels: VariableType, ADInplaceOrView, CPU
         "a leaf Variable that requires grad is being used in an in-place operation")
     } else {
         view_out.mul_(2);
