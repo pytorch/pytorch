@@ -16,7 +16,7 @@
 #else // defined(_WIN32)
 #include <Windows.h>
 #include <fileapi.h>
-#endif  // defined(_WIN32)
+#endif // defined(_WIN32)
 
 namespace c10 {
 namespace detail {
@@ -61,7 +61,8 @@ struct TempFile {
   TempFile() : fd(-1) {}
   TempFile(std::string name, int fd) : fd(fd), name(std::move(name)) {}
   TempFile(const TempFile&) = delete;
-  TempFile(TempFile&& other) noexcept : fd(other.fd), name(std::move(other.name)) {
+  TempFile(TempFile&& other) noexcept
+      : fd(other.fd), name(std::move(other.name)) {
     other.fd = -1;
     other.name.clear();
   }
@@ -109,13 +110,13 @@ struct TempDir {
       rmdir(name.c_str());
     }
   }
-#else   // defined(_WIN32)
+#else // defined(_WIN32)
   ~TempDir() {
     if (!name.empty()) {
       RemoveDirectoryA(name.c_str());
     }
   }
-#endif  // defined(_WIN32)
+#endif // defined(_WIN32)
 
   std::string name;
 };
@@ -159,8 +160,8 @@ inline TempFile make_tempfile(std::string name_prefix = "torch-file-") {
 /// occurred.
 ///
 /// The directory returned follows the pattern
-/// `<tmp-dir>/<name-prefix><random-pattern>/`, where `<tmp-dir>` is the value of
-/// the `"TMPDIR"`, `"TMP"`, `"TEMP"` or
+/// `<tmp-dir>/<name-prefix><random-pattern>/`, where `<tmp-dir>` is the value
+/// of the `"TMPDIR"`, `"TMP"`, `"TEMP"` or
 /// `"TEMPDIR"` environment variable if any is set, or otherwise `/tmp`;
 /// `<name-prefix>` is the value supplied to this function, and
 /// `<random-pattern>` is a random sequence of numbers.
@@ -191,12 +192,13 @@ inline c10::optional<TempDir> try_make_tempdir(
 #endif // defined(_WIN32)
 }
 
-/// Like `try_make_tempdir`, but throws an exception if a temporary directory could
-/// not be returned.
+/// Like `try_make_tempdir`, but throws an exception if a temporary directory
+/// could not be returned.
 inline TempDir make_tempdir(std::string name_prefix = "torch-dir-") {
   if (auto tempdir = try_make_tempdir(std::move(name_prefix))) {
     return std::move(*tempdir);
   }
-  TORCH_CHECK(false, "Error generating temporary directory: ", std::strerror(errno));
+  TORCH_CHECK(
+      false, "Error generating temporary directory: ", std::strerror(errno));
 }
 } // namespace c10
