@@ -155,6 +155,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
       // element
       impl::copy<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
         reinterpret_cast<input_t *>(first_elem.get()), input + i);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       impl::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
           input + i,
           output + i - 1,
@@ -173,6 +174,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         // restore modified first element only if it's not an inplace operation
         impl::copy<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
           input + i, reinterpret_cast<input_t *>(first_elem.get()));
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     }
   }
