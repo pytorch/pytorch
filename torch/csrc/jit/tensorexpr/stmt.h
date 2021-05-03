@@ -698,6 +698,11 @@ class TORCH_API For : public StmtNode<For> {
     return stop_;
   }
 
+  const Var* setVar(const Var* var) {
+    var_ = var;
+    return var_;
+  }
+
  private:
   const Var* var_;
   const Expr* start_;
