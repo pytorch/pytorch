@@ -116,8 +116,8 @@ class RendezvousStateTest(TestCase):
 
                     state.wait_list.add(node_waiting)
 
-                    state.last_keep_alives[node_running] = datetime.utcnow()
-                    state.last_keep_alives[node_waiting] = datetime.utcnow()
+                    state.last_heartbeats[node_running] = datetime.utcnow()
+                    state.last_heartbeats[node_waiting] = datetime.utcnow()
 
                 bits = pickle.dumps(state)
 
