@@ -4,7 +4,6 @@
 import io
 import os
 import pickle
-import re
 import tempfile
 
 import torch
@@ -247,10 +246,6 @@ class MatHandler:
 ################################################################
 # a sample decoder
 ################################################################
-def _default_key_fn(key):
-    return re.sub(r".*[.]", "", key)
-
-
 class Decoder:
     """
     Decode key/data sets using a list of handlers.
@@ -260,8 +255,6 @@ class Decoder:
 
     def __init__(self, handlers, key_fn):
         self.handlers = list(handlers) if len(handlers) > 0 else []
-        if key_fn is None:
-            key_fn = _default_key_fn
         self.key_fn = key_fn
 
     # Add from the beginning of the handlers to make sure the added

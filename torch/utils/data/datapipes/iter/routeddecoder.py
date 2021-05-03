@@ -1,11 +1,18 @@
+import re
+
 from io import BufferedIOBase
-from typing import Any, Callable, Iterable, Iterator, Optional, Sized, Tuple
+from typing import Any, Callable, Iterable, Iterator, Sized, Tuple
 
 from torch.utils.data import IterDataPipe, functional_datapipe
 from torch.utils.data.datapipes.utils.decoder import (
     Decoder,
     basichandlers as decoder_basichandlers,
     imagehandler as decoder_imagehandler)
+
+
+# Extract extension from pathname
+def _default_key_fn(pathname):
+    return re.sub(r".*[.]", "", pathname)
 
 
 @functional_datapipe('decode')
@@ -26,7 +33,7 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     def __init__(self,
                  datapipe: Iterable[Tuple[str, BufferedIOBase]],
                  *handlers: Callable,
-                 key_fn: Optional[Callable] = None) -> None:
+                 key_fn: Callable = _default_key_fn) -> None:
         super().__init__()
         self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
         if len(handlers) > 0:
