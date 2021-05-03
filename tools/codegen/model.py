@@ -118,22 +118,12 @@ class DispatchKey(Enum):
     def lower(self) -> str:
         return str(self).lower()
 
-    def is_autograd_key(self) -> bool:
-        return 'Autograd' in str(self)
-
     @staticmethod
     def parse(value: str) -> 'DispatchKey':
         for k, v in DispatchKey.__members__.items():
             if k == value:
                 return v
         raise AssertionError(f'unknown dispatch key {value}')
-
-    @staticmethod
-    def try_parse(value: str) -> Optional['DispatchKey']:
-        try:
-            return DispatchKey.parse(value)
-        except AssertionError:
-            return None
 
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
