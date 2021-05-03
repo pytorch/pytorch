@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <c10/util/DeadlockDetection.h>
 
 namespace torch {
 namespace distributed {
@@ -133,6 +134,7 @@ DistEngine::DistEngine()
 
 DistEngine::~DistEngine() {
   // Ensure we shutdown the CPU thread.
+  TORCH_ASSERT_NO_GIL_WITHOUT_PYTHON_DEP();
   global_cpu_ready_queue_->pushShutdownTask();
   global_cpu_thread_.join();
 }
