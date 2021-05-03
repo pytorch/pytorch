@@ -96,6 +96,7 @@ core_sources_common = [
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/frontend/string_to_type.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
+    "torch/csrc/jit/mobile/runtime_compatibility.cpp",
     "torch/csrc/jit/runtime/instruction.cpp",
     "torch/csrc/jit/runtime/jit_exception.cpp",
     "torch/csrc/jit/runtime/operator.cpp",
