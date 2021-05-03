@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
-#include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
 
 #include <exception>
@@ -95,6 +95,78 @@ std::string operator_str(
   return result;
 }
 
+TypePtr resolveTypeNameGeneral(
+    const c10::QualifiedName& qn,
+    std::shared_ptr<CompilationUnit> compilation_unit) {
+  // HACK: first we check whether the name starts with special prefix to
+  // tell if it's a supported pytorch class type. There are two special
+  // prefixes. "__torch__" for nn module, and "torch.jit" from to_backend.
+  // This is a reliable
+  // check today, but there is no guarantee that this is the case. The
+  // real solution is to merge type parsers so we can share class
+  // resolution logic.
+  static const c10::QualifiedName torchPrefix = "__torch__";
+  static const c10::QualifiedName jitPrefix = "torch.jit";
+  if (torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) {
+    if (compilation_unit->get_class(qn) == nullptr) {
+      auto typeptr = ClassType::create(qn, compilation_unit, true);
+      compilation_unit->register_type(typeptr);
+    }
+    return compilation_unit->get_class(qn);
+  } else {
+    return c10::parseType(qn.qualifiedName());
+  }
+}
+
+c10::StrongTypePtr typeResolverGeneral(
+    const c10::QualifiedName& qn,
+    std::shared_ptr<CompilationUnit> compilation_unit) {
+  return c10::StrongTypePtr(
+      compilation_unit, resolveTypeNameGeneral(qn, compilation_unit));
+}
+
+c10::intrusive_ptr<c10::ivalue::Object> objLoaderGeneral(
+    at::StrongTypePtr type,
+    IValue input,
+    std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit) {
+  auto cls = type.type_->expect<at::ClassType>();
+  auto qn = cls->name();
+  c10::QualifiedName method_name(qn.value(), "__setstate__");
+  auto setstate = mobile_compilation_unit->find_function(method_name);
+  auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
+    auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
+    if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
+      return custom_class_type;
+    }
+    return nullptr;
+  };
+  if (setstate) {
+    auto obj = c10::ivalue::Object::create(type, 0);
+    Stack stack({obj, input});
+    setstate->run(stack);
+    return obj;
+  } else if (auto custom_class_type = find_custom_class_with_setstate()) {
+    auto obj = c10::ivalue::Object::create(
+        c10::StrongTypePtr(nullptr, custom_class_type), 1);
+    Stack stack({obj, input});
+    custom_class_type->getMethod("__setstate__").run(stack);
+    return obj;
+  } else {
+    auto dict = std::move(input).toGenericDict();
+    size_t ndict = dict.size();
+    auto obj = c10::ivalue::Object::create(type, ndict);
+    auto it = dict.begin();
+    for (size_t i = 0; i < ndict; ++i) {
+      std::stringstream name;
+      name << it->key();
+      cls->addOrCheckAttribute(name.str(), it->key().type());
+      obj->setSlot(i, it->value());
+      ++it;
+    }
+    return obj;
+  }
+}
+
 namespace {
 void print_unsupported_ops_and_throw(
     const std::unordered_set<std::string>& unsupported_ops) {
@@ -171,7 +243,7 @@ std::unordered_set<std::string> BytecodeDeserializer::
   for (const auto& op : ops_list) {
     auto op_item = op.toTuple()->elements();
     TORCH_CHECK(
-        op_item.size() >= 2,
+        op_item.size() == 2 || op_item.size() == 3,
         "There should be either two parts (name and overload name), ",
         "or three parts (name, overload name and number of specified args) ",
         "for an operator");
@@ -192,24 +264,7 @@ std::unordered_set<std::string> BytecodeDeserializer::
 }
 
 TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
-  // HACK: first we check whether the name starts with special prefix to
-  // tell if it's a supported pytorch class type. There are two special
-  // prefixes. "__torch__" for nn module, and "torch.jit" from to_backend.
-  // This is a reliable
-  // check today, but there is no guarantee that this is the case. The
-  // real solution is to merge type parsers so we can share class
-  // resolution logic.
-  static const c10::QualifiedName torchPrefix = "__torch__";
-  static const c10::QualifiedName jitPrefix = "torch.jit";
-  if (torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) {
-    if (compilation_unit_->get_class(qn) == nullptr) {
-      auto typeptr = ClassType::create(qn, compilation_unit_, true);
-      compilation_unit_->register_type(typeptr);
-    }
-    return compilation_unit_->get_class(qn);
-  } else {
-    return c10::parseType(qn.qualifiedName());
-  }
+  return resolveTypeNameGeneral(qn, compilation_unit_);
 }
 
 void BytecodeDeserializer::parseMethods(
@@ -227,7 +282,9 @@ void BytecodeDeserializer::parseMethods(
     method_i_start = 1;
   }
   TORCH_CHECK(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           model_version <= caffe2::serialize::kProducedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
       "The model version must be between ",
@@ -255,6 +312,7 @@ void BytecodeDeserializer::parseMethods(
         ? at::optional<IValue>{m_tuple[2]}
         : at::nullopt;
 
+    // NOLINTNEXTLINE(modernize-make-unique)
     auto function = std::unique_ptr<mobile::Function>(
         new mobile::Function(c10::QualifiedName(function_name)));
 
@@ -466,82 +524,17 @@ std::unordered_map<std::string, std::string> BytecodeDeserializer::
 c10::IValue BytecodeDeserializer::readArchive(
     const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> mcu) {
-  std::stringstream picklename;
-  picklename << archive_name << ".pkl";
-  at::DataPtr pickle_ptr;
-  size_t pickle_size;
-  std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename.str());
-
-  size_t bytes_read = 0;
-  auto data = reinterpret_cast<const char*>(pickle_ptr.get());
-  auto reader = [&](char* buffer, size_t len) -> size_t {
-    if (bytes_read >= pickle_size) {
-      return 0;
-    }
-    len = std::min(pickle_size - bytes_read, len);
-    // Copy len bytes into buffer
-    const char* start = data + bytes_read;
-    std::memcpy(buffer, start, len);
-    bytes_read += len;
-    return len;
-  };
-
   auto type_resolver = [this](const c10::QualifiedName& qn) {
-    return c10::StrongTypePtr(compilation_unit_, resolveTypeName(qn));
+    return typeResolverGeneral(qn, compilation_unit_);
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    auto cls = type.type_->expect<at::ClassType>();
-    auto qn = cls->name();
-    c10::QualifiedName method_name(qn.value(), "__setstate__");
-    auto setstate = mcu->find_function(method_name);
-    auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
-      auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
-      if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
-        return custom_class_type;
-      }
-      return nullptr;
-    };
-    if (setstate) {
-      auto obj = c10::ivalue::Object::create(type, 0);
-      Stack stack({obj, input});
-      setstate->run(stack);
-      return obj;
-    } else if (auto custom_class_type = find_custom_class_with_setstate()) {
-      auto obj = c10::ivalue::Object::create(
-          c10::StrongTypePtr(nullptr, custom_class_type), 1);
-      Stack stack({obj, input});
-      custom_class_type->getMethod("__setstate__").run(stack);
-      return obj;
-    } else {
-      auto dict = std::move(input).toGenericDict();
-      size_t ndict = dict.size();
-      auto obj = c10::ivalue::Object::create(type, ndict);
-      auto it = dict.begin();
-      for (size_t i = 0; i < ndict; ++i) {
-        std::stringstream name;
-        name << it->key();
-        cls->addOrCheckAttribute(name.str(), it->key().type());
-        obj->setSlot(i, it->value());
-        ++it;
-      }
-      return obj;
-    }
+    return objLoaderGeneral(type, input, mcu);
   };
 
-  auto read_record = [&](const std::string& name) {
-    std::stringstream ss;
-    ss << archive_name << "/" << name;
-    return std::get<0>(reader_->getRecord(ss.str()));
-  };
-
-  Unpickler unpickler(
-      reader,
-      std::move(type_resolver),
-      std::move(obj_loader),
-      std::move(read_record),
-      device_);
-  return unpickler.parse_ivalue();
+  auto ivalues = torch::jit::readArchiveAndTensors(
+      archive_name, type_resolver, obj_loader, device_, *reader_.get());
+  return ivalues;
 }
 
 } // namespace
@@ -619,6 +612,7 @@ mobile::Module _load_for_mobile_impl(
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
   auto observer = torch::observerConfig().getModuleObserver();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
@@ -643,6 +637,7 @@ mobile::Module _load_for_mobile_impl(
       observer->onFailLoadModel(
           instance_key,
           error.what(),
+          // NOLINTNEXTLINE(performance-move-const-arg)
           deserializer.deserializeMetadata(std::move(device)));
     }
     TORCH_RETHROW(error);
@@ -663,6 +658,7 @@ mobile::Module _load_for_mobile_impl(
         observer->onFailLoadModel(
             instance_key,
             error.what(),
+            // NOLINTNEXTLINE(performance-move-const-arg)
             deserializer.deserializeMetadata(std::move(device)));
       }
       TORCH_RETHROW(error);
@@ -676,6 +672,7 @@ void _load_extra_only_for_mobile(
     ExtraFilesMap& extra_files) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto observer = torch::observerConfig().getModuleObserver();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
