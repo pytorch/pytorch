@@ -56,40 +56,28 @@ static std::pair<TensorView*, TensorView*> setupReduction(
 }
 
 static void MagicScheduler_Reduction(benchmark::State& benchmark_state,
+  FusionExecutorCache* fusion_executor_cache,
   DataType dtype,
   int reduction_dim) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
 
   auto reduction_size = benchmark_state.range(0);
   auto iter_size = benchmark_state.range(1);
 
-  auto reduction_tvs = setupReduction(&fusion, dtype, reduction_dim);
-
   at::manual_seed(0);
   auto options = at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
   at::Tensor aten_input =
-      (reduction_dim ? at::randn({iter_size, reduction_size}, options)
-            : at::randn({reduction_size, iter_size}, options));
+      (reduction_dim ?  at::randn({iter_size, reduction_size}, options)
+                      : at::randn({reduction_size, iter_size}, options));
 
-  auto reduction_tv = reduction_tvs.first;
-  auto out_of_reduction = reduction_tvs.second;
+  fusion_executor_cache->profile(true);
+  fusion_executor_cache->runFusionWithInputs({aten_input});
 
-  auto reduction_params =
-      getReductionHeuristics(&fusion, {aten_input}, reduction_tv);
-
-  TORCH_CHECK(reduction_params.has_value(), "Reduction is not found!");
-
-  std::vector<TensorView*> outputs_of_reduction;
-  if(out_of_reduction != nullptr){
-    outputs_of_reduction.push_back(out_of_reduction);
-  }
-
-  auto rparams = reduction_params.value();
-  auto lparams = rparams.lparams;
-
-  scheduleReduction(
-      &fusion, rparams, reduction_tv, outputs_of_reduction);
+  auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
+  auto executor_instance = compile_log.fusion_executor;
+  TORCH_INTERNAL_ASSERT(compile_log.reduction_params.has_value());
+  TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
+  auto rparams = compile_log.reduction_params.value();
+  auto lparams = compile_log.launch_constraints.value();
 
   std::stringstream ss;
   if(rparams.fastest_dim){
@@ -117,15 +105,13 @@ static void MagicScheduler_Reduction(benchmark::State& benchmark_state,
 
   benchmark_state.SetLabel(ss.str());
 
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion);
-  fe.setMeasureKernelTimeFlag(true);
+  fusion_executor_cache->profile(false);
+  executor_instance->setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
-    auto cg_outputs = fe.runFusion({aten_input}, lparams);
-    benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
+    auto cg_outputs = fusion_executor_cache->runFusionWithInputs({aten_input});
+    benchmark_state.SetIterationTime(executor_instance->kernelTimeMs() / 1000.0);
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
@@ -136,89 +122,96 @@ static void MagicScheduler_Reduction(benchmark::State& benchmark_state,
       (iter_size * reduction_size + iter_size) * int64_t(dataTypeSize(dtype)));
 }
 
-static void MagicScheduler_fp32_Outer_Reduction(benchmark::State& benchmark_state) {
-  MagicScheduler_Reduction(benchmark_state, DataType::Float, 0);
-}
+NVFUSER_BENCHMARK_DEFINE(MagicScheduler_fp32_Outer_Reduction, setupReduction, MagicScheduler_Reduction, DataType::Float, 0);
+NVFUSER_BENCHMARK_DEFINE(MagicScheduler_fp16_Outer_Reduction, setupReduction, MagicScheduler_Reduction, DataType::Half, 0);
+NVFUSER_BENCHMARK_DEFINE(MagicScheduler_fp32_Inner_Reduction, setupReduction, MagicScheduler_Reduction, DataType::Float, 1);
+NVFUSER_BENCHMARK_DEFINE(MagicScheduler_fp16_Inner_Reduction, setupReduction, MagicScheduler_Reduction, DataType::Half, 1);
 
-static void MagicScheduler_fp32_Inner_Reduction(benchmark::State& benchmark_state) {
-  MagicScheduler_Reduction(benchmark_state, DataType::Float, 1);
-}
-
-static void MagicScheduler_fp16_Outer_Reduction(benchmark::State& benchmark_state) {
-  MagicScheduler_Reduction(benchmark_state, DataType::Half, 0);
-}
-
-static void MagicScheduler_fp16_Inner_Reduction(benchmark::State& benchmark_state) {
-  MagicScheduler_Reduction(benchmark_state, DataType::Half, 1);
-}
-
-BENCHMARK(MagicScheduler_fp32_Outer_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp32_Outer_Reduction)
     ->RangeMultiplier(8)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_fp32_Outer_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp32_Outer_Reduction)
     ->RangeMultiplier(4)
     ->Ranges({{32768, 128 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_fp32_Outer_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp32_Outer_Reduction)
     ->RangeMultiplier(4)
     ->Ranges({{2, 16}, {32768, 128 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_fp16_Outer_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp32_Outer_Reduction)
     ->RangeMultiplier(8)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_fp16_Outer_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp32_Outer_Reduction)
     ->RangeMultiplier(4)
     ->Ranges({{32768, 128 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_fp16_Outer_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp32_Outer_Reduction)
     ->RangeMultiplier(4)
     ->Ranges({{2, 16}, {32768, 128 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_fp32_Inner_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp16_Outer_Reduction)
     ->RangeMultiplier(8)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_fp32_Inner_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp16_Outer_Reduction)
     ->RangeMultiplier(4)
     ->Ranges({{32768, 128 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_fp32_Inner_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp16_Outer_Reduction)
     ->RangeMultiplier(4)
     ->Ranges({{2, 16}, {32768, 128 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_fp16_Inner_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp32_Inner_Reduction)
     ->RangeMultiplier(8)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_fp16_Inner_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp32_Inner_Reduction)
     ->RangeMultiplier(4)
     ->Ranges({{32768, 128 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(MagicScheduler_fp16_Inner_Reduction)
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp32_Inner_Reduction)
+    ->RangeMultiplier(4)
+    ->Ranges({{2, 16}, {32768, 128 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp16_Inner_Reduction)
+    ->RangeMultiplier(8)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp16_Inner_Reduction)
+    ->RangeMultiplier(4)
+    ->Ranges({{32768, 128 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(MagicScheduler_fp16_Inner_Reduction)
     ->RangeMultiplier(4)
     ->Ranges({{2, 16}, {32768, 128 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)

@@ -320,12 +320,19 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   }
 
   const size_t unique_id = id_lookup_ret.id;
+
   // Manage Segmented Fusion through FusionKernelRuntimeCache
   auto fusion_kernel_runtime =
       fusion_kernel_runtime_cache_.getRt(inputs, unique_id);
+
   // Propagate the unique_id so the contained fusionExecutors in the runtime
   //  entry will cache the buffer sizes and launch params based on this id.
-  return fusion_kernel_runtime->runWithInput(inputs, unique_id);
+  auto&& ret = fusion_kernel_runtime->runWithInput(inputs, unique_id);
+  if (profiling_) {
+    most_recent_executor_log_ =
+        fusion_kernel_runtime->getMostRecentExecutorLog();
+  }
+  return std::move(ret);
 }
 
 FusionKernelRuntime::FusionKernelRuntime(
@@ -387,6 +394,14 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   // Load launch params for reduction and normalization kernels
   if (scheduler_entry->hasParam()) {
     launch_params = scheduler_entry->params().lparams;
+  }
+
+  if (profiling_) {
+    most_recent_executor_log_.fusion_executor = &executors_[group_id];
+    most_recent_executor_log_.launch_constraints = launch_params;
+    if (scheduler_entry->hasParam()) {
+      most_recent_executor_log_.reduction_params = scheduler_entry->params();
+    }
   }
 
   return executors_[group_id].runFusion(inputs, launch_params, input_id);
@@ -642,6 +657,10 @@ FusionKernelRuntime* FusionKernelRuntimeCache::getRtByHeuristics(
     //  will be re-computed/updated again if evicted, so it is safe to overwrite
     //  the launchparams here.
     rt->updateHeuristicsLaunchParams(heuristics.get());
+  }
+
+  if (profiling_) {
+    rt->profile(true);
   }
 
   // Cache this new id

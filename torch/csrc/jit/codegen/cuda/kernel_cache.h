@@ -21,6 +21,13 @@ namespace cuda {
 class SegmentedGroup;
 class FusionHeuristics;
 
+// Utilities for benchmarking and profiling
+struct ExecutorLog {
+  c10::optional<ReductionParams> reduction_params = c10::nullopt;
+  c10::optional<LaunchParams> launch_constraints = c10::nullopt;
+  FusionExecutor* fusion_executor = nullptr;
+};
+
 //! FusionKernelRuntime is the unified interface from fusion graphs into
 //!  caching, compilation into kernels, and kernel launches.
 //!
@@ -65,6 +72,21 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
     } else {
       return runKernelWithInput(inputs, input_id);
     }
+  }
+
+  //! Turn On/Off profiling
+  void profile(bool to_profile = true) {
+    profiling_ = to_profile;
+  }
+
+  //! Return the most recently used executor, corresponding to the
+  //!  most recent kernel launch.
+  //! TODO: have a interface for grabbing all recent logs. Need to put a buffer
+  //! space for recent logs
+  ExecutorLog getMostRecentExecutorLog() {
+    TORCH_INTERNAL_ASSERT(
+        profiling_, "Executor log is only produced in profiling mode");
+    return most_recent_executor_log_;
   }
 
   //! Copy the launch params given in the parameter heuristics to prepare
@@ -143,6 +165,12 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //  heuristics for. Applies only in the single-kernel fusion case, i.e.
   //  is_segmented==false
   Fusion* complete_fusion_ = nullptr;
+
+  // States for profiling support
+  bool profiling_ = false;
+
+  // The heuristics and executor for most recent kernel launch
+  ExecutorLog most_recent_executor_log_;
 };
 
 //! Object holding cache entries for segmented fusion
@@ -173,6 +201,18 @@ class TORCH_CUDA_CU_API FusionKernelRuntimeCache {
   FusionKernelRuntime* getRt(
       const at::ArrayRef<IValue>& inputs,
       size_t input_id);
+
+  //! Turn On/Off profile mode in the executors
+  void profile(bool to_profile) {
+    profiling_ = to_profile;
+    // Heavy turning On/Off for now, turn on/off all executors' profiling modes
+    //  each time this function is called
+    for (auto& cache_group_it : seg_runtime_cache_group_) {
+      for (auto& runtime_it : *(cache_group_it.second)) {
+        runtime_it.second->profile(to_profile);
+      }
+    }
+  }
 
  private:
   using HeuristicTag = FusionKernelRuntime::HeuristicTag;
@@ -219,6 +259,9 @@ class TORCH_CUDA_CU_API FusionKernelRuntimeCache {
   FusionKernelRuntime* getRtByHeuristics(
       const at::ArrayRef<IValue>& inputs,
       size_t input_id);
+
+  //! State used for profiling
+  bool profiling_ = false;
 };
 
 //! Encoding an input set to unique id, which is used to short-cut cache entry
@@ -371,6 +414,16 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
     return fusion_segments_ != nullptr;
   }
 
+  ExecutorLog getMostRecentExecutorInfo() {
+    TORCH_INTERNAL_ASSERT(!isSegmented());
+    return most_recent_executor_log_;
+  }
+
+  void profile(bool to_profile) {
+    profiling_ = to_profile;
+    fusion_kernel_runtime_cache_.profile(to_profile);
+  }
+
  private:
   //! evict cached short cut entry in `code_to_fe_lookup_` as well as cached
   //! entry in `FusionExecutor`
@@ -390,6 +443,12 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
 
   //! Caching for segmented fusions
   FusionKernelRuntimeCache fusion_kernel_runtime_cache_;
+
+  //! Logging state for most recent compilation
+  bool profiling_ = false;
+
+  //! Logging state for most recent compilation
+  ExecutorLog most_recent_executor_log_;
 };
 
 class GraphCache {
