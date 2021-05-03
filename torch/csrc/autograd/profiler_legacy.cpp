@@ -299,11 +299,17 @@ std::string ProfilerThreadLocalState::getNvtxStr(
 #ifdef __HIP_PLATFORM_HCC__
     s << name.str();
 #endif
-    if (sequence_nr >= -1) {
+    if (sequence_nr >= 0) {
 #ifdef __HIP_PLATFORM_HCC__
       s << msg << sequence_nr;
 #else
       s << name.str() << msg << sequence_nr;
+#endif
+    } else if (sequence_nr == -1) {
+#ifdef __HIP_PLATFORM_HCC__
+      s << msg;
+#else
+      s << name.str() << msg;
 #endif
     }
     if (shapes.size() > 0) {
