@@ -133,8 +133,8 @@ inline void __attribute__((always_inline)) QuantizeAvx512(
       0x0c, 0x08, 0x04, 0x00);
   // clang-format on
   __m512i permute_mask_v =
-      _mm512_set_epi32(0x0f, 0x0b, 0x0e, 0x0a, 0x0d, 0x09, 0x0c, 0x08,
-                       0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
+      _mm512_set_epi32(0x0f, 0x0c, 0x07, 0x03, 0x0e, 0x0a, 0x06, 0x02,
+                       0x0d, 0x09, 0x05, 0x01, 0x0c, 0x08, 0x04, 0x00);
   __m512i permute_mask_l8_v =
       _mm512_set_epi32(0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0c, 0x08,
                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
@@ -367,8 +367,8 @@ __m512i RequantizeAvx512(
   constexpr auto min_val = std::numeric_limits<T>::min();
   constexpr auto max_val = std::numeric_limits<T>::max();
   __m512i permute_mask_v =
-      _mm512_set_epi32(0x0f, 0x0b, 0x0e, 0x0a, 0x0d, 0x09, 0x0c, 0x08,
-                       0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
+      _mm512_set_epi32(0x0f, 0x0b, 0x07, 0x03, 0x0e, 0x0a, 0x06, 0x02,
+                       0x0d, 0x09, 0x05, 0x01, 0x0c, 0x08, 0x04, 0x00);
   __m512 x_scaled_v = _mm512_mul_ps(_mm512_cvtepi32_ps(inp[0]), multiplier);
   __m512 y_scaled_v = _mm512_mul_ps(_mm512_cvtepi32_ps(inp[1]), multiplier);
   __m512 z_scaled_v = _mm512_mul_ps(_mm512_cvtepi32_ps(inp[2]), multiplier);
@@ -394,7 +394,7 @@ __m512i RequantizeAvx512(
 
   /*
    * xyzw_clamped_v has results in the following layout so we need to
-   * permute: x0-3 y0-3 z0-3 w0-3 x4-7 y4-7 z4-7 w4-7
+   * permute: x0-3 y0-3 z0-3 w0-3 x4-7 y4-7 z4-7 w4-7 x8-11 y8-11 z8-11 w8-11 x12-15 y12-15 z12-15 w12-15
    */
   xyzw_clamped_v = _mm512_permutexvar_epi32(xyzw_clamped_v, permute_mask_v);
   return xyzw_clamped_v;
