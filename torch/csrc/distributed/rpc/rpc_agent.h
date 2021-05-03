@@ -164,8 +164,7 @@ class TORCH_API RpcAgent {
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
-      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
-          {}) = 0;
+      const std::unordered_map<c10::Device, c10::Device>& deviceMap = {}) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
   // receieved. The duration between consecutive sends is increased over
@@ -265,8 +264,8 @@ class TORCH_API RpcAgent {
   std::shared_ptr<TypeResolver> getTypeResolver();
 
   // Retrieves the device map for the provided destination worker.
-  virtual std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> getDeviceMap(
-      const WorkerInfo& dest);
+  virtual std::unordered_map<c10::Device, c10::Device> getDeviceMap(
+      const WorkerInfo& dst) const;
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
