@@ -153,10 +153,6 @@ class LinuxGccConfigNode(ConfigNode):
         if self.find_prop("package_format") == 'conda':
             gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions)
 
-        # XXX libtorch rocm build  is temporarily disabled
-        if self.find_prop("package_format") == 'libtorch':
-            gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions)
-
         return [ArchConfigNode(self, v) for v in gpu_versions]
 
 
