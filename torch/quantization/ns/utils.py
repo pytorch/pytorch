@@ -80,13 +80,13 @@ def get_node_first_input_and_output_type(
                     first_arg, gm, logger_cls, node_type_to_io_type_map)
             return (prev_node_output_type, prev_node_output_type)
         is_known_fp32_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32  # type: ignore
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32  # type: ignore[arg-type]
         )
         is_known_int8_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_INT8  # type: ignore
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_INT8  # type: ignore[arg-type]
         )
         is_known_fp32_or_int8_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore[arg-type]
         )
         if is_known_fp32_input_module:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)

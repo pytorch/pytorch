@@ -123,10 +123,14 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
-PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
-    : PyRRef([&value, &type_hint]() {
+PyRRef::PyRRef(
+    const py::object& value,
+    const py::object& type_hint,
+    std::vector<c10::DeviceIndex> devices)
+    : PyRRef([&value, &type_hint, devices{std::move(devices)}]() mutable {
         TypePtr elem_type = tryInferTypeWithTypeHint(value, type_hint);
-        auto rref = RRefContext::getInstance().createOwnerRRef(elem_type);
+        auto rref = RRefContext::getInstance().createOwnerRRef(
+            elem_type, std::move(devices));
         // jit::toIValue takes a py::handle as the first argument, and it calls
         // py::handle.cast<py::object>() to incref of provided value. The
         // returned ivalue will keep the reference alive.
