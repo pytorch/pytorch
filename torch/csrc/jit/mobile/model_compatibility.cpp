@@ -69,6 +69,8 @@ std::vector<IValue> get_bytecode_values(PyTorchStreamReader& reader) {
 
 } // namespace
 
+/********************** Bytecode Version **********************/
+
 // Forward declare
 int64_t _get_model_bytecode_version(std::vector<IValue> bytecode_ivalues);
 
@@ -98,6 +100,74 @@ int64_t _get_model_bytecode_version(std::vector<IValue> bytecode_ivalues) {
   }
   TORCH_WARN("Fail to get bytecode version.");
   return -1;
+}
+
+/********************** Operators and Info **********************/
+
+// Forward declare
+std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+    std::vector<IValue> bytecode_ivalues);
+
+std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+    std::istream& in) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  return _get_model_ops_and_info(std::move(rai));
+}
+
+std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+    const std::string& filename) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _get_model_ops_and_info(std::move(rai));
+}
+
+std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+    std::shared_ptr<ReadAdapterInterface> rai) {
+  if (!check_zip_file(rai)) {
+    TORCH_WARN("Failed to open zip file for model ops.");
+    return std::unordered_map<std::string, OperatorInfo>{};
+  }
+  PyTorchStreamReader reader(std::move(rai));
+  auto bytecode_values = get_bytecode_values(reader);
+  return _get_model_ops_and_info(bytecode_values);
+}
+
+std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+    std::vector<IValue> bytecode_ivalues) {
+  if (_get_model_bytecode_version(bytecode_ivalues) < 6) {
+    TORCH_WARN(
+        "This model likely has an older bytecode version without operator schema information. Please re-export your model to generate it");
+  }
+  std::unordered_map<std::string, OperatorInfo> result;
+  if (!bytecode_ivalues.empty()) {
+    // loop over all the functions in the bytecode
+    for (int i = 1; i < bytecode_ivalues.size(); i++) {
+      // descend to the operators list
+      auto method_tuple = bytecode_ivalues[i].toTuple()->elements();
+      auto operators_tuple = method_tuple[1].toTuple()->elements()[1];
+      auto operators = operators_tuple.toTuple()->elements()[1];
+      for (auto& op_tuple : operators.toTuple()->elements()) {
+        auto op = op_tuple.toTuple()->elements();
+
+        // grab name
+        std::string op_name = op[0].toStringRef();
+        std::string op_overload_name = op[1].toStringRef();
+        if (op_overload_name != "") {
+          op_name.append(".");
+          op_name.append(op_overload_name);
+        }
+
+        // grab schema
+        int num_args = -1;
+        if (op.size() > 2) {
+          num_args = op[2].toInt();
+        }
+        result.emplace(op_name, OperatorInfo{num_args});
+      }
+    }
+    return result;
+  }
+  TORCH_WARN("Failed to get model ops and info.");
+  return result;
 }
 
 } // namespace jit
