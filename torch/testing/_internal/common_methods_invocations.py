@@ -3260,6 +3260,52 @@ def sample_inputs_scatter_add(op_info, device, dtype, requires_grad):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
+
+def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
+    samples = (SampleInput(make_tensor((S, S, S), device, dtype,
+                                       low=None, high=None,
+                                       requires_grad=requires_grad)),
+               SampleInput(make_tensor((), device, dtype,
+                                       low=None, high=None,
+                                       requires_grad=requires_grad)),)
+
+    return samples
+
+
+def sample_inputs_view(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (((S, S, S), (S * S, S)),
+             ((S * S, S), (S, S, S)),
+             ((S,), (S,)),
+             ((), ()),
+             ((), (1,)))
+
+    def generator():
+        for case in cases:
+            shape, args = case
+            yield(SampleInput(make_arg(shape), args=(args, )))
+
+    return list(generator())
+
+
+def sample_inputs_view_as(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device)
+
+    cases = (((S, S, S), (S * S, S)),
+             ((), ()),
+             ((), (1, 1)),
+             )
+
+    def generator():
+        for case in cases:
+            shape, shape_other = case
+            yield(SampleInput(make_arg(shape, requires_grad=requires_grad),
+                              args=(make_arg(shape_other, requires_grad=False), )))
+
+    return list(generator())
+
+
 def sample_inputs_rbinops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -5416,6 +5462,35 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                 active_if=TEST_WITH_ROCM),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 4}, {'n': 4})),
+    OpInfo('ravel',
+           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfROCM=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_ravel,
+           ),
+    OpInfo('view',
+           op=lambda x, shape: x.view(shape),
+           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfROCM=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           skips=(
+               # Because view does not have a function variant.
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
+           sample_inputs_func=sample_inputs_view,
+           ),
+    OpInfo('view_as',
+           op=lambda x, other: x.view_as(other),
+           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfROCM=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           skips=(
+               # Because view_as does not have a function variant.
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
+           sample_inputs_func=sample_inputs_view_as,
+           ),
     OpInfo('pinverse',
            op=torch.pinverse,
            dtypes=floating_and_complex_types(),
@@ -5951,12 +6026,6 @@ def method_tests():
         ('float_power', uniform_scalar(1e-3, requires_grad=True), (torch.rand(S, S, S) + 0.1,), 'scalar_broadcast_lhs'),
         ('float_power', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant'),
         ('t', (1, 2), NO_ARGS, '', (False,)),
-        ('view', (S, S, S), (S * S, S), '', (False,)),
-        ('view', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
-        ('view', (S,), (S,), '1d', (False,)),
-        ('view', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
-        ('view', (), (1,), 'scalar_to_1d', (False,)),
-        ('ravel', (S, S, S), NO_ARGS, '', (False,)),
         ('reshape', (S, S, S), (S * S, S), '', (False,)),
         ('reshape', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
         ('reshape', (S,), (S,), '1d', (False,)),
@@ -5965,9 +6034,6 @@ def method_tests():
         ('reshape_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
         ('reshape_as', (), (non_differentiable(torch.tensor(42.)),), 'scalar'),
         ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
-        ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
-        ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
-        ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
         ('expand', (S, 1, 1), (S, S, S), '', (False,)),
         ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size', (False,)),
         ('expand', (S, 1), (S, S, S), 'new_dim', (False,)),
