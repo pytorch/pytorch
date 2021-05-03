@@ -17,6 +17,9 @@ from functools import reduce, partial
 import torch
 import json
 
+# TODO(alband) Remove this when this flag is not needed anymore
+torch._C._set_forward_AD_enabled(True)
+
 from torch import nn
 from torch._six import inf, nan
 from torch.autograd.function import once_differentiable

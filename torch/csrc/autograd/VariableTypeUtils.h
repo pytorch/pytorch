@@ -148,27 +148,34 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
   // in the default_included_set, so that view ops on inference tensor doesn't
   // have to go through as_view even outside InferenceMode.
   if (base.unsafeGetTensorImpl()->is_inference_tensor()) return tensor;
-
-  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
-
-  // To speed up the most common case, we specially handle when both the forward and backward
-  // view infos are the same, and so a single shared ViewInfo can be used for both of them.
-  if ((!diff_view_meta || diff_view_meta->shared_view_info()) && is_bw_differentiable && is_fw_differentiable) {
-    if (diff_view_meta) {
-      creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
-      return make_variable_differentiable_view(tensor, diff_view_meta->get_backward_view().chain(base, tensor, view_func),
-                        c10::nullopt, /*shared_view_info*/ true, creation_meta, allow_tensor_metadata_change);
+  if (!isForwardADEnabled()) {
+    // Fast codepath for backward only code
+    // It is useful as it avoids the creation of the temporary c10<optional> which makes
+    // a significant difference when measuring instruction count for a single "t.view(-1)" call from c++.
+    if (is_bw_differentiable) {
+      auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
+      if (diff_view_meta && diff_view_meta->has_bw_view()) {
+        const auto& base_bw_info = diff_view_meta->get_backward_view();
+        creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
+        return make_variable_differentiable_view(tensor, base_bw_info.chain(base, tensor, view_func),
+                                                 c10::nullopt, creation_meta, allow_tensor_metadata_change);
+      } else {
+        return make_variable_differentiable_view(tensor, ViewInfo(base, view_func),
+                                                 c10::nullopt, creation_meta, allow_tensor_metadata_change);
+      }
     } else {
-      return make_variable_differentiable_view(tensor, ViewInfo(base, view_func), c10::nullopt, /*shared_view_info*/ true,
-                                             creation_meta, allow_tensor_metadata_change);
+      TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
+                  "Non-backward differentiable views must have creation_meta=CreationMeta::DEFAULT");
+      // NOLINTNEXTLINE(performance-move-const-arg)
+      return make_variable_non_differentiable_view(base, std::move(tensor), allow_tensor_metadata_change);
     }
   }
-
-  // If they cannot be shared, create the required view infos
+  // Create both the forward and backward info that are needed
   c10::optional<ViewInfo> new_bw_info;
   c10::optional<ViewInfo> new_fw_info;
 
   if (is_bw_differentiable) {
+    auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_bw_view()) {
       const auto& base_bw_info = diff_view_meta->get_backward_view();
       new_bw_info = base_bw_info.chain(base, tensor, view_func);
@@ -182,6 +189,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
 
   if (is_fw_differentiable) {
     // Check if base is a forward differentiable view
+    auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();
       new_fw_info = base_fw_info.chain(base, tensor, view_func);
@@ -191,10 +199,11 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
   }
 
   if (is_fw_differentiable || is_bw_differentiable) {
+    auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_bw_view()) {
       creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
     }
-    return make_variable_differentiable_view(tensor, std::move(new_bw_info), std::move(new_fw_info), /*shared_view_info*/ false,
+    return make_variable_differentiable_view(tensor, std::move(new_bw_info), std::move(new_fw_info),
                                              creation_meta, allow_tensor_metadata_change);
   } else {
     return make_variable_non_differentiable_view(base, tensor, allow_tensor_metadata_change);
@@ -206,31 +215,6 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
                                    bool is_fw_differentiable, CreationMeta creation_meta=CreationMeta::DEFAULT) {
   // See Note [View of inference tensor]
   if (base.unsafeGetTensorImpl()->is_inference_tensor()) return tensors;
-
-  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
-
-  // Special case when view info can be shared for forward and backward differentiable views
-  if ((!diff_view_meta || diff_view_meta->shared_view_info()) && is_bw_differentiable && is_fw_differentiable) {
-    c10::optional<ViewInfo> new_shared_info;
-    if (diff_view_meta) {
-      TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
-                            "Functions that result multiple view must have a creation meta reflecting this behavior.");
-      creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
-      const auto& base_bw_info = diff_view_meta->get_backward_view();
-      new_shared_info = ViewInfo(base_bw_info.base_, /* view_func */ nullptr);
-    } else {
-      new_shared_info = ViewInfo(base, /* view_func */ nullptr);
-    }
-
-    for(Tensor &tensor : tensors) {
-      if (is_fw_differentiable || is_bw_differentiable) {
-        tensor = make_variable_differentiable_view(tensor, new_shared_info, c10::nullopt, /*shared_view_info*/ true, creation_meta);
-      } else {
-        tensor = make_variable_non_differentiable_view(base, tensor);
-      }
-    }
-  }
-
   c10::optional<ViewInfo> new_bw_info = c10::nullopt;
   c10::optional<ViewInfo> new_fw_info = c10::nullopt;
 
@@ -250,7 +234,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
     TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                 "Non-backward differentiable views must have creation_meta=CreationMeta::DEFAULT");
   }
-  if (is_fw_differentiable) {
+  if (isForwardADEnabled() && is_fw_differentiable) {
     // Check if base is a forward differentiabble view
     auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
@@ -273,7 +257,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
 
   for(Tensor &tensor : tensors) {
     if (is_fw_differentiable || is_bw_differentiable) {
-      tensor = make_variable_differentiable_view(tensor, new_bw_info, new_fw_info, /*shared_view_info*/ false, creation_meta);
+      tensor = make_variable_differentiable_view(tensor, new_bw_info, new_fw_info, creation_meta);
     } else {
       tensor = make_variable_non_differentiable_view(base, tensor);
     }
