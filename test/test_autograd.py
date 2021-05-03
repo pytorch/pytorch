@@ -1590,8 +1590,7 @@ class TestAutograd(TestCase):
             warnings.simplefilter("always")
             x = torch.randn((3, 3), requires_grad=True)
             y = torch.randn((3, 3), requires_grad=True)
-            model = MyFunction()
-            model.apply(x, y).sum().backward()
+            MyFunction.apply(x, y).sum().backward()
 
             has_deprecated = map(lambda warn:
                                  'deprecated' in str(warn) and
@@ -2115,16 +2114,27 @@ class TestAutograd(TestCase):
         for _ in range(10):
             CollectOnDelete().forward(torch.randn(1, requires_grad=True)).backward()
 
-    def test_naughty_autograd_function_attr_access(self):
+    def test_naughty_autograd_function_attribute_access(self):
         class Id(Function):
             @staticmethod
-            def forward(self, x):
+            def forward(ctx, x):
                 return x
 
             @staticmethod
-            def backward(self, grad_x):
+            def backward(ctx, grad_x):
                 return grad_x
-        f = Id()
+
+        with self.assertWarnsRegex(DeprecationWarning, "should not be instantiated"):
+            f = Id()
+
+        # # After raising warning, should still return an instance
+        self.assertIsInstance(f, Id)
+        x = torch.zeros(1, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "non-static forward method is deprecated"):
+            f(x)
+        t = Id.apply(x)
+        self.assertEqual(t.grad_fn.name(), "IdBackward")
+
         # THPFunction is the base class of both grad_fn and autograd functions,
         # which means that a lot of accessors on them may segfault. Test that we
         # properly error in this case.
@@ -2434,10 +2444,9 @@ class TestAutograd(TestCase):
         x = torch.randn(5, 5)
         y = torch.randn(5, 5, requires_grad=True)
 
-        fn = Inplace(True)
-        q, p = fn.apply(x, y)
+        q, p = Inplace.apply(x, y)
         self.assertIs(q, x)
-        self.assertIs(q.grad_fn.__class__, fn._backward_cls)
+        self.assertIs(q.grad_fn.__class__, Inplace._backward_cls)
         self.assertTrue(q.requires_grad)
         q.sum().backward()
         self.assertEqual(y.grad, torch.ones(5, 5))

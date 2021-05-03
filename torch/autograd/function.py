@@ -139,6 +139,12 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         >>> #Use it by calling the apply method:
         >>> output = Exp.apply(input)
     """
+    def __init__(self, *args, **kwargs):
+        cls = self.__class__
+        warnings.warn(f"{cls} should not be instantiated. For new-style autograd functions "
+                       "`apply` is a class method, so you can invoke its `.apply()` "
+                       "directly. Instantiating autograd functions will raise an "
+                       "error in a future version of PyTorch.", DeprecationWarning)
 
     def __call__(self, *args, **kwargs):
         raise RuntimeError(
