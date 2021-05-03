@@ -1,0 +1,48 @@
+name: MacOS CI (wow!)
+
+on:
+  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+  pull_request:
+
+
+env:
+  BUILD_ENVIRONMENT: pytorch-macos-10.15-py3-arm64-build
+
+jobs:
+  calculate-docker-image:
+    # TODO: macos-11.0 isn't real apparently??
+    # macos-10.15 === macos-latest according to docs, better to pin it though
+    runs-on: macos-10.15
+    steps:
+      - name: Say stuff
+        run: |
+          # sysctl -a | grep cpu
+          ls /Applications
+          ls /Users
+          xcode-select -p
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+        with:
+          path: pytorch
+          submodules: recursive
+      - name: Download and set up sccache
+        run: |
+          set -e
+          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache 
+          sudo chmod +x /usr/local/bin/sccache
+          export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
+
+          # This IAM user allows write access to S3 bucket for sccache
+          set +x
+          export AWS_ACCESS_KEY_ID=${AWS_S3_UPDATE_ACCESS_KEY_ID}
+          export AWS_SECRET_ACCESS_KEY=${AWS_S3_UPDATE_SECRET_ACCESS_KEY}
+          set -x
+      - name: Run build
+        working-directory: pytorch/
+        run: |
+          sudo xcode-select -r
+          which sccache
+          export IN_CI=1
+          sudo xcode-select -s /Applications/Xcode_12.0.1.app
+          chmod a+x .jenkins/pytorch/macos-build.sh
+          .jenkins/pytorch/macos-build.sh

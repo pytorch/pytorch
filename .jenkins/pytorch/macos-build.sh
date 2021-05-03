@@ -21,6 +21,7 @@ function write_sccache_stub() {
 }
 
 if which sccache > /dev/null; then
+  echo "Using sccache in place of clang"
   write_sccache_stub clang++
   write_sccache_stub clang
 
