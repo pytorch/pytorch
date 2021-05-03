@@ -1,0 +1,12 @@
+name: Test
+
+on:
+  pull_request:
+
+jobs:
+  calculate-docker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Say stuff
+        run: |
+          echo hi
