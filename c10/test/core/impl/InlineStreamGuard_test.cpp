@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <c10/core/impl/InlineStreamGuard.h>
 #include <c10/core/impl/FakeGuardImpl.h>
+#include <c10/core/impl/InlineStreamGuard.h>
 
 using namespace c10;
 using namespace c10::impl;
@@ -39,7 +39,6 @@ TEST(InlineStreamGuard, Constructor) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
-
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, ResetStreamSameSameDevice) {
@@ -101,7 +100,8 @@ TEST(InlineStreamGuard, ResetStreamDifferentDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// -- OptionalInlineStreamGuard -------------------------------------------------------
+// -- OptionalInlineStreamGuard
+// -------------------------------------------------------
 
 using OptionalTestGuard = InlineOptionalStreamGuard<TestGuardImpl>;
 
@@ -180,7 +180,8 @@ TEST(InlineOptionalStreamGuard, ResetStreamDifferentDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// -- InlineMultiStreamGuard -------------------------------------------------------
+// -- InlineMultiStreamGuard
+// -------------------------------------------------------
 
 using MultiTestGuard = InlineMultiStreamGuard<TestGuardImpl>;
 

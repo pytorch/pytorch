@@ -56,7 +56,7 @@ class Registry {
   typedef std::function<ObjectPtrType(Args...)> Creator;
 
   Registry(bool warning = true)
-    : registry_(), priority_(), terminate_(true), warning_(warning) {}
+      : registry_(), priority_(), terminate_(true), warning_(warning) {}
 
   void Register(
       const SrcType& key,
@@ -72,11 +72,11 @@ class Registry {
     if (registry_.count(key) != 0) {
       auto cur_priority = priority_[key];
       if (priority > cur_priority) {
-  #ifdef DEBUG
+#ifdef DEBUG
         std::string warn_msg =
             "Overwriting already registered item for key " + KeyStrRepr(key);
         fprintf(stderr, "%s\n", warn_msg.c_str());
-  #endif
+#endif
         registry_[key] = creator;
         priority_[key] = priority;
       } else if (priority == cur_priority) {
@@ -222,14 +222,15 @@ class Registerer {
     return registry;                                                       \
   }
 
-#define C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(                         \
-    RegistryName, SrcType, ObjectType, PtrType, ...)                       \
-  C10_EXPORT ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* \
-  RegistryName() {                                                         \
-    static ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*   \
-        registry = new ::c10::                                             \
-            Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>(false);  \
-    return registry;                                                       \
+#define C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(                            \
+    RegistryName, SrcType, ObjectType, PtrType, ...)                          \
+  C10_EXPORT ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*    \
+  RegistryName() {                                                            \
+    static ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*      \
+        registry =                                                            \
+            new ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>( \
+                false);                                                       \
+    return registry;                                                          \
   }
 
 // Note(Yangqing): The __VA_ARGS__ below allows one to specify a templated
