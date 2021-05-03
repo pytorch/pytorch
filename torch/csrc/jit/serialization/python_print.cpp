@@ -356,6 +356,7 @@ struct PythonPrintImpl {
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       name = candidate + c10::to_string(next_id[name]++);
     }
     used.insert(name);
@@ -603,6 +604,7 @@ struct PythonPrintImpl {
   }
 
   bool isLongLine(const std::string& str) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return str.size() + level * 2 >= 40;
   }
 
@@ -862,6 +864,7 @@ struct PythonPrintImpl {
       if (val.isString()) {
         const auto maxASCII = 0x7fu;
         for (auto& c : val.toStringRef()) {
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           if (c > maxASCII) {
             hasNonASCII = true;
             return true;
@@ -1485,6 +1488,7 @@ struct PythonPrintImpl {
               method.arguments().at(0).name() == "self");
           for (const Argument& arg :
                at::ArrayRef<Argument>(method.arguments()).slice(1)) {
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             auto type = arg.type();
             registerClassDependencies(type);
             body_ << ", " << arg.name() << ": "
