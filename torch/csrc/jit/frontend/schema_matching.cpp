@@ -184,8 +184,6 @@ static Value* tryMatchArgument(
   // conversions
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
-  bool narrowed = false;
-
   // *** WIP - PROTOTYPE ONLY ***
   // Prototype for automatic type refinement for AnyType (or UnionType)
   // variables. If we've been through all the schemas and we haven't
@@ -198,9 +196,7 @@ static Value* tryMatchArgument(
   // In the current block, the value will be matched to some type `T`
   // and will function as a `T` until program return.
   if (allow_narrowing_conversions && value->type() == AnyType::get()) {
-    narrowed = true;
     Value* first = value->findFirstUseInBlock();
-    Block* owning_block = value->node()->owningBlock();
 
     // Add the `isinstance` and `if` Nodes to the Graph. If you call
     // `graph.dump`, you'll now see something like:
@@ -650,7 +646,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
         /*allow_conversions=*/true,
         /*allow_narrowing_conversions=*/true);
     if (matched_schema) {
-      matches.push_back(std::pair<size_t, MatchedSchema>(i, *matched_schema));
+      matches.emplace_back(std::pair<size_t, MatchedSchema>(i, *matched_schema));
     }
   }
 
