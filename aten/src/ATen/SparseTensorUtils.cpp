@@ -33,7 +33,12 @@ Tensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_
     int64_t mult = 1;
     for (int64_t i = sparse_dim - 1; i >= 0; i--) {
       indices_mult_cpu_vec[i] = mult;
-      mult *= full_size[i];
+      auto sz = full_size[i];
+      if (mult > LONG_MAX / sz) {
+        throw std::runtime_error(
+            "flatten_indices: detected overflow in integer multiplication");
+      }
+      mult *= sz;
     }
     auto indices_mult_cpu = at::from_blob(
         indices_mult_cpu_vec.data(),

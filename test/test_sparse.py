@@ -246,6 +246,16 @@ class TestSparse(TestCase):
         ref = test_sparse_sum()
         self.assertTrue(ref.expired())
 
+    @onlyCPU
+    @dtypes(torch.double)
+    def test_coalesce_large_indices(self, device, dtype):
+        # gh-57416
+        N = 100000
+        indices = torch.tensor([[N, N - 1]] * 4, dtype=torch.int64, device=device)
+        values = torch.tensor([1, 2], dtype=dtype, device=device)
+        s1 = torch.sparse_coo_tensor(indices, values, (N + 1,) * 4, device=device)
+        self.assertRaises(RuntimeError, lambda: s1.coalesce())
+
     @dtypes(torch.double, torch.cdouble)
     def test_ctor_size_checks(self, device, dtype):
         indices = self.index_tensor([
