@@ -503,9 +503,14 @@ class NativeFunctionsGroup:
     def signature(self) -> 'FunctionSchema':
         return self.out.func.signature()
 
-    def functions(self) -> Iterator[NativeFunction]:
-        yield self.out
-        yield self.functional
+    def functions(self, *, functional_first: bool = False) -> Iterator[NativeFunction]:
+        if functional_first:
+            yield self.functional
+            yield self.out
+        else:
+            yield self.out
+            yield self.functional
+
         if self.inplace is not None:
             yield self.inplace
 

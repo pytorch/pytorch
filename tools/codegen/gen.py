@@ -923,6 +923,7 @@ def main() -> None:
                 '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch_key == DispatchKey.CPU else
                 '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == DispatchKey.CUDA else
                 '',
+            'external_backend_headers': '',
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
             'dispatch_namespaced_definitions': list(concatMap(
@@ -930,7 +931,8 @@ def main() -> None:
                     backend_indices[dispatch_key],
                     Target.NAMESPACED_DEFINITION,
                     selector,
-                    rocm=options.rocm),
+                    rocm=options.rocm,
+                    cpp_namespace='at::native'),
                 grouped_native_functions
             )),
             'dispatch_anonymous_definitions': list(concatMap(
@@ -938,7 +940,8 @@ def main() -> None:
                     backend_indices[dispatch_key],
                     Target.ANONYMOUS_DEFINITION,
                     selector,
-                    rocm=options.rocm),
+                    rocm=options.rocm,
+                    cpp_namespace='at::native'),
                 grouped_native_functions
             )),
             'dispatch_registrations': list(concatMap(
@@ -946,7 +949,8 @@ def main() -> None:
                     backend_indices[dispatch_key],
                     Target.REGISTRATION,
                     selector,
-                    rocm=options.rocm),
+                    rocm=options.rocm,
+                    cpp_namespace='at::native'),
                 grouped_native_functions
             )),
         })
@@ -959,7 +963,8 @@ def main() -> None:
                         backend_indices[dispatch_key],
                         Target.NAMESPACED_DECLARATION,
                         selector,
-                        rocm=options.rocm),
+                        rocm=options.rocm,
+                        cpp_namespace='at::native'),
                     grouped_native_functions
                 )),
             })

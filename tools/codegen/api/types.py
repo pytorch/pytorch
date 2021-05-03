@@ -407,11 +407,13 @@ class DispatcherSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
+    prefix: str = ""
+
     def arguments(self) -> List[Binding]:
         return dispatcher.arguments(self.func)
 
     def name(self) -> str:
-        return dispatcher.name(self.func)
+        return self.prefix + dispatcher.name(self.func)
 
     def decl(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(a.decl() for a in self.arguments())
@@ -441,8 +443,8 @@ class DispatcherSignature:
         return f'{self.returns_type().cpp_type()} ({dispatcher_args_types_str})'
 
     @staticmethod
-    def from_schema(func: FunctionSchema) -> 'DispatcherSignature':
-        return DispatcherSignature(func)
+    def from_schema(func: FunctionSchema, *, prefix: str = '') -> 'DispatcherSignature':
+        return DispatcherSignature(func, prefix)
 
 @dataclass(frozen=True)
 class NativeSignature:
@@ -483,14 +485,15 @@ class NativeSignature:
 
 # Helper functions
 
-def kernel_signature(f: NativeFunction, backend_index: BackendIndex) -> Union['NativeSignature', 'DispatcherSignature']:
+def kernel_signature(
+        f: NativeFunction, backend_index: BackendIndex, *, prefix: str = '') -> Union['NativeSignature', 'DispatcherSignature']:
     # Note [External Backends Follow Dispatcher API]
     # Kernel signatures for in-tree backends follow the "native" API,
     # while kernels for out-of-tree backends follow the dispatcher API.
     if backend_index.external:
-        return DispatcherSignature.from_schema(f.func)
+        return DispatcherSignature.from_schema(f.func, prefix=prefix)
     else:
-        return NativeSignature(f.func)
+        return NativeSignature(f.func, prefix)
 
 # Functions only, no types
 from tools.codegen.api import cpp, dispatcher, native, translate
