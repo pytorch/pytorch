@@ -26,6 +26,15 @@ C10_EXPORT std::string DeviceTypeName(const int32_t& d) {
   return at::DeviceTypeName(static_cast<at::DeviceType>(d));
 }
 
+void setTotalBytesLimit(::google::protobuf::io::CodedInputStream& stream, int bytes_limit, int warning_threshold) {
+  #if GOOGLE_PROTOBUF_VERSION >= 3011000
+    // Only take one parameter since protobuf 3.11
+    stream.SetTotalBytesLimit(bytes_limit);
+  #else
+    stream.SetTotalBytesLimit(bytes_limit, warning_threshold);
+  #endif
+}
+
 C10_EXPORT int DeviceId(const DeviceOption& option) {
   switch (option.device_type()) {
     case PROTO_CPU:
@@ -136,7 +145,7 @@ C10_EXPORT bool ParseProtoFromLargeString(
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -149,7 +158,7 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
   // Total bytes hard limit / warning limit are set to 2GB and 512MB
   // respectively.
   ::google::protobuf::io::CodedInputStream coded_stream(&stream);
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -188,6 +197,7 @@ C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
   }
 
   return ::google::protobuf::TextFormat::ParseFromString(
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(bc_spec), proto);
 }
 } // namespace TextFormat
@@ -200,7 +210,8 @@ C10_EXPORT bool ParseProtoFromLargeString(const string& str, Message* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -218,6 +229,7 @@ C10_EXPORT void WriteProtoToTextFile(
     const Message& proto,
     const char* filename,
     bool throwIfError) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   FileOutputStream* output = new FileOutputStream(fd);
   if(!google::protobuf::TextFormat::Print(proto, output)) {
@@ -244,7 +256,14 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
   std::unique_ptr<CodedInputStream> coded_input(
       new CodedInputStream(raw_input.get()));
   // A hack to manually allow using very large protocol buffers.
-  coded_input->SetTotalBytesLimit(2147483647, 536870912);
+  #if GOOGLE_PROTOBUF_VERSION >= 3011000
+    // Only take one parameter since protobuf 3.11
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    coded_input->SetTotalBytesLimit(2147483647);
+  #else
+    // Total bytes hard limit / warning limit are set to 2GB and 512MB respectively.
+    coded_input->SetTotalBytesLimit(2147483647, 536870912);
+  #endif
   bool success = proto->ParseFromCodedStream(coded_input.get());
   coded_input.reset();
   raw_input.reset();
@@ -255,6 +274,7 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
 C10_EXPORT void WriteProtoToBinaryFile(
     const MessageLite& proto,
     const char* filename) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   CAFFE_ENFORCE_NE(
       fd, -1, "File cannot be created: ", filename, " error number: ", errno);
@@ -444,6 +464,7 @@ INSTANTIATE_GET_REPEATED_ARGUMENT(QTensorProto, qtensors, false)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(bool, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(float, f)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(int, i)
+CAFFE2_MAKE_SINGULAR_ARGUMENT(int16_t, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(int64_t, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
 #undef CAFFE2_MAKE_SINGULAR_ARGUMENT
@@ -575,6 +596,7 @@ C10_EXPORT bool GetFlagArgument(
     bool default_value) {
   int index = GetArgumentIndex(args, name);
   if (index != -1) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto arg = args.Get(index);
     CAFFE_ENFORCE(
         arg.has_i(), "Can't parse argument as bool: ", ProtoDebugString(arg));

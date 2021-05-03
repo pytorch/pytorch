@@ -39,7 +39,6 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     @requires_nccl()
     @dist_init
     @skip_if_rocm
-    @unittest.skip("DDP doesn't work with checkpointing")
     def test_basic_nccl_ckpt_always(self):
         self._run_basic_test("nccl", "always")
 
@@ -47,7 +46,6 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     @requires_nccl()
     @dist_init
     @skip_if_rocm
-    @unittest.skip("DDP doesn't work with checkpointing")
     def test_basic_nccl_ckpt_except_last(self):
         self._run_basic_test("nccl", "except_last")
 
@@ -69,7 +67,6 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     @requires_gloo()
     @dist_init
     @skip_if_rocm
-    @unittest.skip("DDP doesn't work with checkpointing")
     def test_basic_gloo_ckpt_always(self):
         self._run_basic_test("gloo", "always")
 
@@ -77,7 +74,6 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     @requires_gloo()
     @dist_init
     @skip_if_rocm
-    @unittest.skip("DDP doesn't work with checkpointing")
     def test_basic_gloo_ckpt_except_last(self):
         self._run_basic_test("gloo", "except_last")
 

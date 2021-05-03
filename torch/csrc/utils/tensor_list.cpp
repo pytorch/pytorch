@@ -1,5 +1,6 @@
 #include <torch/csrc/utils/tensor_list.h>
 
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_scalars.h>
@@ -19,7 +20,7 @@ static PyObject* recursive_to_list(
   auto n = sizes[dim];
   auto list = THPObjectPtr(PyList_New(n));
   if (!list) throw python_error();
-  for (int64_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     PyObject* obj = recursive_to_list(data, sizes, strides, dim + 1, scalarType, elementSize);
     if (!obj) throw python_error();
     PyList_SET_ITEM(list.get(), i, obj);

@@ -4,17 +4,23 @@
 
 #include <cpuinfo.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_threadpool_force_inline,
     false,
     "Force to always run jobs on the calling thread");
 
 // Whether or not threadpool caps apply to Android
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(caffe2_threadpool_android_cap, true, "");
 
-// Whether or not threadpool caps apply to iOS
+// Whether or not threadpool caps apply to iOS and MacOS
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_int(caffe2_threadpool_macos_cap, true, "");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(pthreadpool_size, 0, "Override the default thread pool size.");
 
 namespace caffe2 {
@@ -28,6 +34,8 @@ size_t getDefaultNumThreads() {
   applyCap = FLAGS_caffe2_threadpool_android_cap;
 #elif defined(C10_IOS)
   applyCap = FLAGS_caffe2_threadpool_ios_cap;
+#elif defined(TARGET_OS_MAC)
+  applyCap = FLAGS_caffe2_threadpool_macos_cap;
 #endif
 
   if (applyCap) {
@@ -48,18 +56,22 @@ size_t getDefaultNumThreads() {
         }
         break;
 #endif
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       case 5:
         /* 4+1 big.LITTLE */
         numThreads = 4;
         break;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       case 6:
         /* 2+4 big.LITTLE */
         numThreads = 2;
         break;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-branch-clone)
       case 8:
         /* 4+4 big.LITTLE */
         numThreads = 4;
         break;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       case 10:
         /* 4+4+2 Min.Med.Max, running on Med cores */
         numThreads = 4;
@@ -83,6 +95,7 @@ size_t getDefaultNumThreads() {
 // multiple threads; the runtime value is configurable
 constexpr size_t kDefaultMinWorkSize = 1;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 size_t ThreadPool::defaultNumThreads_ = 0;
 
 std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
@@ -97,6 +110,7 @@ ThreadPool::ThreadPool(int numThreads)
       numThreads_(numThreads),
       workersPool_(std::make_shared<WorkersPool>()) {}
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 ThreadPool::~ThreadPool() {}
 
 int ThreadPool::getNumThreads() const {
@@ -138,7 +152,9 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   }
 
   struct FnTask : public Task {
+    // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
     FnTask(){};
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     ~FnTask() override{};
     const std::function<void(int, size_t)>* fn_;
     int idx_;
@@ -156,6 +172,7 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   tasks_.resize(numThreads);
   for (size_t i = 0; i < numThreads; ++i) {
     if (!tasks_[i]) {
+      // NOLINTNEXTLINE(modernize-make-shared)
       tasks_[i].reset(new FnTask());
     }
     auto* task = (FnTask*)tasks_[i].get();

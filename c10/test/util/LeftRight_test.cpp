@@ -5,9 +5,11 @@
 using c10::LeftRight;
 using std::vector;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, givenInt_whenWritingAndReading_thenChangesArePresent) {
   LeftRight<int> obj;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   obj.write([] (int& obj) {obj = 5;});
   int read = obj.read([] (const int& obj) {return obj;});
   EXPECT_EQ(5, read);
@@ -18,26 +20,32 @@ TEST(LeftRightTest, givenInt_whenWritingAndReading_thenChangesArePresent) {
   EXPECT_EQ(5, read);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, givenVector_whenWritingAndReading_thenChangesArePresent) {
     LeftRight<vector<int>> obj;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     obj.write([] (vector<int>& obj) {obj.push_back(5);});
     vector<int> read = obj.read([] (const vector<int>& obj) {return obj;});
     EXPECT_EQ((vector<int>{5}), read);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     obj.write([] (vector<int>& obj) {obj.push_back(6);});
     read = obj.read([] (const vector<int>& obj) {return obj;});
     EXPECT_EQ((vector<int>{5, 6}), read);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, givenVector_whenWritingReturnsValue_thenValueIsReturned) {
     LeftRight<vector<int>> obj;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto a = obj.write([] (vector<int>&) -> int {return 5;});
     static_assert(std::is_same<int, decltype(a)>::value, "");
     EXPECT_EQ(5, a);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, readsCanBeConcurrent) {
     LeftRight<int> obj;
     std::atomic<int> num_running_readers{0};
@@ -62,6 +70,7 @@ TEST(LeftRightTest, readsCanBeConcurrent) {
     reader2.join();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, writesCanBeConcurrentWithReads_readThenWrite) {
     LeftRight<int> obj;
     std::atomic<bool> reader_running{false};
@@ -89,6 +98,7 @@ TEST(LeftRightTest, writesCanBeConcurrentWithReads_readThenWrite) {
     writer.join();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, writesCanBeConcurrentWithReads_writeThenRead) {
     LeftRight<int> obj;
     std::atomic<bool> writer_running{false};
@@ -116,6 +126,7 @@ TEST(LeftRightTest, writesCanBeConcurrentWithReads_writeThenRead) {
     reader.join();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, writesCannotBeConcurrentWithWrites) {
     LeftRight<int> obj;
     std::atomic<bool> first_writer_started{false};
@@ -124,6 +135,7 @@ TEST(LeftRightTest, writesCannotBeConcurrentWithWrites) {
     std::thread writer1([&] () {
         obj.write([&] (int&) {
             first_writer_started = true;
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             first_writer_finished = true;
         });
@@ -147,29 +159,36 @@ namespace {
 class MyException : public std::exception {};
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, whenReadThrowsException_thenThrowsThrough) {
     LeftRight<int> obj;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     EXPECT_THROW(
         obj.read([](const int&) {throw MyException();}),
         MyException
     );
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, whenWriteThrowsException_thenThrowsThrough) {
     LeftRight<int> obj;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     EXPECT_THROW(
         obj.write([](int&) {throw MyException();}),
         MyException
     );
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, givenInt_whenWriteThrowsExceptionOnFirstCall_thenResetsToOldState) {
     LeftRight<int> obj;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     obj.write([](int& obj) {obj = 5;});
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     EXPECT_THROW(
         obj.write([](int& obj) {
             obj = 6;
@@ -190,12 +209,15 @@ TEST(LeftRightTest, givenInt_whenWriteThrowsExceptionOnFirstCall_thenResetsToOld
 
 // note: each write is executed twice, on the foreground and background copy.
 // We need to test a thrown exception in either call is handled correctly.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, givenInt_whenWriteThrowsExceptionOnSecondCall_thenKeepsNewState) {
     LeftRight<int> obj;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     obj.write([](int& obj) {obj = 5;});
     bool write_called = false;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     EXPECT_THROW(
         obj.write([&](int& obj) {
             obj = 6;
@@ -219,11 +241,14 @@ TEST(LeftRightTest, givenInt_whenWriteThrowsExceptionOnSecondCall_thenKeepsNewSt
     EXPECT_EQ(6, read);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, givenVector_whenWriteThrowsException_thenResetsToOldState) {
     LeftRight<vector<int>> obj;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     obj.write([](vector<int>& obj) {obj.push_back(5);});
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     EXPECT_THROW(
             obj.write([](vector<int>& obj) {
                 obj.push_back(6);
