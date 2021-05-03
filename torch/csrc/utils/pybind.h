@@ -6,6 +6,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/python_tuples.h>
@@ -100,6 +101,33 @@ public:
   }
 private:
   std::vector<int64_t> v_value;
+};
+
+template <>
+struct type_caster<at::Device> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::Device, _("at::Device"));
+
+  // PYBIND11_TYPE_CASTER defines a member field called value. Since at::Device
+  // cannot be default-initialized, we provide this constructor to explicitly
+  // initialize that field. The value doesn't matter as it will be overwritten
+  // after a successful call to load.
+  type_caster() : value(c10::kCPU) {}
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (THPDevice_Check(obj)) {
+      value = reinterpret_cast<THPDevice*>(obj)->device;
+      return true;
+    }
+    return false;
+  }
+
+  static handle
+  cast(const at::Device& src, return_value_policy /* policy */, handle /* parent */) {
+    return handle(THPDevice_New(src));
+  }
 };
 
 // Pybind11 bindings for our optional type.

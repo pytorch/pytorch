@@ -372,7 +372,7 @@ void slow_conv3d_backward_out_cpu_template(
   const int64_t batch_size = input.size(0);
   at::parallel_for(
       0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-        AutoDispatchBelowInplaceOrView non_variable_type_mode;
+        AutoDispatchBelowADInplaceOrView non_variable_type_mode;
         for (int64_t t = start; t < end; t++) {
           Tensor grad_input_t = grad_input[t];
           Tensor grad_output_t = grad_output_contiguous[t];
@@ -600,7 +600,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(const Tensor& 
 
   at::parallel_for(
       0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-        AutoDispatchBelowInplaceOrView non_variable_type_mode;
+        AutoDispatchBelowADInplaceOrView non_variable_type_mode;
         for (int64_t t = start; t < end; t++) {
           Tensor input_t = input[t];
           Tensor output_t = output[t];
