@@ -210,6 +210,7 @@ class BatchDataBuffer {
   struct UnwrappedBatchData {
     explicit UnwrappedBatchData(UnwrappedBatchType data) : batch_data(std::move(data)) {}
 
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     explicit UnwrappedBatchData(std::exception_ptr e) : exception(e) {}
 
     /// batch data to return

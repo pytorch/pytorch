@@ -75,6 +75,15 @@ def generate_tensors_from_vals(vals, device, dtype, domain):
     assert len(vals) < _medium_length  # medium tensor should contain all vals
     assert _medium_length % 4 == 0  # ensure vectorized code coverage
 
+    if not dtype.is_complex:
+        # Filter values based on Operators domain.
+        # Note: Complex numbers don't belong to ordered field,
+        #       so we don't filter for them.
+        if domain[0] is not None:
+            vals = list(filter(lambda x: x >= domain[0], vals))
+        if domain[1] is not None:
+            vals = list(filter(lambda x: x < domain[1], vals))
+
     # Constructs the large tensor containing vals
     large_tensor = make_tensor(_large_size, device=device, dtype=dtype, low=domain[0], high=domain[1])
 
@@ -642,16 +651,6 @@ class TestUnaryUfuncs(TestCase):
                 with self.assertRaisesRegex(RuntimeError,
                                             r"torch\.frexp\(\) expects exponent to have int dtype but got .+"):
                     torch.frexp(input, out=(mantissa, exponent))
-
-    # TODO opinfo mvlgamma
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_mvlgamma(self, device):
-        from scipy.special import multigammaln
-        for d in range(1, 5):
-            input = torch.empty(10, device=device).uniform_(d, 10)
-            res_torch = torch.mvlgamma(input, d)
-            res_scipy = multigammaln(input.cpu().numpy(), d)
-            self.assertEqual(res_torch.cpu().numpy(), res_scipy, atol=1e-5, rtol=0)
 
     def test_mvlgamma_argcheck(self, device):
         def run_test(d):
