@@ -16,20 +16,20 @@ all newly allocated (non-view) tensors are marked as inference tensors. Inferenc
 - are immutable outside ``InferenceMode``. So an error will be raised if you try to:
   - mutate their data outside InferenceMode.
   - mutate them into ``requires_grad=True`` outside InferenceMode.
-  To work around you can make a clone to get a normal tensor before mutating.
+  To work around you can make a clone outside ``InferenceMode`` to get a normal tensor before mutating.
 
 A non-view tensor is an inference tensor if and only if it was allocated inside ``InferenceMode``.
 A view tensor is an inference tensor if and only if the tensor it is a view of is an inference tensor.
 
 Inside an ``InferenceMode`` block, we make the following performance guarantees:
 
-- Like ``NoGradMode``, all operations do not record ``grad_fn`` even if their ``requires_grad=True``.
+- Like ``NoGradMode``, all operations do not record ``grad_fn`` even if their inputs have ``requires_grad=True``.
   This applies to both inference tensors and normal tensors.
-- View operations on inference tensors do not do view tracking. View and base inference tensors are
+- View operations on inference tensors do not do view tracking. View and non-view inference tensors are
   indistinguishable.
 - Inplace operations on inference tensors are guaranteed not to do a version bump.
 
-For more implementation details of ``InferenceMode`` please see the `InferenceMode RFC <https://github.com/pytorch/rfcs/pull/17>`_.
+For more implementation details of ``InferenceMode`` please see the `RFC-0011-InferenceMode <https://github.com/pytorch/rfcs/pull/17>`_.
 Currently this guard is only available in C++ frontend, adding python frontend support
 is tracked in #56608.
 
@@ -41,7 +41,7 @@ of uses of the C++ guard ``AutoNonVariableTypeMode`` (now ``AutoDispatchBelowADI
 which disables autograd, view tracking and version counter bumps. Unfortunately,
 current colloquial of this guard for inference workload is unsafe: it's possible to
 use ``AutoNonVariableTypeMode`` to bypass PyTorch's safety checks and result in
-silent wrong results, e.g. PyTorch throws an error when tensors saved for backwards
+silently wrong results, e.g. PyTorch throws an error when tensors saved for backwards
 are subsequently mutated, but mutation happens inside ``AutoNonVariableTypeMode`` will
 silently bypass the check and returns wrong gradient to users.
 
@@ -50,11 +50,12 @@ steps might help you decide the best alternatives:
 
 1. Users trying to run workload in inference only mode (like loading a pretrained JIT model and
    run inference in C++ runtime) should add ``c10::InferenceMode guard`` to guard all operations
-   on tensors. See an inference workload example below:
+   on tensors (including model loading). See an inference workload example below:
 
 .. code-block:: cpp
 
   c10::InferenceMode guard;
+  model.load_jit(saved_model);
   auto inputs = preprocess_tensors(data);
   auto out = model.forward(inputs);
   auto outputs = postprocess_tensors(out);
@@ -65,8 +66,8 @@ users should pay additional attention to:
 
   - Both guards affects tensor execution process to skip work not related to inference, but ``InferenceMode``
     also affects tensor creation while ``AutoNonVariableTypeMode`` doesn't. In other words, tensors created
-    inside ``InferenceMode`` are marked as inference tensors so that certain limitation can be applied when
-    they participate in autograd computation in the future.
+    inside ``InferenceMode`` are marked as inference tensors so that certain limitation can be applied after
+    exiting ``InferenceMode``.
   - Enabled/disabled ``InferenceMode`` states can be nested while ``AutoNonVariableTypeMode`` only allows enabled state..
 
 .. code-block:: cpp
