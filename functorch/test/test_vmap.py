@@ -2635,7 +2635,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         result = vmap(vjp)(gy)
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
-class TestVmapOperators(TestCase):
+class TestVmapOperatorsOpInfo(TestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
@@ -2686,7 +2686,7 @@ class TestVmapOperators(TestCase):
 
 
 only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestVmapOperators, globals(), only_for=only_for)
+instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
 
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
