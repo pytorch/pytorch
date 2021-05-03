@@ -42,6 +42,7 @@ void RpcAgent::shutdown() {
   if (rpcRetryThread_.joinable()) {
     rpcRetryThread_.join();
   }
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.PureVirtualCall)
   shutdownImpl();
 }
 
@@ -286,8 +287,8 @@ bool RpcAgent::isGILProfilingEnabled() {
   return profilingEnabled_.load();
 }
 
-std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> RpcAgent::getDeviceMap(
-    const WorkerInfo& dest) {
+std::unordered_map<c10::Device, c10::Device> RpcAgent::getDeviceMap(
+    const WorkerInfo& /* unused */) const {
   // Default implementation has no device map.
   return {};
 }

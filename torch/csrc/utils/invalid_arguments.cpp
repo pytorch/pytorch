@@ -114,6 +114,7 @@ struct Option {
 std::vector<std::string> _splitString(const std::string &s, const std::string& delim) {
   std::vector<std::string> tokens;
   size_t start = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t end;
   while((end = s.find(delim, start)) != std::string::npos) {
     tokens.push_back(s.substr(start, end-start));
@@ -130,6 +131,7 @@ std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
   } else if (type_name == "int") {
     result = torch::make_unique<MultiType>(MultiType{"int", "long"});
   } else if (type_name.find("tuple[") == 0) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto type_list = type_name.substr(6);
     type_list.pop_back();
     std::vector<std::unique_ptr<Type>> types;
@@ -137,6 +139,7 @@ std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
       types.emplace_back(_buildType(type, false));
     result = torch::make_unique<TupleType>(std::move(types));
   } else if (type_name.find("sequence[") == 0) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto subtype = type_name.substr(9);
     subtype.pop_back();
     result = torch::make_unique<SequenceType>(_buildType(subtype, false));
@@ -295,6 +298,7 @@ std::string _argDesc(const std::vector<PyObject *>& arguments,
 std::vector<std::string> _tryMatchKwargs(const Option& option,
     const std::unordered_map<std::string, PyObject*>& kwargs) {
   std::vector<std::string> unmatched;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int start_idx = option.arguments.size() - kwargs.size();
   if (option.has_out && kwargs.count("out") == 0)
     start_idx--;
@@ -323,6 +327,7 @@ std::string format_invalid_args(
   std::vector<PyObject *> args;
   std::unordered_map<std::string, PyObject *> kwargs;
   std::string error_msg;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   error_msg.reserve(2000);
   error_msg += function_name;
   error_msg += " received an invalid combination of arguments - ";
@@ -335,6 +340,7 @@ std::string format_invalid_args(
 
   bool has_kwargs = given_kwargs && PyDict_Size(given_kwargs) > 0;
   if (has_kwargs) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject *key, *value;
     Py_ssize_t pos = 0;
 

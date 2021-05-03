@@ -6,7 +6,9 @@ on:
     # NOTE: Make sure to add to this list as you add more workflows running on 'pull_request'
     workflows:
     - Lint
+    - Linux CI (pytorch-linux-xenial-py3.6-gcc5.4)
     - Test tools
+    - TorchBench CI (pytorch-linux-py3.7-cu102)
     - clang-format
 jobs:
   cancel:
