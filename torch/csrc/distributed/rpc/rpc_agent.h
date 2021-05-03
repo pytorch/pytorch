@@ -10,6 +10,9 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
+
 // Default RPC timeout
 constexpr float kDefaultRpcTimeoutSeconds = 60;
 // Unset RPC timeout. This is the value agent::send() will have if user does not
