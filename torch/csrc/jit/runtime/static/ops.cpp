@@ -372,9 +372,11 @@ struct TEWrapper {
   void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_) {
     cg = std::move(cg_);
   }
-
-  void call(const std::vector<void*>& args) {
-    cg->call_raw(args);
+  template <typename... Ts>
+  void operator()(const Ts&... ts) {
+    std::vector<tensorexpr::CodeGen::CallArg> args(
+        {tensorexpr::CodeGen::CallArg(ts)...});
+    cg->call(args);
   }
 
   inline bool supports(const at::Tensor& t) {
@@ -421,9 +423,6 @@ struct TEWrapper {
   TEWrapper() = default;
   template <typename... Ts>
   void operator()(const Ts&... ts) {
-    DCHECK(0 && "Invalid call");
-  }
-  void call(const std::vector<void*>& args) {
     DCHECK(0 && "Invalid call");
   }
 
@@ -519,8 +518,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
       at::native::threshold_out(in0_t, 0, 0, out_t);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      int64_t nn = in0_t.numel();
-      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
+      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
 });
@@ -539,8 +537,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
       at::cpu::tanh_out(out_t, in0_t);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      int64_t nn = in0_t.numel();
-      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
+      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
 });
@@ -562,8 +559,8 @@ REGISTER_OPERATOR_FUNCTOR(
           at::cpu::sigmoid_out(out_t, in0_t);
         } else {
           at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-          int64_t nn = in0_t.numel();
-          te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
+          (*te)(
+              out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
         }
       };
     });
@@ -589,8 +586,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       at::native::logit_out(in0_t, in1_d, out_t);
     } else {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      int64_t nn = in0_t.numel();
-      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
+      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
 });
