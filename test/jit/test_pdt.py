@@ -90,6 +90,7 @@ class TestPDT(JitTestCase):
         scripted_pdt_model = torch.jit._script_pdt(pdt_model, example_inputs=[(20, ), (False, )])
         self.assertEqual(scripted_pdt_model(30), pdt_model(30))
         self.assertEqual(scripted_pdt_model(True), pdt_model(True))
+
     def test_pdt(self):
         def test_sum(a, b):
             return a + b
@@ -146,25 +147,25 @@ class TestPDT(JitTestCase):
 
         make_global(test_list_and_tuple)
 
-        scripted_fn_float = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[([4.9, 8.9],)])
-        self.assertEqual(scripted_fn_float([11.9, 7.6]), test_list_and_tuple([11.9, 7.6]))
+        scripted_fn_float_list_input = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[([4.9, 8.9],)])
+        self.assertEqual(scripted_fn_float_list_input([11.9, 7.6]), test_list_and_tuple([11.9, 7.6]))
 
-        scripted_fn_bool = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[([True, False, True],)])
-        self.assertEqual(scripted_fn_bool([True, True, True]), test_list_and_tuple([True, True, True]))
+        scripted_fn_bool_list_input = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[([True, False, True],)])
+        self.assertEqual(scripted_fn_bool_list_input([True, True, True]), test_list_and_tuple([True, True, True]))
 
-        scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[([3, 4, 5], )])
-        self.assertEqual(scripted_fn_int([1, 2, 3]), test_list_and_tuple([1, 2, 3]))
+        scripted_fn_int_list_input = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[([3, 4, 5], )])
+        self.assertEqual(scripted_fn_int_list_input([1, 2, 3]), test_list_and_tuple([1, 2, 3]))
 
-        scripted_fn_float = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((4.9, 8.9),)])
-        self.assertEqual(scripted_fn_float((11.9, 7.6)), test_list_and_tuple((11.9, 7.6)))
+        scripted_fn_float_tuple_input = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((4.9, 8.9),)])
+        self.assertEqual(scripted_fn_float_tuple_input((11.9, 7.6)), test_list_and_tuple((11.9, 7.6)))
 
-        scripted_fn_bool = torch.jit._script_pdt(test_list_and_tuple,
-                                                 example_inputs=[((True, False, True),)])
-        self.assertEqual(scripted_fn_bool((True, True, True)),
+        scripted_fn_bool_tuple_input = torch.jit._script_pdt(test_list_and_tuple,
+                                                             example_inputs=[((True, False, True),)])
+        self.assertEqual(scripted_fn_bool_tuple_input((True, True, True)),
                          test_list_and_tuple((True, True, True)))
 
-        scripted_fn_int = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((3, 4, 5), )])
-        self.assertEqual(scripted_fn_int((1, 2, 3)), test_list_and_tuple((1, 2, 3)))
+        scripted_fn_int_tuple_input = torch.jit._script_pdt(test_list_and_tuple, example_inputs=[((3, 4, 5), )])
+        self.assertEqual(scripted_fn_int_tuple_input((1, 2, 3)), test_list_and_tuple((1, 2, 3)))
 
     def test_nested_list_and_tuple(self):
         def test_nested_list(inp):
@@ -242,7 +243,7 @@ class TestPDT(JitTestCase):
         self.assertEqual(scripted_fn([10, 11, 14]), test_multiple_types([10, 11, 14]))
 
         scripted_fn = torch.jit._script_pdt(test_multiple_type_refinement, example_inputs=[(1,), ("abc", ), (8.9,),
-                                              ([3, 4, 5],), (True, ), ({"a": True}, ), ])
+                                            ([3, 4, 5],), (True, ), ({"a": True}, ), ])
         self.assertEqual(scripted_fn(10), test_multiple_type_refinement(10))
         self.assertEqual(scripted_fn("def"), test_multiple_type_refinement("def"))
         self.assertEqual(scripted_fn(7.89999), test_multiple_type_refinement(7.89999))

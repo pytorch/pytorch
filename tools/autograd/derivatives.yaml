@@ -319,8 +319,8 @@
 - name: cholesky(Tensor self, bool upper=False) -> Tensor
   self: cholesky_backward(grad, upper, result)
 
-- name: linalg_cholesky(Tensor self) -> Tensor
-  self: cholesky_backward(grad, false, result)
+- name: linalg_cholesky_ex(Tensor self, *, bool check_errors=False) -> (Tensor L, Tensor info)
+  self: cholesky_backward(grad, false, L)
 
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
   self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
@@ -690,6 +690,16 @@
 
 - name: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
   self: grad * at::xlogy((self != 0), other)
+
+- name: special_xlog1py(Tensor self, Tensor other) -> Tensor
+  self: grad * other.log1p()
+  other: grad * self / (other + 1)
+
+- name: special_xlog1py.self_scalar(Scalar self, Tensor other) -> Tensor
+  other: grad * self / (other + 1)
+
+- name: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
+  self: grad * log1p(other.toDouble())
 
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
@@ -2051,3 +2061,6 @@
 
 - name: nonzero(Tensor self) -> Tensor
   output_differentiability: [False]
+
+- name: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
+  data: segment_reduce_backward(grad, result, data, lengths)
