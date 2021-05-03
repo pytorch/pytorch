@@ -151,6 +151,10 @@ class TORCH_API Var : public ExprNode<Var> {
     return name_hint_;
   }
 
+  void set_name_hint(const std::string& name_hint) {
+    name_hint_ = name_hint;
+  }
+
   Var(std::string name_hint, Dtype dtype)
       : ExprNodeBase(dtype, kPrimitive), name_hint_(std::move(name_hint)) {}
 
@@ -170,8 +174,15 @@ class TORCH_API Buf : public ExprNode<Buf> {
   const Var* base_handle() const {
     return base_handle_;
   }
+  void set_base_handle(Var* base_handle) {
+    base_handle_ = base_handle;
+  }
+
   const std::string& name_hint() const {
     return base_handle_->name_hint();
+  }
+  void set_name_hint(const std::string& name_hint) {
+    base_handle_->set_name_hint(name_hint);
   }
 
   Buf(const std::string& name_hint,
@@ -180,7 +191,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const Expr* initializer = nullptr)
       : Buf(new Var(name_hint, kHandle), dims, dtype, initializer) {}
 
-  Buf(const Var* var,
+  Buf(Var* var,
       std::vector<const Expr*> dims,
       Dtype dtype,
       const Expr* initializer = nullptr)
@@ -221,7 +232,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
 
  private:
-  const Var* base_handle_;
+  Var* base_handle_;
   std::vector<const Expr*> dims_;
   const Expr* initializer_;
 };
