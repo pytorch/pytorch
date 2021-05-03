@@ -279,6 +279,15 @@ class TestGradTransform(TestCase):
         self.assertEqual(gx, y)
         self.assertEqual(gy, x)
 
+    def test_zero_grad(self, device):
+        def f(x):
+            return (x['a']**2.0).sum()
+        inps = ({'a':torch.randn(10) + 3, 'b':torch.randn(10)})
+        grads = grad(f)(inps)
+        self.assertNotEqual(grads['a'].sum(), 0.0)
+        self.assertEqual(grads['b'].sum(), 0.0)
+
+
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
         def compute_loss(weight, x, t):
