@@ -341,13 +341,12 @@ class Tracer(TracerBase):
 
         return root_fn, args
 
-    parameter_proxy_cache : Dict[str, Proxy] = {}  # Reduce number of get_attr calls
 
-    def module_getattr(self, attr, attr_val):
+    def module_getattr(self, attr, attr_val, parameter_proxy_cache):
         if isinstance(attr_val, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
                 if attr_val is p:
-                    if n not in self.parameter_proxy_cache:
+                    if n not in parameter_proxy_cache:
                         parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
                     return parameter_proxy_cache[n]
         return attr_val
@@ -403,12 +402,13 @@ class Tracer(TracerBase):
         fn_globals = fn.__globals__  # run before it gets patched
         fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module), concrete_args)
 
+        parameter_proxy_cache : Dict[str, Proxy] = {}  # Reduce number of get_attr calls
         # Method dispatch on parameters is not recorded unless it's directly used.
         # Thus, we need to insert a proxy when __getattr__ requests a parameter.
         @functools.wraps(_orig_module_getattr)
         def module_getattr_wrapper(mod, attr):
             attr_val = _orig_module_getattr(mod, attr)
-            return self.module_getattr(attr, attr_val)
+            return self.module_getattr(attr, attr_val, parameter_proxy_cache)
 
         @functools.wraps(_orig_module_call)
         def module_call_wrapper(mod, *args, **kwargs):
