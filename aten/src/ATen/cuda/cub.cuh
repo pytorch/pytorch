@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <type_traits>
 
 // include cub in a safe manner, see:
 // https://github.com/pytorch/pytorch/pull/55292
@@ -119,7 +120,7 @@ static inline void sort_pairs(
   }
 }
 
-namespace detail {
+namespace impl {
 
 template<typename scalar_t, class ScanOpT>
 C10_LAUNCH_BOUNDS_1(1)
@@ -130,20 +131,19 @@ __global__ void transform_vals(scalar_t * a, scalar_t * b, scalar_t * out, ScanO
 template<typename InputIteratorT, typename OutputIteratorT>
 C10_LAUNCH_BOUNDS_1(1)
 __global__ void copy(OutputIteratorT dest, InputIteratorT from) {
+  using output_t = decltype(*dest);
   *dest = static_cast<output_t>(*from);
 }
 
 }
 
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT>
-void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
+inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
   // non synchronizing cub call
-  using input_t = decltype(*input);
-  using output_t = decltype(*output);
-  constexpr auto max_element_size = std::max(sizeof(input_t), sizeof(output_t));
+  using input_t = std::remove_reference_t<decltype(*input)>;
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   // need to save the first element for all iterations other than first
-  c10::DataPtr first_elem_ptr = allocator->allocate(max_element_size);
+  c10::DataPtr first_elem = allocator->allocate(sizeof(input_t));
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
   // so split at int_max/2
   constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
@@ -153,25 +153,25 @@ void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_o
       // need to temporarily transform first element of the range we are
       // operating on; self might be multi-d, but we need to index a single
       // element
-      detail::copy<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+      impl::copy<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
         reinterpret_cast<input_t *>(first_elem.get()), input + i);
-      detail::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+      impl::transform_vals<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
           input + i,
           output + i - 1,
           input + i,
           scan_op);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan(
+    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
         input + i,
         output + i,
         scan_op,
         size_cub,
-        at::cuda::getCurrentCUDAStream()));
+        at::cuda::getCurrentCUDAStream());
     if (i > 0) {
-      if (self.data_ptr<scalar_t>() != result.data_ptr<scalar_t>()) {
+      if (input != output) {
         // restore modified first element only if it's not an inplace operation
-        detail::copy<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+        impl::copy<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
           input + i, reinterpret_cast<input_t *>(first_elem.get()));
       }
     }
