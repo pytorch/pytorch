@@ -15,16 +15,16 @@ using torch::autograd::increment_version;
 
 namespace torch {
 
-namespace InplaceOrView {
+namespace ADInplaceOrView {
 
 namespace {
 ${inplace_or_view_method_definitions}
 }  // namespace
-}  // namespace InplaceOrView
+}  // namespace ADInplaceOrView
 
 namespace {
 
-TORCH_LIBRARY_IMPL(aten, InplaceOrView, m) {
+TORCH_LIBRARY_IMPL(aten, ADInplaceOrView, m) {
   ${inplace_or_view_wrapper_registrations};
 }
 
