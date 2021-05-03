@@ -31,6 +31,7 @@ Tensor& mkldnn_zero_(Tensor& self) {
 
   auto n = x.get_nelems();
   auto* x_ = static_cast<float*>(x.get_data_handle());
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   parallel_for(0, n, 2048, [x_](int64_t begin, int64_t end) {
     vec256::map(
         [](Vec /* unused */) { return 0.0; },

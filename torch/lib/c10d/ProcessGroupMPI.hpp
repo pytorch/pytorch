@@ -29,12 +29,10 @@ struct WorkEntry {
       std::vector<at::Tensor>* srcPtr,
       std::vector<at::Tensor>* dstPtr,
       std::function<void(std::unique_ptr<WorkEntry>&)> run)
-      : run(run) {
+      : dst(dstPtr ? *dstPtr : std::vector<at::Tensor>()),
+        run(std::move(run)) {
     if (srcPtr) {
       src = *srcPtr;
-    }
-    if (dstPtr) {
-      dst = std::make_shared<std::vector<at::Tensor>>(*dstPtr);
     }
   }
 
@@ -46,9 +44,8 @@ struct WorkEntry {
   // For input and output tensors (in-place), we will always use src
   std::vector<at::Tensor> src;
 
-  // We use `dst` for returning resulting vectors in WorkMPI::result, so we need to
-  // keep it alive.
-  std::shared_ptr<std::vector<at::Tensor>> dst;
+  // Copy of user provided outputs.
+  const std::vector<at::Tensor> dst;
 
   // src rank returned, for recv only
   int* srcRank = nullptr;
@@ -83,8 +80,8 @@ class ProcessGroupMPI : public ProcessGroup {
  public:
   class WorkMPI : public ProcessGroup::Work {
    public:
-    WorkMPI(
-        const std::shared_ptr<std::vector<at::Tensor>> outputs,
+    explicit WorkMPI(
+        std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt)
@@ -93,9 +90,11 @@ class ProcessGroupMPI : public ProcessGroup {
               OpType::UNKNOWN,
               profilingTitle,
               inputTensors),
-          outputs_(outputs),
+          outputTensors_(std::move(outputTensors)),
           future_(c10::make_intrusive<at::ivalue::Future>(
             c10::ListType::create(c10::TensorType::get()))) {}
+
+    std::vector<at::Tensor> result() override;
 
     virtual std::vector<at::Tensor> result() override;
 
@@ -107,7 +106,7 @@ class ProcessGroupMPI : public ProcessGroup {
    private:
     void finishCompleteFuture(std::exception_ptr eptr = nullptr);
 
-    const std::shared_ptr<std::vector<at::Tensor>> outputs_;
+    std::vector<at::Tensor> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
   };
 
@@ -115,7 +114,7 @@ class ProcessGroupMPI : public ProcessGroup {
    public:
     AsyncWork(
         MPI_Request request,
-        const std::vector<at::Tensor>* outputs,
+        std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
@@ -132,12 +131,13 @@ class ProcessGroupMPI : public ProcessGroup {
 
     void abort() override;
 
-   virtual std::vector<at::Tensor> result() override;
+    std::vector<at::Tensor> result() override;
 
    protected:
     void populateException();
 
-    const std::vector<at::Tensor>* outputs_;
+   private:
+    const std::vector<at::Tensor> outputTensors_;
     MPI_Request request_;
     MPI_Status status_;
   };
