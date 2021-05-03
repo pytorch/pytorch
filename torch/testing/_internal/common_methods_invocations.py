@@ -5888,7 +5888,7 @@ shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 def index_variable(shape, max_indices, device=torch.device('cpu')):
     if not isinstance(shape, tuple):
         shape = (shape,)
-    index = torch.rand(*shape, device=device).mul_(max_indices).floor_().long()
+    index = torch.rand(*shape, dtype=torch.double, device=device).mul_(max_indices).floor_().long()
     return index
 
 
@@ -6216,6 +6216,10 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
         # double check casting
         elif isinstance(arg, non_differentiable):
             if isinstance(arg.tensor, torch.Tensor):
+                if arg.tensor.dtype == torch.float:
+                    return maybe_non_contig(arg.tensor.to(dtype=torch.double, device=device))
+                if arg.tensor.dtype == torch.cfloat:
+                    return maybe_non_contig(arg.tensor.to(dtype=torch.cdouble, device=device))
                 return maybe_non_contig(arg.tensor.to(device=device))
             return maybe_non_contig(arg.tensor.to(device=device))
         elif isinstance(arg, torch.Tensor):
