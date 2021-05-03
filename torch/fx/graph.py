@@ -48,7 +48,7 @@ _register_custom_builtin('inf', 'from math import inf', math.inf)
 _register_custom_builtin('nan', 'from math import nan', math.nan)
 _register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
 _register_custom_builtin('torch', 'import torch', torch)
-_register_custom_builtin('device', 'device = torch.device', torch.device)
+_register_custom_builtin('device', 'from torch import device', torch.device)
 
 
 def _is_magic(x: str) -> bool:
