@@ -86,14 +86,17 @@ class RendezvousTimeout:
 
     Args:
         join:
-            The total time within which the rendezvous is expected to complete.
+            The time within which the rendezvous is expected to complete.
         last_call:
             An additional wait amount before completing the rendezvous once the
-            minimum number of nodes has been reached.
+            rendezvous has the minimum number of required participants.
         close:
             The time within which the rendezvous is expected to close after a
             call to :py:meth:`RendezvousHandler.set_closed` or
             :py:meth:`RendezvousHandler.shutdown`.
+        keep_alive:
+            The time within which a keep-alive heartbeat is expected to
+            complete.
     """
 
     _ZERO = timedelta(0)
@@ -102,19 +105,22 @@ class RendezvousTimeout:
         "join": timedelta(seconds=600),
         "last_call": timedelta(seconds=30),
         "close": timedelta(seconds=30),
+        "heartbeat": timedelta(seconds=5),
     }
 
     _join: timedelta
     _last_call: timedelta
     _close: timedelta
+    _heartbeat: timedelta
 
     def __init__(
         self,
         join: Optional[timedelta] = None,
         last_call: Optional[timedelta] = None,
         close: Optional[timedelta] = None,
+        heartbeat: Optional[timedelta] = None,
     ) -> None:
-        self._set_timeouts(join=join, last_call=last_call, close=close)
+        self._set_timeouts(join=join, last_call=last_call, close=close, heartbeat=heartbeat)
 
     @property
     def join(self) -> timedelta:
@@ -130,6 +136,11 @@ class RendezvousTimeout:
     def close(self) -> timedelta:
         """Gets the close timeout."""
         return self._close
+
+    @property
+    def heartbeat(self) -> timedelta:
+        """Gets the keep-alive heartbeat timeout."""
+        return self._heartbeat
 
     def _set_timeouts(self, **timeouts: Optional[timedelta]):
         for name, timeout in timeouts.items():
