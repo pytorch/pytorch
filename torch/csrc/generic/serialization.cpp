@@ -16,6 +16,7 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
   c10::cuda::CUDAGuard guard(self->device());
 #endif
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t *data;
   int64_t size_bytes = self->nbytes();
   int64_t numel = size_bytes / sizeof(scalar_t);
@@ -35,6 +36,7 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
         torch::utils::THPByteOrder::THP_LITTLE_ENDIAN)
       doWrite(fd, &numel, sizeof(int64_t));
     else {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t nsize; // convert big endian cpu to little endian storage
       torch::utils::THP_encodeInt64Buffer(
           (uint8_t*)&nsize,
@@ -50,7 +52,9 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
     doWrite(fd, data, size_bytes);
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t buffer_size = std::min(numel, (int64_t)5000);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(scalar_t)]);
     for (int64_t i = 0; i < numel; i += buffer_size) {
       size_t to_convert = std::min(numel - i, buffer_size);
@@ -66,6 +70,7 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
             (const int32_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       } else if (sizeof(scalar_t) == 8) {
         torch::utils::THP_encodeInt64Buffer(
             (uint8_t*)le_buffer.get(),
@@ -91,11 +96,14 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
   }
 #endif
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t *data;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t size;
   doRead(file, &size, sizeof(int64_t));
   if (torch::utils::THP_nativeByteOrder() ==
       torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t nsize; // convert little endian storage to big endian cpu
     nsize = size;
     torch::utils::THP_decodeInt64Buffer(
@@ -127,7 +135,9 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
     doRead(file, data, storage->nbytes());
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t buffer_size = std::min(size, (int64_t)5000);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(scalar_t)]);
 
 
@@ -147,6 +157,7 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
             le_buffer.get(),
             torch::utils::THP_nativeByteOrder(),
             to_convert);
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       } else if (sizeof(scalar_t) == 8) {
         torch::utils::THP_decodeInt64Buffer(
             (int64_t*)data + i,
