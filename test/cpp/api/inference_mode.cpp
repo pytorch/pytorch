@@ -19,27 +19,27 @@ namespace {
   }
 
   /*
-    Only the following combos of Autograd & InplaceOrView keys on tensors are valid:
-      - Autograd=true, InplaceOrView=true (normal tensor)
-      - Autograd=false, InplaceOrView=false (inference tensor)
+    Only the following combos of Autograd & ADInplaceOrView keys on tensors are valid:
+      - Autograd=true, ADInplaceOrView=true (normal tensor)
+      - Autograd=false, ADInplaceOrView=false (inference tensor)
     Tensors created in InferenceMode are mostly inference tensors. The only exception
     is that view of normal tensors created in InferenceMode still produce normal tensor.
   */
   bool is_inference_tensor(torch::Tensor& x) {
     c10::DispatchKeySet ks = x.key_set();
     bool has_Autograd = ks.has(c10::DispatchKey::AutogradCPU);
-    bool has_InplaceOrView = ks.has(c10::DispatchKey::InplaceOrView);
+    bool has_ADInplaceOrView = ks.has(c10::DispatchKey::ADInplaceOrView);
     // They must be either both true or false.
-    bool is_inference_tensor = !has_Autograd && !has_InplaceOrView && x.is_leaf();
+    bool is_inference_tensor = !has_Autograd && !has_ADInplaceOrView && x.is_leaf();
     return is_inference_tensor;
   }
 
   void assert_TLS_states(bool inference_mode) {
     ASSERT_EQ(InferenceMode::is_enabled(), inference_mode);
-    ASSERT_FALSE(c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::InplaceOrView));
+    ASSERT_FALSE(c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::ADInplaceOrView));
     ASSERT_FALSE(c10::impl::tls_is_dispatch_keyset_included(c10::autograd_dispatch_keyset));
     ASSERT_EQ(c10::impl::tls_is_dispatch_keyset_excluded(c10::autograd_dispatch_keyset), inference_mode);
-    ASSERT_EQ(c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::InplaceOrView), !inference_mode);
+    ASSERT_EQ(c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::ADInplaceOrView), !inference_mode);
     ASSERT_EQ(GradMode::is_enabled(), !inference_mode);
   }
 }
@@ -146,7 +146,7 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeFunctionalOp) {
     // intermediate tensors are normal tensors, and they might dispatch to VariableType
     // kernels. This is fine since users can easily fix it by moving
     // it inside InferenceMode block.
-    torch::Tensor tmp = functional_op(inference_tensor); // go through kernels: InplaceOrView(fallthrough), CPU
+    torch::Tensor tmp = functional_op(inference_tensor); // go through kernels: ADInplaceOrView(fallthrough), CPU
     ASSERT_FALSE(is_inference_tensor(tmp));
     ASSERT_FALSE(tmp.requires_grad());
   }
@@ -160,7 +160,7 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeInplaceOp) {
       InferenceMode guard;
       inference_tensor = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
     }
-    ASSERT_THROWS_WITH(inplace_op(inference_tensor), // go through kernels: InplaceOrView, CPU
+    ASSERT_THROWS_WITH(inplace_op(inference_tensor), // go through kernels: ADInplaceOrView, CPU
       "Inplace update to inference tensor outside InferenceMode is not allowed");
   }
 }
@@ -173,7 +173,7 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeViewOp) {
       InferenceMode guard;
       inference_tensor = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
     }
-    torch::Tensor out = view_op(inference_tensor); // go through kernels: InplaceOrView, CPU
+    torch::Tensor out = view_op(inference_tensor); // go through kernels: ADInplaceOrView, CPU
     ASSERT_TRUE(is_inference_tensor(out));
     ASSERT_FALSE(out.requires_grad());
     ASSERT_FALSE(out.is_view());
@@ -190,17 +190,17 @@ TEST(InferenceModeTest, TestNormalTensorInplaceOutputInInferenceMode) {
     {
       c10::InferenceMode guard;
 
-      inplace_op(a);  // go through kernels: InplaceOrView, CPU
+      inplace_op(a);  // go through kernels: ADInplaceOrView, CPU
       ASSERT_FALSE(is_inference_tensor(a));
       ASSERT_EQ(a.requires_grad(), requires_grad);
 
       // inplace -> inplace
-      inplace_op(a);  // go through kernels: InplaceOrView, CPU
+      inplace_op(a);  // go through kernels: ADInplaceOrView, CPU
       ASSERT_FALSE(is_inference_tensor(a));
       ASSERT_EQ(a.requires_grad(), requires_grad);
 
       // inplace -> inplace -> view
-      torch::Tensor view_out = view_op(a);  // go through kernels: InplaceOrView, CPU
+      torch::Tensor view_out = view_op(a);  // go through kernels: ADInplaceOrView, CPU
       ASSERT_FALSE(is_inference_tensor(view_out));
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
     }
@@ -216,20 +216,20 @@ TEST(InferenceModeTest, TestNormalTensorInplaceOutputInNormalMode) {
     {
       c10::InferenceMode guard;
 
-      inplace_op(a);  // go through kernels: InplaceOrView, CPU
+      inplace_op(a);  // go through kernels: ADInplaceOrView, CPU
       ASSERT_FALSE(is_inference_tensor(a));
       ASSERT_EQ(a.requires_grad(), requires_grad);
     }
 
-    torch::Tensor tmp = functional_op(a);  // go through kernels: VariableType, InplaceOrView(fallthrough), CPU
+    torch::Tensor tmp = functional_op(a);  // go through kernels: VariableType, ADInplaceOrView(fallthrough), CPU
     ASSERT_FALSE(is_inference_tensor(tmp));
     ASSERT_EQ(tmp.requires_grad(), requires_grad);
 
-    inplace_op(a); // go through kernels: VariableType, InplaceOrView, CPU
+    inplace_op(a); // go through kernels: VariableType, ADInplaceOrView, CPU
     ASSERT_FALSE(is_inference_tensor(a));
     ASSERT_EQ(a.requires_grad(), requires_grad);
 
-    tmp = view_op(a);  // go through kernels: VariableType, InplaceOrView, CPU
+    tmp = view_op(a);  // go through kernels: VariableType, ADInplaceOrView, CPU
     ASSERT_FALSE(is_inference_tensor(tmp));
     ASSERT_EQ(tmp.requires_grad(), requires_grad);
   }
@@ -252,25 +252,25 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInInferenceMode) {
       //     Storage(self.storage()), self.key_set(), self.dtype());
       //   ```
       //   In addition, these view output tensors are normal in the sense they
-      //   have both Autograd and InplaceOrView keys. But they're still special
+      //   have both Autograd and ADInplaceOrView keys. But they're still special
       //   since they'll have CreationMeta::INFERENCE_MODE. In other words they behave
       //   exactly the same as a view tensor created in no_grad mode.
 
-      view_out = view_op(a);  // go through kernels: InplaceOrView, CPU
+      view_out = view_op(a);  // go through kernels: ADInplaceOrView, CPU
       ASSERT_FALSE(is_inference_tensor(view_out));
       assert_tensor_creation_meta(view_out, CreationMeta::INFERENCE_MODE);
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
       ASSERT_TRUE(view_out.is_leaf());
 
       // view -> view
-      tmp = view_op(view_out);  // go through kernels: InplaceOrView, CPU
+      tmp = view_op(view_out);  // go through kernels: ADInplaceOrView, CPU
       ASSERT_FALSE(is_inference_tensor(tmp));
       assert_tensor_creation_meta(tmp, CreationMeta::INFERENCE_MODE);
       ASSERT_EQ(tmp.requires_grad(), requires_grad);
       ASSERT_TRUE(tmp.is_leaf());
 
       // view -> view -> inplace
-      inplace_op(tmp);  // kernels: InplaceOrView, CPU
+      inplace_op(tmp);  // kernels: ADInplaceOrView, CPU
       assert_tensor_creation_meta(tmp, CreationMeta::INFERENCE_MODE);
       ASSERT_FALSE(is_inference_tensor(tmp));
       ASSERT_EQ(tmp.requires_grad(), requires_grad);
@@ -289,7 +289,7 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInNormalMode) {
 
     {
       c10::InferenceMode guard;
-      view_out = view_op(a);  // go through kernels: InplaceOrView, CPU
+      view_out = view_op(a);  // go through kernels: ADInplaceOrView, CPU
       ASSERT_FALSE(is_inference_tensor(view_out));
       assert_tensor_creation_meta(view_out, CreationMeta::INFERENCE_MODE);
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
@@ -301,7 +301,7 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInNormalMode) {
     ASSERT_EQ(tmp.requires_grad(), requires_grad);
 
     if (requires_grad) {
-      ASSERT_THROWS_WITH(inplace_op(view_out),  // go through kernels: VariableType, InplaceOrView, CPU
+      ASSERT_THROWS_WITH(inplace_op(view_out),  // go through kernels: VariableType, ADInplaceOrView, CPU
         "A view was created in inference mode and is being modified inplace")
     } else {
       inplace_op(view_out);
@@ -324,7 +324,7 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
     }
 
     // add(Tensor, Tensor) is safe with inference tensor since it doesn't save any variable for backward.
-    torch::Tensor out = c.add(s);  // go through kernels: VariableType, InplaceOrView(fallthrough), CPU
+    torch::Tensor out = c.add(s);  // go through kernels: VariableType, ADInplaceOrView(fallthrough), CPU
     ASSERT_FALSE(is_inference_tensor(out));
     ASSERT_EQ(out.requires_grad(), requires_grad);
     if (requires_grad) {
@@ -341,7 +341,7 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
 
       // Inference tensor in TensorList input
       std::vector<torch::Tensor> inputs = {s, c};
-      ASSERT_THROWS_WITH(torch::stack(inputs), // go through kernels: VariableType(ERROR)!, InplaceOrView(fallthrough), CPU
+      ASSERT_THROWS_WITH(torch::stack(inputs), // go through kernels: VariableType(ERROR)!, ADInplaceOrView(fallthrough), CPU
         "Inference tensors cannot be saved for backward.")
     }
   }
@@ -362,12 +362,12 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorInplaceOp) {
       ASSERT_THROWS_WITH(a.mul_(c), // go through kernels: VariableType(ERROR!), InferenceMode, CPU
         "Inference tensors cannot be saved for backward.");
 
-      ASSERT_THROWS_WITH(torch::mul_out(/*out=*/c, s, s), // go through kernels: VariableType(ERROR!), InplaceOrView, CPU
+      ASSERT_THROWS_WITH(torch::mul_out(/*out=*/c, s, s), // go through kernels: VariableType(ERROR!), ADInplaceOrView, CPU
         "out=... arguments don't support automatic differentiation, but one of the arguments requires grad")
     } else {
       a.mul_(c);
 
-      ASSERT_THROWS_WITH(torch::mul_out(/*out=*/c, s, s), // go through kernels: VariableType, InplaceOrView(ERROR!), CPU
+      ASSERT_THROWS_WITH(torch::mul_out(/*out=*/c, s, s), // go through kernels: VariableType, ADInplaceOrView(ERROR!), CPU
         "Inplace update to inference tensor outside InferenceMode is not allowed");
     }
   }
@@ -385,13 +385,13 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorViewOp) {
 
     // view_as is a composite op which calls view() with only one tensor argument.
     // So there isn't a mixed inference tensor and normal tensor inputs for view ops.
-    torch::Tensor tmp1 = c.view_as(s); // go through kernels: InplaceOrView, CPU
+    torch::Tensor tmp1 = c.view_as(s); // go through kernels: ADInplaceOrView, CPU
     ASSERT_TRUE(is_inference_tensor(tmp1));
     ASSERT_FALSE(tmp1.requires_grad());
 
     // This is fine since it's equivalent as s.view(c.sizes()) which
     // isn't a mixed input scenario.
-    torch::Tensor tmp2 = s.view_as(c); // go through kernels: VariableType, InplaceOrView, CPU
+    torch::Tensor tmp2 = s.view_as(c); // go through kernels: VariableType, ADInplaceOrView, CPU
     ASSERT_FALSE(is_inference_tensor(tmp2));
     ASSERT_EQ(tmp2.requires_grad(), requires_grad);
   }
@@ -405,7 +405,7 @@ TEST(InferenceModeTest, TestHandleDirectViewOnRebase) {
     torch::Tensor view_out;
     {
       InferenceMode guard;
-      view_out = view_op(a);  // go through kernels: InplaceOrView, CPU
+      view_out = view_op(a);  // go through kernels: ADInplaceOrView, CPU
     }
     if (requires_grad) {
       ASSERT_THROWS_WITH(inplace_op(view_out),
@@ -424,7 +424,7 @@ TEST(InferenceModeTest, TestHandleInDirectViewOnRebase) {
     torch::Tensor view_out;
     {
       InferenceMode guard;
-      view_out = view_op(a);  // go through kernels: InplaceOrView, CPU
+      view_out = view_op(a);  // go through kernels: ADInplaceOrView, CPU
     }
     inplace_op(a);
     if (requires_grad) {
