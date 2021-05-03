@@ -17,12 +17,13 @@
 #include <c10/cuda/CUDAStream.h>
 
 // handle the temporary storage and 'twice' calls for cub API
-#define CUB_WRAPPER(func, ...) do {                                        \
-  size_t temp_storage_bytes = 0;                                           \
-  func(nullptr, temp_storage_bytes, __VA_ARGS__);                          \
-  auto temp_storage = allocator->allocate(temp_storage_bytes);             \
-  func(temp_storage.get(), temp_storage_bytes, __VA_ARGS__);               \
-  AT_CUDA_CHECK(cudaGetLastError());                                       \
+#define CUB_WRAPPER(func, ...) do {                                       \
+  size_t temp_storage_bytes = 0;                                          \
+  func(nullptr, temp_storage_bytes, __VA_ARGS__);                         \
+  auto& caching_allocator = *::c10::cuda::CUDACachingAllocator::get();    \
+  auto temp_storage = caching_allocator.allocate(temp_storage_bytes);     \
+  func(temp_storage.get(), temp_storage_bytes, __VA_ARGS__);              \
+  AT_CUDA_CHECK(cudaGetLastError());                                      \
 } while (false)
 
 #ifdef __HIP_PLATFORM_HCC__
@@ -50,14 +51,21 @@ struct cuda_type<c10::Half> {
   using type = __half;
 };
 
+inline int get_num_bits(uint64_t max_key) {
+  int num_bits = 1;
+  while (max_key > 1) {
+    max_key >>= 1;
+    num_bits++;
+  }
+  return num_bits;
+}
+
 template<typename key_t>
 static inline void sort_keys(
     const key_t *keys_in, key_t *keys_out,
     int64_t n, bool descending=false, int64_t start_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
   using key_t_ = typename cuda_type<key_t>::type;
-
-  auto allocator = c10::cuda::CUDACachingAllocator::get();
 
   const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
