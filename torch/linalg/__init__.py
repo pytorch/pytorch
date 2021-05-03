@@ -1160,10 +1160,8 @@ where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent ob
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
-    ord (int, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `None`
-    dim (Tuple[int, int], optional): dimensions over which to compute
-        the norm. See above for the behavior when :attr:`dim`\ `= None`.
-        Default: `None`
+    ord (int, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `'fro'`
+    dim (Tuple[int, int], optional): dimensions over which to compute the norm. Default: `(-2, -1)`
     keepdim (bool, optional): If set to `True`, the reduced dimensions are retained
         in the result as dimensions with size one. Default: `False`
 
