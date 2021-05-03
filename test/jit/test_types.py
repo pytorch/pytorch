@@ -22,12 +22,12 @@ if __name__ == '__main__':
 
 class TestTypesAndAnnotation(JitTestCase):
     def test_pep585_type(self):
-        def fn(x: torch.Tensor) -> Tuple[torch.Tensor, Tuple[torch.Tensor]]:
+        def fn(x: torch.Tensor) -> Tuple[Tuple[torch.Tensor], Dict[str, int]]:
             xl: list[tuple[torch.Tensor]] = []
-            xd: dict[str, torch.Tensor] = {}
+            xd: dict[str, int] = {}
             xl.append((x,))
-            xd['foo'] = x
-            return xl.pop(), xd['foo']
+            xd['foo'] = 1
+            return xl.pop(), xd
 
         self.checkScript(fn, [torch.randn(2, 2)])
 
