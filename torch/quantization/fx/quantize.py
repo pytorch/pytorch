@@ -104,8 +104,7 @@ def insert_observer(
         activation_post_process_map: Dict[str, List[str]],
         activation_post_process_indexes: Dict[str, int],
         env: Dict[Any, Any], observed_graph: Graph, load_arg: Callable,
-        observed_node_names_set: Set[str],
-        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]]):
+        observed_node_names_set: Set[str]):
     """Insert observer for node by modifying the observed_graph and
        attach observer module to the model
        Args:
@@ -237,7 +236,7 @@ def maybe_insert_observer_for_output_of_the_node(
                 model, activation_post_process_map,
                 activation_post_process_indexes,
                 env, observed_graph,
-                load_arg, observed_node_names_set, quants)
+                load_arg, observed_node_names_set)
             inserted_observer = True
         elif should_mark_output_observed_from_input_observed_status:
             observed_node_names_set.add(node.name)
@@ -253,7 +252,7 @@ def maybe_insert_observer_for_output_of_the_node(
                     activation_post_process_map,
                     activation_post_process_indexes,
                     env, observed_graph,
-                    load_arg, observed_node_names_set, quants)
+                    load_arg, observed_node_names_set)
                 inserted_observer = True
 
     # we already inserted activation_post_process for the outputvalue
@@ -278,7 +277,7 @@ def maybe_insert_observer_for_input_arg_of_observed_node(
                     node, activation_post_process_ctr(),
                     model, activation_post_process_map,
                     activation_post_process_indexes,
-                    env, observed_graph, load_arg, observed_node_names_set, quants)
+                    env, observed_graph, load_arg, observed_node_names_set)
 
 def maybe_insert_observer_for_output_of_model(
         node: Node,
@@ -287,8 +286,7 @@ def maybe_insert_observer_for_output_of_model(
         activation_post_process_map: Dict[str, List[str]],
         activation_post_process_indexes: Dict[str, int],
         env: Dict[Any, Any], observed_graph: Graph, load_arg: Callable,
-        observed_node_names_set: Set[str],
-        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]]):
+        observed_node_names_set: Set[str]):
     if isinstance(node, Node):
         assert qconfig_map is not None
         local_qconfig = qconfig_map[node.name]
@@ -300,7 +298,7 @@ def maybe_insert_observer_for_output_of_model(
                 model,
                 activation_post_process_map,
                 activation_post_process_indexes,
-                env, observed_graph, load_arg, observed_node_names_set, quants)
+                env, observed_graph, load_arg, observed_node_names_set)
     elif isinstance(node, list) or isinstance(node, tuple):
         for n in node:
             maybe_insert_observer_for_output_of_model(
@@ -309,7 +307,7 @@ def maybe_insert_observer_for_output_of_model(
                 qconfig_map,
                 activation_post_process_map,
                 activation_post_process_indexes,
-                env, observed_graph, load_arg, observed_node_names_set, quants)
+                env, observed_graph, load_arg, observed_node_names_set)
     elif isinstance(node, dict):
         for n in node.values():
             maybe_insert_observer_for_output_of_model(
@@ -318,7 +316,7 @@ def maybe_insert_observer_for_output_of_model(
                 qconfig_map,
                 activation_post_process_map,
                 activation_post_process_indexes,
-                env, observed_graph, load_arg, observed_node_names_set, quants)
+                env, observed_graph, load_arg, observed_node_names_set)
     else:
         raise Exception("hardcoding output to be quantized not supported: " + str(type(node)))
 
@@ -361,7 +359,7 @@ def insert_observers_for_model(
                     qconfig_map,
                     activation_post_process_map,
                     activation_post_process_indexes,
-                    env, observed_graph, load_arg, observed_node_names_set, quants)
+                    env, observed_graph, load_arg, observed_node_names_set)
 
             observed_graph.output(load_arg(node.args[0]))
             result_node = node
@@ -426,7 +424,6 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
 
 def handle_copy_nodes(
         observed_graph: Graph, matches: Dict[str, MatchResult],
-        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
         qconfig_map: Dict[str, QConfigAny],
         activation_post_process_map: Dict[str, List[str]],
         modules: Dict[str, torch.nn.Module]):
@@ -529,7 +526,6 @@ def handle_copy_nodes(
 
 def handle_cat_nodes(
         model: torch.nn.Module, observed_graph: Graph, matches: Dict[str, MatchResult],
-        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
         activation_post_process_map: Dict[str, List[str]],
         modules: Dict[str, torch.nn.Module]):
     observed_nodes: Set[Node] = set()
@@ -802,7 +798,7 @@ class Quantizer:
             model, observed_graph, standalone_module_names, standalone_module_classes,
             custom_module_classes)
         observed_graph = handle_copy_nodes(
-            observed_graph, matches, quants, self.qconfig_map,
+            observed_graph, matches, self.qconfig_map,
             self.activation_post_process_map, self.modules)
 
         self.modules = dict(model.named_modules())
@@ -810,7 +806,7 @@ class Quantizer:
             model, observed_graph, standalone_module_names, standalone_module_classes,
             custom_module_classes)
         observed_graph = handle_cat_nodes(
-            model, observed_graph, matches, quants, self.activation_post_process_map,
+            model, observed_graph, matches, self.activation_post_process_map,
             self.modules)
 
         self.save_state(model)
