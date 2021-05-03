@@ -96,15 +96,14 @@ class ProcessGroupMPI : public ProcessGroup {
 
     std::vector<at::Tensor> result() override;
 
-    virtual std::vector<at::Tensor> result() override;
-
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
    protected:
     friend class ProcessGroupMPI;
 
    private:
-    void finishCompleteFuture(std::exception_ptr eptr = nullptr);
+    void finishCompleteFuture();
+    void finishCompleteErrorFuture(std::exception_ptr eptr);
 
     std::vector<at::Tensor> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;

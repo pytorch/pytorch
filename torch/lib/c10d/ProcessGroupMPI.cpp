@@ -102,19 +102,13 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupMPI::WorkMPI::getFuture() {
   return future_;
 }
 
-void ProcessGroupMPI::WorkMPI::finishCompleteFuture(std::exception_ptr eptr) {
-  if (eptr) {
-    future_->setError(eptr);
-    future_->markCompleted();
-    finish(eptr);
-  } else {
-    if (outputs_.get()) {
-      future_->markCompleted(at::IValue(*outputs_));
-    } else {
-      future_->markCompleted();
-    }
-    finish();
-  }
+void ProcessGroupMPI::WorkMPI::finishCompleteErrorFuture(std::exception_ptr eptr) {
+  future_->setError(eptr);
+  finish(eptr);
+}
+
+void ProcessGroupMPI::WorkMPI::finishCompleteFuture() {
+  future_->markCompleted(at::IValue(outputTensors_));
 }
 
 ProcessGroupMPI::AsyncWork::AsyncWork(
@@ -359,7 +353,7 @@ void ProcessGroupMPI::runLoop() {
       workEntry->run(workEntry);
       work->finishCompleteFuture();
     } catch (...) {
-      work->finishCompleteFuture(std::current_exception());
+      work->finishCompleteErrorFuture(std::current_exception());
     }
 
     lock.lock();
@@ -619,7 +613,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->dst)[0];
+        auto data = (entry->dst)[0];
         void* sendbuf = nullptr;
         at::Tensor flatInputTensor;
 
@@ -697,7 +691,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
     std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
         [opts, this](std::unique_ptr<WorkEntry>& entry) {
           auto srcdata = (entry->src)[0];
-          auto dstdata = (*entry->dst)[0];
+          auto dstdata = (entry->dst)[0];
           c10::DeviceGuard guard(srcdata.device());
           std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
           MPI_CHECK(MPI_Alltoall(
@@ -725,7 +719,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
         [opts, this, inputSplitSizes, outputSplitSizes](
             std::unique_ptr<WorkEntry>& entry) {
           auto srcdata = (entry->src)[0];
-          auto dstdata = (*entry->dst)[0];
+          auto dstdata = (entry->dst)[0];
           std::vector<int> send_lengths(size_);
           std::vector<int> recv_lengths(size_);
           std::vector<int> send_offsets(size_);
@@ -775,7 +769,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
         std::vector<int> send_offsets(size_);
         std::vector<int> recv_offsets(size_);
         auto srcdata = entry->src;
-        auto dstdata = *entry->dst;
+        auto dstdata = entry->dst;
         int64_t src_len = c10d::computeLengthsAndOffsets(
             srcdata, &send_lengths, &send_offsets);
         int64_t dst_len = c10d::computeLengthsAndOffsets(
