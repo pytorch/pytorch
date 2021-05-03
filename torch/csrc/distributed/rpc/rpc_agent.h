@@ -92,11 +92,14 @@ struct TORCH_API RpcRetryOptions {
   // sendWithRetries function.
   RpcRetryOptions() = default;
   // Maximum number of times we will retry the RPC
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int maxRetries{5};
   // Initial duration between consecutive RPC send attempts
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::chrono::milliseconds rpcRetryDuration{std::chrono::milliseconds(1000)};
   // Constant for exponential backoff used while calculating future wait
   // durations
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float retryBackoff{1.5};
 };
 
@@ -161,8 +164,7 @@ class TORCH_API RpcAgent {
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
-      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
-          {}) = 0;
+      const std::unordered_map<c10::Device, c10::Device>& deviceMap = {}) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
   // receieved. The duration between consecutive sends is increased over
@@ -262,18 +264,24 @@ class TORCH_API RpcAgent {
   std::shared_ptr<TypeResolver> getTypeResolver();
 
   // Retrieves the device map for the provided destination worker.
-  virtual std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> getDeviceMap(
-      const WorkerInfo& dest);
+  virtual std::unordered_map<c10::Device, c10::Device> getDeviceMap(
+      const WorkerInfo& dst) const;
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const WorkerInfo workerInfo_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::unique_ptr<RequestCallback> cb_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::atomic<std::chrono::milliseconds> rpcTimeout_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::atomic<bool> profilingEnabled_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<TypeResolver> typeResolver_;
   // Atomic boolean indicating whether this agent is running. It controls
   // whether several background threads should be running. It is set in
   // RpcAgent::start() and unset in the derived class shutdown().
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::atomic<bool> rpcAgentRunning_;
 
  private:

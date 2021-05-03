@@ -18,6 +18,7 @@ class TORCH_API RequestCallback {
       Message& request,
       std::shared_ptr<LazyStreamContext> ctx) const;
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~RequestCallback() {}
 
  protected:
