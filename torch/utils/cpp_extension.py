@@ -20,7 +20,7 @@ from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
 from typing import List, Optional, Union
 
 from setuptools.command.build_ext import build_ext
-from pkg_resources import packaging  # type: ignore
+from pkg_resources import packaging  # type: ignore[attr-defined]
 
 IS_WINDOWS = sys.platform == 'win32'
 LIB_EXT = '.pyd' if IS_WINDOWS else '.so'
@@ -350,7 +350,7 @@ class BuildExtension(build_ext, object):
         Returns a subclass with alternative constructor that extends any original keyword
         arguments to the original constructor with the given options.
         '''
-        class cls_with_options(cls):  # type: ignore
+        class cls_with_options(cls):  # type: ignore[misc, valid-type]
             def __init__(self, *args, **kwargs):
                 kwargs.update(options)
                 super().__init__(*args, **kwargs)
@@ -1635,13 +1635,12 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
     env = os.environ.copy()
     # Try to activate the vc env for the users
     if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' not in env:
-        from distutils.util import get_platform
-        from distutils._msvccompiler import _get_vc_env
+        from setuptools import distutils
 
-        plat_name = get_platform()
+        plat_name = distutils.util.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]
 
-        vc_env = _get_vc_env(plat_spec)
+        vc_env = distutils._msvccompiler._get_vc_env(plat_spec)
         vc_env = {k.upper(): v for k, v in vc_env.items()}
         for k, v in env.items():
             uk = k.upper()
@@ -1678,8 +1677,8 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         message = error_prefix
         # `error` is a CalledProcessError (which has an `ouput`) attribute, but
         # mypy thinks it's Optional[BaseException] and doesn't narrow
-        if hasattr(error, 'output') and error.output:  # type: ignore
-            message += f": {error.output.decode()}"  # type: ignore
+        if hasattr(error, 'output') and error.output:  # type: ignore[union-attr]
+            message += f": {error.output.decode()}"  # type: ignore[union-attr]
         raise RuntimeError(message) from e
 
 
@@ -1700,7 +1699,7 @@ def _import_module_from_library(module_name, path, is_python_module):
     # Close the .so file after load.
     with file:
         if is_python_module:
-            return imp.load_module(module_name, file, path, description)  # type: ignore
+            return imp.load_module(module_name, file, path, description)  # type: ignore[arg-type]
         else:
             torch.ops.load_library(path)
 

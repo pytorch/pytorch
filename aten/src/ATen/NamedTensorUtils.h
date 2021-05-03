@@ -75,28 +75,28 @@ namespace namedinference {
 // `names` can be empty; see [NOTE] Writing name inference rules
 // If `names` is not empty, `names.size()` should equal `result.dim()`.
 // When in doubt, use this overload instead of the others.
-TORCH_API Tensor& propagate_names_if_nonempty(
-    Tensor& result,
+TORCH_API const Tensor& propagate_names_if_nonempty(
+    const Tensor& result,
     DimnameList maybe_names,
     bool validate_names = false);
 
 // Propagates `names` to `result`. Only use this if we are certain that there are
 // names to propagate (that names is not empty).
-TORCH_API Tensor& propagate_names(
-    Tensor& result,
+TORCH_API const Tensor& propagate_names(
+    const Tensor& result,
     DimnameList names,
     bool validate_names = false);
 
 // Propagates all names from src to result.
-TORCH_API void propagate_names(Tensor& result, const Tensor& src);
+TORCH_API void propagate_names(const Tensor& result, const Tensor& src);
 
 // Propagates all names except for those at the excluded_idxs.
-TORCH_API void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs);
+TORCH_API void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef excluded_idxs);
 
 // Used for reduction ops that have a `keepdim` arg.
-TORCH_API void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
+TORCH_API void propagate_names_for_reduction(const Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
 
-TORCH_API void propagate_names_for_expand(Tensor& result, const Tensor& self);
+TORCH_API void propagate_names_for_expand(const Tensor& result, const Tensor& self);
 
 TORCH_API std::vector<Dimname> compute_cat_outnames(TensorList tensors);
 
