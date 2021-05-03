@@ -17,22 +17,17 @@ class DdpNcclTrainer(DdpTrainerBase):
             self.bp_location = 0
             self.batch_number = -1
 
-        def add_hook_future(self, future, bp_loc, update):
-            self.hook_gradient_futures.append([future, bp_loc, update])
-
         def get_key(self):
             return "{},{}".format(self.batch_number, self.bp_location)
 
         def next_batch_state(self):
             self.bp_location = 0
             self.batch_number += 1
-            self.hook_gradient_futures = []
 
     def __init__(self, rank, trainer_count, ps_rref, epochs):
         super().__init__(rank)
         self.rank = rank
         self.trainer_count = trainer_count
-        self.ps_rref = ps_rref
         self.epochs = epochs
 
     @staticmethod

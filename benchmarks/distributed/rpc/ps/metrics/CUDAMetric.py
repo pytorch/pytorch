@@ -20,4 +20,6 @@ class CUDAMetric(MetricBase):
             self.end.record()
 
     def elapsed_time(self, rank):
+        self.start.synchronize()
+        self.end.synchronize()
         return self.start.elapsed_time(self.end)

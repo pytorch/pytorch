@@ -51,25 +51,30 @@ class MetricsLogger:
      Args:
         self: the instance of the class
 
-     Example:
+     Examples::
 
-        metric1 = CUDAMetric("forward_pass")
-        metric1.record_start(rank)
-        metric1.record_end(rank)
+        >>> metric1 = CUDAMetric("forward_pass")
+        >>> metric1.record_start(rank)
+        >>> metric1.record_end(rank)
 
-        metric2 = CUDAMetric("forward_pass")
-        metric2.record_start(rank)
-        metric2.record_end(rank)
+        >>> metric2 = CUDAMetric("forward_pass")
+        >>> metric2.record_start(rank)
+        >>> metric2.record_end(rank)
 
-        self.metrics == { 
+        >>> print(self.metrics)
+
+        { 
             "forward_metric_type": {
                 "1": metric1,
                 "2": metric2
             }
         }
 
-        processed_metrics == {
-            "forward_metric_type_forward_pass" : [.0429, .0888]
+        >>> processed_metrics = self.get_processed_metrics()
+        >>> print(processed_metrics)
+
+        {
+            "forward_metric_type,forward_pass" : [.0429, .0888]
         }
     """
 
