@@ -145,11 +145,11 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
 
-TORCH_IMPL_FUNC(clamp_max) (const Tensor& self, const Scalar& max, const Tensor& result) {
+TORCH_IMPL_FUNC(clamp_max_out) (const Tensor& self, const Scalar& max, const Tensor& result) {
   clamp_max_stub(device_type(), *this, max);
 }
 
-TORCH_IMPL_FUNC(clamp_min) (const Tensor& self, const Scalar& min, const Tensor& result) {
+TORCH_IMPL_FUNC(clamp_min_out) (const Tensor& self, const Scalar& min, const Tensor& result) {
   clamp_min_stub(device_type(), *this, min);
 }
 
