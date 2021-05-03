@@ -3,11 +3,6 @@
 #include <ATen/native/metal/MetalPrepackOpContext.h>
 #include <c10/util/accumulate.h>
 
-
-#if (C10_IOS || TARGET_OS_MAC)
-#import <ATen/native/metal/ops/MetalConvolution.h>
-#endif
-
 namespace at {
 namespace native {
 namespace metal {
@@ -53,8 +48,11 @@ TORCH_LIBRARY(metal, m) {
                 std::move(std::get<2>(state)),
                 std::move(std::get<3>(state)),
                 std::move(std::get<4>(state)),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<5>(state)),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<6>(state)),
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,performance-move-const-arg)
                 std::move(std::get<7>(state)));
           });
   m.def("copy_to_host(Tensor X) -> Tensor Y");
@@ -92,23 +90,8 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
       output_max);
 }
 
-Tensor conv2d_prepack_run(
-    const Tensor& input,
-    const c10::intrusive_ptr<Conv2dOpContext>& op_context) {
-#if (C10_IOS || TARGET_OS_MAC)
-  return prepack::conv2d(input, *op_context);
-#else
-  TORCH_CHECK(false, "conv2d_prepack_run can only be invoked on iOS and MacOS");
-  return input;
-#endif
-}
-
 TORCH_LIBRARY_IMPL(metal_prepack, CPU, m) {
   m.impl("conv2d_prepack", TORCH_FN(conv2d_prepack));
-}
-
-TORCH_LIBRARY_IMPL(metal_prepack, Metal, m) {
-  m.impl("conv2d_run", conv2d_prepack_run);
 }
 
 } // namespace metal
