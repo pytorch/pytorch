@@ -126,7 +126,8 @@ struct TORCH_API InterpreterManager {
     resources_.setResourceLimit(N);
   }
   Package load_package(const std::string& uri);
-  Package load_package(std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader);
+  Package load_package(
+      std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader);
   InterpreterManager(const InterpreterManager&) = delete;
   InterpreterManager& operator=(const InterpreterManager&) = delete;
   InterpreterManager& operator=(InterpreterManager&&) = delete;
@@ -162,7 +163,8 @@ struct TORCH_API ReplicatedObj {
     return I.self(args).toIValue();
   }
 
-  at::IValue call_kwargs(std::vector<std::tuple<std::string, at::IValue>> kwargs) const {
+  at::IValue call_kwargs(
+      std::vector<std::tuple<std::string, at::IValue>> kwargs) const {
     auto I = acquire_session();
     return I.self.call_kwargs(std::move(kwargs)).toIValue();
   }
@@ -187,9 +189,7 @@ struct TORCH_API Package {
     return I.create_movable(loaded);
   }
 
-  std::string load_text(
-      const std::string& module,
-      const std::string& file) {
+  std::string load_text(const std::string& module, const std::string& file) {
     auto I = acquire_session();
     auto loaded = I.self.attr("load_text")({module, file});
     return loaded.toIValue().toStringRef();
@@ -210,7 +210,7 @@ struct TORCH_API Package {
       : manager_(pm),
         container_file_(
             std::make_shared<caffe2::serialize::PyTorchStreamReader>(uri)) {}
-    Package(
+  Package(
       std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader,
       InterpreterManager*
           pm) // or really any of the constructors to our zip file format

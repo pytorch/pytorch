@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-
-#include <torch/csrc/distributed/rpc/utils.h>
+#include <c10/util/DeadlockDetection.h>
 
 namespace torch {
 namespace distributed {
@@ -22,16 +21,7 @@ RpcAgent::RpcAgent(
       cb_(std::move(cb)),
       rpcTimeout_(rpcTimeout),
       profilingEnabled_(false),
-      rpcAgentRunning_(false) {
-  // Register Future factory for CPU
-  FutureFactoryRegistry::getInstance().registerFutureFactory(
-      c10::DeviceType::CPU,
-      [](const std::vector<c10::DeviceIndex>& devices)
-          -> std::shared_ptr<JitFuture> {
-        TORCH_INTERNAL_ASSERT(devices.empty());
-        return std::make_shared<JitFuture>(at::AnyClassType::get());
-      });
-}
+      rpcAgentRunning_(false) {}
 
 RpcAgent::~RpcAgent() {
   if (rpcAgentRunning_.load()) {
@@ -46,6 +36,7 @@ void RpcAgent::start() {
 }
 
 void RpcAgent::shutdown() {
+  TORCH_ASSERT_NO_GIL_WITHOUT_PYTHON_DEP();
   std::unique_lock<std::mutex> lock(rpcRetryMutex_);
   rpcAgentRunning_.store(false);
   lock.unlock();
@@ -298,8 +289,8 @@ bool RpcAgent::isGILProfilingEnabled() {
   return profilingEnabled_.load();
 }
 
-std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> RpcAgent::getDeviceMap(
-    const WorkerInfo& dest) {
+std::unordered_map<c10::Device, c10::Device> RpcAgent::getDeviceMap(
+    const WorkerInfo& /* unused */) const {
   // Default implementation has no device map.
   return {};
 }
