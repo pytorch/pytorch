@@ -99,6 +99,15 @@ class QuantizeHandler(ABC):
         """
         return False
 
+    def should_mark_output_quantized_from_input_quantized_status(
+        self,
+    ) -> bool:
+        """
+        Returns true if after convert, the output of the matched pattern is
+        quantized iff the first input is also quantized.
+        """
+        return False
+
     def get_activation_ctr(
         self,
         qconfig: Any,
@@ -1100,6 +1109,11 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
                 return all(map(is_observed, input_arg))
         return is_observed(self.node.args[0])
 
+    def should_mark_output_quantized_from_input_quantized_status(
+        self,
+    ) -> bool:
+        return True
+
     # some qhandlers override the activations constructor
     def get_activation_ctr(self, qconfig, pattern) -> Optional[Callable]:
         if activation_dtype(qconfig) == torch.float16:
@@ -1186,6 +1200,11 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('unsqueeze_')
 @register_quant_pattern('view')
 class CopyNodeQuantizeHandler(QuantizeHandler):
+    def should_mark_output_quantized_from_input_quantized_status(
+        self,
+    ) -> bool:
+        return True
+
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
