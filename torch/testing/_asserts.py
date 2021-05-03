@@ -202,19 +202,19 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> S
     Returns:
         (SimpleNamespace): Mismatch diagnostics with the following attributes:
 
-            - ``number_of_elements`` (``int``): Number of elements in each tensor being compared.
-            - ``total_mismatches`` (``int``): Total number of mismatches.
-            - ``mismatch_ratio`` (``float``): Total mismatches divided by number of elements.
-            - ``max_abs_diff`` (``Union[int, float]``): Greatest absolute difference of the inputs.
-            - ``max_abs_diff_idx`` (``Union[int, Tuple[int, ...]]``): Index of greatest absolute difference.
-            - ``max_rel_diff`` (``Union[int, float]``): Greatest relative difference of the inputs.
-            - ``max_rel_diff_idx`` (``Union[int, Tuple[int, ...]]``): Index of greatest relative difference.
+            - ``number_of_elements`` (int): Number of elements in each tensor being compared.
+            - ``total_mismatches`` (int): Total number of mismatches.
+            - ``mismatch_ratio`` (float): Total mismatches divided by number of elements.
+            - ``max_abs_diff`` (Union[int, float]): Greatest absolute difference of the inputs.
+            - ``max_abs_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
+            - ``max_rel_diff`` (Union[int, float]): Greatest relative difference of the inputs.
+            - ``max_rel_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
 
             For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
     """
-    total_elements = mismatches.numel()
+    number_of_elements = mismatches.numel()
     total_mismatches = torch.sum(mismatches).item()
-    mismatch_ratio = total_mismatches / total_elements
+    mismatch_ratio = total_mismatches / number_of_elements
 
     dtype = torch.float64 if actual.dtype.is_floating_point else torch.int64
     a_flat = actual.flatten().to(dtype)
@@ -227,7 +227,7 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> S
     max_rel_diff, max_rel_diff_flat_idx = torch.max(rel_diff, 0)
 
     return SimpleNamespace(
-        total_elements=total_elements,
+        number_of_elements=number_of_elements,
         total_mismatches=cast(int, total_mismatches),
         mismatch_ratio=mismatch_ratio,
         max_abs_diff=max_abs_diff.item(),
@@ -265,7 +265,7 @@ def _check_values_equal(
     if msg is None:
         msg = (
             f"Tensors are not equal!\n\n"
-            f"Mismatched elements: {trace.total_mismatches} / {trace.total_elements} ({trace.mismatch_ratio:.1%})\n"
+            f"Mismatched elements: {trace.total_mismatches} / {trace.number_of_elements} ({trace.mismatch_ratio:.1%})\n"
             f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx}\n"
             f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx}"
         )
@@ -308,7 +308,7 @@ def _check_values_close(
     if msg is None:
         msg = (
             f"Tensors are not close!\n\n"
-            f"Mismatched elements: {trace.total_mismatches} / {trace.total_elements} ({trace.mismatch_ratio:.1%})\n"
+            f"Mismatched elements: {trace.total_mismatches} / {trace.number_of_elements} ({trace.mismatch_ratio:.1%})\n"
             f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx} (up to {atol} allowed)\n"
             f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx} (up to {rtol} allowed)"
         )
@@ -721,10 +721,10 @@ def assert_close(
 
         \lvert \text{actual} - \text{expected} \rvert \le \texttt{atol} + \texttt{rtol} \cdot \lvert \text{expected} \rvert
 
-    and they have the same device (if :attr:`check_device` is ``True``), same dtype (if :attr:`check_dtype` is
-    ``True``), and the same stride (if :attr:`check_stride` is ``True``). Non-finite values (``-inf`` and ``inf``) are
-    only considered close if and only if they are equal. ``NaN``'s are only considered equal to each other if
-    :attr:`equal_nan` is ``True``.
+    and they have the same :attr:`~torch.Tensor.device` (if :attr:`check_device` is ``True``), same ``dtype`` (if
+    :attr:`check_dtype` is ``True``), and the same stride (if :attr:`check_stride` is ``True``). Non-finite values
+    (``-inf`` and ``inf``) are only considered close if and only if they are equal. ``NaN``'s are only considered equal
+    to each other if :attr:`equal_nan` is ``True``.
 
     If :attr:`actual` and :attr:`expected` are complex-valued, they are considered close if both their real and
     imaginary components are considered close according to the definition above.
@@ -796,13 +796,13 @@ def assert_close(
     The namespace of diagnostic information that will be passed to :attr:`msg` if its a callable has the following
     attributes:
 
-    - ``number_of_elements`` (``int``): Number of elements in each tensor being compared.
-    - ``total_mismatches`` (``int``): Total number of mismatches.
-    - ``mismatch_ratio`` (``float``): Total mismatches divided by number of elements.
-    - ``max_abs_diff`` (``Union[int, float]``): Greatest absolute difference of the inputs.
-    - ``max_abs_diff_idx`` (``Union[int, Tuple[int, ...]]``): Index of greatest absolute difference.
-    - ``max_rel_diff`` (``Union[int, float]``): Greatest relative difference of the inputs.
-    - ``max_rel_diff_idx`` (``Union[int, Tuple[int, ...]]``): Index of greatest relative difference.
+    - ``number_of_elements`` (int): Number of elements in each tensor being compared.
+    - ``total_mismatches`` (int): Total number of mismatches.
+    - ``mismatch_ratio`` (float): Total mismatches divided by number of elements.
+    - ``max_abs_diff`` (Union[int, float]): Greatest absolute difference of the inputs.
+    - ``max_abs_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
+    - ``max_rel_diff`` (Union[int, float]): Greatest relative difference of the inputs.
+    - ``max_rel_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
 
     For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
 
