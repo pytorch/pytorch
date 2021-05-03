@@ -8,7 +8,9 @@ from tools.codegen.context import method_with_native_function
 from tools.codegen.utils import Target, mapMaybe
 from tools.codegen.model import (DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind,
-                                 TensorOptionsArguments, assert_never,
+                                 TensorOptionsArguments,
+                                 DeviceCheckType, Argument,
+                                 assert_never,
                                  is_cuda_dispatch_key,
                                  is_structured_dispatch_key)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
@@ -55,6 +57,19 @@ class RegisterDispatchKey:
 
     # Whether or not we are actually code-genning for ROCm
     rocm: bool
+
+    @staticmethod
+    def gen_device_check(type: DeviceCheckType, args: List[Argument], method_name: str) -> str:
+        if type == DeviceCheckType.NoCheck:
+            return '  // No device check\n'
+
+        device_check = 'c10::optional<Device> common_device = nullopt;'
+        for arg in args:
+            # Only tensor like arguments are eligible
+            if arg.type.is_tensor_like():
+                device_check += f"""
+  c10::impl::check_and_update_common_device(common_device, {arg.name}, "{method_name}", "{arg.name}");"""
+        return device_check
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
@@ -156,8 +171,15 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             args_exprs_str = ', '.join(a.name for a in args)
 
-            device_guard = "// DeviceGuard omitted"  # default
+            device_check = '  // No device check\n'
+            if is_cuda_dispatch_key(self.dispatch_key):
+                device_check_args = itertools.chain(
+                    f.func.arguments.out,
+                    f.func.arguments.flat_positional
+                )
+                device_check = RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), name)
 
+            device_guard = "// DeviceGuard omitted"  # default
             if f.device_guard and is_cuda_dispatch_key(self.dispatch_key):
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                 if has_tensor_options:
@@ -185,6 +207,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 namespace {{
 
 {returns_type} {name}({args_str}) {{
+  {device_check}
+
   {device_guard}
   return {impl_name}({args_exprs_str});
 }}
@@ -427,6 +451,13 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             else:
                 class_name = f"structured_{self.g.out.dispatch[self.dispatch_key]}_{k.name}"
                 parent_class = f"at::native::structured_{self.g.out.dispatch[self.dispatch_key]}"
+
+            if is_cuda_dispatch_key(self.dispatch_key):
+                device_check_args = itertools.chain(
+                    f.func.arguments.out,
+                    f.func.arguments.flat_positional
+                )
+                sig_body.append(RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), sig.name()))
 
             if k is SchemaKind.functional:
                 sig_body.append(f"{class_name} op;")

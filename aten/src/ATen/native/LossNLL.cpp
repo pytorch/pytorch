@@ -97,7 +97,9 @@ static void nll_loss_out_frame(
 
   int64_t num_ignored = 0;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   scalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
   for (int64_t b = 0; b < batch_size; b++) {
     const int64_t cur_target = target_data[b];
