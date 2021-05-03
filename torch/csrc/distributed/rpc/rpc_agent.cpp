@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <c10/util/DeadlockDetection.h>
 
 namespace torch {
 namespace distributed {
@@ -35,6 +36,7 @@ void RpcAgent::start() {
 }
 
 void RpcAgent::shutdown() {
+  TORCH_ASSERT_NO_GIL_WITHOUT_PYTHON_DEP();
   std::unique_lock<std::mutex> lock(rpcRetryMutex_);
   rpcAgentRunning_.store(false);
   lock.unlock();
@@ -287,8 +289,8 @@ bool RpcAgent::isGILProfilingEnabled() {
   return profilingEnabled_.load();
 }
 
-std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> RpcAgent::getDeviceMap(
-    const WorkerInfo& dest) {
+std::unordered_map<c10::Device, c10::Device> RpcAgent::getDeviceMap(
+    const WorkerInfo& /* unused */) const {
   // Default implementation has no device map.
   return {};
 }

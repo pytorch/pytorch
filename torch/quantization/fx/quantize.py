@@ -41,7 +41,6 @@ from .pattern_utils import (
     is_match,
     get_default_quant_patterns,
     get_default_output_activation_post_process_map,
-    input_output_observed,
     Pattern,
 )
 
@@ -61,7 +60,6 @@ from .quantization_patterns import (
     CopyNodeQuantizeHandler,
     CustomModuleQuantizeHandler,
     DefaultQuantizeHandler,
-    FixedQParamsOpQuantizeHandler,
     QuantizeHandler,
     StandaloneModuleQuantizeHandler,
 )
@@ -106,8 +104,7 @@ def insert_observer(
         activation_post_process_map: Dict[str, List[str]],
         activation_post_process_indexes: Dict[str, int],
         env: Dict[Any, Any], observed_graph: Graph, load_arg: Callable,
-        observed_node_names_set: Set[str],
-        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]]):
+        observed_node_names_set: Set[str]):
     """Insert observer for node by modifying the observed_graph and
        attach observer module to the model
        Args:
@@ -116,8 +113,9 @@ def insert_observer(
     """
     # In eval mode fixed qparams node are the same as CopyNode and we
     # won't insert observer for them
-    if not model.training and isinstance(observer, torch.quantization.FixedQParamsFakeQuantize):
-        return
+    if not model.training:
+        assert not isinstance(observer, torch.quantization.FixedQParamsFakeQuantize), \
+            "Unexpected FixedQParamsFakeQuantize found when model.training is False."
     # respect device affinity when adding observers
     model_device = assert_and_get_unique_device(model)
     if model_device:
@@ -183,7 +181,7 @@ def maybe_insert_observer_for_special_module(
         modules[node.target] = observed_standalone_module  # type: ignore[index]
     return standalone_module_input_idxs
 
-def insert_observer_for_output_of_the_node(
+def maybe_insert_observer_for_output_of_the_node(
         node: Node,
         quantize_handler: QuantizeHandler,
         qconfig: Any,
@@ -207,128 +205,63 @@ def insert_observer_for_output_of_the_node(
     assert modules is not None
     # TODO: Add warnings in the quantize handlers that does not support fp16 quantization
     inserted_observer = False
-    if activation_is_statically_quantized(qconfig):
-        if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) \
-                and model.training:
-            # we only insert fake quantize module in qat
-            assert pattern is not None
-            if activation_dtype(qconfig) == torch.float16:
-                activation_post_process_ctr = qconfig.activation
-            else:
-                activation_post_process_ctr = \
-                    get_default_output_activation_post_process_map().get(
-                        pattern, None)
-            assert activation_post_process_ctr is not None, \
-                "activation_post_process constructor not provided " + \
-                "for pattern:" + str(pattern)
+    if not activation_is_statically_quantized(qconfig):
+        return
+
+    if isinstance(quantize_handler,
+                  StandaloneModuleQuantizeHandler):
+        assert node.op == "call_module"
+        assert isinstance(node.target, str)
+        sm_out_qidxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore[operator]
+        output_is_quantized = 0 in sm_out_qidxs
+
+        if output_is_quantized:
+            observed_node_names_set.add(node.name)
+    else:
+        should_insert_observer = quantize_handler.should_insert_observer_for_output(
+            qconfig, model.training)
+        should_mark_output_observed_from_input_observed_status = \
+            quantize_handler.should_mark_output_observed_from_input_observed_status(
+                observed_node_names_set)
+
+        activation_post_process_ctr = quantize_handler.get_activation_ctr(
+            qconfig, pattern)
+        assert activation_post_process_ctr is not None, \
+            "activation_post_process constructor not provided " + \
+            "for pattern:" + str(pattern)
+
+        if should_insert_observer:
             insert_observer(
                 node, activation_post_process_ctr(),
                 model, activation_post_process_map,
                 activation_post_process_indexes,
                 env, observed_graph,
-                load_arg, observed_node_names_set, quants)
+                load_arg, observed_node_names_set)
             inserted_observer = True
-        elif (isinstance(quantize_handler,
-                         FixedQParamsOpQuantizeHandler) and
-              not model.training):
-            # inserting observers for output of observed module, or
-            # mark the output as observed
-            assert node.op in [
-                'call_module',
-                'call_function',
-                'call_method'], \
-                'FixedQParamsQuantizeHandler of type ' + node.op + ' is not handled'
+        elif should_mark_output_observed_from_input_observed_status:
+            observed_node_names_set.add(node.name)
+            inserted_observer = True
 
-            def is_observed(input_arg):
-                if isinstance(input_arg, Node):
-                    return input_arg.name in observed_node_names_set
-                elif isinstance(input_arg, list):
-                    return all(map(is_observed, input_arg))
-
-            # insert observers for fixedqparams ops like sigmoid, since
-            # it supports fp16 static quantization
-            if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) and \
-               activation_dtype(qconfig) == torch.float16:
-                insert_observer(
-                    node, qconfig.activation(),
-                    model, activation_post_process_map,
-                    activation_post_process_indexes,
-                    env, observed_graph,
-                    load_arg, observed_node_names_set, quants)
-                inserted_observer = True
-            else:
-                # propagate observed property from input
-                if is_observed(node.args[0]):
-                    observed_node_names_set.add(node.name)
-                    inserted_observer = True
-        elif (isinstance(quantize_handler, BinaryOpQuantizeHandler) and
-              quantize_handler.num_tensor_args == 1):
-            assert matched_nodes is not None
-            input_node = matched_nodes[-1]  # first node in the sequence
-
-            def input_is_observed(arg):
-                return (isinstance(arg, Node) and
-                        arg.name in observed_node_names_set)
-            # This is checking if one of the argument of add/mul
-            # is an observed node
-            # If both of the inputs are number,
-            # we will not consider the output to be observed
-            if (input_is_observed(input_node.args[0]) or
-                    input_is_observed(input_node.args[1])):
-                observed_node_names_set.add(node.name)
-                inserted_observer = True
-
-            if activation_dtype(qconfig) == torch.float16:
-                # observer for outputs
+    # insert observer for input of standalone module
+    if standalone_module_input_idxs is not None:
+        for idx in standalone_module_input_idxs:
+            if node.args[idx].name not in observed_node_names_set:  # type: ignore[union-attr]
                 new_observer = qconfig.activation()
                 insert_observer(
                     node, new_observer, model,
                     activation_post_process_map,
                     activation_post_process_indexes,
                     env, observed_graph,
-                    load_arg, observed_node_names_set, quants)
+                    load_arg, observed_node_names_set)
                 inserted_observer = True
-        elif isinstance(quantize_handler,
-                        StandaloneModuleQuantizeHandler):
-            assert node.op == "call_module"
-            assert isinstance(node.target, str)
-            sm_out_qidxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore[operator]
-            output_is_quantized = 0 in sm_out_qidxs
 
-            if output_is_quantized:
-                observed_node_names_set.add(node.name)
-        elif (quantize_handler.all_node_args_are_tensors and
-              input_output_observed(quantize_handler)):
-            # observer for outputs
-            new_observer = qconfig.activation()
-            insert_observer(
-                node, new_observer, model,
-                activation_post_process_map,
-                activation_post_process_indexes,
-                env, observed_graph,
-                load_arg, observed_node_names_set, quants)
-            inserted_observer = True
+    # we already inserted activation_post_process for the outputvalue
+    # which is the same as the input value of the next op, so we
+    # can skip inserting one activation_post_process for the input
+    if node.name in quants and inserted_observer:
+        quants[node.name].pop(0)
 
-        # insert observer for input of standalone module
-        if standalone_module_input_idxs is not None:
-            for idx in standalone_module_input_idxs:
-                if node.args[idx].name not in observed_node_names_set:  # type: ignore[union-attr]
-                    new_observer = qconfig.activation()
-                    insert_observer(
-                        node, new_observer, model,
-                        activation_post_process_map,
-                        activation_post_process_indexes,
-                        env, observed_graph,
-                        load_arg, observed_node_names_set, quants)
-                    inserted_observer = True
-
-        # we already inserted activation_post_process for the outputvalue
-        # which is the same as the input value of the next op, so we
-        # can skip inserting one activation_post_process for the input
-        if node.name in quants and inserted_observer:
-            quants[node.name].pop(0)
-
-def insert_observer_for_input_arg_of_observed_node(
+def maybe_insert_observer_for_input_arg_of_observed_node(
         node: Node, observed_node_names_set: Set[str],
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
         model: torch.nn.Module,
@@ -344,17 +277,16 @@ def insert_observer_for_input_arg_of_observed_node(
                     node, activation_post_process_ctr(),
                     model, activation_post_process_map,
                     activation_post_process_indexes,
-                    env, observed_graph, load_arg, observed_node_names_set, quants)
+                    env, observed_graph, load_arg, observed_node_names_set)
 
-def insert_observer_for_output_of_model(
+def maybe_insert_observer_for_output_of_model(
         node: Node,
         model: torch.nn.Module,
         qconfig_map: Dict[str, QConfigAny],
         activation_post_process_map: Dict[str, List[str]],
         activation_post_process_indexes: Dict[str, int],
         env: Dict[Any, Any], observed_graph: Graph, load_arg: Callable,
-        observed_node_names_set: Set[str],
-        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]]):
+        observed_node_names_set: Set[str]):
     if isinstance(node, Node):
         assert qconfig_map is not None
         local_qconfig = qconfig_map[node.name]
@@ -366,25 +298,25 @@ def insert_observer_for_output_of_model(
                 model,
                 activation_post_process_map,
                 activation_post_process_indexes,
-                env, observed_graph, load_arg, observed_node_names_set, quants)
+                env, observed_graph, load_arg, observed_node_names_set)
     elif isinstance(node, list) or isinstance(node, tuple):
         for n in node:
-            insert_observer_for_output_of_model(
+            maybe_insert_observer_for_output_of_model(
                 n,
                 model,
                 qconfig_map,
                 activation_post_process_map,
                 activation_post_process_indexes,
-                env, observed_graph, load_arg, observed_node_names_set, quants)
+                env, observed_graph, load_arg, observed_node_names_set)
     elif isinstance(node, dict):
         for n in node.values():
-            insert_observer_for_output_of_model(
+            maybe_insert_observer_for_output_of_model(
                 n,
                 model,
                 qconfig_map,
                 activation_post_process_map,
                 activation_post_process_indexes,
-                env, observed_graph, load_arg, observed_node_names_set, quants)
+                env, observed_graph, load_arg, observed_node_names_set)
     else:
         raise Exception("hardcoding output to be quantized not supported: " + str(type(node)))
 
@@ -421,13 +353,13 @@ def insert_observers_for_model(
             output_node_seen_cnt += 1
             if cur_output_node_idx in output_quantized_idxs:
                 prev_node = node.args[0]
-                insert_observer_for_output_of_model(
+                maybe_insert_observer_for_output_of_model(
                     prev_node,
                     model,
                     qconfig_map,
                     activation_post_process_map,
                     activation_post_process_indexes,
-                    env, observed_graph, load_arg, observed_node_names_set, quants)
+                    env, observed_graph, load_arg, observed_node_names_set)
 
             observed_graph.output(load_arg(node.args[0]))
             result_node = node
@@ -448,7 +380,7 @@ def insert_observers_for_model(
                     maybe_insert_observer_for_special_module(
                         obj, modules, prepare_custom_config_dict, qconfig,
                         node)
-                insert_observer_for_output_of_the_node(
+                maybe_insert_observer_for_output_of_the_node(
                     node, obj, qconfig, modules, model, pattern,
                     activation_post_process_map,
                     activation_post_process_indexes,
@@ -465,7 +397,7 @@ def insert_observers_for_model(
                 observed_node_names_set.add(node.name)
                 continue
 
-        insert_observer_for_input_arg_of_observed_node(
+        maybe_insert_observer_for_input_arg_of_observed_node(
             node, observed_node_names_set, quants,
             model, activation_post_process_map,
             activation_post_process_indexes,
@@ -492,7 +424,6 @@ def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Modu
 
 def handle_copy_nodes(
         observed_graph: Graph, matches: Dict[str, MatchResult],
-        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
         qconfig_map: Dict[str, QConfigAny],
         activation_post_process_map: Dict[str, List[str]],
         modules: Dict[str, torch.nn.Module]):
@@ -595,7 +526,6 @@ def handle_copy_nodes(
 
 def handle_cat_nodes(
         model: torch.nn.Module, observed_graph: Graph, matches: Dict[str, MatchResult],
-        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
         activation_post_process_map: Dict[str, List[str]],
         modules: Dict[str, torch.nn.Module]):
     observed_nodes: Set[Node] = set()
@@ -868,7 +798,7 @@ class Quantizer:
             model, observed_graph, standalone_module_names, standalone_module_classes,
             custom_module_classes)
         observed_graph = handle_copy_nodes(
-            observed_graph, matches, quants, self.qconfig_map,
+            observed_graph, matches, self.qconfig_map,
             self.activation_post_process_map, self.modules)
 
         self.modules = dict(model.named_modules())
@@ -876,7 +806,7 @@ class Quantizer:
             model, observed_graph, standalone_module_names, standalone_module_classes,
             custom_module_classes)
         observed_graph = handle_cat_nodes(
-            model, observed_graph, matches, quants, self.activation_post_process_map,
+            model, observed_graph, matches, self.activation_post_process_map,
             self.modules)
 
         self.save_state(model)
@@ -983,9 +913,6 @@ class Quantizer:
         matches = self._find_matches(
             model.graph, self.modules, self.patterns,
             custom_module_classes=custom_module_classes)
-
-        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]] = \
-            self._find_quants(model.graph, self.modules, matches)
 
         self.quantized_graph = Graph()
         env: Dict[str, Node] = {}
@@ -1107,10 +1034,7 @@ class Quantizer:
             # of FixedQParamsQuantizeHandler
             # TODO: we may want to try to remove the special case here
             # as well
-            if type(obj) in [
-                    CopyNodeQuantizeHandler,
-                    FixedQParamsOpQuantizeHandler
-            ]:
+            if obj.should_mark_output_quantized_from_input_quantized_status():
                 assert node.op in [
                     'call_module',
                     'call_function',
@@ -1123,7 +1047,7 @@ class Quantizer:
             # and activation is fp16 (since we will output fp32 currently for fp16
             # converter
             if not activation_is_int8_quantized(qconfig) or \
-               not input_output_observed(obj):
+               not obj.input_output_observed():
                 quantized = False
             if node_return_type_is_int(node):
                 quantized = False
@@ -1579,7 +1503,7 @@ class Quantizer:
                 root_node, matched_nodes, matched_pattern, quantize_handler, \
                     qconfig = matches[node.name]
                 if root_node is node and \
-                        input_output_observed(quantize_handler):
+                        quantize_handler.input_output_observed():
                     # matched_nodes[-1] is the first op in the sequence and
                     # matched_nodes[0] is the last op in the sequence
                     # inputs
