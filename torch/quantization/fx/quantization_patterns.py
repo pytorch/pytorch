@@ -20,11 +20,15 @@ from ..utils import (
     activation_is_int8_quantized,
     weight_is_statically_quantized,
     get_qconfig_dtypes,
+    activation_dtype,
 )
 
 from .pattern_utils import (
     register_quant_pattern,
     mark_input_output_not_observed,
+    get_default_output_activation_post_process_map,
+    input_output_observed,
+    Pattern,
 )
 
 from .utils import (
@@ -44,7 +48,7 @@ from abc import ABC, abstractmethod
 import operator
 import warnings
 
-from typing import Any, Callable, Dict, Union, Optional, Tuple, List
+from typing import Any, Callable, Dict, Union, Optional, Tuple, List, Set
 
 # -------------------------
 # Pattern Registrations
@@ -65,6 +69,43 @@ class QuantizeHandler(ABC):
         # all inputs are tensors or not, e.g. add/mul
         self.num_tensor_args = len(node.args)
         self.all_node_args_are_tensors = True
+
+    def should_insert_observer_for_output(
+        self,
+        qconfig: Any,
+        model_is_training: bool,
+    ) -> bool:
+        """
+        Returns true if an observer should be inserted for the output of
+        the pattern matched to this QuantizeHandler instance during the
+        prepare step.
+        """
+        # TODO(future PR): potentially clean up and deduplicate these
+        # mappings.
+        return self.all_node_args_are_tensors and input_output_observed(self)
+
+    def should_mark_output_observed_from_input_observed_status(
+        self,
+        observed_node_names_set: Set[str],
+    ) -> bool:
+        """
+        Returns true if the output of this pattern instance should be marked
+        as observed based on the observed status of inputs to this pattern.
+        """
+        return False
+
+    def get_activation_ctr(
+        self,
+        qconfig: Any,
+        pattern: Pattern,
+    ) -> Optional[Callable]:
+        """
+        Returns the constructor for the activation observer which should be
+        used for the pattern matched to this handler. Some handlers override
+        this to a different value than what is specified in the qconfig.
+        """
+        return qconfig.activation
+
 
     @abstractmethod
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
@@ -169,6 +210,46 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
             self.quantized_binary_op = qbin_relu_op_mapping[self.binary_op] \
                 if self.relu_node is not None \
                 else qbin_op_mapping[self.binary_op]
+
+    def should_insert_observer_for_output(
+        self,
+        qconfig: Any,
+        model_is_training: bool,
+    ) -> bool:
+        """
+        Returns true if an observer should be inserted for the output of
+        the pattern matched to this QuantizeHandler instance during the
+        prepare step.
+        """
+        if self.num_tensor_args == 1:
+            return activation_dtype(qconfig) == torch.float16
+        elif self.all_node_args_are_tensors and input_output_observed(self):
+            return True
+        else:
+            return False
+
+    def should_mark_output_observed_from_input_observed_status(
+        self,
+        observed_node_names_set: Set[str],
+    ) -> bool:
+        if self.num_tensor_args == 1:
+            # If only one of the inputs is a tensor, the output is
+            # observed if the tensor input is observed
+            def input_is_observed(arg):
+                return (isinstance(arg, Node) and
+                        arg.name in observed_node_names_set)
+            # This is checking if one of the argument of add/mul
+            # is an observed node
+            # If both of the inputs are number,
+            # we will not consider the output to be observed
+            return (
+                input_is_observed(self.binary_op_node.args[0]) or
+                input_is_observed(self.binary_op_node.args[1])
+            )
+        else:
+            # If either none or both inputs are tensors, this code
+            # path will not be hit.
+            return False
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
@@ -982,6 +1063,42 @@ class ELUQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('tanh', default_symmetric_fixed_qparams_fake_quant)
 @register_quant_pattern('tanh_', default_symmetric_fixed_qparams_fake_quant)
 class FixedQParamsOpQuantizeHandler(QuantizeHandler):
+    def __init__(self, quantizer: QuantizerCls, node: Node):
+        super().__init__(quantizer, node)
+        self.node = node
+
+    def should_insert_observer_for_output(
+        self,
+        qconfig: Any,
+        model_is_training: bool,
+    ) -> bool:
+        if model_is_training:
+            # in QAT, always insert fake_quants
+            return True
+        else:
+            # in PTQ, only insert observers when emulating fp16
+            return activation_dtype(qconfig) == torch.float16
+
+    def should_mark_output_observed_from_input_observed_status(
+        self,
+        observed_node_names_set: Set[str],
+    ) -> bool:
+        # For these ops if input is observed, output is also observed
+        def is_observed(input_arg):
+            if isinstance(input_arg, Node):
+                return input_arg.name in observed_node_names_set
+            elif isinstance(input_arg, list):
+                return all(map(is_observed, input_arg))
+        return is_observed(self.node.args[0])
+
+    # some qhandlers override the activations constructor
+    def get_activation_ctr(self, qconfig, pattern) -> Optional[Callable]:
+        if activation_dtype(qconfig) == torch.float16:
+            return qconfig.activation
+        else:
+            return get_default_output_activation_post_process_map().get(
+                pattern, None)
+
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
