@@ -183,7 +183,8 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     auto k = node->kind();
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
         k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
-        k == prim::MKLDNNHardTanh || k == aten::tanh) {
+        k == prim::MKLDNNHardTanh || k == aten::tanh ||
+        k == prim::MKLDNNClamp) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -361,6 +362,15 @@ static std::function<void(at::Tensor output, at::Tensor input)> hardtanh_helper(
   };
 }
 
+static std::function<void(at::Tensor output, at::Tensor input)> clamp_helper(
+    const Node* n) {
+  auto min_val = n->f(attr::min_val);
+  auto max_val = n->f(attr::max_val);
+  return [min_val, max_val](at::Tensor output, at::Tensor input) {
+    at::cpu::clamp_out(output, input, min_val, max_val);
+  };
+}
+
 // any op added to this registry needs to meet
 // the precondition: `aten_op(0) == 0`
 const RegisterOperators MKLDNNHardSwishOpReg({
@@ -387,6 +397,12 @@ const RegisterOperators MKLDNNHardSwishOpReg({
         },
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
+        "prim::MKLDNNClamp_(Tensor(a!) self) -> Tensor(a!)",
+        [](const Node* n) -> Operation {
+          return createUnaryOp(clamp_helper(n), true);
+        },
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
         "prim::MKLDNNHardSwish(Tensor a) -> Tensor",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
@@ -406,6 +422,12 @@ const RegisterOperators MKLDNNHardSwishOpReg({
         "prim::MKLDNNHardTanh(Tensor self) -> Tensor",
         [](const Node* n) -> Operation {
           return createUnaryOp(hardtanh_helper(n), false);
+        },
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNClamp(Tensor self) -> Tensor",
+        [](const Node* n) -> Operation {
+          return createUnaryOp(clamp_helper(n), false);
         },
         AliasAnalysisKind::FROM_SCHEMA),
 });
@@ -578,13 +600,14 @@ void moveWeightsToMKLDNN(Node* n) {
   }
 }
 
-static void hartanh_node_creator(
+static void clamp_node_creator(
     Node* body_node,
+    c10::Symbol kind,
     double min_val,
     double max_val) {
   WithInsertPoint insert_guard{body_node};
-  auto out_node = body_node->owningGraph()->create(
-      {prim::MKLDNNHardTanh}, {body_node->input(0)}, 1);
+  auto out_node =
+      body_node->owningGraph()->create({kind}, {body_node->input(0)}, 1);
   // N.B. we can't use `insert` as it calls `getOperation` (via
   // `emitBuiltinCall`) which uses `min_val` and `max_val` attrs which we
   // haven't set yet.
@@ -662,7 +685,7 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
 
     if (body_node->kind() == aten::relu6) {
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-      hartanh_node_creator(body_node, 0., 6.);
+      clamp_node_creator(body_node, prim::MKLDNNHardTanh, 0., 6.);
       continue;
     }
 
@@ -671,7 +694,14 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
           constant_as<double>(body_node->namedInput("min_val")).value();
       auto max_val =
           constant_as<double>(body_node->namedInput("max_val")).value();
-      hartanh_node_creator(body_node, min_val, max_val);
+      clamp_node_creator(body_node, prim::MKLDNNHardTanh, min_val, max_val);
+      continue;
+    }
+
+    if (body_node->kind() == aten::clamp) {
+      auto min_val = constant_as<double>(body_node->namedInput("min")).value();
+      auto max_val = constant_as<double>(body_node->namedInput("max")).value();
+      clamp_node_creator(body_node, prim::MKLDNNClamp, min_val, max_val);
       continue;
     }
 
@@ -865,9 +895,11 @@ class MKLDNNSubgraphSlicer {
         return true;
     }
 
-    if (n->kind() == aten::hardtanh && !nonConstantParameters(n)) {
-      auto min_val = constant_as<double>(n->namedInput("min_val")).value();
-      auto max_val = constant_as<double>(n->namedInput("max_val")).value();
+    if ((n->kind() == aten::hardtanh || n->kind() == aten::clamp) &&
+        !nonConstantParameters(n)) {
+      const size_t MIN_INDEX = 1, MAX_INDEX = 2;
+      auto min_val = constant_as<double>(n->input(MIN_INDEX)).value();
+      auto max_val = constant_as<double>(n->input(MAX_INDEX)).value();
       // we need to maintain the following invariant `pointwise_func(0) == 0`,
       // see `createUnaryOp`
       if (min_val <= 0. && max_val >= 0.) {
@@ -1000,74 +1032,19 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
           aten::mul_,
           aten::relu_,
           aten::relu6_,
+          aten::gelu_,
           aten::hardswish_,
           aten::dropout_,
           aten::sigmoid_,
           aten::hardsigmoid_,
           aten::hardtanh_,
           aten::tanh_,
+          aten::clamp_,
       };
       return mkldnn_ops.count(node_to_functionalize->kind()) != 0;
     });
 
-    static const std::string gelu_pattern = R"IR(
-        graph(%x.1 : Tensor, %3 : int):
-          %1 : int = prim::Constant[value=3]()
-          %2 : float = prim::Constant[value=0.044714999999999998]()
-          %4 : float = prim::Constant[value=0.5]()
-          %5 : float = prim::Constant[value=0.79788456080286541]()
-          %6 : Tensor = aten::mul(%x.1, %4)
-          %7 : Tensor = aten::pow(%x.1, %1)
-          %8 : Tensor = aten::mul(%7, %2)
-          %9 : Tensor = aten::add(%x.1, %8, %3)
-          %10 : Tensor = aten::mul(%9, %5)
-          %11 : Tensor = aten::tanh(%10)
-          %12 : Tensor = aten::add(%11, %3, %3)
-          %13 : Tensor = aten::mul(%6, %12)
-          return (%13)
-          )IR";
-
-    static const std::string gelu_replacement = R"IR(
-      graph(%a, %3 : int):
-        %d = aten::gelu(%a)
-        return (%d))IR";
-
-    auto input_checks =
-        [](const Match& match,
-           const std::unordered_map<std::string, Value*>& vmap) {
-          const auto& match_vmap = match.values_map;
-
-          auto v3 = toIValue(match_vmap.at(vmap.at("3")));
-          if (!v3->isInt() || v3->toInt() != 1) {
-            GRAPH_DEBUG("Failed v3");
-            return false;
-          }
-
-          auto v2 = toIValue(match_vmap.at(vmap.at("2")));
-          if (!v2->isDouble() || v2->toDouble() != 0.044714999999999998) {
-            GRAPH_DEBUG("Failed v2");
-            return false;
-          }
-
-          auto v4 = toIValue(match_vmap.at(vmap.at("4")));
-          if (!v4->isDouble() || v4->toDouble() != 0.5) {
-            GRAPH_DEBUG("Failed v4");
-            return false;
-          }
-
-          auto v5 = toIValue(match_vmap.at(vmap.at("5")));
-          if (!v5->isDouble() || v5->toDouble() != 0.79788456080286541) {
-            GRAPH_DEBUG("Failed v5");
-            return false;
-          }
-          return true;
-        };
-
-    SubgraphRewriter rewriter;
-    rewriter.RegisterRewritePattern(gelu_pattern, gelu_replacement);
-    rewriter.runOnGraph(graph, input_checks);
     AliasDb db(graph);
-
     MKLDNNSubgraphSlicer(graph->block(), graph, db).run();
     EliminateDeadCode(graph);
     GRAPH_DUMP("After convert frozen ops to mkldnn", graph);

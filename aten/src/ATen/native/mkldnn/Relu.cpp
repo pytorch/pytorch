@@ -74,7 +74,7 @@ Tensor mkldnn_gelu(const Tensor& input) {
   const ideep::tensor& x = itensor_from_mkldnn(input);
   ideep::tensor y;
   ideep::eltwise_forward::compute(
-      x, y, ideep::algorithm::eltwise_gelu, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+      x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
   return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
                                  input.options().device_opt());
 }
