@@ -1080,7 +1080,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(ClampMaxModel(), x)
 
-    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(8)
     def test_clamp_dyn(self):
         class ClampMaxModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1106,6 +1106,27 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.arange(16).view(2, 8).float()
         self.run_test(ClampMinMaxModel(), x)
+
+        class ClampTensorModel(torch.nn.Module):
+            def forward(self, x, min, max):
+                return x.clamp(min, max)
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        z = torch.randn(3, 4)
+        self.run_test(ClampTensorModel(), (x, y, z))
+
+        class ClampTensorMinModel(torch.nn.Module):
+            def forward(self, x, min):
+                return x.clamp(min=min)
+
+        self.run_test(ClampTensorMinModel(), (x, y))
+
+        class ClampTensorMaxModel(torch.nn.Module):
+            def forward(self, x, max):
+                return x.clamp(max=max)
+
+        self.run_test(ClampTensorMaxModel(), (x, z))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_trace(self):
