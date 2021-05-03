@@ -1349,11 +1349,6 @@ class Quantizer:
                     if is_match(modules, node, pattern):
                         skip_this_match = False
                         if value is BinaryOpQuantizeHandler:
-                            use_copy_node = all_node_args_have_no_tensors(node, modules, cache_for_no_tensor_check)
-                            if use_copy_node:
-                                # TODO(future PR): update the pattern to quantize
-                                # handler logic to take this into account.
-                                value = CopyNodeQuantizeHandler  # type: ignore[assignment]
 
                             # to properly check for dtype support, we need to
                             # navigate to the base node of an add-relu or mul-relu
