@@ -605,7 +605,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_device_map",
-          (std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>(
+          (std::unordered_map<c10::Device, c10::Device>(
               ProcessGroupAgent::*)(const WorkerInfo& dst) const) &
               ProcessGroupAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
@@ -635,16 +635,15 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               optional<std::vector<std::string>>,
               float,
               std::string,
-              std::unordered_map<std::string, tensorpipe::DeviceMap>,
-              std::vector<c10::DeviceIndex>>(),
+              std::unordered_map<std::string, DeviceMap>,
+              std::vector<c10::Device>>(),
           py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
           py::arg("_transports") = optional<std::vector<std::string>>(),
           py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
           py::arg("init_method") = kDefaultInitMethod,
-          py::arg("device_maps") =
-              std::unordered_map<std::string, tensorpipe::DeviceMap>(),
-          py::arg("devices") = std::vector<c10::DeviceIndex>())
+          py::arg("device_maps") = std::unordered_map<std::string, DeviceMap>(),
+          py::arg("devices") = std::vector<c10::Device>())
       .def_readwrite(
           "num_worker_threads",
           &TensorPipeRpcBackendOptions::numWorkerThreads,
@@ -722,8 +721,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_device_map",
-          (tensorpipe::DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst)
-               const) &
+          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
               TensorPipeAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(
