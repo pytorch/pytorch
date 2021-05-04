@@ -1815,7 +1815,7 @@ class TestTEFuser(JitTestCase):
                 self.assertEqual(len(self.findFusionGroups(t.graph_for(x))), 0)
 
     def test_superslomo(self):
-        devices = self.devices
+        devices = self.devices.copy()
         if not LLVM_ENABLED:
             devices.remove("cpu")
         for device in devices:
