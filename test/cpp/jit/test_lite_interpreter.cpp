@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
@@ -606,6 +607,12 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   std::unordered_set<std::string> expected_result(
       {"top(C).forward", "top(C).A0(A).forward", "top(C).B0(B).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
+  auto runtime_bytecode_version = _get_runtime_bytecode_version();
+  AT_ASSERT(
+      runtime_bytecode_version == caffe2::serialize::kProducedBytecodeVersion);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

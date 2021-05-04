@@ -735,7 +735,7 @@ Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
   auto expandedSizesAndStrides = inferExpandGeometry_dimvector(self.sizes(), self.strides(), size);
 
   auto result = self.as_strided(
-      std::get<0>(expandedSizesAndStrides), std::get<1>(expandedSizesAndStrides));
+      expandedSizesAndStrides.sizes, expandedSizesAndStrides.strides);
   namedinference::propagate_names_for_expand(result, self);
   return result;
 }
@@ -780,7 +780,7 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   return result;
 }
 
-Tensor &as_strided_(Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   setStrided(self, size, stride, storage_offset);
   return self;
@@ -1683,7 +1683,8 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   DimVector strides(self.strides().begin(), self.strides().end());
   std::swap(strides[dim0], strides[dim1]);
   std::swap(sizes[dim0], sizes[dim1]);
-  return self.as_strided_(sizes, strides);
+  self.as_strided_(sizes, strides);
+  return self;
 }
 
 Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
@@ -1868,7 +1869,8 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
 
 Tensor & squeeze_(Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+  self.as_strided_(std::get<0>(g), std::get<1>(g));
+  return self;
 }
 
 Tensor & squeeze_(Tensor& self, int64_t dim) {
@@ -1876,10 +1878,12 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   if (dims == 0 || self.sizes()[dim] != 1) {
-    return self.as_strided_(self.sizes(), self.strides());
+    self.as_strided_(self.sizes(), self.strides());
+    return self;
   }
   auto g = inferSqueezeGeometry(self, dim);
-  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+  self.as_strided_(std::get<0>(g), std::get<1>(g));
+  return self;
 }
 
 // _unsafe_view() differs from view() in that the returned tensor isn't treated
@@ -1955,7 +1959,8 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
   auto g = inferUnsqueezeGeometry(self, dim);
-  return self.as_strided_(g.sizes, g.strides);
+  self.as_strided_(g.sizes, g.strides);
+  return self;
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
