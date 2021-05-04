@@ -35,8 +35,10 @@ _NON_SCRIPTABLE_REMOTE_MODULE_MODULE = (
 
 
 # RPC handler.
-def _instantiate_template(module_interface_cls):
-    instantiator.instantiate_scriptable_remote_module_template(module_interface_cls)
+def _instantiate_template(module_interface_cls, enable_moving_cpu_tensors_to_cuda):
+    instantiator.instantiate_scriptable_remote_module_template(
+        module_interface_cls, enable_moving_cpu_tensors_to_cuda
+    )
 
 
 def _create_module(module_cls, args, kwargs, device="cpu", module_interface_cls=None):
@@ -101,7 +103,7 @@ class _RemoteModule(nn.Module):
         ``def forward_async(input: Tensor) -> Future[Tensor]:``.
 
         .. note::
-            If the remote module is placed on cuda device,
+            If the remote module is placed on a cuda device,
             any input CPU tensors will be automatically moved to the same cuda device,
             and GPU tensors are returned over the wire according to the device map of the remote worker on TensorPipe RPC backend.
 
@@ -165,7 +167,14 @@ class _RemoteModule(nn.Module):
 
         self.on, self.device = _parse_remote_device(remote_device)
         agent = rpc._get_current_rpc_agent()
+        # If the device map of the remote worker is set,
+        # then enable moving any input CPU tensors to the same cuda device.
         self.is_device_map_set = bool(agent._get_device_map(agent.get_worker_info(self.on)))
+        # ``enable_moving_cpu_tensors_to_cuda`` is less strict than ``is_device_map_set``:
+        # If ``enable_moving_cpu_tensors_to_cuda`` is true, but the device map is not set,
+        # then any CPU tensors can still be moved to a cuda device to run forward,
+        # but the output must be moved back to CPU before being sent over the wire.
+        enable_moving_cpu_tensors_to_cuda = torch.device(self.device).type == "cuda"
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
@@ -173,13 +182,15 @@ class _RemoteModule(nn.Module):
 
             # Instantiate template on remote side.
             fut = rpc.rpc_async(
-                self.on, _instantiate_template, (_module_interface_cls,)
+                self.on,
+                _instantiate_template,
+                (_module_interface_cls, enable_moving_cpu_tensors_to_cuda),
             )
 
             # Instantiate template on local side.
             generated_module = (
                 instantiator.instantiate_scriptable_remote_module_template(
-                    _module_interface_cls
+                    _module_interface_cls, enable_moving_cpu_tensors_to_cuda
                 )
             )
             generated_methods = generated_module._generated_methods
