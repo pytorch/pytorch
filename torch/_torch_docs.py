@@ -6704,8 +6704,8 @@ where `Q` is represented using Householder reflectors `(input, tau)`.
 See `Representation of Orthogonal or Unitary Matrices`_ for further details.
 
 If :attr:`left` is `True` then `op(Q)` times `C` is computed, otherwise the result is `C` times `op(Q)`.
-When ``left==True`` the implicit matrix `Q` has the size  :math:`m \times m`,
-and it is of size :math:`n \times n` otherwise.
+When :attr:`left` is `True`, the implicit matrix `Q` has size :math:`m \times m`.
+It has size :math:`n \times n` otherwise.
 If :attr:`transpose` is `True` then `op` is the conjugate transpose operation, otherwise it's a no-op.
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
@@ -6717,7 +6717,8 @@ Also supports batched inputs, and, if the input is batched, the output is batche
         from the QR decomposition.
 
 Args:
-    input (Tensor): tensor of shape `(*, mn, k)` where `*` is zero or more batch dimensions.
+    input (Tensor): tensor of shape `(*, mn, k)` where `*` is zero or more batch dimensions
+                    and `mn` equals to `m` or `n` depending on the :attr:`left`.
     tau (Tensor): tensor of shape `(*, min(mn, k))` where `*` is zero or more batch dimensions.
     other (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     left (bool): controls the order of multiplication.
@@ -6725,14 +6726,6 @@ Args:
 
 Keyword args:
     out (Tensor, optional): the output Tensor. Ignored if `None`. Default: `None`.
-
-Raises:
-    RuntimeError:
-        if :attr:`input` and :attr:`other` have incompatible shapes for the matrix multiplication.
-
-    RuntimeError:
-        if size of :attr:`tau` vector is larger than number of rows (when ``left=True``)
-        or columns (when ``left=False``) of :attr:`other`.
 
 .. _Representation of Orthogonal or Unitary Matrices:
     https://www.netlib.org/lapack/lug/node128.html
