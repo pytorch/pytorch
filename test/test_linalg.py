@@ -219,7 +219,8 @@ class TestLinalg(TestCase):
         m_ge_n_sizes = [(m, m // 2) for m in ms] + [(m, m) for m in ms]
         # cases m < n are only supported on CPU and for cuSOLVER path on CUDA
         m_l_n_sizes = [(m // 2, m) for m in ms]
-        matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if cusolver_available else [])
+        include_m_l_n_case = (cusolver_available or device == 'cpu')
+        matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if include_m_l_n_case else [])
         batches = [(), (2,), (2, 2), (2, 2, 2)]
         # we generate matrices with singular values sampled from a normal distribution,
         # that is why we use `cond=1.0`, the mean to cut roughly half of all

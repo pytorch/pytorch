@@ -2875,6 +2875,9 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& infos) {
         const_cast<Tensor&>(infos),
         upper, transpose, conjugate_transpose, unitriangular);
 
+    // B matrix has the size max(m, n) x nrhs
+    // triangular_solve_kernel writes its output into the first m rows of B leaving the rest untouched
+    // we need to set the rest of the rows to zero so that the multiplication from step 3 is correct
     B.narrow(-2, m, n - m).zero_();
 
     auto tau_expand_batch = expand_batch_portion;
