@@ -70,10 +70,8 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         return g.op("Split", self, split_size_or_sizes, axis_i=dim, outputs=_outputs)
     split_size = sym_help._get_const(split_size_or_sizes, 'i', 'split_size')
 
-    sizes = self.type().sizes()
-    if sizes is not None and sizes[dim] is not None:
-        size = sizes[dim]
-    else:
+    size = sym_help._get_tensor_dim_size(dim)
+    if size is None:
         if _outputs is not None:
             size = split_size * _outputs
         else:
