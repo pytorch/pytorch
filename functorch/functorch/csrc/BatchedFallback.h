@@ -21,6 +21,9 @@ namespace functorch {
 // write batching rules for operators whenever possible.
 void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
+bool isVmapFallbackWarningEnabled();
+void setVmapFallbackWarningEnabled(bool enabled);
+
 
 }
 } // namespace at
