@@ -1655,6 +1655,7 @@ void initJitScriptBindings(PyObject* module) {
       "_import_ir_module_from_package",
       [](std::shared_ptr<CompilationUnit> cu,
          std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
+         std::shared_ptr<torch::jit::StorageContextTracker> storage_tracker,
          py::object map_location,
          std::string ts_id) {
         c10::optional<at::Device> optional_device;
@@ -1666,6 +1667,7 @@ void initJitScriptBindings(PyObject* module) {
         return import_ir_module(
             std::move(cu),
             std::move(reader),
+            std::move(storage_tracker),
             optional_device,
             std::move(ts_id));
       });

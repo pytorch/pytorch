@@ -1044,6 +1044,26 @@ void initJITBindings(PyObject* module) {
         return self.getAllRecords();
       });
 
+  // Used by torch.Package to coordinate deserialization of storages across
+  // ScriptModules and eager modules
+  py::class_<StorageContextTracker, std::shared_ptr<StorageContextTracker>>(
+      m, "StorageContextTracker")
+      .def(py::init<>())
+      .def(
+          "get_tensor_impl",
+          [](StorageContextTracker& self, const std::string& name) {
+            auto tensor_impl = self.getStorage(name);
+            return at::Tensor(std::move(tensor_impl));
+          })
+      .def(
+          "add_tensor_impl",
+          [](StorageContextTracker& self,
+             const std::string& name,
+             const at::Tensor& tensor) {
+            self.addStorage(name, tensor.getIntrusivePtr());
+          })
+      .def("has_tensor_impl", &StorageContextTracker::hasStorage);
+
   m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
