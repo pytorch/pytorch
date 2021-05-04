@@ -1431,6 +1431,15 @@ endif()
 
 # ---[ Onnx
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
+
+  include_directories(../third_party/optimizer)
+  set(ONNX_SRCS
+    "../third_party/optimizer/onnxoptimizer/optimize.cc"
+    "../third_party/optimizer/onnxoptimizer/pass.cc"
+    "../third_party/optimizer/onnxoptimizer/pass_registry.cc"
+    "../third_party/optimizer/onnxoptimizer/pass_manager.cc")
+  list(APPEND Caffe2_CPU_SRCS ${ONNX_SRCS})
+
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
   endif()
