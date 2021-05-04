@@ -2367,7 +2367,7 @@ void check_linalg_matrix_norm_args(
   TORCH_CHECK(
       in_dtype == kFloat || in_dtype == kDouble || in_dtype == kComplexFloat ||
           in_dtype == kComplexDouble,
-      "linalg.matrix_norm(): only supports floating point and complex dtypes, but got: ",
+      "linalg.matrix_norm(): only supports the float, double, cfloat and cdouble dtypes, but got: ",
       toString(in_dtype));
   TORCH_CHECK(
       dim.size() == 2, "linalg.matrix_norm(): dim must be a 2-tuple of ints");

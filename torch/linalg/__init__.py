@@ -1138,8 +1138,8 @@ If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
 
-- The norm will be computed over the dimensions specified by the 2-tuple :attr:`dim`
-  and the other dimensions will be treated as batch dimensions.
+The norm will be computed over the dimensions specified by the 2-tuple :attr:`dim`
+and the other dimensions will be treated as batch dimensions.
 
 :attr:`ord` defines the matrix norm that is computed. The following norms are supported:
 
