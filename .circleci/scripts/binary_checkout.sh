@@ -61,7 +61,8 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+# TODO: switch this back!
+retry git clone -q https://github.com/janeyx99/builder.git -b fix-windows-11.3 "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
 git --no-pager log --max-count 1

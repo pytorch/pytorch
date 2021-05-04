@@ -5,9 +5,9 @@ set -eux -o pipefail
 source /env
 
 # Defaults here so they can be changed in one place
-export MAX_JOBS=${MAX_JOBS:-$(( $(nproc) - 2 ))}
+export MAX_JOBS=18      # ${MAX_JOBS:-$(( $(nproc) - 2 ))}
 
-if [[ "${DESIRED_CUDA}" == "cu111" ]]; then
+if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
   export BUILD_SPLIT_CUDA="ON"
 fi
 
