@@ -44,6 +44,7 @@ def skip_init(module_cls, device='cpu'):
         raise RuntimeError('Expected a Module; got {}'.format(module_cls))
     if 'device' not in inspect.signature(module_cls).parameters:
         raise RuntimeError('Module must support a \'device\' arg to skip initialization')
+
     def _instantiate(*args, **kwargs):
         return module_cls(*args, **kwargs, device='meta').to_empty(device=device)
     return _instantiate
