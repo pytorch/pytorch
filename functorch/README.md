@@ -61,7 +61,7 @@ pip install --user "git+https://github.com/zou3519/functorch.git"
 ```
 
 Run a quick sanity check in python:
-```
+```py
 >>> import torch
 >>> from functorch import vmap
 >>> x = torch.randn(3)
@@ -91,7 +91,10 @@ Right now, we support the following transforms:
 - `vmap`
 
 Furthermore, we have some utilities for working with PyTorch modules.
-- `make_functional_with_buffers`
+- `make_functional(model)` takes a model and returns its weights and a function
+version of the model that has no state.
+- `make_functional_with_buffers(model)` takes a model and returns its weights 
+and buffers and a function version of the model that has no state.
 
 ### vmap
 
