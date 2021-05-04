@@ -1815,11 +1815,9 @@ class TestTEFuser(JitTestCase):
                 self.assertEqual(len(self.findFusionGroups(t.graph_for(x))), 0)
 
     def test_superslomo(self):
-        devices = []
-        if RUN_CUDA:
-            devices.append("cuda")
-        if LLVM_ENABLED:
-            devices.append("cpu")
+        devices = self.devices
+        if not LLVM_ENABLED:
+            devices.remove("cpu")
         for device in devices:
             # Test extracted from Super-SloMo: https://github.com/avinashpaliwal/Super-SloMo
             # A few interesting things happen here: strided inputs of mixed size,
