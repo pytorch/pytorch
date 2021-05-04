@@ -116,20 +116,26 @@ bool opIsRegistered(const c10::Symbol& op_name) {
   return SROperatorRegistry()->Has(name);
 }
 
-bool canRunOutOfPlace(Node* n) {
-  auto op_name = std::string(n->kind().toQualString());
-  return SROperatorRegistry()->Has(op_name);
+// Expensive check, use sparingly.
+// This is needed to make sure that we only switch to out variants for the
+// supported overloads, which is checked in the `Generate` step in
+// `SROperatorRegistry()->Create(op_name)->Generate(n)`
+bool canReuseInputsOutputs(Node* n) {
+  return getOutOfPlaceOperation(n) != nullptr;
 }
 
-// Keep function canReuseInputsOutputs because the name canReuseInputsOutputs is
-// more informative where it's used
-bool canReuseInputsOutputs(Node* n) {
-  return canRunOutOfPlace(n);
+std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
+  auto op_name = n->kind().toQualString();
+  if (SROperatorRegistry()->Has(op_name)) {
+    return SROperatorRegistry()->Create(op_name)->Generate(n);
+  }
+
+  return nullptr;
 }
 
 // TODO: expand to include all view producing ops, mostly in
 // https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/TensorShape.cpp
-bool canRunNatively(Node* n) {
+bool mayRunNatively(Node* n) {
   // In alphabetical order
   const static std::unordered_set<std::string> native_nodes{
       "aten::flatten",
@@ -146,10 +152,6 @@ bool canRunNatively(Node* n) {
   if (!native_nodes.count(str)) {
     return false;
   }
-  if (str == "aten::to") {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    return n->inputs().size() == 5;
-  }
   return true;
 }
 
@@ -158,7 +160,7 @@ bool canRunNatively(Node* n) {
 // This means the IValues will not change run to run
 bool inputsCanRunOutOfPlace(Node* n) {
   for (auto* input : n->inputs()) {
-    if (!canRunOutOfPlace(input->node())) {
+    if (!canReuseInputsOutputs(input->node())) {
       return false;
     }
   }
@@ -167,11 +169,11 @@ bool inputsCanRunOutOfPlace(Node* n) {
 
 bool isOptimizableContainerType(Node* n) {
   const auto& type = n->output()->type();
+  bool is_supported_type = false;
   if (type->kind() == TypeKind::ListType) {
     const auto& list_type = type->expectRef<ListType>();
-    bool is_tensor_list =
+    is_supported_type =
         list_type.getElementType()->kind() == TypeKind::TensorType;
-    return is_tensor_list && inputsCanRunOutOfPlace(n);
   } else if (type->kind() == TypeKind::TupleType) {
     const auto& tuple_type = type->expectRef<TupleType>();
     auto types = tuple_type.containedTypes();
@@ -179,10 +181,9 @@ bool isOptimizableContainerType(Node* n) {
         std::find_if(types.begin(), types.end(), [](const TypePtr& elem) {
           return elem->kind() == TypeKind::TensorType;
         });
-    bool is_tensor_tuple = iter != types.end();
-    return is_tensor_tuple && inputsCanRunOutOfPlace(n);
+    is_supported_type = iter != types.end();
   }
-  return false;
+  return is_supported_type && inputsCanRunOutOfPlace(n);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -770,7 +771,6 @@ REGISTER_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       // support 4- or 5-arg for adindexer/adfinder models
       TORCH_CHECK(n->inputs().size() == 4 || n->inputs().size() == 5);
-
       return [](ProcessedNode* p_node) {
         const auto& self = p_node->Input(0).toTensor();
         if (p_node->Output(0).isNone()) {
@@ -879,15 +879,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
     at::native::sum_out(self, dim, keepdim, dtype, output);
   };
 });
-
-std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
-  auto op_name = n->kind().toQualString();
-  if (SROperatorRegistry()->Has(op_name)) {
-    return SROperatorRegistry()->Create(op_name)->Generate(n);
-  }
-
-  return [](ProcessedNode*) { TORCH_CHECK(0); };
-}
 
 std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
   if (n->kind() == c10::Symbol::fromQualString("aten::transpose")) {
@@ -1040,8 +1031,10 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
           at::native::slice(self, dim, start, start + length, 1);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::to")) {
+    if (n->inputs().size() != 5) {
+      return nullptr;
+    }
     return [](ProcessedNode* p_node) {
-      DCHECK(p_node->inputs().size() == 5);
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in2_i = p_node->Input(2).toBool();
       const auto in3_i = p_node->Input(3).toBool();
@@ -1059,7 +1052,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       }
     };
   }
-  return [](ProcessedNode*) { TORCH_CHECK(0); };
+  return nullptr;
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1303,14 +1296,17 @@ REGISTER_OPERATOR_FUNCTOR(
  * norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False)
  */
 REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
-  TORCH_CHECK(
-      n->inputs().size() > 2,
-      "Please implement static runtime support for aten::norm 2-arg version");
+  if (n->inputs().size() <= 2) {
+    LOG(ERROR)
+        << "Please implement static runtime support for aten::norm 2-arg version";
+    return nullptr;
+  }
+  // check that the third arg is scalar or int[]
   auto val_2 = toIValue(n->inputs()[2]);
-  if (val_2) {
-    TORCH_CHECK(
-        val_2->isIntList() || val_2->isInt(),
-        "Please implement static runtime support for aten::norm w/ DimnameList");
+  if (val_2 && !(val_2->isIntList() || val_2->isInt())) {
+    LOG(ERROR)
+        << "Please implement static runtime support for aten::norm w/ DimnameList";
+    return nullptr;
   }
 
   return [](ProcessedNode* p_node) {
