@@ -31,6 +31,7 @@ bool FlexibleTopKOp<T, Context>::RunOnDevice() {
   CAFFE_ENFORCE_GT(input.dim(), 0);
   vector<int64_t> input_dims = input.sizes().vec();
   vector<int64_t> linear_shape = {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       size_to_dim_(input_dims.size() - 1, input_dims), input_dims.back()};
   CAFFE_ENFORCE_EQ(
       linear_shape[0],
@@ -72,9 +73,11 @@ bool FlexibleTopKOp<T, Context>::RunOnDevice() {
     int64_t k_ = k_data[i];
     for (int64_t j = 0; j < linear_shape[1]; ++j) {
       const T value = input_data[i * linear_shape[1] + j];
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (PQ.size() < k_ || value > PQ.top().first) {
         PQ.push(std::make_pair(value, j));
       }
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (PQ.size() > k_) {
         PQ.pop();
       }
@@ -125,11 +128,14 @@ bool FlexibleTopKGradientOp<T, Context>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(FlexibleTopK, FlexibleTopKOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FlexibleTopKGradient,
     FlexibleTopKGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FlexibleTopK)
     .NumInputs(2)
     .NumOutputs(2)
@@ -164,6 +170,7 @@ first.
         "Tensor of shape [ \\sum_i K[i, 1] ] containing the indices "
         "into the flatten input");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FlexibleTopKGradient).NumInputs(4).NumOutputs(1);
 
 class GetFlexibleTopKGradient : public GradientMakerBase {
@@ -177,6 +184,7 @@ class GetFlexibleTopKGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(FlexibleTopK, GetFlexibleTopKGradient);
 
 } // namespace caffe2
