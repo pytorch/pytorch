@@ -140,7 +140,7 @@ void SparseCsrTensorImpl::set_member_tensors(
 
   TORCH_CHECK(
         crow_indices.get_device() == values.get_device(),
-        "device of csr indices (",
+        "device of crow_indices (",
         crow_indices.get_device(),
         ") must match device of values (",
         values.get_device(),
