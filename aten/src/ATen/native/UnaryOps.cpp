@@ -89,6 +89,13 @@ TORCH_META_FUNC(sign) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(trunc) (const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "trunc is not supported for complex inputs");
+  build_unary_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -130,6 +137,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(reciprocal)
 CREATE_UNARY_TORCH_IMPL_FUNC(round)
 CREATE_UNARY_TORCH_IMPL_FUNC(rsqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(sigmoid)
+CREATE_UNARY_TORCH_IMPL_FUNC(sign)
 CREATE_UNARY_TORCH_IMPL_FUNC(sin)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
@@ -138,7 +146,8 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
-CREATE_UNARY_TORCH_IMPL_FUNC(sign)
+CREATE_UNARY_TORCH_IMPL_FUNC(trunc)
+
 
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
@@ -485,16 +494,6 @@ Tensor& nan_to_num_(
   return at::nan_to_num_out(self, self, nan, pos_inf, neg_inf);
 }
 
-Tensor& trunc_out(const Tensor& self, Tensor& result) {
-  // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
-    "trunc is not supported for complex inputs");
-
-  return unary_op_impl_out(result, self, trunc_stub);
-}
-Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
-Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
-
 // Alias for trunc
 Tensor& fix_out(const Tensor& self, Tensor& result) { return at::trunc_out(result, self); }
 Tensor fix(const Tensor& self) { return self.trunc(); }
@@ -549,78 +548,6 @@ Tensor& signbit_out(const Tensor& self, Tensor& result) {
 Tensor signbit(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
   return at::signbit_out(result, self);
-}
-
-Tensor& clamp_out(const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max, Tensor& result) {
-  if (min && max) {
-    TORCH_CHECK(self.layout() == Layout::Strided,
-                "clamp only supports strided layout, got: ", self.layout());
-    auto iter = TensorIterator::unary_op(result, self);
-    clamp_stub(iter.device_type(), iter, *min, *max);
-  } else if (max) {
-    at::clamp_max_out(result, self, *max);
-  } else if (min) {
-    at::clamp_min_out(result, self, *min);
-  } else {
-    TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
-  }
-  return result;
-}
-
-Tensor clamp(const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_out(result, self, min, max);
-}
-
-Tensor& clamp_(Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
-  return at::clamp_out(self, self, min, max);
-}
-
-Tensor& clamp_max_out(const Tensor& self, const Scalar& max, Tensor& result) {
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "clamp_max only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::unary_op(result, self);
-  clamp_max_stub(iter.device_type(), iter, max);
-  return result;
-}
-
-Tensor clamp_max(const Tensor& self, const Scalar& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_max_out(result, self, max);
-}
-
-Tensor& clamp_max_(Tensor& self, const Scalar& max) {
-  return at::clamp_max_out(self, self, max);
-}
-
-Tensor& clamp_min_out(const Tensor& self, const Scalar& min, Tensor& result) {
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "clamp_min only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::unary_op(result, self);
-  clamp_min_stub(iter.device_type(), iter, min);
-  return result;
-}
-
-Tensor clamp_min(const Tensor& self, const Scalar& min) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_min_out(result, self, min);
-}
-
-Tensor& clamp_min_(Tensor& self, const Scalar& min) {
-  return at::clamp_min_out(self, self, min);
-}
-
-// Implements the "clip" alias for clamp
-Tensor& clip_out(const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max, Tensor& result) {
-  return at::clamp_out(result, self, min, max);
-}
-
-Tensor clip(const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
-  return at::clamp(self, min, max);
-}
-
-Tensor& clip_(Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
-  return at::clamp_(self, min, max);
 }
 
 Tensor polygamma(int64_t n, const Tensor& self) {
@@ -733,9 +660,6 @@ DEFINE_DISPATCH(asin_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(atan_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(bitwise_not_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(ceil_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_min_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(digamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
