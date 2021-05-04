@@ -3,7 +3,8 @@ from tools.codegen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
     dispatch_strategy,
 )
-from tools.codegen.api.types import Binding, DispatcherSignature, CppSignatureGroup
+from tools.codegen.api.types import (Binding, DispatcherSignature, CppSignatureGroup, CType,
+                                     BaseCType, OptionalCType, intT, boolT, intArrayRefT)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (
@@ -13,6 +14,7 @@ from tools.codegen.model import (
 from typing import List, Optional, Sequence, Tuple
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
+from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
 )
@@ -120,7 +122,7 @@ m.impl("${unqual_operator_name_with_overload}",
 
 INPLACE_REDISPATCH = CodeTemplate("""\
 {
-  at::AutoDispatchBelowInplaceOrView guard;
+  at::AutoDispatchBelowADInplaceOrView guard;
   at::redispatch::${api_name}(${unpacked_args});
 }
 """)
@@ -131,7 +133,7 @@ ${return_values} = ${rhs_value};
 
 VIEW_REDISPATCH = CodeTemplate("""\
 ${assign_return_values} ([&]() {
-  at::AutoDispatchBelowInplaceOrView guard;
+  at::AutoDispatchBelowADInplaceOrView guard;
   return at::redispatch::${api_name}(${unpacked_args});
 })();
 """)
@@ -185,7 +187,7 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
         ))
         unpacked_bindings.append(Binding(
             name=binding.name + '_',
-            ctype=binding.ctype,
+            nctype=binding.nctype,
             argument=binding.argument,
             default=binding.default,
         ))
@@ -228,26 +230,30 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
     input_base = 'input_base'
     replay_view_func = ''
     updated_unpacked_args: List[str] = []
-    known_view_arg_simple_types: List[str] = ['int64_t', 'c10::optional<int64_t>', 'bool', 'IntArrayRef']
+    known_view_arg_simple_types: List[CType] = [
+        BaseCType(intT),
+        OptionalCType(BaseCType(intT)),
+        BaseCType(boolT),
+        BaseCType(intArrayRefT)]
     for unpacked_binding in unpacked_bindings:
-        arg, arg_type = unpacked_binding.name, unpacked_binding.type
+        arg, arg_type = unpacked_binding.name, unpacked_binding.nctype.type
         if arg == 'self_':
             updated_unpacked_args.append(input_base)
             continue
         if arg_type not in known_view_arg_simple_types:
-            known_types_str = ', '.join(known_view_arg_simple_types)
+            known_types_str = ', '.join([str(t) for t in known_view_arg_simple_types])
             raise TypeError(f'You are adding an {arg_type} {arg} argument to op {cpp.name(f.func)} in addition to known types: '
                             f'{known_types_str}. Please update the list or materialize it so that it can be closed '
                             'over by value, also add a test in pytorch/xla/test/test_operations.py where this code '
                             'is exercised.')
 
-        if arg_type == 'IntArrayRef':
+        if arg_type == BaseCType(intArrayRefT):
             # It's not safe to close over IntArrayRef by value, since this is a
             # reference type, so materialize a vector to close over by value
             arg_vec = arg + '_vec'
             replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
             updated_unpacked_args.append(arg_vec)
-        elif arg_type == 'c10::optional<int64_t>':
+        elif arg_type == OptionalCType(BaseCType(intT)):
             # Materialize int64_t? to int64_t
             arg_value = arg + '_val'
             replay_view_func += OPTIONAL_TO_VAL.substitute(arg=arg, val=arg_value, default='0')
@@ -316,6 +322,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
 def modifies_arguments(f: NativeFunction) -> bool:
     return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
 
+@with_native_function_with_differentiability_info
 def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     f = fn.func
     inplace_view_body: List[str] = []
@@ -323,9 +330,9 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    # code-generated InplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
+    # code-generated ADInplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
     # See Note [Plumbing Keys Through The Dispatcher] for details.
-    dispatch_key_set = 'ks & c10::after_InplaceOrView_keyset'
+    dispatch_key_set = 'ks & c10::after_ADInplaceOrView_keyset'
     redispatch_args = ', '.join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
@@ -368,17 +375,19 @@ def gen_formals(f: NativeFunction) -> str:
          for a in f.func.schema_order_arguments()]
     )
 
+@with_native_function_with_differentiability_info
 def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
     if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     return METHOD_DEFINITION.substitute(
-        return_type=cpp.returns_type(f.func.returns),
+        return_type=cpp.returns_type(f.func.returns).cpp_type(),
         type_wrapper_name=type_wrapper_name(f),
         formals=gen_formals(f),
         type_definition_body=emit_inplace_or_view_body(fn),
     )
 
+@with_native_function_with_differentiability_info
 def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
     if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
@@ -386,7 +395,7 @@ def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityI
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,
         type_wrapper_name=type_wrapper_name(f),
-        class_type='InplaceOrView',
+        class_type='ADInplaceOrView',
     )
 
 def use_derived(fn: NativeFunctionWithDifferentiabilityInfo) -> bool:
@@ -400,8 +409,8 @@ def gen_inplace_or_view_type_shard(
 
     filtered_fns_with_infos = list(filter(use_derived, fns_with_infos))
 
-    fm.write_with_template('InplaceOrViewType%s.cpp' % suffix, 'InplaceOrViewType.cpp', lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/InplaceOrViewType.cpp',
+    fm.write_with_template('ADInplaceOrViewType%s.cpp' % suffix, 'ADInplaceOrViewType.cpp', lambda: {
+        'generated_comment': f'@generated from {fm.template_dir}/ADInplaceOrViewType.cpp',
         'inplace_or_view_method_definitions': list(mapMaybe(inplace_or_view_method_definition, filtered_fns_with_infos)),
         'inplace_or_view_wrapper_registrations': list(mapMaybe(inplace_or_view_method_registration, filtered_fns_with_infos)),
     })

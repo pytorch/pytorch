@@ -30,7 +30,7 @@ def is_in_onnx_export():
     return __IN_ONNX_EXPORT
 
 # Skip check due to cannot import IValue from torch._C
-_params_dict = {}  # type: ignore
+_params_dict = {}  # type: ignore[var-annotated]
 
 @contextlib.contextmanager
 def select_model_mode_for_export(model, mode):
@@ -200,12 +200,12 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
 
-        torch._C._jit_pass_onnx_scalar_type_analysis(graph)
+        from torch.onnx.symbolic_helper import _export_onnx_opset_version
+        torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
         torch._C._jit_pass_lint(graph)
 
         torch._C._jit_pass_onnx_fold_if(graph)
 
-        from torch.onnx.symbolic_helper import _export_onnx_opset_version
         torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
         torch._C._jit_pass_lint(graph)
 
@@ -466,9 +466,9 @@ def _model_to_graph(model, args, verbose=False,
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
         if not (isinstance(torch_out, list) or isinstance(torch_out, tuple)):
-            output_wrapped = [torch_out]  # type: ignore
+            output_wrapped = [torch_out]
         else:
-            output_wrapped = torch_out  # type: ignore
+            output_wrapped = torch_out  # type: ignore[assignment]
 
         output_tensors, out_desc = torch._C._jit_flatten(tuple(output_wrapped))
         torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
@@ -1115,7 +1115,7 @@ def _graph_constant(g, value, dims, type, *args, **kwargs):
     else:
         raise ValueError("Unknown type, type should be one of the following strings: "
                          "char, short, int, long, half, float, double")
-    tensor.fill_(value)  # type: ignore
+    tensor.fill_(value)  # type: ignore[call-overload]
     if isscalar:
         return g.op("Constant", *args, value_z=tensor, **kwargs)
     return g.op("Constant", *args, value_t=tensor, **kwargs)
@@ -1188,8 +1188,8 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
             dynamic_axes[key] = value_dict
 
 
-torch._C.Graph.op = _graph_op  # type: ignore
-torch._C.Graph.at = _graph_at  # type: ignore
-torch._C.Block.op = _block_op  # type: ignore
-torch._C.Graph.constant = _graph_constant  # type: ignore
-torch._C.Node.__getitem__ = _node_getitem  # type: ignore
+torch._C.Graph.op = _graph_op  # type: ignore[attr-defined]
+torch._C.Graph.at = _graph_at  # type: ignore[attr-defined]
+torch._C.Block.op = _block_op  # type: ignore[attr-defined]
+torch._C.Graph.constant = _graph_constant  # type: ignore[attr-defined]
+torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc]
