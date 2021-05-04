@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
@@ -110,7 +111,8 @@ std::string getModuleTypeName(const Module& module, const std::string& prefix) {
 std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     const Module& module,
     const Function& func,
-    bool save_mobile_debug_info) {
+    const bool save_mobile_debug_info,
+    const SourceRangeTagMap& source_range_tag_map) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
@@ -122,6 +124,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   std::vector<c10::OperatorName> opnames;
   std::vector<std::string> method_names;
   std::vector<std::string> op_module_paths;
+  std::vector<int64_t> op_source_debug_tags;
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
     if (ins.op == OP || ins.op == OPN) {
@@ -129,7 +132,30 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       opnames.emplace_back(node->schema().operator_name());
       if (save_mobile_debug_info) {
         std::string root_scope_string = getModuleTypeName(module, "top");
+        // A little explanation as to why node->sourceRange() is not enough
+        // and we need to do node->sourceRange().findSourceRangeThatGenerated()
+        // When you do m = torch.jit.script/trace(model)
+        // the scripted model has graphs for methods with nodes.
+        // The nodes of this graph are annotated with sourceRange that is
+        // original python code. However when such a model is serialized via
+        // torch.jit.save, what is saved is compiled python code of the model.
+        // The compiled code for methods is effectively compiled graph which
+        // contains prim/aten etc. ops. This is not the same as original python
+        // code. When such a serialized model is loaded via torch.jit.load,
+        // node->sourceRange() does not point to original python code but points
+        // to transformed/compiled python code. So in order to get original
+        // python code which is serialized in debug_pkl, it is necessary to do
+        // node->sourceRange().findSourceRangeThatGenerated()
+        auto source_range = node->sourceRange().findSourceRangeThatGenerated()
+            ? node->sourceRange().findSourceRangeThatGenerated().value()
+            : node->sourceRange();
+        int64_t source_range_tag{-1};
+        const auto& it = source_range_tag_map.find(source_range);
+        if (it != source_range_tag_map.end()) {
+          source_range_tag = it->second;
+        }
         op_module_paths.emplace_back(getModulePath(node, root_scope_string));
+        op_source_debug_tags.emplace_back(source_range_tag);
       }
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
@@ -280,12 +306,22 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   c10::optional<IValue> debug_info_vals;
   if (save_mobile_debug_info) {
     // module debug info
-    std::vector<IValue> module_paths;
-    module_paths.reserve(op_module_paths.size());
-    for (auto& path : op_module_paths) {
-      module_paths.emplace_back(std::move(path));
+    // Temporarily adding source debug tag here.
+    // In the diffs to follow we should move to serializing
+    // InlinedCallStack.
+    // Then we will just serialize either a vector or dictionary
+    // of debug handles, a.k.a PCs for lite interpreter,
+    // to InlinedCallStack
+    std::vector<IValue> module_debug_tuples;
+    module_debug_tuples.reserve(op_module_paths.size());
+    for (size_t i = 0; i < op_module_paths.size(); ++i) {
+      auto& path = op_module_paths[i];
+      int64_t source_debug_tag = op_source_debug_tags[i];
+      module_debug_tuples.emplace_back(
+          c10::ivalue::Tuple::create({std::move(path), source_debug_tag}));
     }
-    auto module_debug_info = Table({{"module_debug_info", Tup(module_paths)}});
+    auto module_debug_info =
+        Table({{"module_debug_info", Tup(module_debug_tuples)}});
     debug_info_vals = Tup({func.qualname().qualifiedName(), module_debug_info});
   }
   return std::make_pair(bytecode_vals, debug_info_vals);
@@ -297,7 +333,8 @@ void setstateTuple(
     std::vector<c10::IValue>& elements,
     std::unordered_set<std::string>& qn_cache,
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
-    bool save_mobile_debug_info) {
+    const bool save_mobile_debug_info,
+    const SourceRangeTagMap& source_range_map) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
@@ -309,8 +346,8 @@ void setstateTuple(
       return;
     }
     if (setstate.isGraphFunction()) {
-      auto func_tuple =
-          getFunctionTuple(module, setstate, save_mobile_debug_info);
+      auto func_tuple = getFunctionTuple(
+          module, setstate, save_mobile_debug_info, source_range_map);
       elements.push_back(func_tuple.first);
       qn_cache.emplace(qn);
       if (save_mobile_debug_info) {
@@ -325,7 +362,8 @@ void setstateTuple(
           elements,
           qn_cache,
           debug_info_elements,
-          save_mobile_debug_info);
+          save_mobile_debug_info,
+          source_range_map);
     }
   }
 }
@@ -335,7 +373,8 @@ void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements, // note: appended to in-place
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
-    bool save_mobile_debug_info) {
+    const bool save_mobile_debug_info,
+    const SourceRangeTagMap& source_range_map = SourceRangeTagMap()) {
   auto methods = module.get_methods();
   std::unordered_set<std::string> qn_cache;
   // top level methods
@@ -344,8 +383,8 @@ void moduleMethodsTuple(
     if (qn_cache.find(qn) != qn_cache.end()) {
       continue;
     }
-    auto func_tuple =
-        getFunctionTuple(module, method.function(), save_mobile_debug_info);
+    auto func_tuple = getFunctionTuple(
+        module, method.function(), save_mobile_debug_info, source_range_map);
     elements.push_back(func_tuple.first);
     qn_cache.emplace(qn);
     if (save_mobile_debug_info) {
@@ -360,7 +399,8 @@ void moduleMethodsTuple(
       elements,
       qn_cache,
       debug_info_elements,
-      save_mobile_debug_info);
+      save_mobile_debug_info,
+      source_range_map);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -488,6 +528,15 @@ class ScriptModuleSerializer {
     }
   }
 
+  void updateSourceRangeTags(const SourceRangeRecords& ranges) {
+    for (const auto& range : ranges) {
+      if (source_range_tags_.find(range.range) == source_range_tags_.end()) {
+        source_range_tags_[range.range] = current_source_range_tag_;
+        current_source_range_tag_++;
+      }
+    }
+  }
+
   void writeCode(const at::NamedTypePtr& root_type) {
     class_deps_.add(root_type);
     for (size_t i = 0; i < class_deps_.size(); ++i) {
@@ -496,6 +545,7 @@ class ScriptModuleSerializer {
       convertNamedType(class_deps_[i]);
     }
 
+    current_source_range_tag_ = 0;
     // Mapping of filename => src. We need this because multiple classes may go
     // in the same file (e.g. foo.bar.Baz and foo.bar.Qux)
     for (auto& item : file_streams_) {
@@ -517,7 +567,9 @@ class ScriptModuleSerializer {
       // Write out the debug information
       std::string debugFilename = filename + ".debug_pkl";
       SourceRangePickler source_range_pickler;
-      auto range_data = source_range_pickler.pickle(item.value().ranges());
+      updateSourceRangeTags(item.value().ranges());
+      auto range_data = source_range_pickler.pickle(
+          item.value().ranges(), source_range_tags_);
       writer_.writeRecord(
           debugFilename,
           range_data.data(),
@@ -526,7 +578,7 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(const Module& module, bool save_mobile_debug_info) {
+  void writeByteCode(const Module& module, const bool save_mobile_debug_info) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -538,7 +590,11 @@ class ScriptModuleSerializer {
     }
 
     moduleMethodsTuple(
-        module, elements, debug_info_elements, save_mobile_debug_info);
+        module,
+        elements,
+        debug_info_elements,
+        save_mobile_debug_info,
+        source_range_tags_);
     auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
@@ -585,6 +641,32 @@ class ScriptModuleSerializer {
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
   // created
   OrderedDict<std::string, PythonPrint> file_streams_;
+
+  // Uniquely identifies a SourceRange in a model.
+  // SourceRanges are associated with Nodes of Graphs.
+  // However for mobile deployment we dont intend to ship
+  // full JIT with capabilities of reading code and constructing
+  // graphs.
+  // Instead we serialize the Code generated from graph of the methods.
+  // Code is serialized in bytecode format that contains instructions
+  // corresponding to the nodes of the graph. Since original graph is gone, the
+  // question is how do we identify where the ops, in serialized bytecode, come
+  // from in original model code. We do this in two parts.
+  // 1. Associate a unique tag to SourceRange.
+  // 2. Serialize this unique_tag.
+  //  2.1 Meaning save <byte_offset, source_range_tag, source range> instead of
+  //      <byte_offset, source range>
+  // 3. During serializing model for mobile, i.e. bytecode generation,
+  //    save unique tag of SourceRange corresponding to the Node.
+  // 4. During deserialization, read all the debug_pkl, to construct a map
+  //    of <unique_tag, SourceRange> and use tag saved with OPs in bytecode
+  //    to lookup the source range.
+  // Strictly speaking we will serialize InlinedCallStack directly, which
+  // contains SourceRange. This way we have access to entire callstack and not
+  // just source information about where the node is, since bytecode inlines the
+  // graph before saving it.
+  SourceRangeTagMap source_range_tags_;
+  int64_t current_source_range_tag_;
 };
 
 void ExportModule(
