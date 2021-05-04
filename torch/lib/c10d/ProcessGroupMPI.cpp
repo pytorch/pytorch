@@ -109,6 +109,7 @@ void ProcessGroupMPI::WorkMPI::finishCompleteErrorFuture(std::exception_ptr eptr
 
 void ProcessGroupMPI::WorkMPI::finishCompleteFuture() {
   future_->markCompleted(at::IValue(outputTensors_));
+  finish();
 }
 
 ProcessGroupMPI::AsyncWork::AsyncWork(

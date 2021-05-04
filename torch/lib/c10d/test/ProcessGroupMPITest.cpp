@@ -351,6 +351,31 @@ void testBackendName() {
   }
 }
 
+// void testError() {
+//   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
+
+//   // Generate inputs
+//   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
+//   auto tensor = at::ones({16, 16}) * 7;
+//   std::vector<at::Tensor> tensors = {tensor, tensor};
+
+//   // Queue the work.
+//   c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
+//       pg->allreduce(tensors);
+//   works.push_back(std::move(work));
+
+//   try {
+//     auto outputTensors = waitFuture(pg, works);
+//     throw std::runtime_error("Should raise std::runtime_error: "
+//                              "MPI process group does not support multi-GPU collectives!");
+//   } catch (std::runtime_error& err) {
+//     std::cerr << "except";
+//   } catch (...) {
+//     throw std::runtime_error("Should raise exception: "
+//                              "MPI process group does not support multi-GPU collectives!");
+//   }
+// }
+
 int main(int argc, char** argv) {
 #ifdef MPIEXEC
   // If we are within an openmpi mpirun, then skip the exec

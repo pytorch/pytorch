@@ -43,6 +43,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
+
 struct LazyStreamContext;
 
 using steady_clock_time_point =

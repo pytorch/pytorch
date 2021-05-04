@@ -47,6 +47,7 @@ from torch.testing._internal.common_distributed import (
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.cuda.amp import GradScaler, autocast
+from test_c10d_common import gpus_for_rank
 
 try:
     import torchvision
@@ -80,6 +81,11 @@ f = Foo(10)
 f.bar = 1
 
 foo_cpu_tensor = Foo(torch.randn(3, 3))
+
+import sys
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
 
 COLLECTIVES_OBJECT_TEST_LIST = [
@@ -412,7 +418,7 @@ class TestDistBackend(MultiProcessTestCase):
         # Skip return code checking for following tests as they are expected to
         # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
         self.skip_return_code_checks = [
-            self.test_ddp_model_diff_across_ranks.__wrapped__,
+        #    self.test_ddp_model_diff_across_ranks.__wrapped__,
         ]
 
     def tearDown(self):
@@ -3379,7 +3385,33 @@ class DistributedTest:
                 )
                 self._test_ddp_hook_parity(state=powersgd_state, hook=powerSGD.powerSGD_hook)
 
-        def _prepare_module(
+        def _prepare_single_device_module(
+                self,
+                rank,
+                process_group,
+                devices,
+                device_ids,
+                global_batch_size,
+                gradient_as_bucket_view=False,
+        ):
+            model = Net()
+            device = devices[0] if devices else torch.device("cuda:%d" % rank)
+            ddp_model = DistributedDataParallel(
+                copy.deepcopy(model).to(device),
+                device_ids=device_ids,
+                process_group=process_group,
+                bucket_cap_mb=0.001,
+                gradient_as_bucket_view=gradient_as_bucket_view,
+            )
+
+            model.to(device)
+
+            input = torch.randn(global_batch_size, 2).to(device)
+            target = torch.randn(global_batch_size, 4).to(device)
+
+            return model, ddp_model, input, target
+
+        def _prepare_cpu_module(
             self,
             process_group,
             global_batch_size,
@@ -3406,13 +3438,24 @@ class DistributedTest:
             the resulting gradients.
             """
             process_group = _get_default_group()
-            global_batch_size = get_world_size()
+            world_size = get_world_size()
             rank = dist.get_rank()
-            local_batch_size = 1
 
-            model, ddp_model, input, target = self._prepare_module(
-                process_group, global_batch_size, gradient_as_bucket_view
-            )
+            if BACKEND == "mpi":
+                global_batch_size = world_size
+                local_batch_size = 1
+                model, ddp_model, input, target = self._prepare_cpu_module(
+                    process_group, global_batch_size, gradient_as_bucket_view
+                )
+
+            if BACKEND == "nccl":
+                int_devices = gpus_for_rank(world_size)[rank][:1]
+                devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+                global_batch_size = world_size
+                local_batch_size = len(devices)
+                model, ddp_model, input, target = self._prepare_single_device_module(
+                    rank, process_group, devices, devices, global_batch_size, gradient_as_bucket_view
+                )
 
             if ddp_comm_hook is not None:
                 ddp_model.register_comm_hook(process_group, ddp_comm_hook)
@@ -3462,7 +3505,28 @@ class DistributedTest:
                 input = input[torch.randperm(global_batch_size)]
 
         @unittest.skipIf(
-            BACKEND != "mpi", "For now, this is MPI only test"
+            BACKEND != "mpi" and BACKEND != 'nccl',
+            "get_future is only supported on mpi and nccl"
+        )
+        def test_accumulate_gradients_no_sync(self):
+            """
+            Runs _test_accumulate_gradients_no_sync using default inputs
+            """
+            self._test_accumulate_gradients_no_sync()
+
+        @unittest.skipIf(
+            BACKEND != "mpi" and BACKEND != 'nccl',
+            "get_future is only supported on mpi and nccl"
+        )
+        def test_accumulate_gradients_no_sync_grad_is_view(self):
+            """
+            Runs _test_accumulate_gradients_no_sync using default inputs
+            """
+            self._test_accumulate_gradients_no_sync(gradient_as_bucket_view=True)
+
+        @unittest.skipIf(
+            BACKEND != "mpi" and BACKEND != 'nccl',
+            "get_future is only supported on mpi and nccl"
         )
         def test_accumulate_gradients_no_sync_allreduce_hook(self):
             """
@@ -3485,6 +3549,39 @@ class DistributedTest:
 
         @unittest.skipIf(
             BACKEND != "mpi" and BACKEND != 'nccl',
+            "get_future is only supported on mpi and nccl"
+        )
+        def test_accumulate_gradients_no_sync_allreduce_with_then_hook(self):
+            """
+            Runs multiple iterations on _test_accumulate_gradients_no_sync using allreduce
+            hook that also uses then callbacks. In first then callback result is multiplied
+            by 2, and the second callback divides the result by 2 * world_size. It validates
+            whether final result was properly passed as gradients in reducer.
+            """
+
+            world_size = get_world_size()
+
+            def allreduce_with_then_hook(
+                    process_group: object, bucket: dist.GradBucket
+            ) -> torch.futures.Future:
+                fut = process_group.allreduce([bucket.get_tensor()]).get_future()
+
+                def mult(fut):
+                    # Multiply the result by 2.
+                    return [2 * t for t in fut.wait()]
+
+                def div(fut):
+                    # Divide the result by 2 * world_size.
+                    return [t / (2 * world_size) for t in fut.wait()]
+
+                return fut.then(mult).then(div)
+
+            self._test_accumulate_gradients_no_sync(
+                num_iters=4, ddp_comm_hook=allreduce_with_then_hook
+            )
+
+        @unittest.skipIf(
+            BACKEND != "mpi",
             "get_future is only supported on mpi and nccl"
         )
         def test_get_future(self):
