@@ -1447,11 +1447,18 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/optimizer EXCLUDE_FROM_ALL)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
+  include_directories(../third_party/optimizer)
+
+  set(ONNX_OPTIMIZER_SRCS
+    "../third_party/optimizer/onnxoptimizer/optimize.cc"
+    "../third_party/optimizer/onnxoptimizer/pass.cc"
+    "../third_party/optimizer/onnxoptimizer/pass_registry.cc"
+    "../third_party/optimizer/onnxoptimizer/pass_manager.cc")
+
   if(NOT USE_SYSTEM_ONNX)
     include_directories(${ONNX_INCLUDE_DIRS})
     # In mobile build we care about code size, and so we need drop
@@ -1460,9 +1467,8 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
       caffe2_interface_library(onnx_proto onnx_library)
     else()
       caffe2_interface_library(onnx onnx_library)
-      caffe2_interface_library(onnx_optimizer onnx_optimizer_library)
     endif()
-    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library onnx_optimizer_library)
+    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library onnx_optimizer_library ${ONNX_SRCS})
     # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       target_compile_options(onnx PRIVATE -Wno-deprecated-declarations)
@@ -1480,14 +1486,8 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
       message(FATAL_ERROR "Cannot find onnx")
     endif()
     set_property(TARGET onnx_proto PROPERTY IMPORTED_LOCATION ${ONNX_PROTO_LIBRARY})
-    add_library(onnx_optimizer SHARED IMPORTED)
-    find_library(ONNX_OPTIMIZER_LIBRARY onnx_optimizer)
-    if(NOT ONNX_OPTIMIZER_LIBRARY)
-      message(FATAL_ERROR "Cannot find onnx optimizer")
-    endif()
-    set_property(TARGET onnx_optimizer PROPERTY IMPORTED_LOCATION ${ONNX_OPTIMIZER_LIBRARY})
-    message("-- Found onnx: ${ONNX_LIBRARY} ${ONNX_PROTO_LIBRARY} ${ONNX_OPTIMIZER_LIBRARY}")
-    list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx onnx_optimizer)
+    message("-- Found onnx: ${ONNX_LIBRARY} ${ONNX_PROTO_LIBRARY}")
+    list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx onnx_optimizer ${ONNX_SRCS})
   endif()
   include_directories(${FOXI_INCLUDE_DIRS})
   list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
