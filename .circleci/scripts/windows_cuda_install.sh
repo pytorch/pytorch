@@ -37,17 +37,20 @@ for elem in "${build_dirs[@]}"; do
 done
 
 # cuda_install_packages
+# https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html#install-cuda-software
 cuda10_packages_template="nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1"
 
 cuda11_packages_template="nvcc_11.1 cuobjdump_11.1 nvprune_11.1 nvprof_11.1 cupti_11.1 cublas_11.1 cublas_dev_11.1 cudart_11.1 cufft_11.1 cufft_dev_11.1 curand_11.1 curand_dev_11.1 cusolver_11.1 cusolver_dev_11.1 cusparse_11.1 cusparse_dev_11.1 npp_11.1 npp_dev_11.1 nvrtc_11.1 nvrtc_dev_11.1 nvml_dev_11.1"
 
 declare -a install_packages=(
-    "10, ${cuda10_packages_template}"
-    "11, ${cuda11_packages_template}"
+    "10.1, ${cuda10_packages_template}"
+    "11.1, ${cuda11_packages_template}"
+    "11.2, ${cuda11_packages_template}"
+    "11.3, ${cuda11_packages_template } thrust_11.3"
 )
 for elem in "${install_packages[@]}"; do
     IFS="," read -a pair <<< "$elem" # use comma as delimiter because packages includes whitespace
-    if [[ "$cuda_major_version" == "${pair[0]}" ]]; then
+    if [[ "$CUDA_VERSION" == "${pair[0]}" ]]; then
         packages_template="${pair[1]}"
         cuda_install_packages=${packages_template//[1-9][0-9*]\.[0-9]/$CUDA_VERSION}
         break
