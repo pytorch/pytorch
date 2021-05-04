@@ -71,20 +71,6 @@ bool Function::append_operator(
   return true;
 }
 
-void Function::set_module_debug_info_list_size(size_t size) {
-  pc_to_module_debug_info_.resize(size);
-  for (size_t i = 0; i < size; ++i) {
-    pc_to_module_debug_info_[i] = "<no module info>";
-  }
-}
-
-void Function::set_module_info(const std::string& module_info, size_t pc) {
-  TORCH_CHECK(
-      pc < pc_to_module_debug_info_.size(),
-      "Module debug info index out of boundary.");
-  pc_to_module_debug_info_[pc] = module_info;
-}
-
 void Function::append_constant(const c10::IValue& constant) {
   code_->constants_.push_back(constant);
 }
@@ -97,11 +83,12 @@ void Function::set_register_size(size_t size) {
   code_->register_size_ = size;
 }
 
-std::string Function::get_module_debug_info(size_t pc) const {
+int64_t Function::get_debug_handle(size_t pc) const {
+  TORCH_CHECK(code_, "Valid code must exist.");
   TORCH_CHECK(
-      pc < pc_to_module_debug_info_.size(),
+      pc < code_->debug_handles_.size(),
       "Module debug info index out of boundary.");
-  return pc_to_module_debug_info_[pc];
+  return code_->debug_handles_[pc];
 }
 
 void Function::setSchema(c10::FunctionSchema schema) {

@@ -60,6 +60,7 @@ jit_core_headers = [
     "torch/csrc/utils/memory.h",
     "torch/csrc/WindowsTorchApiMacro.h",
     "torch/csrc/jit/frontend/source_range.h",
+    "torch/csrc/jit/serialization/callstack_debug_info_serialization.h",
     "torch/csrc/jit/serialization/source_range_serialization.h",
     "torch/csrc/jit/frontend/lexer.h",
     "torch/csrc/jit/frontend/strtod.h",
@@ -136,6 +137,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
+    "torch/csrc/jit/backends/backend_debug_handler.cpp",
     "torch/csrc/jit/backends/backend_detail.cpp",
     "torch/csrc/jit/backends/backend_interface.cpp",
     "torch/csrc/jit/backends/backend_resolver.cpp",
@@ -244,6 +246,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/runtime/profiling_graph_executor_impl.cpp",
     "torch/csrc/jit/runtime/profiling_record.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
+    "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
     "torch/csrc/jit/serialization/import.cpp",
     "torch/csrc/jit/serialization/import_export_helpers.cpp",
     "torch/csrc/jit/serialization/import_source.cpp",
@@ -358,7 +361,9 @@ torch_mobile_core = [
 
 libtorch_lite_eager_symbolication = [
     "torch/csrc/jit/frontend/source_range.cpp",
+    "torch/csrc/jit/ir/scope.cpp",
     "torch/csrc/jit/mobile/debug_info.cpp",
+    "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
     "torch/csrc/jit/serialization/source_range_serialization.cpp",
     # Later we can split serialization and deserialization logic
     # to have better separation within build and only build relevant parts.
