@@ -413,7 +413,7 @@ class TestDistBackend(MultiProcessTestCase):
         # Skip return code checking for following tests as they are expected to
         # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
         self.skip_return_code_checks = [
-           self.test_ddp_model_diff_across_ranks.__wrapped__,
+            self.test_ddp_model_diff_across_ranks.__wrapped__,
         ]
 
     def tearDown(self):
