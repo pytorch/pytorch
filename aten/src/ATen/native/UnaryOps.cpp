@@ -66,6 +66,11 @@ CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
 
+TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
+  TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
+  build_unary_float_op(maybe_get_output(), self);
+}
+
 // These are normal unary ops that preserve dtype
 #define CREATE_UNARY_META_FUNC(func)                  \
   TORCH_META_FUNC(func) (const Tensor& self) {        \
@@ -140,6 +145,18 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
 CREATE_UNARY_TORCH_IMPL_FUNC(trunc)
+
+TORCH_IMPL_FUNC(polygamma_out)
+(int64_t n, const Tensor& self, const Tensor& result) {
+  polygamma_stub(device_type(), *this, n);
+}
+
+// since polygamma_ has different signature from its
+// out and functional variant, we explicitly
+// define it (instead of using structured kernel).
+Tensor& polygamma_(Tensor& self, int64_t n) {
+  return at::polygamma_out(self, n, self);
+}
 
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
@@ -548,21 +565,6 @@ Tensor& signbit_out(const Tensor& self, Tensor& result) {
 Tensor signbit(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
   return at::signbit_out(result, self);
-}
-
-Tensor polygamma(int64_t n, const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  at::polygamma_out(result, n, self);
-  return result;
-}
-Tensor& polygamma_(Tensor& self, int64_t n) {
-  return at::polygamma_out(self, n, self);
-}
-Tensor& polygamma_out(int64_t n, const Tensor& self, Tensor& result) {
-  TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
-  auto iter = TensorIterator::unary_op(result, self);
-  polygamma_stub(iter.device_type(), iter, n);
-  return result;
 }
 
 namespace {
