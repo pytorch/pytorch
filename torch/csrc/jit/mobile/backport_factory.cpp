@@ -22,11 +22,40 @@ using BytecodeBackportFunction = std::function<bool(
     caffe2::serialize::PyTorchStreamWriter&)>;
 
 bool backport_v5_to_v4(
-    caffe2::serialize::PyTorchStreamReader& rai,
+    caffe2::serialize::PyTorchStreamReader& reader,
     caffe2::serialize::PyTorchStreamWriter& writer);
+
+BackportFactory* BackportFactory::instance = 0;
+
+BackportFactory* BackportFactory::getInstance() {
+  if (instance == 0) {
+    instance = new BackportFactory();
+  }
+  return instance;
+}
 
 BackportFactory::BackportFactory() {
   registerBytecodeBackportFunction(kBytecodeVersionV5, backport_v5_to_v4);
+}
+
+std::unordered_map<
+    int64_t,
+    std::function<bool(
+        caffe2::serialize::PyTorchStreamReader&,
+        caffe2::serialize::PyTorchStreamWriter&)>>&
+BackportFactory::bytecodeBackportFunctions() const {
+  static std::unordered_map<
+      int64_t,
+      std::function<bool(
+          caffe2::serialize::PyTorchStreamReader&,
+          caffe2::serialize::PyTorchStreamWriter&)>>
+      backport_functions;
+  return backport_functions;
+}
+
+bool BackportFactory::hasBytecodeBackportFunction(
+    const int64_t from_version) const {
+  return bytecodeBackportFunctions().count(from_version);
 }
 
 void BackportFactory::registerBytecodeBackportFunction(
@@ -46,7 +75,7 @@ void BackportFactory::registerBytecodeBackportFunction(
 // the intermediate result will be stored with stream.
 bool BackportFactory::backport(
     std::shared_ptr<IStreamAdapter> istream_adapter,
-    PyTorchStreamWriter& writer,
+    PyTorchStreamWriter& final_writer,
     int64_t from_version,
     int64_t to_version) const {
   int64_t bytecode_version = from_version;
@@ -81,7 +110,7 @@ bool BackportFactory::backport(
     // otherwise, export to the intermediate ostream.
     if (bytecode_version - 1 == to_version) {
       bytecodeBackportFunctions()[bytecode_version--](
-          intermediate_reader, writer);
+          intermediate_reader, final_writer);
     } else {
       bytecodeBackportFunctions()[bytecode_version--](
           intermediate_reader, intermediate_writer);

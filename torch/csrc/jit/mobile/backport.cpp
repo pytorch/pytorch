@@ -16,7 +16,7 @@ using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
 using caffe2::serialize::ReadAdapterInterface;
 
-static const BackportFactory backportFactory;
+// static const BackportFactory backportFactory;
 
 // Forward declare so that _backport_for_mobile() overloads can
 // call this method directly.
@@ -91,11 +91,13 @@ bool _backport_for_mobile_impl(
     std::shared_ptr<IStreamAdapter> istream_adapter,
     PyTorchStreamWriter& writer,
     const int64_t to_version) {
-  if (!backportFactory.hasBytecodeBackportFunction(to_version + 1)) {
+  BackportFactory* backportFactory = BackportFactory::getInstance();
+
+  if (!backportFactory->hasBytecodeBackportFunction(to_version + 1)) {
     return false;
   }
   int64_t from_version = _get_model_bytecode_version(istream_adapter);
-  return backportFactory.backport(
+  return backportFactory->backport(
       istream_adapter, writer, from_version, to_version);
 }
 

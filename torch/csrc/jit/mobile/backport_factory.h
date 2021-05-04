@@ -33,33 +33,29 @@ function to check if a specific function exists.
 */
 class BackportFactory final {
  public:
-  explicit BackportFactory();
   [[nodiscard]] bool hasBytecodeBackportFunction(
-      const int64_t from_version) const {
-    return bytecodeBackportFunctions().count(from_version);
-  }
+      const int64_t from_version) const;
+
   [[nodiscard]] std::unordered_map<
       int64_t,
       std::function<bool(
           caffe2::serialize::PyTorchStreamReader&,
           caffe2::serialize::PyTorchStreamWriter&)>>&
-  bytecodeBackportFunctions() const {
-    static std::unordered_map<
-        int64_t,
-        std::function<bool(
-            caffe2::serialize::PyTorchStreamReader&,
-            caffe2::serialize::PyTorchStreamWriter&)>>
-        backport_functions;
-    return backport_functions;
-  }
+  bytecodeBackportFunctions() const;
 
   bool backport(
       std::shared_ptr<caffe2::serialize::IStreamAdapter> istream_adapter,
-      caffe2::serialize::PyTorchStreamWriter& writer,
+      caffe2::serialize::PyTorchStreamWriter& final_writer,
       int64_t from_version,
       int64_t to_version) const;
+  static BackportFactory* getInstance();
+
+  BackportFactory(BackportFactory const&) = delete;
+  BackportFactory& operator=(BackportFactory const&) = delete;
 
  private:
+  static BackportFactory* instance;
+  BackportFactory();
   // Registry of backport functions.
   void registerBytecodeBackportFunction(
       const int64_t from_version,
