@@ -30,6 +30,10 @@ transforms comes from the [JAX framework](https://github.com/google/jax).
 
 ## Install
 
+### Colab
+
+Follow the instructions [in this Colab notebook](https://colab.research.google.com/drive/1CrLkqIrydBYP_svnF89UUO-aQEqNPE8x?usp=sharing)
+
 ### Binaries
 
 First, set up an environment. We will be installing a nightly PyTorch binary
