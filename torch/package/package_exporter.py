@@ -106,11 +106,6 @@ class PackageExporter:
         self.zip_file.set_min_version(6)
         self.serialized_storages: Dict[str, Any] = {}
 
-        # Only a dict for uniquing and deterministic ordering, the value is meaningless
-        self.intern_modules: Dict[str, bool] = {}
-        self.extern_modules: Dict[str, bool] = {}
-        self.mock_modules: Dict[str, bool] = {}
-
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
         # - Each node is a module name (or a pickle name that looks like '<foo.obj.pkl>')
@@ -199,12 +194,12 @@ class PackageExporter:
             orig_file_name (str, optional): If present, used in logging to identifying where the source came from.
                 Defaults to ``None``.
         """
-        self._implicit_intern(module_name)
-        self.dependency_graph.add_node(module_name, src=src, is_package=is_package)
+        self.dependency_graph.add_node(module_name, src=src, is_package=is_package, provided=True, action="intern")
 
         if dependencies:
             deps = self._get_dependencies(src, module_name, is_package)
 
+            # TODO this should be moved into _get_dependecies
             if self.verbose:
                 dep_str = "".join(f"  {dep}\n" for dep in deps)
                 file_info = (
@@ -215,8 +210,8 @@ class PackageExporter:
                 print(f"{module_name} {file_info}depends on:\n{dep_str}\n")
 
             for dep in deps:
-                self.require_module_if_not_provided(dep)
                 self.dependency_graph.add_edge(module_name, dep)
+                self.require_module_if_not_provided(dep)
 
     def _write_source_string(
         self,
@@ -266,26 +261,29 @@ node [shape=box];
         arg = quote(template, safe="")
         return f"https://dreampuf.github.io/GraphvizOnline/#{arg}"
 
-    def _get_source_of_module(self, module: types.ModuleType) -> str:
+    def _get_source_of_module(self, module: types.ModuleType) -> Optional[str]:
         filename = getattr(module, "__file__", None)
         result = (
             None
             if filename is None or not filename.endswith(".py")
             else linecache.getlines(filename, module.__dict__)
         )
+
         if result is None:
-            extra = ""
-            if self.verbose:
-                extra = f" See the dependency graph for more info: \n{self._write_dep_graph(module.__name__)}"
-            raise ValueError(
-                f'cannot save source for module "{module.__name__}" because '
-                f'its source file "{filename}" could not be found.{extra}'
-            )
+            return None
+            # extra = ""
+            # if self.verbose:
+            #     extra = f" See the dependency graph for more info: \n{self._write_dep_graph(module.__name__)}"
+            # raise ValueError(
+            #     f'cannot save source for module "{module.__name__}" because '
+            #     f'its source file "{filename}" could not be found.{extra}'
+            # )
         return "".join(result)
 
     def require_module_if_not_provided(self, module_name: str, dependencies=True):
-        if module_name in self.dependency_graph or self._can_implicitly_extern(module_name):
+        if module_name in self.dependency_graph and self.dependency_graph.nodes[module_name].get("provided") is True:
             return
+
         self.require_module(module_name, dependencies)
 
     def require_module(self, module_name: str, dependencies=True):
@@ -295,7 +293,23 @@ node [shape=box];
         and call :meth:`save_module` otherwise. Clients can subclass this object
         and override this method to provide other behavior, such as automatically mocking out a whole class
         of modules"""
-        self._save_module(module_name, dependencies)
+
+        if self._can_implicitly_extern(module_name):
+            # TODO we are externing individual modules instead just the top level package
+            if self.verbose:
+                print(
+                    f"implicitly adding {module_name} to external modules "
+                    f"since it is part of the standard library and is a dependency."
+                )
+            self.save_extern_module(module_name)
+            return
+
+        for pattern, action, _ in self.patterns:
+            if pattern.matches(module_name):
+                self.matched_patterns.add(pattern)
+                action(module_name)
+                return
+
 
     def save_module(self, module_name: str, dependencies=True):
         """Save the code for ``module`` into the package. Code for the module is resolved using the ``importers`` path to find the
@@ -311,8 +325,8 @@ node [shape=box];
                 "save_module() expects a string input, did you perhaps mean to pass `__name__`?"
             )
 
-        self._implicit_intern(module_name)
-        self._save_module(module_name, dependencies)
+        self.dependency_graph.add_node(module_name, provided=True, action="intern")
+        self._add_module_to_dependency_graph(module_name, dependencies)
 
     def _implicit_intern(self, module_name):
         # Save it to the front of the patterns list so that it will be
@@ -321,21 +335,30 @@ node [shape=box];
             0, (GlobGroup(module_name), self.save_intern_module, False)
         )
 
-    def _save_module(
+    def _add_module_to_dependency_graph(
         self,
         module_name: str,
         dependencies: bool,
     ):
         module_obj = self._import_module(module_name)
-        source = self._get_source_of_module(module_obj)
-        self.dependency_graph.add_node(module_name)
+        self.dependency_graph.add_node(module_name, provided=True)
 
-        if dependencies:
-            is_package = hasattr(module_obj, "__path__")
-            deps = self._get_dependencies(source, module_name, is_package)
-            for dep in deps:
-                self.require_module_if_not_provided(dep)
-                self.dependency_graph.add_edge(module_name, dep)
+        if not dependencies:
+            return
+
+        # Find dependencies of this module and require them as well.
+        is_package = hasattr(module_obj, "__path__")
+        source = self._get_source_of_module(module_obj)
+        if source is None:
+            # Couldn't find a source!  Add it to our dependency graph as broken
+            # and continue.
+            self.dependency_graph.nodes[module_name]["broken"] = True
+            return
+
+        deps = self._get_dependencies(source, module_name, is_package)
+        for dep in deps:
+            self.dependency_graph.add_edge(module_name, dep)
+            self.require_module_if_not_provided(dep)
 
     def save_pickle(
         self, package: str, resource: str, obj: Any, dependencies: bool = True
@@ -365,8 +388,7 @@ node [shape=box];
         data_value = data_buf.getvalue()
 
         name_in_dependency_graph = f"<{package}.{resource}>"
-        self.intern(name_in_dependency_graph)
-        self.dependency_graph.add_node(name_in_dependency_graph, is_pickle=True)
+        self.dependency_graph.add_node(name_in_dependency_graph, action="intern", provided=True, is_pickle=True)
 
         if dependencies:
             all_dependencies = []
@@ -382,8 +404,8 @@ node [shape=box];
                 print(f"{resource} depends on:\n{dep_string}\n")
 
             for module_name in all_dependencies:
-                self.require_module_if_not_provided(module_name)
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
+                self.require_module_if_not_provided(module_name)
 
         self._write(filename, data_value)
 
@@ -500,7 +522,9 @@ node [shape=box];
 
     def save_intern_module(self, module_name: str):
         """TODO DOC"""
-        self.intern_modules[module_name] = True
+        self.dependency_graph.add_node(module_name, action="intern", provided=True)
+        # TODO move this somewhere more sensible
+        self._add_module_to_dependency_graph(module_name, dependencies=True)
 
     def save_extern_module(self, module_name: str):
         """Add `module_name` to the list of external modules, regardless of whether it is
@@ -508,7 +532,7 @@ node [shape=box];
 
         Prefer using :meth:`extern` to only mark modules extern if they are actually required by the packaged code.
         """
-        self.extern_modules[module_name] = True
+        self.dependency_graph.add_node(module_name, action="extern", provided=True)
 
     def save_mock_module(self, module_name: str):
         """Add `module_name` to the package, implemented it with a mocked out version that
@@ -516,7 +540,7 @@ node [shape=box];
 
         Prefer using `mock` to only include this module if it is required by other modules.
         """
-        self.mock_modules[module_name] = True
+        self.dependency_graph.add_node(module_name, action="mock", provided=True)
 
     def _reject_denied_module(self, module_name: str):
         """Throw an exception containing a message that `module_name` was explicitly blocklisted via
@@ -563,35 +587,12 @@ node [shape=box];
             str_or_bytes = str_or_bytes.encode("utf-8")
         self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))
 
-    def _match_patterns(self):
-        def do_match(module_name):
-            base_name = module_name.partition(".")[0]
-            if self._can_implicitly_extern(base_name):
-                # TODO this is a behavioral difference, we are now externing the whole module
-                self.save_extern_module(module_name)
-                return
-
-            for pattern, action, _ in self.patterns:
-                if pattern.matches(module_name):
-                    action(module_name)
-                    self.matched_patterns.add(pattern)
-                    return
-
-        for module_name in self.dependency_graph:
-            do_match(module_name)
-
     def _compute_patterns(self):
-        self._match_patterns()
         # At this point, every module should be in either intern, mock, or extern.
         unmatched = set()
-        for module_name in self.dependency_graph:
-            if (
-                module_name in self.intern_modules
-                or module_name in self.extern_modules
-                or module_name in self.mock_modules
-            ):
-                continue
-            unmatched.add(module_name)
+        for module_name, attrs in self.dependency_graph.nodes.items():
+            if attrs.get("action") is None:
+                unmatched.add(module_name)
 
         if len(unmatched) != 0:
             raise RuntimeError(f"TODO {unmatched}")
@@ -603,35 +604,46 @@ node [shape=box];
                     f"Exporter did not match any modules to {pattern}, which was marked as allow_empty=False"
                 )
 
-        # Execute the patterns
-        if len(self.mock_modules) != 0:
-            mock_file = str(Path(__file__).parent / "_mock.py")
-            self._write_source_string("_mock", _read_file(mock_file), is_package=False)
+        extern_modules = []
+        _mock_written = False
+        for module_name, attrs in self.dependency_graph.nodes.items():
+            action = attrs["action"]
 
-        for module_name in self.mock_modules:
-            is_package = hasattr(self._import_module(module_name), "__path__")
-            self._write_source_string(module_name, _MOCK_IMPL, is_package)
+            if action == "extern":
+                extern_modules.append(module_name)
+            elif action == "mock":
+                if not _mock_written:
+                    mock_file = str(Path(__file__).parent / "_mock.py")
+                    self._write_source_string("_mock", _read_file(mock_file), is_package=False)
+                    _mock_written = True
 
-        for module_name in self.intern_modules:
-            # The node in the dependency graph contains metadata that tells us
-            # how to intern the module.
-            node_attrs = self.dependency_graph.nodes[module_name]
+                is_package = hasattr(self._import_module(module_name), "__path__")
+                self._write_source_string(module_name, _MOCK_IMPL, is_package)
+            elif action == "intern":
+                # The node in the dependency graph contains metadata that tells us
+                # how to intern the module.
+                if "provided" not in attrs:
+                    raise AssertionError(f"Module was marked `intern` but not provided: {module_name}")
 
-            if node_attrs.get("is_pickle") is True:
-                # This node came from save_source_pickle, we don't need to write any source for it.
-                continue
-            elif node_attrs.get("src") is not None:
-                # This node came from save_source_string, write out the user-provided source.
-                source = node_attrs["src"]
-                is_package = node_attrs["is_package"]
+                if attrs.get("is_pickle") is True:
+                    # This node came from save_source_pickle, we don't need to write any source for it.
+                    continue
+                elif attrs.get("src") is not None:
+                    # This node came from save_source_string, write out the user-provided source.
+                    source = attrs["src"]
+                    is_package = attrs["is_package"]
+                else:
+                    # Otherwise import the module normally and use its source.
+                    module_obj = self._import_module(module_name)
+                    is_package = hasattr(module_obj, "__path__")
+                    source = self._get_source_of_module(module_obj)
+                    if source is None:
+                        raise AssertionError(module_name)
+                self._write_source_string(module_name, source, is_package)
             else:
-                # Otherwise import the module normally and use its source.
-                module_obj = self._import_module(module_name)
-                is_package = hasattr(module_obj, "__path__")
-                source = self._get_source_of_module(module_obj)
-            self._write_source_string(module_name, source, is_package)
+                raise AssertionError(f"Module has no action: {module_name}")
 
-        extern_file_contents = "\n".join(self.extern_modules) + "\n"
+        extern_file_contents = "\n".join(extern_modules) + "\n"
         self._write(".data/extern_modules", extern_file_contents)
 
     def close(self):
