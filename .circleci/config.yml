@@ -2101,50 +2101,6 @@ workflows:
   binary_builds:
     jobs:
       - binary_linux_build:
-          name: binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_build
-          build_environment: "manywheel 3.6m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_7m_cpu_devtoolset7_nightly_build
-          build_environment: "manywheel 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_build
-          build_environment: "manywheel 3.8m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_9m_cpu_devtoolset7_nightly_build
-          build_environment: "manywheel 3.9m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu113_devtoolset7_nightly_build
           build_environment: "manywheel 3.6m cu113 devtoolset7"
           filters:
@@ -2188,54 +2144,6 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda113"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_build
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_build
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cu113_devtoolset7_nightly_shared-with-deps_build
           build_environment: "libtorch 3.7m cu113 devtoolset7"
@@ -2285,54 +2193,6 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda113"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/libtorch-cxx11-builder:cpu"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/libtorch-cxx11-builder:cpu"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/libtorch-cxx11-builder:cpu"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/libtorch-cxx11-builder:cpu"
-      - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cu113_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           build_environment: "libtorch 3.7m cu113 gcc5.4_cxx11-abi"
           filters:
@@ -2381,46 +2241,6 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/libtorch-cxx11-builder:cuda113"
       - binary_windows_build:
-          name: binary_windows_wheel_3_6_cpu_nightly_build
-          build_environment: "wheel 3.6 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_7_cpu_nightly_build
-          build_environment: "wheel 3.7 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_8_cpu_nightly_build
-          build_environment: "wheel 3.8 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_9_cpu_nightly_build
-          build_environment: "wheel 3.9 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
           name: binary_windows_wheel_3_6_cu113_nightly_build
           build_environment: "wheel 3.6 cu113"
           filters:
@@ -2461,28 +2281,8 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cpu_debug_nightly_build
-          build_environment: "libtorch 3.7 cpu debug"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
           name: binary_windows_libtorch_3_7_cu113_debug_nightly_build
           build_environment: "libtorch 3.7 cu113 debug"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cpu_release_nightly_build
-          build_environment: "libtorch 3.7 cpu release"
           filters:
             branches:
               only:
@@ -2500,58 +2300,6 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_linux_test:
-          name: binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test
-          build_environment: "manywheel 3.6m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_build
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_test:
-          name: binary_linux_manywheel_3_7m_cpu_devtoolset7_nightly_test
-          build_environment: "manywheel 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_linux_manywheel_3_7m_cpu_devtoolset7_nightly_build
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_test:
-          name: binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_test
-          build_environment: "manywheel 3.8m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_build
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_test:
-          name: binary_linux_manywheel_3_9m_cpu_devtoolset7_nightly_test
-          build_environment: "manywheel 3.9m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_linux_manywheel_3_9m_cpu_devtoolset7_nightly_build
-          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
           name: binary_linux_manywheel_3_6m_cu113_devtoolset7_nightly_test
           build_environment: "manywheel 3.6m cu113 devtoolset7"
@@ -2612,62 +2360,6 @@ workflows:
           docker_image: "pytorch/manylinux-cuda113"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
-      - binary_linux_test:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_test
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_build
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_test:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_test
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_build
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_test:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_test
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_build
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_test:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_test
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_build
-          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu113_devtoolset7_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cu113 devtoolset7"
@@ -2733,62 +2425,6 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          docker_image: "pytorch/libtorch-cxx11-builder:cpu"
-      - binary_linux_test:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          docker_image: "pytorch/libtorch-cxx11-builder:cpu"
-      - binary_linux_test:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_test
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          docker_image: "pytorch/libtorch-cxx11-builder:cpu"
-      - binary_linux_test:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_test
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          docker_image: "pytorch/libtorch-cxx11-builder:cpu"
-      - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu113_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cu113 gcc5.4_cxx11-abi"
           filters:
@@ -2853,54 +2489,6 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_windows_test:
-          name: binary_windows_wheel_3_6_cpu_nightly_test
-          build_environment: "wheel 3.6 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_wheel_3_6_cpu_nightly_build
-      - binary_windows_test:
-          name: binary_windows_wheel_3_7_cpu_nightly_test
-          build_environment: "wheel 3.7 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_wheel_3_7_cpu_nightly_build
-      - binary_windows_test:
-          name: binary_windows_wheel_3_8_cpu_nightly_test
-          build_environment: "wheel 3.8 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_wheel_3_8_cpu_nightly_build
-      - binary_windows_test:
-          name: binary_windows_wheel_3_9_cpu_nightly_test
-          build_environment: "wheel 3.9 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_wheel_3_9_cpu_nightly_build
-      - binary_windows_test:
           name: binary_windows_wheel_3_6_cu113_nightly_test
           build_environment: "wheel 3.6 cu113"
           filters:
@@ -2953,18 +2541,6 @@ workflows:
             - binary_windows_wheel_3_9_cu113_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
-          name: binary_windows_libtorch_3_7_cpu_debug_nightly_test
-          build_environment: "libtorch 3.7 cpu debug"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_libtorch_3_7_cpu_debug_nightly_build
-      - binary_windows_test:
           name: binary_windows_libtorch_3_7_cu113_debug_nightly_test
           build_environment: "libtorch 3.7 cu113 debug"
           filters:
@@ -2978,18 +2554,6 @@ workflows:
             - binary_windows_libtorch_3_7_cu113_debug_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
-          name: binary_windows_libtorch_3_7_cpu_release_nightly_test
-          build_environment: "libtorch 3.7 cpu release"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_libtorch_3_7_cpu_release_nightly_build
-      - binary_windows_test:
           name: binary_windows_libtorch_3_7_cu113_release_nightly_test
           build_environment: "libtorch 3.7 cu113 release"
           filters:
@@ -3002,62 +2566,6 @@ workflows:
           requires:
             - binary_windows_libtorch_3_7_cu113_release_nightly_build
           executor: windows-with-nvidia-gpu
-      - binary_upload:
-          name: binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_upload
-          context: org-member
-          requires:
-            - binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: manywheel
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_linux_manywheel_3_7m_cpu_devtoolset7_nightly_upload
-          context: org-member
-          requires:
-            - binary_linux_manywheel_3_7m_cpu_devtoolset7_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: manywheel
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_upload
-          context: org-member
-          requires:
-            - binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: manywheel
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_linux_manywheel_3_9m_cpu_devtoolset7_nightly_upload
-          context: org-member
-          requires:
-            - binary_linux_manywheel_3_9m_cpu_devtoolset7_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: manywheel
-          upload_subfolder: cpu
       - binary_upload:
           name: binary_linux_manywheel_3_6m_cu113_devtoolset7_nightly_upload
           context: org-member
@@ -3115,62 +2623,6 @@ workflows:
           package_type: manywheel
           upload_subfolder: cu113
       - binary_upload:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_upload
-          context: org-member
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: libtorch
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_upload
-          context: org-member
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: libtorch
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_upload
-          context: org-member
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: libtorch
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_upload
-          context: org-member
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: libtorch
-          upload_subfolder: cpu
-      - binary_upload:
           name: binary_linux_libtorch_3_7m_cu113_devtoolset7_nightly_shared-with-deps_upload
           context: org-member
           requires:
@@ -3226,62 +2678,6 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: libtorch
           upload_subfolder: cu113
-      - binary_upload:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_upload
-          context: org-member
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: libtorch
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_upload
-          context: org-member
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: libtorch
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_upload
-          context: org-member
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: libtorch
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_upload
-          context: org-member
-          requires:
-            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: libtorch
-          upload_subfolder: cpu
       - binary_upload:
           name: binary_linux_libtorch_3_7m_cu113_gcc5_4_cxx11-abi_nightly_shared-with-deps_upload
           context: org-member
@@ -3339,62 +2735,6 @@ workflows:
           package_type: libtorch
           upload_subfolder: cu113
       - binary_upload:
-          name: binary_windows_wheel_3_6_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_wheel_3_6_cpu_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: wheel
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_windows_wheel_3_7_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_wheel_3_7_cpu_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: wheel
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_windows_wheel_3_8_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_wheel_3_8_cpu_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: wheel
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_windows_wheel_3_9_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_wheel_3_9_cpu_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: wheel
-          upload_subfolder: cpu
-      - binary_upload:
           name: binary_windows_wheel_3_6_cu113_nightly_upload
           context: org-member
           requires:
@@ -3451,20 +2791,6 @@ workflows:
           package_type: wheel
           upload_subfolder: cu113
       - binary_upload:
-          name: binary_windows_libtorch_3_7_cpu_debug_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_libtorch_3_7_cpu_debug_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: libtorch
-          upload_subfolder: cpu
-      - binary_upload:
           name: binary_windows_libtorch_3_7_cu113_debug_nightly_upload
           context: org-member
           requires:
@@ -3478,20 +2804,6 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: libtorch
           upload_subfolder: cu113
-      - binary_upload:
-          name: binary_windows_libtorch_3_7_cpu_release_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_libtorch_3_7_cpu_release_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: libtorch
-          upload_subfolder: cpu
       - binary_upload:
           name: binary_windows_libtorch_3_7_cu113_release_nightly_upload
           context: org-member
