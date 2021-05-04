@@ -24,7 +24,7 @@ namespace kir {
 //! implicit_definition_ = true will recurisvely print the definition of all
 //! inputs to an expression if they haven't been printed.
 class TORCH_CUDA_CU_API IrPrinter : private kir::IrVisitor {
-  static constexpr char* kTab = "  ";
+  static constexpr char const* kTab = "  ";
 
  public:
   //! Constructs a new IrPrinter which outputs to the specified stream

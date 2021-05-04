@@ -512,7 +512,7 @@ IterDomain::IterDomain(
   TORCH_INTERNAL_ASSERT(
       start->isAnInt(),
       "Cannot create an iter domain with a start that is not an int but received ",
-      extent,
+      start,
       " .");
 
   // Check that all for-loops iterate from zero to some positive integer
@@ -520,7 +520,7 @@ IterDomain::IterDomain(
   TORCH_INTERNAL_ASSERT(
       start->isZeroInt(),
       "Cannot create an iter domain with a start that is non-zero but received ",
-      extent,
+      start,
       " .");
 
   name_ = fusion_->registerVal(this);
