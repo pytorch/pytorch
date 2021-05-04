@@ -1212,8 +1212,9 @@ class TestUnaryUfuncs(TestCase):
         t = torch.tensor([], device=device, dtype=dtype)
         check_equal(t, torch.i0, scipy.special.i0)
         check_equal(t, torch.special.i0e, scipy.special.i0e)
-        check_equal(t, torch.special.i1, scipy.special.i1)
-        check_equal(t, torch.special.i1e, scipy.special.i1e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
 
         range = (-1e7, 1e7)
         if dtype == torch.half:
@@ -1222,8 +1223,9 @@ class TestUnaryUfuncs(TestCase):
         t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
         check_equal(t, torch.i0, scipy.special.i0)
         check_equal(t, torch.special.i0e, scipy.special.i0e)
-        check_equal(t, torch.special.i1, scipy.special.i1)
-        check_equal(t, torch.special.i1e, scipy.special.i1e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
 
         # NaN, inf, -inf are tested in reference_numerics tests.
         info = torch.finfo(dtype)
@@ -1231,8 +1233,9 @@ class TestUnaryUfuncs(TestCase):
         t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
         check_equal(t, torch.i0, scipy.special.i0)
         check_equal(t, torch.special.i0e, scipy.special.i0e)
-        check_equal(t, torch.special.i1, scipy.special.i1)
-        check_equal(t, torch.special.i1e, scipy.special.i1e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
 
     # TODO: allow large opinfo values to be opted-into via metadata
     @dtypes(torch.long)
