@@ -792,7 +792,7 @@ class Graph:
 
             Returns: the global name that should be used to reference 'obj' in generated source.
             """
-            if _is_from_torch(obj) and name_hint != 'device': # to support registering torch.device
+            if _is_from_torch(obj) and name_hint != 'device':  # to support registering torch.device
                 # HACK: workaround for how torch custom ops are registered. We
                 # can't import them like normal modules so they must retain their
                 # fully qualified name.
