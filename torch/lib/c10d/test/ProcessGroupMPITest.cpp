@@ -189,7 +189,7 @@ void testAllgather(int iter = 10000) {
   }
 }
 
-void testGather(int iter = 1000) {
+void testGather(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
 
@@ -350,31 +350,6 @@ void testBackendName() {
     throw std::runtime_error("BOOM!");
   }
 }
-
-// void testError() {
-//   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-
-//   // Generate inputs
-//   std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
-//   auto tensor = at::ones({16, 16}) * 7;
-//   std::vector<at::Tensor> tensors = {tensor, tensor};
-
-//   // Queue the work.
-//   c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
-//       pg->allreduce(tensors);
-//   works.push_back(std::move(work));
-
-//   try {
-//     auto outputTensors = waitFuture(pg, works);
-//     throw std::runtime_error("Should raise std::runtime_error: "
-//                              "MPI process group does not support multi-GPU collectives!");
-//   } catch (std::runtime_error& err) {
-//     std::cerr << "except";
-//   } catch (...) {
-//     throw std::runtime_error("Should raise exception: "
-//                              "MPI process group does not support multi-GPU collectives!");
-//   }
-// }
 
 int main(int argc, char** argv) {
 #ifdef MPIEXEC

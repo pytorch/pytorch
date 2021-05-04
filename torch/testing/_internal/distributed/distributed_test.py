@@ -82,11 +82,6 @@ f.bar = 1
 
 foo_cpu_tensor = Foo(torch.randn(3, 3))
 
-import sys
-
-def eprint(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
-
 
 COLLECTIVES_OBJECT_TEST_LIST = [
     {"key1": 3, "key2": 4, "key3": {"nested": True}},
@@ -418,7 +413,7 @@ class TestDistBackend(MultiProcessTestCase):
         # Skip return code checking for following tests as they are expected to
         # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
         self.skip_return_code_checks = [
-        #    self.test_ddp_model_diff_across_ranks.__wrapped__,
+            self.test_ddp_model_diff_across_ranks.__wrapped__,
         ]
 
     def tearDown(self):
@@ -3505,7 +3500,7 @@ class DistributedTest:
                 input = input[torch.randperm(global_batch_size)]
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != 'nccl',
+            BACKEND != "mpi" and (BACKEND != 'nccl' or torch.cuda.device_count() < 2),
             "get_future is only supported on mpi and nccl"
         )
         def test_accumulate_gradients_no_sync(self):
@@ -3515,7 +3510,7 @@ class DistributedTest:
             self._test_accumulate_gradients_no_sync()
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != 'nccl',
+            BACKEND != "mpi" and (BACKEND != 'nccl' or torch.cuda.device_count() < 2),
             "get_future is only supported on mpi and nccl"
         )
         def test_accumulate_gradients_no_sync_grad_is_view(self):
@@ -3525,7 +3520,7 @@ class DistributedTest:
             self._test_accumulate_gradients_no_sync(gradient_as_bucket_view=True)
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != 'nccl',
+            BACKEND != "mpi" and (BACKEND != 'nccl' or torch.cuda.device_count() < 2),
             "get_future is only supported on mpi and nccl"
         )
         def test_accumulate_gradients_no_sync_allreduce_hook(self):
@@ -3548,7 +3543,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(
-            BACKEND != "mpi" and BACKEND != 'nccl',
+            BACKEND != "mpi" and (BACKEND != 'nccl' or torch.cuda.device_count() < 2),
             "get_future is only supported on mpi and nccl"
         )
         def test_accumulate_gradients_no_sync_allreduce_with_then_hook(self):
@@ -3582,7 +3577,7 @@ class DistributedTest:
 
         @unittest.skipIf(
             BACKEND != "mpi",
-            "get_future is only supported on mpi and nccl"
+            "get_future is only supported on mpi"
         )
         def test_get_future(self):
             def mult(fut):
