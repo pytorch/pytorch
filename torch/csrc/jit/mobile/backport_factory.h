@@ -33,10 +33,9 @@ function to check if a specific function exists.
 */
 class BackportFactory final {
  public:
-  [[nodiscard]] bool hasBytecodeBackportFunction(
-      const int64_t from_version) const;
+  bool hasBytecodeBackportFunction(const int64_t from_version);
 
-  [[nodiscard]] std::unordered_map<
+  std::unordered_map<
       int64_t,
       std::function<bool(
           caffe2::serialize::PyTorchStreamReader&,
