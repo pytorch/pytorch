@@ -28,18 +28,19 @@ protected:
 
   virtual ~Socket() {
     if (socket_fd != -1)
-      close(socket_fd);
+      SYSCHECK_ERR_RETURN_NEG1(close(socket_fd));
   }
 
   struct sockaddr_un prepare_address(const char *path) {
     struct sockaddr_un address;
     address.sun_family = AF_UNIX;
+    // Maximum size for sun_path is 108
     strcpy(address.sun_path, path);
     return address;
   }
 
   size_t address_length(struct sockaddr_un address) {
-    return strlen(address.sun_path) + sizeof(address.sun_family);
+    return offsetof(sockaddr_un, sun_path) + strlen(address.sun_path) + 1;
   }
 
   void recv(void *_buffer, size_t num_bytes) {
@@ -112,7 +113,7 @@ public:
   }
 
   virtual ~ManagerServerSocket() {
-    unlink(socket_path.c_str());
+    SYSCHECK_ERR_RETURN_NEG1(unlink(socket_path.c_str()));
   }
 
   ManagerSocket accept() {

@@ -41,6 +41,10 @@ inline std::vector<char> make_filename(std::string name_prefix) {
     }
   }
 
+  if (tmp_directory.back() == '/') {
+    tmp_directory.pop_back();
+  }
+
   std::vector<char> filename;
   filename.reserve(
       tmp_directory.size() + name_prefix.size() + kRandomPattern.size() + 2);
@@ -104,19 +108,15 @@ struct TempDir {
     return *this;
   }
 
+  ~TempDir() {
+    if (!name.empty()) {
 #if !defined(_WIN32)
-  ~TempDir() {
-    if (!name.empty()) {
       rmdir(name.c_str());
-    }
-  }
 #else // defined(_WIN32)
-  ~TempDir() {
-    if (!name.empty()) {
       RemoveDirectoryA(name.c_str());
+#endif // defined(_WIN32)
     }
   }
-#endif // defined(_WIN32)
 
   std::string name;
 };
