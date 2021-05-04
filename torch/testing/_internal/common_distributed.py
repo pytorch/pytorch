@@ -99,6 +99,7 @@ def skip_if_lt_x_gpu(x):
     return decorator
 
 
+# This decorator helps avoiding initializing cuda while testing other backends
 def nccl_skip_if_lt_x_gpu(backend, x):
     def decorator(func):
         @wraps(func)
