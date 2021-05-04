@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
@@ -27,28 +28,13 @@ std::set<T> set_intersection(const std::set<T>& set1, const std::set<T>& set2) {
   return intersection;
 }
 
-// convert an iterable of Val* to be an iterable of TensorView*
-template <typename T1, typename T2>
-T1 tvIterable(const T2& val_iterable) {
-  T1 tv_iterable = T1();
-  std::transform(
-      val_iterable.begin(),
-      val_iterable.end(),
-      std::back_inserter(tv_iterable),
-      [](Val* v) {
-        TORCH_INTERNAL_ASSERT(
-            v->getValType().value() == ValType::TensorView,
-            "When following the computeAt dependency chain, a non TensorView value was found.");
-        return v->as<TensorView>();
-      });
-  return tv_iterable;
-}
-
 std::deque<std::deque<TensorView*>> tvChains(
     std::deque<std::deque<Val*>> val_chains) {
   std::deque<std::deque<TensorView*>> tv_chains(val_chains.size());
   for (size_t i = 0; i < val_chains.size(); i++) {
-    tv_chains[i] = tvIterable<std::deque<TensorView*>>(val_chains[i]);
+    auto tv_iterable = ir_utils::filterByType<TensorView>(val_chains[i]);
+    tv_chains[i] =
+        std::deque<TensorView*>(tv_iterable.begin(), tv_iterable.end());
   }
   return tv_chains;
 }
@@ -60,41 +46,102 @@ bool validateDomain(TensorView* tv, TensorDomain* new_td) {
       first_mismatch >= (int)tv->getComputeAtPosition();
 }
 
+// Return the max position in consumer that producer can be inlined to
+// Cannot inline:
+//   Reduction dimensions in producer
+//   Block broadcast dimensions in producer
+//   Vectorized dimensions in producer or consumer
+//   Dimensions derived from root dimensions that exist in both but are
+//   unmappable
 unsigned int getReplayablePosPasC(
     TensorView* producer,
     TensorView* consumer,
     const ComputeAtRootDomainMap& root_map_) {
+  // Grab dimensions in producer and consumer that are mappable to eachother
+  // based on the computeAtRootDomainMap. This will tell us which dimensions
+  // can be inlined based on avoiding trying to inline reduction structures.
   auto mappable_roots =
-      root_map_.getMappableDims(producer->domain(), consumer->domain(), true);
+      root_map_.getMappableDims(producer->domain(), consumer->domain());
 
-  for (size_t consumer_pos = consumer->nDims(); consumer_pos > 0;
+  // Check if any consumer dimensions are marked as vectorize as producer can
+  // not be inlined to vectorized dimensions in consumer.
+  auto c_dom = consumer->domain()->domain();
+  auto vector_dim_it =
+      std::find_if(c_dom.begin(), c_dom.end(), [](IterDomain* id) {
+        return isParallelTypeVectorize(id->getParallelType());
+      });
+
+  // Limit max position based on vectorized dims in consumer.
+  auto max_consumer_pos = std::distance(c_dom.begin(), vector_dim_it);
+
+  auto pairwise_root_map = PairwiseRootDomainMap(producer, consumer);
+  auto c2p_root_map =
+      PairwiseRootDomainMap(producer, consumer)
+          .mapConsumerToProducer(consumer->domain(), producer->domain());
+
+  auto replay_PasC =
+      BestEffortReplay::replayPasC(producer, consumer, -1, pairwise_root_map);
+
+  // Look for id's that map to a consumer id that's vectorized
+  auto c2p_replay_map = replay_PasC.getReplay();
+
+  for (size_t consumer_pos = max_consumer_pos; consumer_pos > 0;
        consumer_pos--) {
-    auto root_dim_vals = IterVisitor::getInputsTo(
-        {consumer->domain()->domain().begin(),
-         consumer->domain()->domain().begin() + consumer_pos});
-    auto root_dim = ir_utils::filterByType<IterDomain>(root_dim_vals);
+    auto map_it = c2p_replay_map.find(consumer->axis((int)consumer_pos - 1));
+    if (map_it != c2p_replay_map.end()) {
+      auto p_id = map_it->second;
+      // If we find a consumer dim that maps to a producer dim that's
+      // vectorized, or to a producer dim that's a block broadcast, limit max
+      // compute at by it
+      if (isParallelTypeVectorize(p_id->getParallelType())) {
+        max_consumer_pos = consumer_pos - 1;
+      }
+    }
+  }
+
+  // Start at max position and work backwards,  try to find a location where
+  // producer can be inlined.
+  for (size_t consumer_pos = max_consumer_pos; consumer_pos > 0;
+       consumer_pos--) {
+    // Grab all root dimensions of consumer as roots must be used to understand
+    // inlining potential.
+    auto consumer_root_dim_vals =
+        IterVisitor::getInputsTo({c_dom.begin(), c_dom.begin() + consumer_pos});
+    // convert to iter domains
+    auto consumer_root_dim_ids =
+        ir_utils::filterByType<IterDomain>(consumer_root_dim_vals);
+    // If any root dimensions cannot be mapped to producer we can't inline. If
+    // any root dimension
     if (std::any_of(
-            root_dim.begin(),
-            root_dim.end(),
-            [&mappable_roots](IterDomain* root_id) {
+            consumer_root_dim_ids.begin(),
+            consumer_root_dim_ids.end(),
+            [&mappable_roots, &c2p_root_map](IterDomain* root_id) {
               return mappable_roots.find(root_id) == mappable_roots.end() &&
-                  // TODO: Check replayablePosCasP and see if we need something
-                  // similar
-                  !root_id->isBroadcast();
+                  c2p_root_map.find(root_id) != c2p_root_map.end();
             })) {
       continue;
     }
     return consumer_pos;
   }
+
   return 0;
 }
 
+// Return the max position in producer that can be inlined to consumer
+// Cannot inline:
+//   Reduction dimensions in producer
+//   Vectorized dimensions in producer or consumer
+//   Dimensions derived from root dimensions that exist in both but are
+//   unmappable
 unsigned int getReplayablePosCasP(
     TensorView* consumer,
     TensorView* producer,
     const ComputeAtRootDomainMap& root_map_) {
+  // Grab dimensions in producer and consumer that are mappable to eachother
+  // based on the computeAtRootDomainMap. This will tell us which dimensions
+  // can be inlined based on avoiding trying to inline reduction structures.
   auto mappable_roots =
-      root_map_.getMappableDims(producer->domain(), consumer->domain(), false);
+      root_map_.getMappableDims(producer->domain(), consumer->domain());
 
   auto p_dom = producer->domain()->domain();
   auto first_reduction =
@@ -102,7 +149,35 @@ unsigned int getReplayablePosCasP(
         return id->isReduction();
       });
 
-  auto max_producer_pos = std::distance(p_dom.begin(), first_reduction);
+  auto first_vectorized_axis =
+      std::find_if(p_dom.begin(), first_reduction, [](IterDomain* id) {
+        return isParallelTypeVectorize(id->getParallelType());
+      });
+
+  auto max_producer_pos = std::distance(p_dom.begin(), first_vectorized_axis);
+
+  auto pairwise_root_map = PairwiseRootDomainMap(producer, consumer);
+  auto p2c_root_map = pairwise_root_map.mapProducerToConsumer(
+      producer->domain(), consumer->domain());
+
+  auto replay_CasP =
+      BestEffortReplay::replayCasP(consumer, producer, -1, pairwise_root_map);
+
+  // Look for id's that map to a consumer id that's vectorized
+  auto p2c_replay_map = replay_CasP.getReplay();
+
+  for (size_t producer_pos = max_producer_pos; producer_pos > 0;
+       producer_pos--) {
+    auto map_it = p2c_replay_map.find(producer->axis((int)producer_pos - 1));
+    if (map_it != p2c_replay_map.end()) {
+      auto c_id = map_it->second;
+      // If we find a producer dim that maps to a consumer vectorized dim, limit
+      // max compute at by it
+      if (isParallelTypeVectorize(c_id->getParallelType())) {
+        max_producer_pos = producer_pos - 1;
+      }
+    }
+  }
 
   for (size_t producer_pos = max_producer_pos; producer_pos > 0;
        producer_pos--) {
@@ -111,6 +186,8 @@ unsigned int getReplayablePosCasP(
          producer->getMaybeRFactorDomain().end()},
         {p_dom.begin(), p_dom.begin() + producer_pos});
 
+    // If any root dims could have mapped to consumer, but don't, then we can't
+    // compute at this point
     if (std::any_of(
             producer->getMaybeRFactorDomain().begin(),
             producer->getMaybeRFactorDomain().end(),
@@ -121,6 +198,7 @@ unsigned int getReplayablePosCasP(
             })) {
       continue;
     }
+
     return producer_pos;
   }
   return 0;
@@ -196,28 +274,36 @@ unsigned int ComputeAt::backwardComputeAt_impl(
     unsigned int consumer_compute_at_pos) {
   FUSER_PERF_SCOPE("backwardComputeAt_impl");
 
+  auto max_consumer_compute_at_pos =
+      getReplayablePosPasC(producer, consumer, root_map_);
   if (mode_ == ComputeAtMode::BestEffort) {
-    consumer_compute_at_pos = std::min(
-        consumer_compute_at_pos,
-        getReplayablePosPasC(producer, consumer, root_map_));
-  } else if (mode_ == ComputeAtMode::MostInlined) {
     consumer_compute_at_pos =
-        getReplayablePosPasC(producer, consumer, root_map_);
+        std::min(consumer_compute_at_pos, max_consumer_compute_at_pos);
+  } else if (mode_ == ComputeAtMode::MostInlined) {
+    consumer_compute_at_pos = max_consumer_compute_at_pos;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        consumer_compute_at_pos <= max_consumer_compute_at_pos,
+        "Invalid compute at position detected in compute at when trying to replay producer: ",
+        producer,
+        " as consumer: ",
+        consumer,
+        " tried to do this at position: ",
+        consumer_compute_at_pos,
+        " but max position that's allowed is ",
+        max_consumer_compute_at_pos);
   }
 
-  auto replay = TransformReplay::replayPasC(
-      producer->domain(),
-      consumer->domain(),
-      (int)consumer_compute_at_pos,
-      root_map_);
+  auto replay_producer_pair = TransformReplay::replayPasC(
+      producer, consumer, (int)consumer_compute_at_pos, root_map_);
 
-  if (replay.second == 0) {
+  if (replay_producer_pair.second == 0) {
     return 0;
   }
 
-  if (replay.second >= producer->getComputeAtPosition()) {
+  if (replay_producer_pair.second >= producer->getComputeAtPosition()) {
     const TensorDomain* current_domain = producer->domain();
-    TensorDomain* new_domain = replay.first;
+    TensorDomain* new_domain = replay_producer_pair.first;
 
     TORCH_INTERNAL_ASSERT(
         validateDomain(producer, new_domain),
@@ -229,13 +315,14 @@ unsigned int ComputeAt::backwardComputeAt_impl(
 
     producer->setDomain(new_domain);
     if (!producer->isFusionInput()) {
-      producer->setComputeAt(replay.second);
+      producer->setComputeAt(replay_producer_pair.second);
     }
+
     consumer->setMaxProducer(consumer_compute_at_pos);
     root_map_.setAlias(current_domain, new_domain);
   }
 
-  return replay.second;
+  return replay_producer_pair.second;
 }
 
 // Actually applies transformation, replay consumer based on producer, set
@@ -247,36 +334,29 @@ unsigned int ComputeAt::forwardComputeAt_impl(
     unsigned int producer_compute_at_pos) {
   FUSER_PERF_SCOPE("forwardComputeAt_impl");
 
-  // Can get into a situation where we inlined into a reduction, but then would
-  // try to traverse forward at that position but wouldn't be valid.
-  // Reduce position to be inside first reduction
-  unsigned int first_red_pos = producer->nDims();
-  for (unsigned int i = 0;
-       i < (unsigned int)producer->domain()->domain().size();
-       i++) {
-    if (producer->axis((int)i)->isReduction()) {
-      first_red_pos = i;
-      break;
-    }
-  }
-  producer_compute_at_pos = std::min(first_red_pos, producer_compute_at_pos);
-  if (producer_compute_at_pos == 0) {
-    return 0;
-  }
+  auto max_producer_compute_at_pos =
+      getReplayablePosCasP(consumer, producer, root_map_);
 
   if (mode_ == ComputeAtMode::BestEffort) {
-    producer_compute_at_pos = std::min(
-        producer_compute_at_pos,
-        getReplayablePosCasP(consumer, producer, root_map_));
-  } else if (mode_ == ComputeAtMode::MostInlined) {
     producer_compute_at_pos =
-        getReplayablePosCasP(consumer, producer, root_map_);
+        std::min(producer_compute_at_pos, max_producer_compute_at_pos);
+  } else if (mode_ == ComputeAtMode::MostInlined) {
+    producer_compute_at_pos = max_producer_compute_at_pos;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        producer_compute_at_pos <= max_producer_compute_at_pos,
+        "Invalid compute at position detected in compute at when trying to replay consumer: ",
+        consumer,
+        " as producer: ",
+        producer,
+        " tried to do this at position: ",
+        producer_compute_at_pos,
+        " but max position that's allowed is ",
+        max_producer_compute_at_pos);
   }
-  auto replay = TransformReplay::replayCasP(
-      consumer->domain(),
-      producer->domain(),
-      (int)producer_compute_at_pos,
-      root_map_);
+
+  auto replay_consumer_pair = TransformReplay::replayCasP(
+      consumer, producer, (int)producer_compute_at_pos, root_map_);
 
   if (producer_compute_at_pos > producer->getComputeAtPosition()) {
     if (!producer->isFusionInput()) {
@@ -284,24 +364,24 @@ unsigned int ComputeAt::forwardComputeAt_impl(
     }
   }
 
-  if (replay.second > consumer->getMaxProducerPosition()) {
+  if (replay_consumer_pair.second > consumer->getMaxProducerPosition()) {
     const TensorDomain* current_domain = consumer->domain();
-    TensorDomain* new_domain = replay.first;
+    TensorDomain* new_domain = replay_consumer_pair.first;
 
     TORCH_INTERNAL_ASSERT(
         validateDomain(consumer, new_domain),
         "Tried to set the domain of ",
-        producer,
+        consumer,
         " to ",
         new_domain,
         " but that would invalidate previously compute at position or max producer position.");
 
     consumer->setDomain(new_domain);
-    consumer->setMaxProducer(replay.second);
+    consumer->setMaxProducer(replay_consumer_pair.second);
     root_map_.setAlias(current_domain, new_domain);
   }
 
-  return replay.second;
+  return replay_consumer_pair.second;
 }
 
 void ComputeAt::setCommonConsumer() {

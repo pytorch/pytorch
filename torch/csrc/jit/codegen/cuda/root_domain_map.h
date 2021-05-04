@@ -261,10 +261,11 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
       const TensorDomain* to_td,
       const std::vector<IterDomain*>& to_root) const;
 
+  // Returns an unordered set of all iter domains in producer and consumer that
+  // can map to eachother
   std::unordered_set<IterDomain*> getMappableDims(
       const TensorDomain* producer,
-      const TensorDomain* consumer,
-      bool producer_to_consumer) const;
+      const TensorDomain* consumer) const;
 
  private:
   //! Returns if key_a and key(td_b, id_b) are mapped to eachother (equivalent),

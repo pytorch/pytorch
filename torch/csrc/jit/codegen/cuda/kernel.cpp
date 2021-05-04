@@ -51,9 +51,10 @@ class KernelIrScanner : private kir::IrVisitor {
         }
         break;
       case MemoryType::Local:
-        summary_.has_dynamic_local_memory_allocations =
-            summary_.has_dynamic_local_memory_allocations ||
-            !ExpressionEvaluator::isConst(allocate->size());
+        if (!ExpressionEvaluator::isConst(allocate->size())) {
+          summary_.has_dynamic_local_memory_allocations = true;
+          summary_.dynamic_lmem_allocations.emplace_back(allocate);
+        }
         break;
     }
   }

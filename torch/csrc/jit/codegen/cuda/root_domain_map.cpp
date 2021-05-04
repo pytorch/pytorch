@@ -563,21 +563,16 @@ std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::map(
 
 std::unordered_set<IterDomain*> ComputeAtRootDomainMap::getMappableDims(
     const TensorDomain* producer,
-    const TensorDomain* consumer,
-    bool producer_to_consumer) const {
+    const TensorDomain* consumer) const {
   const auto& producer_root = producer->getMaybeRFactorDomain();
   const auto& consumer_root = consumer->getRootDomain();
-  const TensorDomain* from_td = producer_to_consumer ? producer : consumer;
-  const TensorDomain* to_td = producer_to_consumer ? consumer : producer;
-  const auto& from_ids = producer_to_consumer ? producer_root : consumer_root;
-  const auto& to_ids = producer_to_consumer ? consumer_root : producer_root;
 
   std::unordered_map<IterDomain*, IterDomain*> id_map =
-      mapBestEffort(from_td, from_ids, to_td, to_ids);
+      mapBestEffort(producer, producer_root, consumer, consumer_root);
 
   std::unordered_set<IterDomain*> mappable_ids;
 
-  for (auto& from_id : from_ids) {
+  for (auto& from_id : producer_root) {
     if (id_map.find(from_id) != id_map.end()) {
       mappable_ids.emplace(from_id);
       mappable_ids.emplace(id_map.at(from_id));

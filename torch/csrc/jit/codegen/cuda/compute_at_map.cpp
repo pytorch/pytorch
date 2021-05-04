@@ -249,10 +249,9 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
         // If outside computeAt axis, we don't want to directly map
         // consumer/producer as their thread mappings could change as long as
         // it's across shared/global memory.
-
+        auto pairwise_map = PairwiseRootDomainMap(p_tv, c_tv);
         auto c2p_root_map =
-            PairwiseRootDomainMap(p_tv, c_tv)
-                .mapConsumerToProducer(c_tv->domain(), p_tv->domain());
+            pairwise_map.mapConsumerToProducer(c_tv->domain(), p_tv->domain());
 
         // Look for matching ID transformations in producer and consumer, replay
         // producer as consumer. We want to replay producer as consumer instead
@@ -262,12 +261,13 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
         // mapping. If we're using this map for indexing, we do not want to
         // propagate broadcast mismatches. If we're using it to identify loop
         // nests, we do want to propagate mismatches.
-        BestEffortReplay replay_PasC(
-            p_tv->domain()->domain(),
-            c_tv->domain()->domain(),
-            c2p_root_map,
-            mapping_mode_ == MappingMode::LOOP ||
-                mapping_mode_ == MappingMode::PARALLEL);
+        auto replay_PasC = mapping_mode_ == MappingMode::LOOP ||
+                mapping_mode_ == MappingMode::PARALLEL
+            ? BestEffortReplay::replayPasC(p_tv, c_tv, -1, pairwise_map)
+            : BestEffortReplay(
+                  p_tv->domain()->domain(),
+                  c_tv->domain()->domain(),
+                  c2p_root_map);
 
         auto c2p_map = replay_PasC.getReplay();
 

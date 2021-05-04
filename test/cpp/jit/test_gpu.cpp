@@ -1803,6 +1803,141 @@ TEST(NVFuserTest, FusionAdvancedComputeAt6_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionAdvancedComputeAt7_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1.0));
+
+  auto tv2 = makeSymbolicTensor(1);
+  fusion.addInput(tv2);
+
+  auto tv3 = add(tv2, new Double(3.0));
+
+  auto tv4 = add(tv1, tv3);
+  fusion.addOutput(tv4);
+
+  auto tv5 = broadcast(tv1, {false, true});
+
+  auto tv6 = makeSymbolicTensor(2);
+  fusion.addInput(tv6);
+
+  auto tv7 = mul(tv5, tv6);
+
+  fusion.addOutput(tv7);
+
+  tv7->split(1, 2);
+  tv7->merge(0);
+  tv7->split(0, 4);
+  tv7->split(0, 128);
+
+  tv7->axis(0)->parallelize(ParallelType::BIDx);
+  tv7->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv0->computeAt(tv7, 1);
+  auto tv5_domain = tv5->domain()->domain();
+
+  // These computeAt transformations should not affect the TV5 domain
+  tv0->computeAt(tv4, -1);
+  tv2->computeAt(tv4, -1);
+
+  auto tv5_domain_current = tv5->domain()->domain();
+  TORCH_CHECK(tv5_domain == tv5_domain_current, "Invalid TV5 domain");
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int numel_x = 100;
+  const int numel_y = 200;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({numel_x}, options);
+  auto t2 = at::randn({numel_x}, options);
+  auto t6 = at::randn({numel_x, numel_y}, options);
+
+  auto t1 = t0.add(1.0);
+  auto t3 = t2.add(3.0);
+  auto t4 = t1.add(t3);
+  auto t5 = t1.unsqueeze(1);
+  auto t7 = t5.mul(t6);
+
+  std::vector<IValue> aten_inputs = {t0, t2, t6};
+  std::vector<at::Tensor> aten_outputs = {t4, t7};
+
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionAdvancedComputeAt8_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1.0));
+
+  auto tv2 = makeSymbolicTensor(1);
+  fusion.addInput(tv2);
+
+  auto tv3 = add(tv2, new Double(3.0));
+
+  auto tv4 = add(tv1, tv3);
+  fusion.addOutput(tv4);
+
+  auto tv5 = broadcast(tv1, {false, true});
+
+  auto tv6 = makeSymbolicTensor(2);
+  fusion.addInput(tv6);
+
+  auto tv7 = mul(tv5, tv6);
+
+  fusion.addOutput(tv7);
+
+  tv7->split(1, 2);
+  tv7->merge(0);
+  tv7->split(0, 128, false);
+  tv7->split(0, 4, false);
+
+  tv7->axis(0)->parallelize(ParallelType::BIDx);
+  tv7->axis(1)->parallelize(ParallelType::TIDx);
+
+  // Reverse computeAt structure from previous test
+  tv0->computeAt(tv4, -1);
+  tv2->computeAt(tv4, -1);
+  tv0->computeAt(tv7, -1);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int numel_x = 100;
+  const int numel_y = 200;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({numel_x}, options);
+  auto t2 = at::randn({numel_x}, options);
+  auto t6 = at::randn({numel_x, numel_y}, options);
+
+  auto t1 = t0.add(1.0);
+  auto t3 = t2.add(3.0);
+  auto t4 = t1.add(t3);
+  auto t5 = t1.unsqueeze(1);
+  auto t7 = t5.mul(t6);
+
+  std::vector<IValue> aten_inputs = {t0, t2, t6};
+  std::vector<at::Tensor> aten_outputs = {t4, t7};
+
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionAdvancedComputeWith1_CUDA) {
   // Case 1
   // tv1 = tv0 * 0.5
@@ -5345,7 +5480,7 @@ TEST(NVFuserTest, FusionAdvancedLowering1_CUDA) {
   tv4->split(1, 4);
   auto tv5 = tv4->rFactor({2});
 
-  tv1->computeAt(tv5, -1);
+  tv1->computeAt(tv5, 2);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn({9, 5}, options);
@@ -6409,7 +6544,7 @@ TEST(NVFuserTest, FusionReductionMultiConsumer_CUDA) {
   auto tv3 = reductionOp(BinaryOpType::Min, {-1}, new Double(0), tv1);
   auto tv4 = add(tv2, tv3);
   fusion.addOutput(tv4);
-  tv1->computeAt(tv2, -1);
+  tv1->computeAt(tv2, -1, ComputeAtMode::BestEffort);
 
   TORCH_CHECK(tv1->getComputeAtPosition() == 2);
 }
@@ -11824,7 +11959,7 @@ TEST(NVFuserTest, FusionWelfordSchedule_CUDA) {
   tv_avg->axis(1)->parallelize(ParallelType::TIDy);
   tv_avg->axis(-1)->parallelize(ParallelType::TIDx);
 
-  tv1->computeAt(rtvs.avg, -1);
+  tv1->computeAt(rtvs.avg, -1, ComputeAtMode::BestEffort);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);

@@ -653,22 +653,23 @@ namespace {
 
 // Note: This may be included as an independent member function
 // TensorView if it's determined to be useful more generally.
+// TODO: Remove this, and its use which is in cache_before.
+// cache_before should only be run before computeAt is called.
 int getMappedConsumerAxis(
     TensorView* producer_tv,
     unsigned int producer_axis,
     TensorView* consumer_tv) {
-  auto c2p_root_map =
-      PairwiseRootDomainMap(producer_tv, consumer_tv)
-          .mapConsumerToProducer(consumer_tv->domain(), producer_tv->domain());
-  auto replay = BestEffortReplay(
-                    producer_tv->domain()->domain(),
-                    consumer_tv->domain()->domain(),
-                    c2p_root_map,
-                    true)
-                    .getReplay();
+  auto c2p_pairwise_root_map = PairwiseRootDomainMap(producer_tv, consumer_tv);
+  auto c2p_root_map = c2p_pairwise_root_map.mapConsumerToProducer(
+      consumer_tv->domain(), producer_tv->domain());
+  auto replay_PasC = BestEffortReplay::replayPasC(
+      producer_tv, consumer_tv, -1, c2p_pairwise_root_map);
+
+  auto c2p_map = replay_PasC.getReplay();
+
   auto producer_id = producer_tv->axis(int(producer_axis));
   IterDomain* consumer_id = nullptr;
-  for (const auto& m : replay) {
+  for (const auto& m : c2p_map) {
     if (m.second == producer_id) {
       consumer_id = m.first;
     }
@@ -756,7 +757,9 @@ TensorView* TensorView::cache_before() {
   // setDefinition(nullptr);
 
   if (consumer_replay_needed) {
-    TransformReplay::replayCasP(consumer, producer, -1);
+    auto replayed_consumer_pair =
+        TransformReplay::replayCasP(consumer, producer, -1);
+    consumer->setDomain(replayed_consumer_pair.first);
   }
 
   // Make the cache tensor computed at the consumer if the
@@ -774,7 +777,9 @@ TensorView* TensorView::cache_before() {
   // After:  New TV (CB) -> This TV -> Next TV
   if (hasComputeAt()) {
     if (!cache_replayed) {
-      TransformReplay::replayPasC(producer, consumer, -1);
+      auto replayed_producer_pair =
+          TransformReplay::replayPasC(producer, consumer, -1);
+      producer->setDomain(replayed_producer_pair.first);
       cache_replayed = true;
     }
     producer->setComputeAt(getComputeAtPosition());
@@ -791,7 +796,9 @@ TensorView* TensorView::cache_before() {
        ir_utils::filterByType<TensorView>(expr_inputs)) {
     if (producer_of_producer->hasComputeAt()) {
       if (!cache_replayed) {
-        TransformReplay::replayPasC(producer, consumer, -1);
+        auto replayed_producer_pair =
+            TransformReplay::replayPasC(producer, consumer, -1);
+        producer->setDomain(replayed_producer_pair.first);
         cache_replayed = true;
       }
       TORCH_INTERNAL_ASSERT(producer_of_producer->getComputeAtPosition() > 0);
@@ -862,7 +869,8 @@ TensorView* TensorView::cache_fork() {
   fusion()->replaceOutput(this, new_output);
 
   // Transform new output according to this TV
-  TransformReplay::replayCasP(new_output, this, -1);
+  auto replayed_output_pair = TransformReplay::replayCasP(new_output, this, -1);
+  new_output->setDomain(replayed_output_pair.first);
 
   // Set the computeAt for this forked TensorView. It is a terminating
   // output, so set only this position.
@@ -919,7 +927,9 @@ TensorView* TensorView::cache_after() {
   // Before: This TV -> Next TV
   // After:  This TV -> New TV (After) -> Next TV
   if (hasComputeAt()) {
-    TransformReplay::replayCasP(consumer, producer, -1);
+    auto replayed_consumer_pair =
+        TransformReplay::replayCasP(consumer, producer, -1);
+    consumer->setDomain(replayed_consumer_pair.first);
     consumer->setComputeAt(getComputeAtPosition());
   } else if (kIsFusionInput) {
     bool cache_replayed = false;
@@ -930,7 +940,9 @@ TensorView* TensorView::cache_after() {
         if (output->hasComputeAt()) {
           if (!cache_replayed) {
             // Completely transform consumer according to output
-            TransformReplay::replayPasC(consumer, output, -1);
+            auto replayed_consumer_pair =
+                TransformReplay::replayPasC(consumer, output, -1);
+            consumer->setDomain(replayed_consumer_pair.first);
             cache_replayed = true;
           }
           auto output_ca_pos = output->getComputeAtPosition();

@@ -58,6 +58,10 @@ struct KernelSummary {
 
   //! Do we have allocations of dynamic local memory?
   bool has_dynamic_local_memory_allocations = false;
+
+  //! List of dynamic local memory buffers.
+  //! Only used for debugging.
+  std::vector<const kir::Allocate*> dynamic_lmem_allocations;
 };
 
 //! Container for a lowered Kernel IR

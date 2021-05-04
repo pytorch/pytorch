@@ -40,10 +40,10 @@ class ComputeAt {
   TensorView* consumer_;
   TensorView* reference_;
   unsigned int reference_position_;
+  ComputeAtMode mode_ = ComputeAtMode::Standard;
+
   unsigned int producer_position_ = 0;
   ComputeAtRootDomainMap root_map_;
-
-  ComputeAtMode mode_ = ComputeAtMode::Standard;
 
   // Runs replayPasC and sets producer computeAt settings. Returns
   // producer_compute_at_pos.

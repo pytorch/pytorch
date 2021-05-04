@@ -161,9 +161,15 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
         "The static shared memory allocation is larger than available memory.");
   }
 
-  TORCH_INTERNAL_ASSERT(
-      !kernel_summary.has_dynamic_local_memory_allocations,
-      "Allocations must be based on constant integers for local memory.");
+  if (kernel_summary.has_dynamic_local_memory_allocations) {
+    std::stringstream ss;
+    ss << "Allocations must be based on constant integers for local memory. However, found: ";
+    for (auto alloc : kernel_summary.dynamic_lmem_allocations) {
+      ss << toString(alloc->buffer(), false) << ", ";
+    }
+    ss << " have dynamic allocations but are placed in local memory.";
+    TORCH_INTERNAL_ASSERT(false, ss.str());
+  }
 
   TORCH_CHECK(
       kernel_summary.number_of_grid_reductions <= 1,

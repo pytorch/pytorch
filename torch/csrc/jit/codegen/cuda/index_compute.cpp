@@ -242,11 +242,9 @@ void IndexCompute::handle(Split* split) {
   const bool inner_bcast = inner_id->isBroadcast();
 
   const bool outer_vect =
-      split->outer()->getParallelType() == ParallelType::Vectorize ||
-      split->outer()->getParallelType() == ParallelType::MisalignedVectorize;
+      isParallelTypeVectorize(split->outer()->getParallelType());
   const bool inner_vect =
-      split->inner()->getParallelType() == ParallelType::Vectorize ||
-      split->inner()->getParallelType() == ParallelType::MisalignedVectorize;
+      isParallelTypeVectorize(split->inner()->getParallelType());
 
   // We want to mark as zero merged in if we're working with shared or local
   // memory, and the dimension we're working with is not part of the allocation,
@@ -746,8 +744,7 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
   // loop nests look like consumer
   auto pairwiseMap = PairwiseRootDomainMap(producer_tv, consumer_tv);
   auto producerAsC =
-      TransformReplay::replayPasC(
-          producer_tv->domain(), consumer_tv->domain(), -1, pairwiseMap)
+      TransformReplay::replayPasC(producer_tv, consumer_tv, -1, pairwiseMap)
           .first;
 
   // Make the producer_tv look like consumer while performing indexing math
@@ -771,8 +768,7 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
   BestEffortReplay replay_producer_as_ref(
       producer_tv->domain()->domain(),
       reference_domain->domain(),
-      root_ref_to_producer,
-      false);
+      root_ref_to_producer);
 
   const auto& ref_2_producer = replay_producer_as_ref.getReplay();
 
@@ -788,8 +784,7 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
     if (ref_id->getParallelType() == ParallelType::Vectorize) {
       p_id_backup.emplace_back(std::make_pair(p_id, p_id->getParallelType()));
       p_id->parallelize(ParallelType::Vectorize);
-    }
-    if (ref_id->getParallelType() == ParallelType::MisalignedVectorize) {
+    } else if (ref_id->getParallelType() == ParallelType::MisalignedVectorize) {
       p_id->parallelize(ParallelType::MisalignedVectorize);
     }
   }
@@ -988,29 +983,20 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
 
   // Replay producer to look like consumer so we can index on producer since our
   // loop nests look like consumer
-  auto pairwiseMap = PairwiseRootDomainMap(producer_tv, consumer_tv);
-  auto producerAsC =
-      TransformReplay::replayPasC(
-          producer_tv->domain(), consumer_tv->domain(), -1, pairwiseMap)
+  auto pairwise_map = PairwiseRootDomainMap(producer_tv, consumer_tv);
+  auto producer_replayed_as_consumer =
+      TransformReplay::replayPasC(producer_tv, consumer_tv, -1, pairwise_map)
           .first;
 
-  ir_utils::TVDomainGuard domain_guard(producer_tv, producerAsC);
-
-  // Produce mapping between consumer and producer, this is used to figure out
-  // the allocation point of the producer relative to the loop nests generated
-  // by the consumer
-  auto c2p_root_map = pairwiseMap.mapConsumerToProducer(
-      consumer_tv->domain(), producer_tv->domain());
+  ir_utils::TVDomainGuard domain_guard(
+      producer_tv, producer_replayed_as_consumer);
 
   //  We want to play producer as consumer instead of the other way around since
   //  consumer may have some broadcasted axes producer doesn't have merged into
   //  loops producer may use. If we did consumer as producer we wouldn't have
   //  this information in the mapping.
-  BestEffortReplay replay_PasC(
-      producer_tv->domain()->domain(),
-      consumer_tv->domain()->domain(),
-      c2p_root_map,
-      true);
+  auto replay_PasC =
+      BestEffortReplay::replayPasC(producer_tv, consumer_tv, -1, pairwise_map);
 
   auto c2p_map = replay_PasC.getReplay();
 
@@ -1082,8 +1068,7 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
   BestEffortReplay replay_producer_as_ref(
       producer_tv->domain()->domain(),
       reference_domain->domain(),
-      root_ref_to_producer,
-      false);
+      root_ref_to_producer);
 
   const auto& ref_2_producer = replay_producer_as_ref.getReplay();
 
@@ -1099,8 +1084,7 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
     if (ref_id->getParallelType() == ParallelType::Vectorize) {
       p_id_backup.emplace_back(std::make_pair(p_id, p_id->getParallelType()));
       p_id->parallelize(ParallelType::Vectorize);
-    }
-    if (ref_id->getParallelType() == ParallelType::MisalignedVectorize) {
+    } else if (ref_id->getParallelType() == ParallelType::MisalignedVectorize) {
       p_id->parallelize(ParallelType::MisalignedVectorize);
     }
   }
@@ -1247,8 +1231,7 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
   BestEffortReplay replay_consumer_as_ref(
       consumer_tv->domain()->domain(),
       reference_domain->domain(),
-      root_ref_to_consumer,
-      false);
+      root_ref_to_consumer);
 
   const auto& ref_2_consumer = replay_consumer_as_ref.getReplay();
 
@@ -1437,8 +1420,7 @@ std::vector<kir::Val*> Index::getNonGlobalConsumerStridedIndices(
   BestEffortReplay replay_consumer_as_ref(
       consumer_tv->domain()->domain(),
       reference_domain->domain(),
-      root_ref_to_consumer,
-      false);
+      root_ref_to_consumer);
 
   const auto& ref_2_consumer = replay_consumer_as_ref.getReplay();
 
@@ -1640,8 +1622,7 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
   BestEffortReplay replay_consumer_as_ref(
       consumer_tv->domain()->domain(),
       reference_domain->domain(),
-      root_ref_to_consumer,
-      false);
+      root_ref_to_consumer);
 
   const auto& ref_2_consumer = replay_consumer_as_ref.getReplay();
 
