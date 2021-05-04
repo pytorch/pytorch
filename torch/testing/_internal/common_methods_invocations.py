@@ -3754,18 +3754,13 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad):
 
     samples = []
     for tensor, args in test_cases:
-        samples.append(SampleInput(tensor, args=args))
+        samples.append(SampleInput(tensor, args=args, kwargs={'reduce': None}))
 
-        if not requires_grad:
-            reduce_args = []
+        if dtype.is_floating_point or dtype.is_complex:
+            samples.append(SampleInput(tensor, args=args, kwargs={'reduce': 'add'}))
 
-            if dtype.is_floating_point:
-                reduce_args = ['add', 'multiply']
-            elif dtype.is_complex:
-                reduce_args = ['add']
-
-            for r in reduce_args:
-                samples.append(SampleInput(tensor, args=args, kwargs={'reduce': r}))
+        if dtype.is_floating_point:
+            samples.append(SampleInput(tensor, args=args, kwargs={'reduce': 'multiply'}))
 
     return samples
 
@@ -6491,8 +6486,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter,
-           supports_complex_autograd=False,
-           supports_out=False),
+           supports_complex_autograd=False,),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
