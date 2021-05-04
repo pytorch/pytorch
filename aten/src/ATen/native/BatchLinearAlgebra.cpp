@@ -214,9 +214,6 @@ void lapackGetri(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwo
 template<class scalar_t>
 void lapackCholeskySolve(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info);
 
-template<class scalar_t>
-void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info);
-
 template<class scalar_t, class value_t=scalar_t>
 void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, value_t *w, scalar_t *work, int lwork, value_t *rwork, int *info);
 
@@ -1153,45 +1150,7 @@ Tensor& cholesky_solve_out(const Tensor& self, const Tensor& A, bool upper, Tens
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template<typename scalar_t>
-static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
-  AT_ERROR("cholesky: LAPACK library not found in compilation");
-#else
-  char uplo = upper ? 'U' : 'L';
-
-  auto self_data = self.data_ptr<scalar_t>();
-  auto self_matrix_stride = matrixStride(self);
-  auto batch_size = batchCount(self);
-  auto n = self.size(-2);
-  auto lda = std::max<int64_t>(1, n);
-
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    lapackCholesky<scalar_t>(uplo, n, self_working_ptr, lda, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
-  }
-#endif
-}
-
-Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
-  std::vector<int64_t> infos(batchCount(self), 0);
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cpu", [&]{
-    apply_cholesky<scalar_t>(self_working_copy, upper, infos);
-  });
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "cholesky_cpu");
-  } else {
-    singleCheckErrors(infos[0], "cholesky_cpu");
-  }
-  return self_working_copy;
-}
+DEFINE_DISPATCH(cholesky_stub);
 
 Tensor cholesky(const Tensor &self, bool upper) {
   if (self.numel() == 0) {
@@ -1199,7 +1158,20 @@ Tensor cholesky(const Tensor &self, bool upper) {
   }
   squareCheckInputs(self);
 
-  auto raw_cholesky_output = at::_cholesky_helper(self, upper);
+  auto raw_cholesky_output = cloneBatchedColumnMajor(self);
+  auto info_shape = IntArrayRef(
+      self.sizes().cbegin(), self.sizes().cend() - 2); // self.shape[:-2]
+  auto info = at::empty({info_shape}, self.options().dtype(kInt));
+
+  // fill the raw_cholesky_output with the result
+  cholesky_stub(self.device().type(), raw_cholesky_output, info, upper);
+
+  if (self.dim() > 2) {
+    batchCheckErrors(info, "cholesky");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "cholesky");
+  }
+
   if (upper) {
     return raw_cholesky_output.triu_();
   } else {
@@ -1216,20 +1188,141 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
   return result;
 }
 
-Tensor linalg_cholesky(const Tensor &self) {
-  if (self.numel() == 0) {
-    return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const Tensor& info) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.size(-1) == input.size(-2));
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.device() == input.device());
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.device() == input.device());
+
+  // if result has no elements we can modify it
+  if (result.numel() == 0) {
+    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
+    result.transpose_(-2, -1);
   }
-  squareCheckInputs(self);
-  return at::_cholesky_helper(self, /*upper=*/false).tril_();
+
+  // result tensor must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.sizes().equals(input.sizes()));
+
+  // cholesky_stub (apply_cholesky) performs calculations in-place and result must be a copy of input
+  result.copy_(input);
+
+  // if info has no elements we can modify it
+  auto expected_info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
+  if (info.numel() == 0) {
+    info.resize_(expected_info_shape);
+  }
+
+  // info must be contiguous
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.sizes().equals(expected_info_shape));
+  info.fill_(0);
+
+  cholesky_stub(result.device().type(), result, info, /*upper=*/false);
+
+  result.tril_();
+}
+
+std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool check_errors, Tensor& L, Tensor& info) {
+  squareCheckInputs(input);
+  checkSameDevice("torch.linalg.cholesky_ex", L, input, "L");
+  checkLinalgCompatibleDtype("torch.linalg.cholesky_ex", L, input, "L");
+  checkSameDevice("torch.linalg.cholesky_ex", info, input, "info");
+
+  // Do not allow type promotion for the `info` tensor, it must be of Int dtype
+  // Int is used because current interface to LAPACK and its CUDA implementation use "int" type.
+  // https://github.com/pytorch/pytorch/pull/56724#discussion_r618916774
+  ScalarType info_output_type = ScalarType::Int;
+  TORCH_CHECK(
+      info.scalar_type() == info_output_type,
+      "torch.linalg.cholesky_ex: ",
+      "Expected info to have ", info_output_type, " dtype, but got info with dtype ", info.scalar_type());
+
+  bool L_input_same_type = (L.scalar_type() == input.scalar_type());
+  bool L_equal_expected_shape = L.sizes().equals(input.sizes());
+  bool is_L_batched_column_major = false;
+  if (L.dim() >= 2) {
+    is_L_batched_column_major = L.transpose(-2, -1).is_contiguous();
+  }
+
+  // if L is not empty and not in batched column major format
+  bool copy_needed = (L.numel() != 0 && !is_L_batched_column_major);
+  copy_needed |= (L.numel() != 0 && !L_equal_expected_shape); // or L does not have the expected shape
+  copy_needed |= !L_input_same_type;  // or L does not have the same dtype as input
+  // we have to allocate a temporary tensor
+
+  // similar conditions for info tensor
+  auto expected_info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
+  copy_needed |= (info.numel() != 0 && !info.is_contiguous());
+  copy_needed |= (info.numel() != 0 && !(info.sizes().equals(expected_info_shape))); // or L does not have the expected shape
+
+  if (copy_needed) {
+    Tensor L_tmp = at::empty({0}, input.options());
+    Tensor info_tmp = at::empty({0}, input.options().dtype(kInt));
+    linalg_cholesky_out_info(input, L_tmp, info_tmp);
+    at::native::resize_output(L, L_tmp.sizes());
+    L.copy_(L_tmp);
+    at::native::resize_output(info, info_tmp.sizes());
+    info.copy_(info_tmp);
+  } else {
+    // use "out" tensors' memory directly
+    linalg_cholesky_out_info(input, L, info);
+  }
+
+  if (check_errors) {
+    if (input.dim() > 2) {
+      batchCheckErrors(info, "torch.linalg.cholesky_ex");
+    } else {
+      singleCheckErrors(info.item<int64_t>(), "torch.linalg.cholesky_ex");
+    }
+  }
+
+  return std::tuple<Tensor&, Tensor&>(L, info);
+}
+
+std::tuple<Tensor, Tensor> linalg_cholesky_ex(const Tensor& input, bool check_errors) {
+  Tensor L = at::empty({0}, input.options());
+  Tensor info = at::empty({0}, input.options().dtype(kInt));
+  std::tie(L, info) = at::native::linalg_cholesky_ex_out(input, check_errors, L, info);
+  return std::make_tuple(L, info);
+}
+
+Tensor linalg_cholesky(const Tensor &self) {
+  Tensor result, info;
+  std::tie(result, info) = at::linalg_cholesky_ex(self, /*check_errors=*/false);
+
+  // we pass check_errors=false above and do the check here
+  // so that the name of the function is correct in the error message
+  if (self.dim() > 2) {
+    batchCheckErrors(info, "torch.linalg.cholesky");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "torch.linalg.cholesky");
+  }
+
+  return result;
 }
 
 Tensor& linalg_cholesky_out(const Tensor &self, Tensor &result) {
-  checkSameDevice("linalg_cholesky", result, self);
-  checkLinalgCompatibleDtype("linalg_cholesky", result, self);
-  Tensor result_tmp = at::linalg_cholesky(self);
-  at::native::resize_output(result, result_tmp.sizes());
-  result.copy_(result_tmp);
+  // linalg_cholesky_ex_outf includes these checks, but we do it here
+  // so that the name of the function is correct in the error message
+  checkSameDevice("torch.linalg.cholesky", result, self);
+  checkLinalgCompatibleDtype("torch.linalg.cholesky", result, self);
+
+  Tensor info = at::empty({0}, self.options().dtype(kInt));
+  std::tie(result, info) = at::linalg_cholesky_ex_outf(self, /*check_errors=*/false, result, info);
+
+  // we pass check_errors=false above and do the check here
+  // so that the name of the function is correct in the error message
+  if (self.dim() > 2) {
+    batchCheckErrors(info, "torch.linalg.cholesky");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "torch.linalg.cholesky");
+  }
+
   return result;
 }
 
@@ -1519,7 +1612,7 @@ static void geqrf_out_helper(const Tensor& input, const Tensor& QR, const Tensor
 
   // geqrf_stub (apply_geqrf) performs calculations in-place and 'QR' must be a copy of input
   QR.copy_(input);
-  geqrf_stub(input.device().type(), QR, tau, input.size(-2), input.size(-1));
+  geqrf_stub(input.device().type(), QR, tau);
 }
 
 std::tuple<Tensor&, Tensor&> geqrf_out(const Tensor& input, Tensor& QR, Tensor& tau) {
@@ -1578,57 +1671,126 @@ std::tuple<Tensor, Tensor> geqrf(const Tensor& input) {
   return std::make_tuple(QR, tau);
 }
 
-std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string mode) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool compute_q, reduced;
-  std::tie(compute_q, reduced) = _parse_qr_mode(mode);
-  int64_t m = self.size(-2), n = self.size(-1);
+/*
+  Computes the QR decomposition using GEQRF and ORGQR operations.
+  This is an in-place function and Q, R tensors must have correct shape and be Fortran contiguous.
 
-  // Setup inputs for apply_geqrf
-  auto self_sizes = self.sizes().vec();
-  self_sizes.pop_back();
-  self_sizes[self.dim() - 2] = std::min(m, n);
-  auto tau_working_copy = at::empty(self_sizes, self.options());
-  Tensor q_working_copy;
-  Tensor R;
+  Args:
+  * `input` - [in] Input tensor for QR decomposition
+  * `Q` - [out] Tensor containing the Q matrices of QR decomposition
+  * `R` - [out] Tensor containing the R matrices of QR decomposition
+  * `compute_q` - controls whether the Q tensor is computed
+  * `reduced_mode` - controls the size of Q and R tensors
 
-  // Setup input geometry for apply_orgqr
-  std::vector<int64_t> q_sizes, q_strides;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t n_columns_q;
-  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, reduced);
+  For further details, please see the LAPACK documentation for GEQRF and ORGQR.
+*/
+void linalg_qr_out_helper(const Tensor& input, const Tensor& Q, const Tensor& R, bool compute_q, bool reduced_mode) {
+  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
 
-  // If there are no elements, then we simply return a pair of tensors of required dimensions
-  if (self.numel() == 0) {
-    R = at::empty({n_columns_q, n}, self.options());
+  TORCH_INTERNAL_ASSERT(input.scalar_type() == Q.scalar_type());
+  TORCH_INTERNAL_ASSERT(input.device() == Q.device());
+
+  TORCH_INTERNAL_ASSERT(input.scalar_type() == R.scalar_type());
+  TORCH_INTERNAL_ASSERT(input.device() == R.device());
+
+  auto m = input.size(-2);
+  auto n = input.size(-1);
+  auto mn = std::min(m, n);
+
+  // Q must have the expected shape: reduced_mode ? (..., m, min(m, n)) : (..., m, m)
+  if (compute_q) {
+    auto expected_Q_shape = input.sizes().vec();
+    expected_Q_shape.back() = reduced_mode ? mn : m;
+    TORCH_INTERNAL_ASSERT(Q.sizes().equals(expected_Q_shape));
+
+    // Q tensor must be in batched column major order (Fortran contiguous)
+    TORCH_INTERNAL_ASSERT(Q.transpose(-2, -1).is_contiguous());
+  }
+
+  // R must have the expected shape: (reduced_mode || !compute_q) ? (..., min(m,n), n) : (..., m, n)
+  auto expected_R_shape = input.sizes().vec();
+  expected_R_shape.end()[-2] = (reduced_mode || !compute_q) ? mn : m;
+  TORCH_INTERNAL_ASSERT(R.sizes().equals(expected_R_shape));
+
+  // R tensor must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT(R.transpose(-2, -1).is_contiguous());
+
+  auto tau_shape = input.sizes().vec();
+  tau_shape.pop_back();
+  tau_shape.back() = mn;
+  Tensor tau = at::empty(tau_shape, input.options());
+
+  // geqrf requires m x n workspace input that is modified in-place
+  // if m > n and reduced==true we use Q tensor for storing the result of geqrf operation
+  // otherwise R tensor is used
+  Tensor QR;
+  if (m <= n) {
+    QR = R;
+  } else { // m > n
     if (compute_q) {
-      int64_t n_rows_q = q_sizes[self.dim() - 2];
-      q_working_copy = at::eye(n_rows_q, n_columns_q, self.options());
+      QR = reduced_mode ? Q : R;
     } else {
-      q_working_copy = at::empty({0}, self.options());
+      // if m > n and compute_q==false we need to allocate an additional temporary tensor
+      QR = at::empty(input.transpose(-2, -1).sizes(), input.options());
+      QR.transpose_(-2, -1);
     }
-    return std::make_tuple(q_working_copy, R);
   }
 
-  // First perform GEQRF for R and TAU (the elementary reflectors)
-  // We will need to generate R from the upper triangular matrix from the
-  // matrix input to GEQRF.
-  q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
-  q_working_copy.narrow(-1, 0, n).copy_(self);
+  // geqrf_stub (apply_geqrf) performs calculations in-place and 'QR' must be a copy of input
+  QR.copy_(input);
+  geqrf_stub(input.device().type(), QR, tau);
 
-  geqrf_stub(q_working_copy.device().type(), q_working_copy, tau_working_copy, m, n);
-
-  R = q_working_copy.slice(-2, 0, n_columns_q).slice(-1, 0, n).triu();
+  // this is for mode='r'
   if (!compute_q) {
-    // this is for mode='r'
-    Tensor empty_Q = at::empty({0}, self.options());
-    return std::make_tuple(empty_Q, R);
+    // if m > n we used a temporary tensor to store the result of geqrf
+    if (m > n) {
+      R.copy_(QR.slice(-2, 0, mn));
+    }
+    R.triu_();
+    return;
   }
 
-  // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
-  orgqr_stub(q_working_copy.device().type(), q_working_copy, tau_working_copy, n_columns_q);
+  // if Q tensor was used for geqrf copy the result for R from QR
+  if (m > n && reduced_mode) {
+    R.copy_(Q.slice(-2, 0, n));
+  } else {
+    Q.slice(-1, 0, n).copy_(R.slice(-1, 0, m));
+  }
+  R.triu_();
 
-  return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q), R);
+  // Next perform ORGQR for Q using the result from GEQRF
+  orgqr_stub(input.device().type(), const_cast<Tensor&>(Q), tau);
+}
+
+std::tuple<Tensor, Tensor> _linalg_qr_helper_default(const Tensor& input, std::string mode) {
+  bool compute_q, reduced_mode;
+  std::tie(compute_q, reduced_mode) = _parse_qr_mode(mode);
+  auto m = input.size(-2);
+  auto n = input.size(-1);
+  auto mn = std::min(m, n);
+
+  // Allocate Q, R tensors with correct shape and memory layout
+  Tensor Q;
+  if (compute_q) {
+    auto Qt_shape = input.sizes().vec();
+    Qt_shape.end()[-2] = reduced_mode ? mn : m;
+    Qt_shape.end()[-1] = m;
+    Q = at::empty(Qt_shape, input.options());
+    Q.transpose_(-2, -1); // make 'Q' with Fortran contiguous memory layout
+  } else {
+    Q = at::empty({0}, input.options());
+  }
+
+  auto Rt_shape = input.sizes().vec();
+  Rt_shape.end()[-2] = n;
+  Rt_shape.end()[-1] = (reduced_mode || !compute_q) ? mn : m;
+  Tensor R = at::empty(Rt_shape, input.options());
+  R.transpose_(-2, -1); // make 'R' with Fortran contiguous memory layout
+
+  // Now fill Q, R tensors with the result
+  linalg_qr_out_helper(input, Q, R, compute_q, reduced_mode);
+
+  return std::make_tuple(Q, R);
 }
 
 std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, std::string mode) {
@@ -1710,8 +1872,7 @@ Tensor& householder_product_out_helper(const Tensor& input, const Tensor& tau, T
   // orgqr_stub (apply_orgqr) performs calculations in-place and result must be a copy of input
   result.copy_(input);
 
-  auto n = input.size(-1);
-  result = orgqr_stub(result.device().type(), result, tau_, n);
+  result = orgqr_stub(result.device().type(), result, tau_);
   return result;
 }
 
