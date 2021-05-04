@@ -388,14 +388,14 @@ class PackageScriptModuleTest(PackageTestCase):
         Test tensors shared across eager and ScriptModules on load 
         are the same.
         """
-        from package_a.test_module import ModWithSubmodAndTensor, ModWithTensor
+        from package_a.test_module import ModWithTensor, ModWithTwoSubmodsAndTensor
 
-        shared_tensor = torch.rand(2, 3, 4)
-        scripted_mod = torch.jit.script(ModWithTensor(shared_tensor))
+        shared_tensor = torch.ones(3, 3)
 
-        mod1 = ModWithSubmodAndTensor(shared_tensor, scripted_mod)
+        scripted_mod_0 = torch.jit.script(ModWithTensor(shared_tensor))
+        scripted_mod_1 = torch.jit.script(ModWithTensor(shared_tensor))
 
-        self.assertEqual(id(mod1.tensor), id(mod1.sub_mod.tensor))
+        mod1 = ModWithTwoSubmodsAndTensor(shared_tensor, scripted_mod_0, scripted_mod_1)
 
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as e:
@@ -405,8 +405,73 @@ class PackageScriptModuleTest(PackageTestCase):
         importer = PackageImporter(buffer)
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
 
-        self.assertEqual(id(loaded_mod_1.tensor), id(loaded_mod_1.sub_mod.tensor))
-        # Issue: fails because currently tensors aren't being shared between loaded eager/script modules
+        self.assertTrue(
+            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_0.tensor)
+        )
+        self.assertTrue(
+            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_1.tensor)
+        )
+
+        loaded_mod_1.tensor.add_(torch.ones(3, 3))
+
+        self.assertTrue(
+            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_0.tensor)
+        )
+        self.assertTrue(
+            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_1.tensor)
+        )
+
+    def test_load_shared_tensors_repackaged(self):
+        """
+        Test tensors shared across eager and ScriptModules on load 
+        are the same across multiple package saves and loads. This is
+        an important test because not all of the tensor information is restored
+        in python between packages. The python identity is not maintained, but
+        the backing cpp TensorImpl is. We load/save storages based off of this
+        cpp TensorImpl and not the python identity. 
+        """
+        from package_a.test_module import ModWithTensor, ModWithTwoSubmodsAndTensor
+
+        shared_tensor = torch.ones(3, 3)
+
+        scripted_mod_0 = torch.jit.script(ModWithTensor(shared_tensor))
+        scripted_mod_1 = torch.jit.script(ModWithTensor(shared_tensor))
+
+        mod1 = ModWithTwoSubmodsAndTensor(shared_tensor, scripted_mod_0, scripted_mod_1)
+
+        buffer_0 = BytesIO()
+        with PackageExporter(buffer_0, verbose=False) as e:
+            e.save_pickle("res", "mod1.pkl", mod1)
+
+        buffer_0.seek(0)
+        importer_0 = PackageImporter(buffer_0)
+        loaded_mod_0 = importer_0.load_pickle("res", "mod1.pkl")
+
+        buffer_1 = BytesIO()
+        with PackageExporter(buffer_1, importer=importer_0, verbose=False) as e:
+            e.save_pickle("res", "mod1.pkl", loaded_mod_0)
+
+        buffer_1.seek(0)
+        importer = PackageImporter(buffer_1)
+        loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
+
+        self.assertTrue(
+            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_0.tensor)
+        )
+        self.assertTrue(
+            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_1.tensor)
+        )
+
+        loaded_mod_1.tensor.add_(
+            torch.ones(3, 3)
+        )  # all tensors should reflect this change
+
+        self.assertTrue(
+            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_0.tensor)
+        )
+        self.assertTrue(
+            torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_1.tensor)
+        )
 
     def test_saving_and_scripting_packaged_mod(self):
         """

@@ -5,6 +5,7 @@
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <string>
@@ -402,43 +403,54 @@ PickleOpCode Unpickler::readInstruction() {
           args.at(0).toStringRef());
       at::ScalarType type = args.at(1).toScalarType();
       const std::string& key = args.at(2).toStringRef();
-      at::Device device(args.at(3).toStringRef());
-      if (device_) {
-        device = *device_;
-      }
-      at::DataPtr storage_ptr = read_record_(key);
-      int64_t numel = args.at(4).toInt();
-      caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
-      at::Storage storage(
-          c10::Storage::use_byte_size_t(),
-          numel * dtype.itemsize(),
-          std::move(storage_ptr),
-          /*allocator=*/nullptr,
-          /*resizable=*/false); // NB: we didn't set any allocator for the
-                                // tensor
-      auto options = at::CPU(type).options();
 
-      if (use_storage_device_) {
-        options = options.device(storage.device());
-        device = storage.device();
-      }
-
-      at::Tensor tensor;
-      if (options.backend() == c10::Backend::QuantizedCPU) {
-        tensor = at::_empty_affine_quantized({}, options, 0, 0)
-                     .set_(storage, 0, {}, {});
+      if (storage_tracker_ != nullptr && storage_tracker_->hasStorage(key)) {
+        // for torch.package logic where storage may be loaded already
+        at::Tensor tensor = at::Tensor(storage_tracker_->getStorage(key));
+        stack_.emplace_back(std::move(tensor));
       } else {
-        tensor = at::empty({0}, options).set_(storage);
-      }
+        at::Device device(args.at(3).toStringRef());
+        if (device_) {
+          device = *device_;
+        }
+        at::DataPtr storage_ptr =
+            read_record_(key);
+        int64_t numel = args.at(4).toInt();
+        caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
+        at::Storage storage(
+            c10::Storage::use_byte_size_t(),
+            numel * dtype.itemsize(),
+            std::move(storage_ptr),
+            /*allocator=*/nullptr,
+            /*resizable=*/false); // NB: we didn't set any allocator for the
+                                  // tensor
+        auto options = at::CPU(type).options();
 
-      if (device.is_cuda() || device.is_xpu()) {
-        tensor = tensor.to(device, tensor.scalar_type());
-      } else if (device.type() != DeviceType::CPU) {
-        AT_ERROR(
-            "supported devices include CPU and CUDA, however got ",
-            DeviceTypeName(device.type(), false));
+        if (use_storage_device_) {
+          options = options.device(storage.device());
+          device = storage.device();
+        }
+
+        at::Tensor tensor;
+        if (options.backend() == c10::Backend::QuantizedCPU) {
+          tensor = at::_empty_affine_quantized({}, options, 0, 0)
+                       .set_(storage, 0, {}, {});
+        } else {
+          tensor = at::empty({0}, options).set_(storage);
+        }
+
+        if (device.is_cuda() || device.is_xpu()) {
+          tensor = tensor.to(device, tensor.scalar_type());
+        } else if (device.type() != DeviceType::CPU) {
+          AT_ERROR(
+              "supported devices include CPU and CUDA, however got ",
+              DeviceTypeName(device.type(), false));
+        }
+        if (storage_tracker_ != nullptr) {
+          storage_tracker_->addStorage(key, tensor.getIntrusivePtr());
+        }
+        stack_.emplace_back(std::move(tensor));
       }
-      stack_.emplace_back(std::move(tensor));
     } break;
     default: {
       AT_ERROR(

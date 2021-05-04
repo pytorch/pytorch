@@ -32,6 +32,17 @@ class ModWithSubmodAndTensor(torch.nn.Module):
         return self.sub_mod(x) + self.tensor
 
 
+class ModWithTwoSubmodsAndTensor(torch.nn.Module):
+    def __init__(self, tensor, sub_mod_0, sub_mod_1):
+        super().__init__()
+        self.tensor = tensor
+        self.sub_mod_0 = sub_mod_0
+        self.sub_mod_1 = sub_mod_1
+
+    def forward(self, x):
+        return self.sub_mod_0(x) + self.sub_mod_1(x) + self.tensor
+
+
 class ModWithMultipleSubmods(torch.nn.Module):
     def __init__(self, mod1, mod2):
         super().__init__()
