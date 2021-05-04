@@ -16236,6 +16236,19 @@ class TestNNDeviceType(NNTestCase):
         m.to_empty(device='meta')
         m(input)
 
+    @skipMeta
+    def test_skip_init(self, device):
+        torch.manual_seed(1)
+        m_initialized = torch.nn.Linear(5, 1)
+        m_initialized.to(device)
+
+        torch.manual_seed(1)
+        l = torch.nn.utils.skip_init(torch.nn.Linear, device=device)
+        m_uninitialized = l(5, 1)
+
+        self.assertEqual(m_initialized.weight.device, m_uninitialized.weight.device)
+        self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
+
 class TestModuleGlobalHooks(TestCase):
 
     def tearDown(self):
