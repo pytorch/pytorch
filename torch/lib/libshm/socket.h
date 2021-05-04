@@ -119,6 +119,10 @@ public:
       SYSCHECK_ERR_RETURN_NEG1(unlink(socket_path.c_str()));
   }
 
+  virtual ~ManagerServerSocket() {
+    unlink(socket_path.c_str());
+  }
+
   ManagerSocket accept() {
     int client_fd;
     struct sockaddr_un addr;
