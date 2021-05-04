@@ -114,8 +114,8 @@ public:
   }
 
   void remove() {
-    struct stat st;
-    if (stat(socket_path.c_str(), &st) == 0)
+    struct stat file_stat;
+    if (fstat(socket_fd, &file_stat) == 0)
       SYSCHECK_ERR_RETURN_NEG1(unlink(socket_path.c_str()));
   }
 
