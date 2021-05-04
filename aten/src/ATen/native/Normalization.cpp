@@ -423,26 +423,23 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("bias", num_features, bias.numel());
   }
 
-	const auto isizes = input.sizes();
   const bool use_cudnn = (
-		           input.is_cuda()
-               && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
-               && (input.scalar_type() != at::kHalf
-                 || weight.scalar_type() == at::kFloat)
-               && weight.defined() && bias.defined()
-               && ((running_mean.defined() && running_var.defined())
-                 || (!running_mean.defined() && !running_var.defined() && training))
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-               && (!training || (isizes.size() >= 3)) // disable per-activation, training
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-							 && ((isizes.size() == 2 && isizes[0] <= 262136 && !training) // per-activation, eval
-								 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-								 || (isizes.size() >= 3 && isizes[0] <= 880801 && training) // spatial, training
-								 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-								 || (isizes.size() >= 3 && isizes[0] <= 65535 && !training)) //spatial, eval
-               && detail::getCUDAHooks().compiledWithCuDNN()
-               && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
-               && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
+      input.is_cuda()
+      && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
+      && (input.scalar_type() != at::kHalf
+        || weight.scalar_type() == at::kFloat)
+      && weight.defined() && bias.defined()
+      && ((running_mean.defined() && running_var.defined())
+        || (!running_mean.defined() && !running_var.defined() && training))
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      && (input.dim() >= 3)
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      && ((input.size(0) <= 880801 && training) // spatial, training
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          ||(input.size(0) <= 65535 && !training)) //spatial, eval
+      && detail::getCUDAHooks().compiledWithCuDNN()
+      && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
+      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
   if (use_cudnn) {
     auto input_c = input.contiguous(input.suggest_memory_format());
