@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <cuda.h>
 
 // Note [CHECK macro]
@@ -21,7 +21,7 @@
     }                                                                \
   } while (0)
 
-  #define C10_CUDA_CHECK_WARN(EXPR)                            \
+#define C10_CUDA_CHECK_WARN(EXPR)                              \
   do {                                                         \
     cudaError_t __err = EXPR;                                  \
     if (__err != cudaSuccess) {                                \
