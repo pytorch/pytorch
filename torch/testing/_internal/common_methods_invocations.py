@@ -2991,6 +2991,8 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
 
     if dtype.is_floating_point:
         if op_info.op != torch.special.i0e:
+            # Second-order derivative for `i0e` at `0`
+            # is not defined due to discontinuity. 
             t = make_tensor((S,), device, dtype,
                             requires_grad=requires_grad)
 
