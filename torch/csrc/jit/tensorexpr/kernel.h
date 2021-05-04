@@ -217,6 +217,10 @@ TORCH_API bool& getCatWoConditionals();
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);
 
+TORCH_API void annotateInputShapes(
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<c10::optional<at::Tensor>>& example_inputs);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

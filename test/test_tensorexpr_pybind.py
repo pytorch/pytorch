@@ -83,14 +83,12 @@ graph(%a.1 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu),
         """
         graph = torch._C.parse_ir(graph_str)
 
-        with kernel_arena_scope():
-            kernel = torch._C._te.TensorExprKernel(graph)
-            res1 = kernel.run((x, y, z))
-            res2 = kernel.fallback((x, y, z))
-            correct = f(x, y, z)
-            np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
-            np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
-
+        kernel = torch._C._te.TensorExprKernel(graph)
+        res1 = kernel.run((x, y, z))
+        res2 = kernel.fallback((x, y, z))
+        correct = f(x, y, z)
+        np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+        np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_with_scalar_inputs(self):
@@ -111,13 +109,50 @@ graph(%a.1 : Float(requires_grad=0, device=cpu),
         """
         graph = torch._C.parse_ir(graph_str)
 
-        with kernel_arena_scope():
+        kernel = torch._C._te.TensorExprKernel(graph)
+        res1 = kernel.run((x, y, z))
+        res2 = kernel.fallback((x, y, z))
+        correct = f(x, y, z)
+        np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+        np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
+
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_kernel_shape_prop(self):
+        device, size = 'cpu', (4, 4)
+        x = torch.rand(size, device=device)
+        y = torch.rand(size, device=device)
+
+        graph_str = """
+graph(%a : Tensor, %b : Tensor):
+  %c : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu) = aten::mul(%a, %b)
+  return (%c)
+        """
+        graph = torch._C.parse_ir(graph_str)
+
+        exception_thrown = False
+        try:
             kernel = torch._C._te.TensorExprKernel(graph)
-            res1 = kernel.run((x, y, z))
-            res2 = kernel.fallback((x, y, z))
-            correct = f(x, y, z)
-            np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
-            np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
+        except RuntimeError:
+            # Graph doesn't have shape info for inputs => compilation should
+            # fail
+            exception_thrown = True
+            pass
+        assert exception_thrown
+
+        # Inject shape info and try compiling again
+        example_inputs = [torch.rand(4, 4), torch.rand(4, 4)]
+        torch._C._te.annotate_input_shapes(graph, example_inputs)
+
+        # TODO: once we have shape propagation as well we should erase type
+        # info for %c from the input IR and run shape propagation here - it
+        # should be able to reconstruct that info
+
+        # Now compilation should pass
+        kernel = torch._C._te.TensorExprKernel(graph)
+
+        res = kernel.run((x, y))
+        correct = torch.mul(x, y)
+        np.testing.assert_allclose(res.numpy(), correct.numpy(), atol=1e-5)
 
 if __name__ == '__main__':
     run_tests()
