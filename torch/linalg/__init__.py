@@ -661,6 +661,10 @@ Also supports batched inputs, and, if the input is batched, the output is batche
         :func:`torch.geqrf` can be used together with this function to form the `Q` from the
         :func:`~qr` decomposition.
 
+        :func:`torch.ormqr` is a related function that computes the matrix multiplication
+        of a product of Householder matrices with another matrix.
+        However, that function is not supported by autograd.
+
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     tau (Tensor): tensor of shape `(*, k)` where `*` is zero or more batch dimensions.
