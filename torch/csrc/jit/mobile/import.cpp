@@ -306,8 +306,8 @@ void BytecodeDeserializer::parseMethods(
                                .toList()
                                .vec();
       TORCH_CHECK(
-          debug_handles_list.size() == ops_list.size(),
-          "The numbers of operators and debug handles strings do not match.");
+          debug_handles_list.size() == ins_list.size(),
+          "The numbers of instructions and debug handles strings do not match.");
     }
 
     for (size_t i = 0; i < ins_list.size(); ++i) {
@@ -319,20 +319,9 @@ void BytecodeDeserializer::parseMethods(
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
-      // TODO: Save debug handles for all instructions, not just for OP
-      if (op_code == OP) {
-        if (has_debug_handles) {
-          // Why X is used to index into debug_handles?
-          // X is the offset into opnames table and since debug handles
-          // were "appended" in the debug handles vector, during serialization,
-          // only for OP/OPN X is safe to index into it.
-          // This is not super reliable and once we move to saving debug
-          // handles for all instructions we can remove this strange behavior.
-          int64_t debug_handle = debug_handles_list[X].toInt();
-          function->append_instruction(op_code, X, N, debug_handle);
-        } else {
-          function->append_instruction(op_code, X, N);
-        }
+      if (has_debug_handles) {
+        int64_t debug_handle = debug_handles_list[i].toInt();
+        function->append_instruction(op_code, X, N, debug_handle);
       } else {
         function->append_instruction(op_code, X, N);
       }
