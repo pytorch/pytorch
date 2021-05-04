@@ -58,13 +58,13 @@ Tensor sparse_csr_tensor(
       options.layout());
 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
-    Tensor cpu_crow_indices = crow_indices.to(at::DeviceType::CPU);
-    auto crow_indices_accessor = cpu_crow_indices.accessor<index_t, 1>();
+    index_t first_index_value = crow_indices.select(0, 0).item<index_t>();
+    index_t last_index_value = crow_indices.select(0, crow_indices.numel() - 1).item<index_t>();
     TORCH_CHECK(
-        crow_indices_accessor[crow_indices.numel() - 1] <= col_indices.numel(),
-        "last value of crow_indices should be less than length of col_indices.");
+        last_index_value == col_indices.numel(),
+        "last value of crow_indices should be equal to the length of col_indices.");
     TORCH_CHECK(
-        crow_indices_accessor[0] == 0, "0th value of crow_indices must be 0.");
+        first_index_value == 0, "0th value of crow_indices must be 0.");
   });
 
   TORCH_CHECK(
@@ -115,13 +115,13 @@ Tensor sparse_csr_tensor(
     Tensor max_col_indices = std::get<0>(col_indices.max(0, false)).to(kCPU);
 
     AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
-      auto cpu_crow_indices = crow_indices.to(kCPU);
-      auto crow_indices_accessor = cpu_crow_indices.accessor<index_t, 1>();
+      auto last_index_value = crow_indices.select(0, crow_indices.numel() - 1).item<index_t>();
+      auto first_index_value = crow_indices.select(0, 0).item<index_t>();
       TORCH_CHECK(
-          crow_indices_accessor[crow_indices.numel() - 1] <= col_indices.numel(),
-          "last value of crow_indices should be less than length of col_indices.");
+          last_index_value == col_indices.numel(),
+          "last value of crow_indices should be equal to the length of col_indices.");
       TORCH_CHECK(
-          crow_indices_accessor[0] == 0, "0th value of crow_indices must be 0.");
+          first_index_value == 0, "0th value of crow_indices must be 0.");
 
       size[1] = *max_col_indices.data_ptr<index_t>() + 1;
     });
