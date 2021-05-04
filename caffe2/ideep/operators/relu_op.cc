@@ -14,15 +14,18 @@ class IDEEPReluOp final : public IDEEPOperator {
     // Figure out the Relu descriptor.
     if (operator_def.type().substr(0, 4) == "Relu") {
       alpha_ = 0.0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (operator_def.type().substr(0, 9) == "LeakyRelu") {
       if (HasArgument("alpha")) {
         alpha_ = static_cast<float>(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             OperatorBase::GetSingleArgument<float>("alpha", 0.01));
       }
     } else {
       LOG(FATAL) << "Unsupported Relu method: " << operator_def.type();
     }
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPReluOp() override {}
 
   bool RunOnDevice() override {
@@ -50,17 +53,21 @@ class IDEEPReluGradientOp final : public IDEEPOperator {
   IDEEPReluGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws), alpha_(0.0) {
     // Figure out the Relu descriptor.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (operator_def.type().substr(0, 12) == "ReluGradient") {
       alpha_ = 0.0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (operator_def.type().substr(0, 17) == "LeakyReluGradient") {
       if (HasArgument("alpha")) {
         alpha_ = static_cast<float>(
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             OperatorBase::GetSingleArgument<float>("alpha", 0.01));
       }
     } else {
       LOG(FATAL) << "Unsupported Relu method: " << operator_def.type();
     }
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPReluGradientOp() override {}
 
   bool RunOnDevice() override {
@@ -80,10 +87,14 @@ class IDEEPReluGradientOp final : public IDEEPOperator {
   OUTPUT_TAGS(INPUT_GRAD);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Relu, IDEEPReluOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(ReluGradient, IDEEPReluGradientOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(LeakyRelu, IDEEPReluOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(LeakyReluGradient, IDEEPReluGradientOp);
 
 } // namespace

@@ -28,14 +28,6 @@ const char* toString(DispatchKey t) {
       return "Vulkan";
     case DispatchKey::Metal:
       return "Metal";
-    case DispatchKey::MKLDNN:
-      return "MKLDNN";
-    case DispatchKey::OpenGL:
-      return "OpenGL";
-    case DispatchKey::OpenCL:
-      return "OpenCL";
-    case DispatchKey::IDEEP:
-      return "IDEEP";
     case DispatchKey::QuantizedCPU:
       return "QuantizedCPU";
     case DispatchKey::QuantizedCUDA:
@@ -74,8 +66,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Meta:
       return "Meta";
 
-    case DispatchKey::InplaceOrView:
-      return "InplaceOrView";
+    case DispatchKey::ADInplaceOrView:
+      return "ADInplaceOrView";
 
     case DispatchKey::Autograd:
       return "Autograd";

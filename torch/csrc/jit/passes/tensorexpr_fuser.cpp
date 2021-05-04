@@ -28,6 +28,7 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_reductions_enabled = false;
 
 bool isSupportedForBlock(Node* node) {
@@ -95,6 +96,7 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
       "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
       "aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
       "aten::to.dtype_layout(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None"
       ", bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
       "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
@@ -233,7 +235,9 @@ bool isSupported(Node* node) {
 
 } // namespace tensorexpr
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_fuser_enabled_ = true;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_parallel_cpu_enabled = false;
 
 bool texprParallelCPUEnabled() {
@@ -646,7 +650,9 @@ class TensorExprFuser {
   }
 
   static void debugDumpFusionGroup(const std::string& msg, Node* n) {
+    // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
     GRAPH_DEBUG(msg, *n);
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     if (n->kind() == prim::TensorExprGroup) {
       GRAPH_DEBUG(*n->g(attr::Subgraph));
     }
@@ -685,6 +691,7 @@ class TensorExprFuser {
     while (any_changed) {
       any_changed = false;
       for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         bool changed;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
@@ -1251,6 +1258,7 @@ Operation createTensorExprOp(const Node* node) {
   };
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators TensorExprOps({
     torch::jit::Operator(
         prim::TensorExprGroup,

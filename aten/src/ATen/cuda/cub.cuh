@@ -51,6 +51,15 @@ struct cuda_type<c10::Half> {
   using type = __half;
 };
 
+inline int get_num_bits(uint64_t max_key) {
+  int num_bits = 1;
+  while (max_key > 1) {
+    max_key >>= 1;
+    num_bits++;
+  }
+  return num_bits;
+}
+
 template<typename key_t>
 static inline void sort_keys(
     const key_t *keys_in, key_t *keys_out,
