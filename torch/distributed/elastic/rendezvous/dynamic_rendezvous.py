@@ -26,7 +26,7 @@ from .api import (
     RendezvousTimeoutError,
 )
 
-from .utils import _delay
+from .utils import _delay, _PeriodicTimer
 
 
 log = logging.getLogger(__name__)
@@ -792,52 +792,50 @@ class _RendezvousKeepAliveOp:
 
 
 class DynamicRendezvousHandler(RendezvousHandler):
-    """Represents the dynamic rendezvous handler.
+    """Represents a handler that sets up a rendezvous among a set of nodes."""
 
-    Args:
-        run_id:
-            The run id of the rendezvous.
-        store:
-            The C10d store to return as part of the rendezvous.
-        backend:
-            The backend to use to hold the rendezvous state.
-        min_nodes:
-            The minimum number of nodes to admit to the rendezvous.
-        max_nodes:
-            The maximum number of nodes to admit to the rendezvous.
-        timeout:
-            The timeout configuration of the rendezvous.
-    """
+    # Static
+    _node_desc_generator = _NodeDescGenerator()
 
-    _run_id: str
+    _this_node: _NodeDesc
     _settings: RendezvousSettings
+    _backend_name: str
     _store: Store
-    _backend: RendezvousBackend
+    _state_holder: _RendezvousStateHolder
+    _op_executor: _RendezvousOpExecutor
+    _heartbeat_lock: threading.Lock
+    _keep_alive_timer: Optional[_PeriodicTimer]
 
-    def __init__(
-        self,
+    @classmethod
+    def from_backend(
+        cls,
         run_id: str,
         store: Store,
         backend: RendezvousBackend,
         min_nodes: int,
         max_nodes: int,
         timeout: Optional[RendezvousTimeout] = None,
-    ) -> None:
-        if not run_id:
-            raise ValueError("The run id must be a non-empty string.")
+    ):
+        """Creates a new :py:class:`DynamicRendezvousHandler`.
 
-        if min_nodes < 1:
-            raise ValueError(
-                f"The minimum number of nodes ({min_nodes}) must be greater than zero."
-            )
+        Args:
+            run_id:
+                The run id of the rendezvous.
+            store:
+                The C10d store to return as part of the rendezvous.
+            backend:
+                The backend to use to hold the rendezvous state.
+            min_nodes:
+                The minimum number of nodes to admit to the rendezvous.
+            max_nodes:
+                The maximum number of nodes to admit to the rendezvous.
+            timeout:
+                The timeout configuration of the rendezvous.
+        """
+        # We associate each handler instance with a unique node descriptor.
+        node = cls._node_desc_generator.generate()
 
-        if max_nodes < min_nodes:
-            raise ValueError(
-                f"The maximum number of nodes ({max_nodes}) must be greater than or equal to the "
-                f"minimum number of nodes ({min_nodes})."
-            )
-
-        self._settings = RendezvousSettings(
+        settings = RendezvousSettings(
             run_id,
             min_nodes,
             max_nodes,
@@ -846,27 +844,58 @@ class DynamicRendezvousHandler(RendezvousHandler):
             keep_alive_max_attempt=3,
         )
 
+        state_holder = _BackendRendezvousStateHolder(backend, settings)
+
+        return cls(node, settings, backend.name, store, state_holder)
+
+    def __init__(
+        self,
+        node: _NodeDesc,
+        settings: RendezvousSettings,
+        backend_name: str,
+        store: Store,
+        state_holder: _RendezvousStateHolder,
+    ) -> None:
+        if not settings.run_id:
+            raise ValueError("The run id must be a non-empty string.")
+
+        if settings.min_nodes < 1:
+            raise ValueError(
+                f"The minimum number of nodes ({settings.min_nodes}) must be greater than zero."
+            )
+
+        if settings.max_nodes < settings.min_nodes:
+            raise ValueError(
+                f"The maximum number of nodes ({settings.max_nodes}) must be greater than or equal "
+                f"to the minimum number of nodes ({settings.min_nodes})."
+            )
+
+        self._this_node = node
+
+        self._settings = settings
+
+        self._backend_name = backend_name
+
         self._store = store
-        self._backend = backend
+
+        self._state_holder = state_holder
+
+        self._op_executor = _DistributedRendezvousOpExecutor(
+            self._this_node, self._state_holder, self._settings
+        )
+
+        self._heartbeat_lock = threading.Lock()
+
+        self._keep_alive_timer = None
 
     @property
     def settings(self) -> RendezvousSettings:
         """Gets the settings of the rendezvous."""
         return self._settings
 
-    @property
-    def store(self) -> Store:
-        """Gets the C10d store returned as part of the rendezvous."""
-        return self._store
-
-    @property
-    def backend(self) -> RendezvousBackend:
-        """Gets the backend used to hold the rendezvous state."""
-        return self._backend
-
     def get_backend(self) -> str:
         """See base class."""
-        return self._backend.name
+        return self._backend_name
 
     def next_rendezvous(self) -> Tuple[Store, int, int]:
         """See base class."""
@@ -903,7 +932,7 @@ def _get_timeout(params: RendezvousParameters, key: str) -> Optional[timedelta]:
 def create_handler(
     store: Store, backend: RendezvousBackend, params: RendezvousParameters
 ) -> DynamicRendezvousHandler:
-    """Create a new :py:class:`DynamicRendezvousHandler` from the specified
+    """Creates a new :py:class:`DynamicRendezvousHandler` from the specified
     parameters.
 
     +-------------------+------------------------------------------------------+
@@ -930,7 +959,7 @@ def create_handler(
         _get_timeout(params, "close"),
     )
 
-    return DynamicRendezvousHandler(
+    return DynamicRendezvousHandler.from_backend(
         params.run_id,
         store,
         backend,
