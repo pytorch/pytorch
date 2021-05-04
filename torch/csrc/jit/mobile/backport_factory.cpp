@@ -2,6 +2,7 @@
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/backport_factory.h>
+#include <cstddef>
 
 namespace torch {
 namespace jit {
@@ -78,6 +79,14 @@ bool BackportFactory::backport(
     PyTorchStreamWriter& final_writer,
     int64_t from_version,
     int64_t to_version) const {
+  if (from_version <= to_version) {
+    TORCH_WARN(
+        "backport donesn't support backporting model to new version. It's trying to backport from version ",
+        from_version,
+        " to version ",
+        to_version);
+    return false;
+  }
   int64_t bytecode_version = from_version;
   std::ostringstream out;
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
@@ -88,6 +97,7 @@ bool BackportFactory::backport(
   std::shared_ptr<IStreamAdapter> intermediate_istream_adapter =
       istream_adapter;
   std::ostringstream oss;
+  bool backport_success = true;
 
   while (bytecode_version > to_version) {
     // Read from intermediate writer result if ostream is not empty, otherwise
@@ -109,14 +119,14 @@ bool BackportFactory::backport(
     // When it's the last backport process, write to the final destination
     // otherwise, export to the intermediate ostream.
     if (bytecode_version - 1 == to_version) {
-      bytecodeBackportFunctions()[bytecode_version--](
+      backport_success &= bytecodeBackportFunctions()[bytecode_version--](
           intermediate_reader, final_writer);
     } else {
-      bytecodeBackportFunctions()[bytecode_version--](
+      backport_success &= bytecodeBackportFunctions()[bytecode_version--](
           intermediate_reader, intermediate_writer);
     }
   }
-  return true;
+  return backport_success;
 }
 
 } // namespace jit
