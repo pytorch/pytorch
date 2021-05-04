@@ -29,20 +29,35 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(sum_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(nansum_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(std_var_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(prod_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(norm_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mean_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(and_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(or_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(min_values_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_values_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(argmax_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(argmin_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cumsum_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cumprod_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logcumsumexp_stub);
 
 Tensor _logcumsumexp_cpu(const Tensor& self, int64_t dim) {
@@ -850,7 +865,6 @@ Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::logsumexp_out(self, dims, keepdim, result);
 }
-
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
   return at::logsumexp(self, dimnames_to_positions(self, dims), keepdim);
 }
@@ -861,6 +875,7 @@ Tensor& logsumexp_out(const Tensor& self, DimnameList dims, bool keepdim, Tensor
 
 static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scalar>& opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto p = opt_p.value_or(2.0).to<double>();
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "norm only supports CPU and CUDA device types, but got: ", self.device().type());
@@ -1114,10 +1129,16 @@ Tensor &any_out(const Tensor &self, int64_t dim, bool keepdim, Tensor &result) {
 }
 
 Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Expected the dtype for input and out to match, but got ",
+              self.scalar_type(), " for input's dtype and ",  result.scalar_type(), " for out's dtype.");
+  if (self.numel() == 0) {
+    zero_numel_check_dims(self, dim, "amin()");
+  }
+
   auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
-  TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
-  min_values_stub(iter.device_type(), iter);
+  if (iter.numel() != 0) {
+    min_values_stub(iter.device_type(), iter);
+  }
   return result;
 }
 
@@ -1127,10 +1148,16 @@ Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
 }
 
 Tensor &amax_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Expected the dtype for input and out to match, but got ",
+              self.scalar_type(), " for input's dtype and ",  result.scalar_type(), " for out's dtype.");
+  if (self.numel() == 0) {
+    zero_numel_check_dims(self, dim, "amax()");
+  }
+
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
-  TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
-  max_values_stub(iter.device_type(), iter);
+  if (iter.numel() != 0) {
+    max_values_stub(iter.device_type(), iter);
+  }
   return result;
 }
 
@@ -1140,11 +1167,11 @@ Tensor amax(const Tensor& self, IntArrayRef dim, bool keepdim) {
 }
 
 Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim, Tensor& result) {
-  TORCH_CHECK(self.numel() > 0, "cannot perform reduction function argmax on a "
-      "tensor with no elements because the operation does not have an identity");
   Tensor in;
   if (dim) {
     auto sizes = self.sizes();
+    zero_numel_check_dims(self, dim.value(), "argmax()");
+
     auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
     if (sizes[wrap_dim] == 1) {
       if (keepdim) {
@@ -1158,12 +1185,15 @@ Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
     }
     in = self;
   } else {
+    TORCH_CHECK_INDEX(self.numel() != 0, "argmax_out(): Expected reduction dim to be specified for input.numel() == 0.");
     in = self.reshape({-1});
     keepdim = false;
   }
   auto itr = make_reduction("argmax", result, in, dim.value_or(0), keepdim,
       self.scalar_type(), at::kLong);
-  argmax_stub(itr.device_type(), itr);
+  if (itr.numel() != 0) {
+    argmax_stub(itr.device_type(), itr);
+  }
   return result;
 }
 
@@ -1173,11 +1203,11 @@ Tensor argmax(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
 }
 
 Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim, Tensor& result) {
-  TORCH_CHECK(self.numel() > 0, "cannot perform reduction function argmin on a "
-      "tensor with no elements because the operation does not have an identity");
   Tensor in;
   if (dim) {
     auto sizes = self.sizes();
+    zero_numel_check_dims(self, dim.value(), "argmin()");
+
     auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
     if (sizes[wrap_dim] == 1) {
       if (keepdim) {
@@ -1191,12 +1221,15 @@ Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
     }
     in = self;
   } else {
+    TORCH_CHECK_INDEX(self.numel() != 0, "argmin_out(): Expected reduction dim to be specified for input.numel() == 0.");
     in = self.reshape({-1});
     keepdim = false;
   }
   auto itr = make_reduction("argmin", result, in, dim.value_or(0), keepdim,
       self.scalar_type(), at::kLong);
-  argmin_stub(itr.device_type(), itr);
+  if (itr.numel() != 0) {
+    argmin_stub(itr.device_type(), itr);
+  }
   return result;
 }
 
