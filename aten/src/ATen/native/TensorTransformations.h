@@ -2,15 +2,9 @@
 
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
-#include <ATen/native/DispatchStub.h>
-
 
 #include <algorithm>
 #include <vector>
-
-namespace at {
-  struct TensorIterator;
-}
 
 namespace at {
 namespace native {

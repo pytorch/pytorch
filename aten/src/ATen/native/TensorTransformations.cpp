@@ -13,7 +13,12 @@ namespace native {
 
 constexpr size_t dim_bitset_size = 64;
 
-Tensor build_index(int64_t num_dims, int64_t flip_dim, int64_t dim_size) {
+Tensor build_index(Tensor input, int64_t flip_dim) {
+  int64_t element_size_bytes = input.element_size();
+  auto num_dims = input.ndimension();
+  auto dim_size = input.size(flip_dim);
+  auto stride = input.stride(flip_dim);
+
   auto new_shape = std::vector<int64_t>(num_dims, 1);
   new_shape[flip_dim] = dim_size;
 
@@ -21,22 +26,20 @@ Tensor build_index(int64_t num_dims, int64_t flip_dim, int64_t dim_size) {
     TensorOptions(c10::kLong).
     device(c10::kCPU);
 
-  return at::empty(new_shape, tensor_options);
+  auto index = at::empty(new_shape, tensor_options);
+  auto input_index_ptr = index.data_ptr<int64_t>();
+
+  for(int64_t i = 0; i < dim_size; i++) {
+    input_index_ptr[i] = static_cast<int64_t>(dim_size - i - 1) * stride * element_size_bytes;
+  }
+  return index;
 }
 
 
 std::vector<Tensor> build_indices_loop(Tensor input, IntArrayRef flip_dims) {
   std::vector<Tensor> indices;
-  int64_t element_size_bytes = input.element_size();
   for(auto dim: flip_dims) {
-    auto dim_size = input.size(dim);
-    auto index = build_index(input.ndimension(), dim, dim_size);
-    auto stride = input.stride(dim);
-    auto input_index_ptr = index.data_ptr<int64_t>();
-
-    for(int64_t i = 0; i < dim_size; i++) {
-      input_index_ptr[i] = static_cast<int64_t>(dim_size - i - 1) * stride * element_size_bytes;
-    }
+    auto index = build_index(input, dim);
     indices.push_back(index);
   }
   return indices;
