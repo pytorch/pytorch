@@ -198,7 +198,7 @@ inline void __attribute__((always_inline)) QuantizeAvx512(
         _mm512_max_epi32(min_v, _mm512_min_epi32(max_v, x_rounded_v));
 
     x_clipped_v = _mm512_shuffle_epi8(x_clipped_v, shuffle_mask_v);
-    x_clipped_v = _mm512_permutexvar_epi32(x_clipped_v, permute_mask_l8_v);
+    x_clipped_v = _mm512_permutexvar_epi32(permute_mask_l8_v, x_clipped_v);
     _mm256_store_epi64(
         reinterpret_cast<__m256i*>(dst + i),
         _mm512_castsi512_si256(x_clipped_v));
@@ -396,7 +396,7 @@ __m512i RequantizeAvx512(
    * xyzw_clamped_v has results in the following layout so we need to
    * permute: x0-3 y0-3 z0-3 w0-3 x4-7 y4-7 z4-7 w4-7 x8-11 y8-11 z8-11 w8-11 x12-15 y12-15 z12-15 w12-15
    */
-  xyzw_clamped_v = _mm512_permutexvar_epi32(xyzw_clamped_v, permute_mask_v);
+  xyzw_clamped_v = _mm512_permutexvar_epi32(permute_mask_v, xyzw_clamped_v);
   return xyzw_clamped_v;
 }
 
