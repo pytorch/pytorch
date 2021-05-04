@@ -15,8 +15,6 @@ namespace at {
 namespace at {
 namespace native {
 
-using flip_fn = void(*)(TensorIterator &, const Tensor& self);
-
 static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size, IntArrayRef dims) {
   if (flip_dims_size==0) {
     return;
@@ -63,7 +61,5 @@ static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArra
   auto first_dim_rolled = roll(self, shifts[0], dims[0]);
   return at::roll(first_dim_rolled, tail_shifts, tail_dims);
 }
-
-DECLARE_DISPATCH(flip_fn, flip_stub);
 
 }}  // namespace at::native
