@@ -4285,6 +4285,10 @@ op_db: List[OpInfo] = [
                    ref=np.i0,
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 5e-1}),),
+                   skips=(
+                       SkipInfo('TestOpInfo', 'test_supported_backward',
+                                dtypes=(torch.float16, torch.bfloat16)),
+                   ),
                    dtypes=floating_types_and(torch.bfloat16),
                    dtypesIfCPU=floating_types_and(torch.bfloat16),
                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16)),
@@ -4293,6 +4297,10 @@ op_db: List[OpInfo] = [
                    ref=scipy.special.i0e if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 3e-1}),),
+                   skips=(
+                       SkipInfo('TestOpInfo', 'test_supported_backward',
+                                dtypes=(torch.float16, torch.bfloat16)),
+                   ),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
