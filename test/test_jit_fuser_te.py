@@ -1815,7 +1815,12 @@ class TestTEFuser(JitTestCase):
                 self.assertEqual(len(self.findFusionGroups(t.graph_for(x))), 0)
 
     def test_superslomo(self):
-        for device in self.devices:
+        devices = []
+        if RUN_CUDA:
+            devices.append("cuda")
+        if LLVM_ENABLED:
+            devices.append("cpu")
+        for device in devices:
             # Test extracted from Super-SloMo: https://github.com/avinashpaliwal/Super-SloMo
             # A few interesting things happen here: strided inputs of mixed size,
             # plus outputs of mixed shapes.  The latter characteristic happened to
@@ -1901,6 +1906,7 @@ class TestTEFuser(JitTestCase):
         script = self.checkScript(eager_st, (s, b))
         self.assertAllFused(script.graph_for(s, b))
 
+    @unittest.skipIf(not LLVM_ENABLED, "Too slow to run with the TE interpreter")
     def test_conv2d_depthwise(self):
         def eager(input, weight, bias):
             return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=72)
