@@ -421,8 +421,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/InplaceOrViewType_0.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/InplaceOrViewType_1.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
     )
   endif()
 
@@ -479,7 +479,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
-    "${TOOLS_PATH}/autograd/templates/InplaceOrViewType.cpp"
+    "${TOOLS_PATH}/autograd/templates/ADInplaceOrViewType.cpp"
     "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
@@ -516,13 +516,29 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
   list(APPEND LIBTORCH_CMAKE_SRCS "")
 
+  list(APPEND LITE_EAGER_SYMOBLICATION_SRCS "")
+  if(USE_SOURCE_DEBUG_ON_MOBILE)
+    append_filelist("libtorch_lite_eager_symbolication" LITE_EAGER_SYMOBLICATION_SRCS)
+    # For source debug on lite interpreter, we have to add dependency on pickling
+    # but references to read/writeArchiveAndTensor is not built for mobile
+    # so this condition specifically says we are building for source debug
+    # on mobile.
+    if(BUILD_LITE_INTERPRETER)
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp PROPERTIES COMPILE_FLAGS "-DC10_MOBILE -DFEATURE_TORCH_MOBILE")
+    endif()
+  endif()
+
   # Switch between the full jit interpreter and lite interpreter
   if(BUILD_LITE_INTERPRETER)
     append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
+    list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
+      set_source_files_properties(../torch/csrc/jit/serialization/export.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+
       # TODO: Delete this when https://github.com/pytorch/pytorch/issues/35026 is fixed
       set_source_files_properties(../torch/csrc/autograd/record_function_ops.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     endif()
@@ -562,6 +578,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/sequential.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
+    list(APPEND TORCH_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   endif()
 
   # This one needs to be unconditionally added as Functions.cpp is also unconditionally added
@@ -635,6 +652,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
       PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
     )
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
   endif()
 
   if(USE_MLCOMPUTE)
@@ -1743,6 +1761,11 @@ if(BUILD_PYTHON)
     endif()
   endif()
 
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
+    set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+    set_source_files_properties(${TORCH_SRC_DIR}/../caffe2/operators/box_with_nms_limit_op.cc PROPERTIES COMPILE_FLAGS -Wno-attributes)
+  endif()
   # Allow different install locations for libcaffe2
   # For setuptools installs (that all build Python), install libcaffe2 into
   # site-packages, alongside the torch libraries. The pybind11 library needs
