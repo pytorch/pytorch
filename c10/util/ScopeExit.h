@@ -13,9 +13,11 @@ template <typename Callable> class scope_exit {
   bool Engaged = true; // False once moved-from or release()d.
 
 public:
-  // @lint-ignore CLANGTIDY
   template <typename Fp>
-  scope_exit(Fp &&F) : ExitFunction(std::forward<Fp>(F)) {}
+  // constructor accepting a forwarding reference can hide the
+  // move constructor
+  // @lint-ignore CLANGTIDY
+  explicit scope_exit(Fp &&F) : ExitFunction(std::forward<Fp>(F)) {}
 
   scope_exit(scope_exit &&Rhs) noexcept
       : ExitFunction(std::move(Rhs.ExitFunction)), Engaged(Rhs.Engaged) {
