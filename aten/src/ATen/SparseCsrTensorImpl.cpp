@@ -129,22 +129,21 @@ void SparseCsrTensorImpl::set_member_tensors(
       ") must match device type of device().type()",
       device().type(),
       ")");
+
   TORCH_CHECK(
-      values.is_cuda() || col_indices.get_device() == crow_indices.get_device(),
+      col_indices.get_device() == crow_indices.get_device(),
       "crow_indices and col_indices devices (",
       crow_indices.get_device(),
       ", ",
       col_indices.get_device(),
-      ") must match with the (non-cuda) device of values (",
-      values.get_device(),
-      ")");
+      ") must match");
 
   TORCH_CHECK(
-        crow_indices.options().backend() == values.options().backend(),
-        "backend of csr indices (",
-        crow_indices.options().backend(),
-        ") must match backend of values (",
-        values.options().backend(),
+        crow_indices.get_device() == values.get_device(),
+        "device of csr indices (",
+        crow_indices.get_device(),
+        ") must match device of values (",
+        values.get_device(),
         ")");
 
   TORCH_CHECK(
