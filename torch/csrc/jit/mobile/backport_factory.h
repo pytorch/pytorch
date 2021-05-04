@@ -33,7 +33,7 @@ function to check if a specific function exists.
 */
 class BackportFactory final {
  public:
-  bool hasBytecodeBackportFunction(const int64_t from_version);
+  bool hasBytecodeBackportFunction(const int64_t from_version) const;
 
   std::unordered_map<
       int64_t,
