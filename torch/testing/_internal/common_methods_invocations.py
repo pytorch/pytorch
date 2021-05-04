@@ -1876,11 +1876,12 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     def is_integral(dtype):
         return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
 
-    # NOTE: Promotion in PyTorch is from integer types to the default dtype
-    np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
-
     @wraps(fn)
     def wrapped_fn(x):
+        # As the default dtype can change, acquire it when function is called.
+        # NOTE: Promotion in PyTorch is from integer types to the default dtype
+        np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
+
         if is_integral(x.dtype):
             return fn(x, dtype=np_dtype)
         return fn(x)
@@ -1893,11 +1894,12 @@ def np_unary_ufunc_integer_promotion_wrapper_with_astype(fn):
     def is_integral(dtype):
         return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
 
-    # NOTE: Promotion in PyTorch is from integer types to the default dtype
-    np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
-
     @wraps(fn)
     def wrapped_fn(x):
+        # As the default dtype can change, acquire it when function is called.
+        # NOTE: Promotion in PyTorch is from integer types to the default dtype
+        np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
+
         if is_integral(x.dtype):
             return fn(x).astype(np_dtype)
         return fn(x)
