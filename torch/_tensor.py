@@ -937,7 +937,7 @@ class Tensor(torch._C._TensorBase):
             device = coalesced_self.values().device
             crow_indices = torch.tensor(ro, dtype=row_indices.dtype, device=device)
             return torch.sparse_csr_tensor(crow_indices,
-                                           coalesced_self.indices().select(0, 1),
+                                           coalesced_self.indices()[1].contiguous(),
                                            coalesced_self.values(),
                                            size=coalesced_self.shape,
                                            dtype=coalesced_self.dtype,

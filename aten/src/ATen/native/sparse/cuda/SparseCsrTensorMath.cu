@@ -44,10 +44,10 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   Tensor& out)
 {
 
-  AT_ASSERT(op1.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT(op1.is_sparse_csr());
   Tensor expand_self = *expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_csr");
 
-  AT_ASSERT(expand_self.device().type() == kCUDA);
+  TORCH_INTERNAL_ASSERT(expand_self.device().type() == kCUDA);
   TORCH_CHECK(
       out.device().type() == kCUDA,
       "addmm: expected 'out' to be CUDA tensor, but got CUDA tensor");
@@ -91,7 +91,7 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
       dim_k,
       ", got ",
       op1.size(1));
-  out.resize_({dim_i, dim_j});
+  at::native::resize_output(out, {dim_i, dim_j});
 
   auto values = op1.values();
 
@@ -168,14 +168,14 @@ Tensor& add_out_dense_sparse_csr_cuda(
       output.scalar_type(),
       " in add operation");
 
-  Tensor src_values = src.values().to(commonDtype);
+  Tensor src_values = src.values();
   Tensor src_crow_indices = src.crow_indices();
   Tensor src_col_indices = src.col_indices();
 
   at::native::resize_output(output, dense.sizes());
+
   Tensor resultBuffer = output;
   Tensor valuesBuffer = src_values.to(commonDtype);
-
   if (output.scalar_type() != commonDtype) {
     resultBuffer = dense.to(commonDtype);
   } else if (!is_same_tensor(output, dense)) {
@@ -184,20 +184,20 @@ Tensor& add_out_dense_sparse_csr_cuda(
   AT_DISPATCH_ALL_TYPES(
       commonDtype,
       "add_out_op2_sparse_csr",
-      [&src_values, &output, &alpha, &src_crow_indices, &src_col_indices]() {
+      [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {
         AT_DISPATCH_INDEX_TYPES(
             src_crow_indices.scalar_type(),
             "csr_add_out_crow_indices",
-              [&src_values, &output, &alpha, &src_crow_indices, &src_col_indices]() {
-                scalar_t* values_accessor = src_values.data_ptr<scalar_t>();
-                scalar_t* out_ptr = output.data_ptr<scalar_t>();
+              [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {
+                scalar_t* values_accessor = valuesBuffer.data_ptr<scalar_t>();
+                scalar_t* out_ptr = resultBuffer.data_ptr<scalar_t>();
                 scalar_t cast_value = alpha.to<scalar_t>();
 
                 index_t* crow_indices_accessor = src_crow_indices.data_ptr<index_t>();
                 index_t* col_indices_accessor = src_col_indices.data_ptr<index_t>();
-                int64_t out_storage_offset = output.storage_offset();
+                int64_t out_storage_offset = resultBuffer.storage_offset();
 
-                auto out_strides = output.strides();
+                auto out_strides = resultBuffer.strides();
                 int64_t out_strides0 = out_strides[0];
                 int64_t out_strides1 = out_strides[1];
 
@@ -205,6 +205,7 @@ Tensor& add_out_dense_sparse_csr_cuda(
                 auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
                 auto policy = thrust::cuda::par(allocator).on(stream);
 
+               // Note that this could be wildly imbalanced if the sparsity pattern varies a lot between rows.
                thrust::for_each(
                     policy,
                     thrust::make_counting_iterator(int64_t(0)),
@@ -229,6 +230,9 @@ Tensor& add_out_dense_sparse_csr_cuda(
                     });
               });
       });
+  if (output.scalar_type() != commonDtype) {
+    output.copy_(resultBuffer);
+  }
   return output;
 }
 

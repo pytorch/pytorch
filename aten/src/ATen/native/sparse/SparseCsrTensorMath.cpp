@@ -9,6 +9,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/mkl/SparseCsrLinearAlgebra.h>
 
 #include <algorithm>
@@ -36,10 +37,10 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& out) {
-  AT_ASSERT(op1.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT(op1.is_sparse_csr());
   Tensor expand_self = *expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_csr");
 
-  AT_ASSERT(expand_self.device().type() == kCPU);
+  TORCH_INTERNAL_ASSERT(expand_self.device().type() == kCPU);
   TORCH_CHECK(
       out.device().type() == kCPU,
       "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -83,7 +84,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
       dim_k,
       ", got ",
       op1.size(1));
-  out.resize_({dim_i, dim_j});
+  at::native::resize_output(out, {dim_i, dim_j});
 
   auto col_indices = op1.col_indices();
   auto crow_indices = op1.crow_indices();
@@ -229,9 +230,9 @@ Tensor& add_out_dense_sparse_csr_cpu(
     const Tensor& dense,
     const SparseCsrTensor& src,
     const Scalar& alpha) {
-  AT_ASSERT(dense.layout() == kStrided);
-  AT_ASSERT(src.is_sparse_csr());
-  AT_ASSERT(dense.device() == kCPU);
+  TORCH_INTERNAL_ASSERT(dense.layout() == kStrided);
+  TORCH_INTERNAL_ASSERT(src.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT(dense.device() == kCPU);
 
   TORCH_CHECK(
       out.is_contiguous(),
@@ -263,11 +264,12 @@ Tensor& add_out_dense_sparse_csr_cpu(
       out.scalar_type(),
       " in add operation");
 
-  auto src_values = src.values().to(commonDtype);
+  auto src_values = src.values();
   auto src_crow_indices = src.crow_indices();
   auto src_col_indices = src.col_indices();
 
-  out.resize_as_(dense);
+  at::native::resize_output(out, dense.sizes());
+
   Tensor resultBuffer = out;
   Tensor valuesBuffer = src_values.to(commonDtype);
 
@@ -280,21 +282,21 @@ Tensor& add_out_dense_sparse_csr_cpu(
   AT_DISPATCH_ALL_TYPES(
       commonDtype,
       "add_out_op2_sparse_csr",
-      [&src_values, &out, &alpha, &src_crow_indices, &src_col_indices]() {
+      [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {
         AT_DISPATCH_INDEX_TYPES(
             src_crow_indices.scalar_type(),
             "csr_add_out_crow_indices",
-            [&src_values, &out, &alpha, &src_crow_indices, &src_col_indices]() {
-              auto values_accessor = src_values.accessor<scalar_t, 1>();
-              scalar_t* out_ptr = out.data_ptr<scalar_t>();
+            [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {
+              auto values_accessor = valuesBuffer.accessor<scalar_t, 1>();
+              scalar_t* out_ptr = resultBuffer.data_ptr<scalar_t>();
               scalar_t cast_value = alpha.to<scalar_t>();
 
               auto crow_indices_accessor =
                   src_crow_indices.accessor<index_t, 1>();
               auto col_indices_accessor =
                   src_col_indices.accessor<index_t, 1>();
-              auto out_strides0 = out.strides()[0];
-              auto out_strides1 = out.strides()[1];
+              auto out_strides0 = resultBuffer.strides()[0];
+              auto out_strides1 = resultBuffer.strides()[1];
 
               for (int32_t irow = 0; irow < src_crow_indices.size(0) - 1;
                    ++irow) {
@@ -303,13 +305,16 @@ Tensor& add_out_dense_sparse_csr_cpu(
 
                 for (int i = start_index; i < end_index; ++i) {
                   auto icol = col_indices_accessor[i];
-                  auto index = out.storage_offset() + irow * out_strides0 +
+                  auto index = resultBuffer.storage_offset() + irow * out_strides0 +
                       icol * out_strides1;
                   out_ptr[index] += cast_value * values_accessor[i];
                 }
               }
             });
       });
+  if (out.scalar_type() != commonDtype) {
+    out.copy_(resultBuffer);
+  }
   return out;
 }
 
