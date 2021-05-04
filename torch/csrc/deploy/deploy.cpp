@@ -19,7 +19,8 @@ Package InterpreterManager::load_package(const std::string& uri) {
   return Package(uri, this);
 }
 
-Package InterpreterManager::load_package(std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader) {
+Package InterpreterManager::load_package(
+    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader) {
   return Package(reader, this);
 }
 
