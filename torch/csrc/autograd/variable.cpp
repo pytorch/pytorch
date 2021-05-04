@@ -32,15 +32,21 @@ namespace autograd {
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
   c10::optional<ViewInfo> backward_info,
   c10::optional<ViewInfo> forward_info,
+  bool shared_view_info,
   CreationMeta creation_meta)
     : AutogradMeta(self_impl),
       backward_info_(std::move(backward_info)),
       forward_info_(std::move(forward_info)),
+      shared_view_info_(shared_view_info),
       creation_meta_(creation_meta) {
   is_view_ = true;
   if (backward_info_.has_value()) {
     self_impl->set_version_counter(impl::version_counter(backward_info_.value().base_));
     attr_version_ = self_impl->version_counter().current_version();
+  }
+  if (shared_view_info_) {
+    TORCH_INTERNAL_ASSERT(backward_info_.has_value(), "Shared view info require a backward view info.");
+    TORCH_INTERNAL_ASSERT(!forward_info_.has_value(), "Shared view info require forward view info to be empty")
   }
 }
 
