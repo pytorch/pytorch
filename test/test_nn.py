@@ -16243,8 +16243,7 @@ class TestNNDeviceType(NNTestCase):
         m_initialized.to(device)
 
         torch.manual_seed(1)
-        l = torch.nn.utils.skip_init(torch.nn.Linear, device=device)
-        m_uninitialized = l(5, 1)
+        m_uninitialized = torch.nn.utils.skip_init(torch.nn.Linear, 5, 1)
 
         self.assertEqual(m_initialized.weight.device, m_uninitialized.weight.device)
         self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
