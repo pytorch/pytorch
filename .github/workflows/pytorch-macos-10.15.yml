@@ -53,13 +53,12 @@ jobs:
           zip -r artifacts.zip dist/ build/
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Build Artifacts
-        working-directory: pytorch/
         with:
           name: pytorch-macos-10.15
           retention-days: 30
           if-no-files-found: error
           path:
-            artifacts.zip
+            pytorch/artifacts.zip
   test:
     runs-on: macos-10.15
     needs:
