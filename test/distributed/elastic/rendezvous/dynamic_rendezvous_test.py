@@ -9,6 +9,7 @@ import copy
 import os
 import pickle
 import socket
+from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import Callable, Optional, Tuple, cast
 from unittest import TestCase
@@ -32,6 +33,8 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     _DistributedRendezvousOpExecutor,
     _NodeDesc,
     _NodeDescGenerator,
+    _RendezvousCloseOp,
+    _RendezvousContext,
     _RendezvousState,
     _RendezvousStateHolder,
     create_handler,
@@ -790,6 +793,84 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
             mock_delay.assert_called_once_with(seconds=1)
 
         self.assertListEqual(self._mock_state_holder.mock_calls, [call.sync(), call.sync()])
+
+
+class AbstractTestRendezvousOp(ABC):
+    assertEqual: Callable
+
+    def setUp(self) -> None:
+        self._node = _NodeDesc("this_node", 1, 1)
+
+        self._min_nodes = 1
+        self._max_nodes = 2
+
+        self._keep_alive_interval = timedelta(seconds=30)
+
+        self._state = _RendezvousState()
+        self._state.participants[_NodeDesc("dummy1", 1, 1)] = 1
+
+        self._now = datetime(2000, 1, 1, hour=0, minute=0)
+
+        self._deadline = 10
+
+        self._datetime_patch = patch(
+            "torch.distributed.elastic.rendezvous.dynamic_rendezvous.datetime"
+        )
+
+        mock_datetime = self._datetime_patch.start()
+        mock_datetime.utcnow.return_value = self._now
+
+        self._time_patch = patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous.time")
+
+        mock_time = self._time_patch.start()
+        mock_time.monotonic.return_value = self._deadline
+
+    def tearDown(self) -> None:
+        self._time_patch.stop()
+        self._datetime_patch.stop()
+
+    def _get_next_action(self) -> _Action:
+        op = self._create_op()
+
+        settings = RendezvousSettings(
+            run_id="dummy_run_id",
+            min_nodes=self._min_nodes,
+            max_nodes=self._max_nodes,
+            timeout=RendezvousTimeout(),
+            keep_alive_interval=self._keep_alive_interval,
+            keep_alive_max_attempt=3,
+        )
+
+        ctx = _RendezvousContext(self._node, self._state, settings)
+
+        return op(ctx, self._deadline)
+
+    @abstractmethod
+    def _create_op(self) -> Callable:
+        pass
+
+    def _assert_action(self, expected_action) -> None:
+        action = self._get_next_action()
+
+        self.assertEqual(action, expected_action)
+
+
+class TestRendezvousCloseOp(AbstractTestRendezvousOp, TestCase):
+    def _create_op(self) -> Callable:
+        return _RendezvousCloseOp()
+
+    def test_finishes_if_rendezvous_is_closed(self) -> None:
+        self._state.closed = True
+
+        self._assert_action(_Action.FINISH)
+
+    def test_raises_timeout_if_deadline_exceeded(self) -> None:
+        self._deadline = 0
+
+        self._assert_action(_Action.ERROR_TIMEOUT)
+
+    def test_marks_rendezvous_closed(self) -> None:
+        self._assert_action(_Action.MARK_RENDEZVOUS_CLOSED)
 
 
 class DummyStore(Store):
