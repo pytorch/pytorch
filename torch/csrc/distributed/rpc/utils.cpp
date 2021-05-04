@@ -175,7 +175,7 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
 
       // Need to reverse the device map for the backward pass of distributed
       // autograd.
-      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
+      std::unordered_map<c10::Device, c10::Device> reverseDeviceMap;
       for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
         reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
       }
@@ -575,31 +575,6 @@ void populateRemoteProfiledEvents(
       }
     }
   }
-}
-
-FutureFactoryRegistry& FutureFactoryRegistry::getInstance() {
-  // Leaky singleton to avoid module destructor races.
-  static FutureFactoryRegistry* registry = new FutureFactoryRegistry();
-  return *registry;
-}
-
-void FutureFactoryRegistry::registerFutureFactory(
-    c10::DeviceType type,
-    future_factory_t factory) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  factories_[static_cast<size_t>(type) & 0xFF] = std::move(factory);
-}
-
-std::shared_ptr<JitFuture> FutureFactoryRegistry::createFuture(
-    c10::DeviceType type,
-    const std::vector<c10::DeviceIndex>& devices) {
-  TORCH_INTERNAL_ASSERT(
-      factories_[static_cast<size_t>(type) & 0xFF],
-      "Using FutureFactory for device type ",
-      DeviceTypeName(type),
-      " before registration.")
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  return factories_[static_cast<size_t>(type) & 0xFF](devices);
 }
 
 } // namespace rpc
