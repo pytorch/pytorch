@@ -683,6 +683,17 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._state.closed = True
 
 
+class _RendezvousCloseOp:
+    """Represents a rendezvous close operation."""
+
+    def __call__(self, ctx: _RendezvousContext, deadline: float) -> _Action:
+        if ctx.state.closed:
+            return _Action.FINISH
+        if time.monotonic() > deadline:
+            return _Action.ERROR_TIMEOUT
+        return _Action.MARK_RENDEZVOUS_CLOSED
+
+
 class DynamicRendezvousHandler(RendezvousHandler):
     """Represents the dynamic rendezvous handler.
 
