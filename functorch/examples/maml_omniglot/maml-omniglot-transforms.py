@@ -111,7 +111,7 @@ def main():
     # Given this module we've created, rip out the parameters and buffers
     # and return a functional version of the module. `fnet` is stateless
     # and can be called with `fnet(params, buffers, args, kwargs)`
-    params, buffers, fnet, _, _, = make_functional_with_buffers(net)
+    params, buffers, fnet, _, _ = make_functional_with_buffers(net)
 
     # We will use Adam to (meta-)optimize the initial parameters
     # to be adapted.

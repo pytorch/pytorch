@@ -66,19 +66,16 @@ def train_step_fn(weights, batch, targets, lr=0.2):
     with torch.no_grad():
         for grad_weight, weight in zip(grad_weights, weights):
             new_weights.append(weight - grad_weight * lr)
-    # NB: return looks weird because torch.vmap must return Tensors
-    return (loss, *new_weights)
 
+    return loss, new_weights
 
-def unpack(train_result):
-    return train_result[0], train_result[1:]
 
 # Step 4: Let's verify this actually trains.
 # We should see the loss decrease.
 def step4():
     global weights
     for i in range(2000):
-        loss, weights = unpack(train_step_fn(weights, points, labels))
+        loss, weights = train_step_fn(weights, points, labels)
         if i % 100 == 0:
             print(loss)
 
@@ -100,7 +97,7 @@ def step6():
     parallel_train_step_fn = vmap(train_step_fn, in_dims=(0, None, None))
     batched_weights = init_fn(num_models=2)
     for i in range(2000):
-        loss, batched_weights = unpack(parallel_train_step_fn(batched_weights, points, labels))
+        loss, batched_weights = parallel_train_step_fn(batched_weights, points, labels)
         if i % 200 == 0:
             print(loss)
 
