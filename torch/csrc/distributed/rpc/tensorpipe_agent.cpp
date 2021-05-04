@@ -55,10 +55,16 @@ std::vector<c10::Device> getDevicesForTensors(
       remoteName);
   std::vector<c10::Device> devices;
   devices.reserve(tensors.size());
-  bool hasCudaTensor = false;
+  bool hasMappedDevice = false;
   for (const auto& t : tensors) {
     if (t.device().is_cpu()) {
-      devices.emplace_back(c10::kCPU);
+      const auto deviceIter = deviceMap.find(c10::kCPU);
+      if (deviceIter == deviceMap.end()) {
+        devices.emplace_back(c10::kCPU);
+      } else {
+        devices.emplace_back(deviceIter->second);
+        hasMappedDevice = true;
+      }
     } else {
       const auto deviceIter = deviceMap.find(t.device());
       TORCH_CHECK(
@@ -68,10 +74,10 @@ std::vector<c10::Device> getDevicesForTensors(
           t.device(),
           " but received a tensor on that device.");
       devices.push_back(deviceIter->second);
-      hasCudaTensor = true;
+      hasMappedDevice = true;
     }
   }
-  if (!hasCudaTensor) {
+  if (!hasMappedDevice) {
     devices.clear();
   }
   return devices;
@@ -95,7 +101,9 @@ std::unordered_set<c10::Device> getLocalDevices(
   std::unordered_set<c10::Device> deviceSet;
   for (const auto& entry : deviceMap) {
     for (const auto& device : entry.second) {
-      deviceSet.insert(device.first);
+      if (!device.first.is_cpu()) {
+        deviceSet.insert(device.first);
+      }
     }
   }
   return deviceSet;
