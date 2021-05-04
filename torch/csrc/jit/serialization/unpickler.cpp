@@ -413,8 +413,7 @@ PickleOpCode Unpickler::readInstruction() {
         if (device_) {
           device = *device_;
         }
-        at::DataPtr storage_ptr =
-            read_record_(key);
+        at::DataPtr storage_ptr = read_record_(key);
         int64_t numel = args.at(4).toInt();
         caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
         at::Storage storage(
