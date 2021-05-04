@@ -10,16 +10,18 @@ import pickle
 import socket
 import threading
 import time
+import weakref
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Set, Tuple, cast
 
-from torch.distributed import Store
+from torch.distributed import PrefixStore, Store
 
 from .api import (
     RendezvousClosedError,
+    RendezvousError,
     RendezvousHandler,
     RendezvousParameters,
     RendezvousStateError,
@@ -899,27 +901,145 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
     def next_rendezvous(self) -> Tuple[Store, int, int]:
         """See base class."""
-        raise NotImplementedError()
+        log.info(
+            f"The node '{self._this_node}' attempts to join the next round of the rendezvous "
+            f"'{self._settings.run_id}'."
+        )
+
+        self._stop_heartbeats()
+
+        # Delay the execution for a small random amount of time if this is our
+        # first run. This will slightly skew the rendezvous attempts across the
+        # nodes and reduce the load on the backend.
+        if self._state_holder.state.round == 0:
+            _delay(seconds=(0, 0.3))
+
+        exit_op = _RendezvousExitOp()
+        join_op = _RendezvousJoinOp()
+
+        deadline = self._get_deadline(self._settings.timeout.join)
+
+        self._op_executor.run(exit_op, deadline)
+        self._op_executor.run(join_op, deadline)
+
+        self._start_heartbeats()
+
+        rank, world_size = self._get_world()
+        store = self._get_store()
+
+        log.info(
+            f"The node '{self._this_node}' has joined round {self._state_holder.state.round} of "
+            f"the rendezvous '{self._settings.run_id}' as rank {rank} in a world of size "
+            f"{world_size}."
+        )
+
+        return store, rank, world_size
 
     def is_closed(self) -> bool:
         """See base class."""
-        raise NotImplementedError()
+        with self._heartbeat_lock:
+            self._state_holder.sync()
+
+            return self._state_holder.state.closed
 
     def set_closed(self) -> None:
         """See base class."""
-        raise NotImplementedError()
+        with self._heartbeat_lock:
+            self._close()
 
     def num_nodes_waiting(self) -> int:
         """See base class."""
-        raise NotImplementedError()
+        with self._heartbeat_lock:
+            self._state_holder.sync()
+
+            return len(self._state_holder.state.wait_list)
 
     def get_run_id(self) -> str:
         """See base class."""
-        return self.settings.run_id
+        return self._settings.run_id
 
     def shutdown(self) -> bool:
         """See base class."""
-        raise NotImplementedError()
+        self._stop_heartbeats()
+
+        try:
+            self._close()
+
+            return True
+        except RendezvousError as ex:
+            log.warning(
+                f"The node '{self._this_node}' has failed to shutdown the rendezvous "
+                f"'{self._settings.run_id}' due to an error of type {type(ex).__name__}."
+            )
+
+            return False
+
+    def _close(self) -> None:
+        op = _RendezvousCloseOp()
+
+        deadline = self._get_deadline(self._settings.timeout.close)
+
+        self._op_executor.run(op, deadline)
+
+        log.info(
+            f"The node '{self._this_node}' has closed the rendezvous '{self._settings.run_id}'."
+        )
+
+    @staticmethod
+    def _keep_alive_weak(weak_self) -> None:
+        self = weak_self()
+        if self is not None:
+            self._keep_alive()
+
+    def _keep_alive(self) -> None:
+        self._heartbeat_lock.acquire()
+
+        op = _RendezvousKeepAliveOp()
+
+        deadline = self._get_deadline(self._settings.timeout.heartbeat)
+
+        try:
+            self._op_executor.run(op, deadline)
+
+            log.debug(
+                f"The node '{self._this_node}' has sent a keep-alive heartbeat to the rendezvous "
+                f"'{self._settings.run_id}'."
+            )
+        except RendezvousError as ex:
+            log.warning(
+                f"The node '{self._this_node}' has failed to send a keep-alive heartbeat to the "
+                f"rendezvous '{self._settings.run_id}' due to an error of type {type(ex).__name__}."
+            )
+        finally:
+            self._heartbeat_lock.release()
+
+    def _start_heartbeats(self) -> None:
+        self._keep_alive_timer = _PeriodicTimer(
+            self._settings.keep_alive_interval, self._keep_alive_weak, weakref.ref(self)
+        )
+
+        self._keep_alive_timer.set_name(f"RendezvousKeepAliveTimer_{self._this_node.local_id}")
+
+        self._keep_alive_timer.start()
+
+    def _stop_heartbeats(self) -> None:
+        if self._keep_alive_timer is None:
+            return
+
+        self._keep_alive_timer.cancel()
+
+    def _get_world(self) -> Tuple[int, int]:
+        state = self._state_holder.state
+
+        return state.participants[self._this_node], len(state.participants)
+
+    def _get_store(self) -> Store:
+        key_prefix = f"torch.rendezvous.{self._settings.run_id}.{self._state_holder.state.round}"
+
+        return PrefixStore(key_prefix, self._store)
+
+    def _get_deadline(self, timeout: timedelta) -> float:
+        return time.monotonic() + timeout.total_seconds()
 
 
 def _get_timeout(params: RendezvousParameters, key: str) -> Optional[timedelta]:
