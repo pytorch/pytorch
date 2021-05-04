@@ -6330,8 +6330,6 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: polygamma.out
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: polygamma
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
