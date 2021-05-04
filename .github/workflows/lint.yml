@@ -30,22 +30,22 @@ jobs:
       - name: Epic fail
         run: 'false'
       - name: Ensure consistent CircleCI YAML config
-        if: steps.requirements.conclusion == 'success'
+        if: steps.requirements.outcome == 'success'
         run: cd .circleci && ./ensure-consistency.py
       - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
-        if: steps.requirements.conclusion == 'success'
+        if: steps.requirements.outcome == 'success'
         run: |
           pip install ruamel.yaml==0.17.4
           echo "Please locally run .github/scripts/regenerate_cancel_redundant_workflow.py and commit if this step fails."
           .github/scripts/regenerate_cancel_redundant_workflow.py
           git diff --exit-code .github/workflows/cancel_redundant_workflows.yml
       - name: Lint native_functions.yaml
-        if: steps.requirements.conclusion == 'success'
+        if: steps.requirements.outcome == 'success'
         run: |
           pip install ruamel.yaml==0.17.4
           .github/scripts/lint_native_functions.py
       - name: Extract scripts from GitHub Actions workflows
-        if: steps.requirements.conclusion == 'success'
+        if: steps.requirements.outcome == 'success'
         run: |
           # For local lints, remove the .extracted_scripts folder if it was already there
           rm -rf .extracted_scripts
@@ -62,11 +62,11 @@ jobs:
           rm -r "shellcheck-${scversion}"
           shellcheck --version
       - name: Run ShellCheck
-        if: steps.install_shellcheck.conclusion == 'success'
+        if: steps.install_shellcheck.outcome == 'success'
         run: |
           tools/run_shellcheck.sh .jenkins/pytorch .extracted_scripts
       - name: Ensure correct trailing newlines
-        if: steps.requirements.conclusion == 'success'
+        if: steps.requirements.outcome == 'success'
         run: |
           (! git --no-pager grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
@@ -106,12 +106,12 @@ jobs:
           # shellcheck disable=SC2016
           (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format|gradlew)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
       - name: C++ docs check
-        if: steps.requirements.conclusion == 'success'
+        if: steps.requirements.outcome == 'success'
         run: |
           sudo apt-get install -y doxygen
           cd docs/cpp/source && ./check-doxygen.sh
       - name: CUDA kernel launch check
-        if: steps.requirements.conclusion == 'success'
+        if: steps.requirements.outcome == 'success'
         run: |
           set -eux
           python torch/testing/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
