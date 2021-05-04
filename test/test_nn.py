@@ -10260,6 +10260,25 @@ class TestNN(NNTestCase):
                 self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
                 self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_sync_batchnorm_accuracy_cuda(self):
+        # The target of this test is to test the functionality and accuracy of
+        #   those single-GPU cuda kernels used in SyncBatchNorm
+        # They are:
+        #   fwd: torch.batch_norm_stats, torch.batch_norm_gather_stats_with_counts, torch.batch_norm_elemt
+        #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_elemt
+
+        def _batch_norm_stats(data):
+            mean1, _ = torch.batch_norm_stats(data, 1e-5)
+            mean2, _ = torch.batch_norm_stats(data.to(memory_format=torch.channels_last), 1e-5)
+            mean_ref = torch.mean(data, (0, 2, 3), keepdim=False)
+
+            self.assertEqual(mean_ref, mean1)
+            self.assertEqual(mean_ref, mean2)
+
+        data = torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda')
+        _batch_norm_stats(data)
+
     def test_functional_grad_conv(self):
         # Conv 1D
         input = torch.randn(1, 1, 5, requires_grad=True)

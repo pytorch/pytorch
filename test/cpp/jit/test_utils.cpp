@@ -248,7 +248,7 @@ RegisterOperators reg({
         [](Stack* stack) { push(stack, at::Tensor()); },
         aliasAnalysisFromSchema()),
 });
-}
+} // namespace
 
 } // namespace jit
 } // namespace torch
