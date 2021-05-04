@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
 #include <THC/THCDeviceUtils.cuh>
@@ -50,10 +50,10 @@ __global__ void replication_pad_forward_kernel1d(
 }
 
 template <typename scalar_t>
-__global__ void replication_pad_backward_kernel(
+__global__ void replication_pad_backward_kernel1d(
     PackedTensorAccessor64<scalar_t, 3> gradInput,
     PackedTensorAccessor64<scalar_t, 3> gradOutput,
-    int padL, int padR, int y_shift, int z_shift) {
+    int padL, int padR, int channel, int height, int gi_numel, int y_shift, int z_shift) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y + y_shift;
@@ -69,7 +69,13 @@ __global__ void replication_pad_backward_kernel(
   int inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointX];
-  gpuAtomicAdd(&gradInput[batch][plane][inputPointX], valueToCopy);
+  fastAtomicAdd(
+    gradInput.data(),
+    idx_1d(batch, plane, inputPointX, channel, height),
+    gi_numel,
+    valueToCopy,
+    true
+  );
 }
 
 template <typename scalar_t>
@@ -100,10 +106,12 @@ __global__ void replication_pad_forward_kernel2d(
 }
 
 template <typename scalar_t>
-__global__ void replication_pad_backward_kernel(
+__global__ void replication_pad_backward_kernel2d(
     PackedTensorAccessor64<scalar_t, 4> gradInput,
     PackedTensorAccessor64<scalar_t, 4> gradOutput,
-    int padT, int padB, int padL, int padR, int y_shift, int z_shift) {
+    int padT, int padB, int padL, int padR,
+    int channel, int height, int width, int gi_numel,
+    int y_shift, int z_shift) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y + y_shift;
@@ -123,7 +131,13 @@ __global__ void replication_pad_backward_kernel(
   int inputPointY = imin(imax(padT, outputPointY), gradInput.size(2) + padT - 1) - oStartY + iStartY;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointY][outputPointX];
-  gpuAtomicAdd(&gradInput[batch][plane][inputPointY][inputPointX], valueToCopy);
+  fastAtomicAdd(
+    gradInput.data(),
+    idx_2d(batch * channel + plane, inputPointY, inputPointX, height, width),
+    gi_numel,
+    valueToCopy,
+    true
+  );
 }
 
 template <typename scalar_t>
@@ -163,10 +177,12 @@ __global__ void replication_pad_forward_kernel3d(
 }
 
 template <typename scalar_t>
-__global__ void replication_pad_backward_kernel(
+__global__ void replication_pad_backward_kernel3d(
     PackedTensorAccessor64<scalar_t, 5> gradInput,
     PackedTensorAccessor64<scalar_t, 5> gradOutput,
-    int pfront, int pback, int ptop, int pbottom, int pleft, int pright, int y_shift, int z_shift) {
+    int pfront, int pback, int ptop, int pbottom, int pleft, int pright,
+    int channel, int depth, int height, int width, int gi_numel,
+    int y_shift, int z_shift) {
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y + y_shift;
   int batch = blockIdx.z + z_shift;
@@ -195,10 +211,14 @@ __global__ void replication_pad_backward_kernel(
   int inputPointZ = imin(imax(pfront, outputPointZ),
       gradInput.size(2) + pfront - 1) - oStartZ + iStartZ;
 
-  scalar_t valueToCopy =
-    gradOutput[batch][plane][outputPointZ][outputPointY][outputPointX];
-  gpuAtomicAdd(&gradInput[batch][plane][inputPointZ][inputPointY][inputPointX],
-      valueToCopy);
+  scalar_t valueToCopy = gradOutput[batch][plane][outputPointZ][outputPointY][outputPointX];
+  fastAtomicAdd(
+    gradInput.data(),
+    idx_3d(batch, plane, inputPointZ, inputPointY, inputPointX, channel, depth, height, width),
+    gi_numel,
+    valueToCopy,
+    true
+  );
 }
 
 void replication_pad2d_backward_out_cuda_template(
@@ -270,8 +290,10 @@ void replication_pad2d_backward_out_cuda_template(
             dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
             dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
-            replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
-              devGradInput, devGradOutput, padT, padB, padL, padR, block_y, block_z);
+            replication_pad_backward_kernel2d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+              devGradInput, devGradOutput, padT, padB, padL, padR,
+              gradInput_.size(1), gradInput_.size(2), gradInput_.size(3), gradInput_.numel(),
+              block_y, block_z);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
         }
@@ -435,8 +457,10 @@ void replication_pad3d_backward_out_cuda_template(
           dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
-          replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
-                    devGradInput, devGradOutput, pfront, pback, ptop, pbottom, pleft, pright, block_y, block_z);
+          replication_pad_backward_kernel3d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+                    devGradInput, devGradOutput, pfront, pback, ptop, pbottom, pleft, pright,
+                    gradInput_.size(1), gradInput_.size(2), gradInput_.size(3), gradInput_.size(4), gradInput_.numel(),
+                    block_y, block_z);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
       }
@@ -561,8 +585,9 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
           dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
-          replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
-            devGradInput, devGradOutput, padL, padR, block_y, block_z);
+          replication_pad_backward_kernel1d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+            devGradInput, devGradOutput, padL, padR, gradInput_.size(1), gradInput_.size(2), gradInput_.numel(),
+            block_y, block_z);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
       }

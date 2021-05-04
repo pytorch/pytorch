@@ -5,6 +5,37 @@
 namespace at {
 namespace native {
 
+__device__ __forceinline__ size_t
+idx_1d(
+    const size_t n, const size_t c, const size_t h,
+    const size_t channel, const size_t height){
+  return (n * channel + c) * height + h;
+}
+
+__device__ __forceinline__ size_t
+idx_2d(const size_t nc,
+    const size_t h,
+    const size_t w,
+    const size_t height,
+    const size_t width) {
+  return (nc * height + h) * width + w;
+}
+
+// for channels-last
+__device__ __forceinline__ size_t
+idx_2d_cl(
+  const size_t n, const size_t h, const size_t w, const size_t c,
+  const size_t height, const size_t width, const size_t channel) {
+  return ((n * height + h) * width + w) * channel + c;
+}
+
+__device__ __forceinline__ size_t
+idx_3d(
+    const size_t n, const size_t c, const size_t d, const size_t h, const size_t w,
+    const size_t channel, const size_t depth, const size_t height, const size_t width) {
+  return (((n * channel + c) * depth + d) * height + h) * width + w;
+}
+
 template <
     typename scalar_t,
     typename std::enable_if<std::is_same<c10::Half, scalar_t>::value>::type* =
