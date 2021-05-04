@@ -23,9 +23,6 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-      # TODO: remove this step before merging
-      - name: Epic fail
-        run: 'false'
       - name: Install requirements
         id: requirements
         run: pip install -r requirements.txt
