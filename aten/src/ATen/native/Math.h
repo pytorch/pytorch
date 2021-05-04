@@ -1169,15 +1169,15 @@ calc_gcd(T a, T b) {
  * If the coefficients are for the inverted interval, in which (a, b) is mapped to (1/b, 1/a), the transformation
  * required is x -> 2(2ab/x - b - a)/(b-a).  If b is infinity, this becomes x -> 4a/x - 1.
  */
-template <typename T, unsigned long N>
+template <typename T>
 static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
-chbevl(const T x, const std::array<T, N>& array) {
+chbevl(const T x, const T array[], size_t len) {
   T b0, b1, b2;
 
   b0 = array[0];
   b1 = static_cast<T>(0.0);
 
-  for (size_t i = 1; i < N; ++i) {
+  for (size_t i = 1; i < len; ++i) {
     b2 = b1;
     b1 = b0;
     b0 = x * b1 - b2 + array[i];
@@ -1196,13 +1196,13 @@ chbevl(const T x, const std::array<T, N>& array) {
  * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
-inline const auto chebyshev_coefficients_i0e_A() {
+inline const T* chebyshev_coefficients_i0e_A() {
   /* Chebyshev coefficients for exp(-x) I0(x)
    * in the interval [0,8].
    *
    * lim(x->0){ exp(-x) I0(x) } = 1.
    */
-  static const std::array<T, 30> coeff = {
+  static const T coeff[] = {
       -4.41534164647933937950E-18, 3.33079451882223809783E-17,
       -2.43127984654795469359E-16, 1.71539128555513303061E-15,
       -1.16853328779934516808E-14, 7.67618549860493561688E-14,
@@ -1222,13 +1222,13 @@ inline const auto chebyshev_coefficients_i0e_A() {
 };
 
 template <typename T>
-inline const auto chebyshev_coefficients_i0e_B() {
+inline const T* chebyshev_coefficients_i0e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I0(x)
    * in the inverted interval [8,infinity].
    *
    * lim(x->inf){ exp(-x) sqrt(x) I0(x) } = 1/sqrt(2pi).
    */
-  static const std::array<T, 25> coeff = {
+  static const T coeff[] = {
       -7.23318048787475395456E-18, -4.83050448594418207126E-18,
       4.46562142029675999901E-17,  3.46122286769746109310E-17,
       -2.82762398051658348494E-16, -3.42548561967721913462E-16,
@@ -1247,14 +1247,14 @@ inline const auto chebyshev_coefficients_i0e_B() {
 };
 
 template <typename T>
-inline const std::enable_if_t<std::is_same<double, T>::value, std::array<T, 29>>
+inline typename std::enable_if<std::is_same<double, T>::value, const T*>::type
 chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
    *
    * lim(x->0){ exp(-x) I1(x) / x } = 1/2.
    */
-  static const std::array<T, 29> coeff = {
+  static const T coeff[] = {
       2.77791411276104639959E-18, -2.11142121435816608115E-17,
       1.55363195773620046921E-16, -1.10559694773538630805E-15,
       7.60068429473540693410E-15, -5.04218550472791168711E-14,
@@ -1274,15 +1274,14 @@ chebyshev_coefficients_i1e_A() {
 };
 
 template <typename T>
-inline const std::
-    enable_if_t<std::is_same<float, T>::value, std::array<float, 17>>
-    chebyshev_coefficients_i1e_A() {
+inline typename std::enable_if<std::is_same<float, T>::value, const T*>::type
+chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
    *
    * lim(x->0){ exp(-x) I1(x) / x } = 1/2.
    */
-  static const std::array<float, 17> coeff = {
+  static const T coeff[] = {
       9.38153738649577178388E-9f,
       -4.44505912879632808065E-8f,
       2.00329475355213526229E-7f,
@@ -1304,14 +1303,14 @@ inline const std::
 };
 
 template <typename T>
-inline const std::enable_if_t<std::is_same<double, T>::value, std::array<T, 25>>
+inline typename std::enable_if<std::is_same<double, T>::value, const T*>::type
 chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
    *
    * lim(x->inf){ exp(-x) sqrt(x) I1(x) } = 1/sqrt(2pi).
    */
-  static const std::array<T, 25> coeff = {
+  static const T coeff[] = {
       7.51729631084210481353E-18,  4.41434832307170791151E-18,
       -4.65030536848935832153E-17, -3.20952592199342395980E-17,
       2.96262899764595013876E-16,  3.30820231092092828324E-16,
@@ -1330,14 +1329,14 @@ chebyshev_coefficients_i1e_B() {
 };
 
 template <typename T>
-inline const std::enable_if_t<std::is_same<float, T>::value, std::array<T, 7>>
+inline typename std::enable_if<std::is_same<float, T>::value,const T*>::type
 chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
    *
    * lim(x->inf){ exp(-x) sqrt(x) I1(x) } = 1/sqrt(2pi).
    */
-  static const std::array<float, 7> coeff = {
+  static const T coeff[] = {
       -3.83538038596423702205E-9f,
       -2.63146884688951950684E-8f,
       -2.51223623787020892529E-7f,
@@ -1357,12 +1356,12 @@ calc_i0(T _x) {
   if (x <= 8.0) {
     const auto A = chebyshev_coefficients_i0e_A<T>();
     T y = (x / 2.0) - 2.0;
-    return static_cast<T>(std::exp(x) * chbevl(y, A));
+    return static_cast<T>(std::exp(x) * chbevl(y, A, 30));
   }
 
   const auto B = chebyshev_coefficients_i0e_B<T>();
   return static_cast<T>(
-      std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B) / std::sqrt(x));
+      std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, 25) / std::sqrt(x));
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
@@ -1385,12 +1384,12 @@ calc_i0e(T _x) {
   if (x <= 8.0) {
     auto A = chebyshev_coefficients_i0e_A<T>();
     T y = (x / 2.0) - 2.0;
-    return static_cast<T>(chbevl(y, A));
+    return static_cast<T>(chbevl(y, A, 30));
   }
 
   auto B = chebyshev_coefficients_i0e_B<T>();
   return static_cast<T>(
-      chbevl(static_cast<T>(32.0 / x - 2.0), B) / std::sqrt(x));
+      chbevl(static_cast<T>(32.0 / x - 2.0), B, 25) / std::sqrt(x));
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
@@ -1413,13 +1412,32 @@ calc_i1(T _x) {
   if (x <= 8.0) {
     const auto A = chebyshev_coefficients_i1e_A<T>();
     T y = (x / 2.0) - 2.0;
-    const T out = static_cast<T>(std::exp(x) * x * chbevl(y, A));
+    const T out = static_cast<T>(std::exp(x) * x * chbevl(y, A, 29));
     return (_x < 0.0) ? -out : out;
   }
 
   const auto B = chebyshev_coefficients_i1e_B<T>();
   const auto out = static_cast<T>(
-      (std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B)) / std::sqrt(x));
+      (std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, 25)) / std::sqrt(x));
+  return (_x < 0.0) ? -out : out;
+}
+
+template <>
+inline float calc_i1(float _x) {
+  using T = float;
+  T x = std::abs(_x);
+
+  if (x <= 8.0) {
+    const auto A = chebyshev_coefficients_i1e_A<T>();
+    T y = (x / 2.0) - 2.0;
+    const T out = static_cast<T>(std::exp(x) * x * chbevl(y, A, 17));
+    return (_x < 0.0) ? -out : out;
+  }
+
+  const auto B = chebyshev_coefficients_i1e_B<T>();
+  const auto out = static_cast<T>(
+      (std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, 7)) /
+      std::sqrt(x));
   return (_x < 0.0) ? -out : out;
 }
 
@@ -1440,12 +1458,30 @@ calc_i1e(T _x) {
   if (x <= 8.0) {
     auto A = chebyshev_coefficients_i1e_A<T>();
     T y = (x / 2.0) - 2.0;
-    const auto out = static_cast<T>(chbevl(y, A) * x);
+    const auto out = static_cast<T>(chbevl(y, A, 29) * x);
     return (_x < 0.0) ? -out : out;
   }
 
   auto B = chebyshev_coefficients_i1e_B<T>();
   const auto out =
-      static_cast<T>(chbevl(static_cast<T>(32.0 / x - 2.0), B) / std::sqrt(x));
+      static_cast<T>(chbevl(static_cast<T>(32.0 / x - 2.0), B, 25) / std::sqrt(x));
+  return (_x < 0.0) ? -out : out;
+}
+
+template <>
+inline float calc_i1e(float _x) {
+  using T=float;
+  T x = std::abs(_x);
+
+  if (x <= 8.0) {
+    auto A = chebyshev_coefficients_i1e_A<T>();
+    T y = (x / 2.0) - 2.0;
+    const auto out = static_cast<T>(chbevl(y, A, 17) * x);
+    return (_x < 0.0) ? -out : out;
+  }
+
+  auto B = chebyshev_coefficients_i1e_B<T>();
+  const auto out =
+      static_cast<T>(chbevl(static_cast<T>(32.0 / x - 2.0), B, 7) / std::sqrt(x));
   return (_x < 0.0) ? -out : out;
 }
