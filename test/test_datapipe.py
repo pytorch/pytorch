@@ -183,7 +183,7 @@ class TestIterableDataPipeBasic(TestCase):
         datapipe1 = dp.iter.ListDirFiles(temp_dir, ['*.png', '*.txt'])
         datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
         datapipe3 = dp.iter.RoutedDecoder(datapipe2, decoder_imagehandler('rgb'))
-        datapipe3.add_handler(decoder_basichandlers)
+        datapipe3.add_handler(*decoder_basichandlers)
 
         for rec in datapipe3:
             ext = os.path.splitext(rec[0])[1]

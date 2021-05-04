@@ -32,17 +32,18 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
 
     def __init__(self,
                  datapipe: Iterable[Tuple[str, BufferedIOBase]],
-                 *handlers: Callable,
+                 *handler: Callable,
                  key_fn: Callable = _default_key_fn) -> None:
         super().__init__()
         self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
-        if len(handlers) > 0:
-            self.decoder = Decoder(handlers, key_fn)
+        if len(handler) > 0:
+            self.decoder = Decoder(*handler, key_fn=key_fn)
         else:
-            self.decoder = Decoder([decoder_basichandlers, decoder_imagehandler('torch')], key_fn)
+            self.decoder = Decoder(*decoder_basichandlers, decoder_imagehandler('torch'),
+                                   key_fn=key_fn)
 
-    def add_handler(self, handler: Callable) -> None:
-        self.decoder.add_handler(handler)
+    def add_handler(self, *handler: Callable) -> None:
+        self.decoder.add_handler(*handler)
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
         for data in self.datapipe:

@@ -6,50 +6,86 @@ import os
 import pickle
 import tempfile
 
+from typing import Callable, List, Optional, Tuple, Union
+
 import torch
+
+
+_all__ = ["Handler", "Decoder", "basichandlers", "imagehandler"]
+
+
+class Handler:
+    r"""
+    Handler to use `decode_fn` to decode 'data' based on 'key', and to determine
+    if the key-data pair should be handled. When `key_fn` is specified, it will
+    be applied to 'key' for decoding data and determining if it's correct Handler.
+    """
+    def __init__(self,
+                 keys: Union[str, List[str], Tuple[str]],
+                 decode_fn: Optional[Callable] = None,
+                 key_fn: Optional[Callable] = None) -> None:
+        self.keys = keys if isinstance(keys, list) else list(keys)
+        if decode_fn is None:
+            assert hasattr(self, 'decode_fn'), \
+                "Expected {} Class has implementation of `decode_fn`".format(type(self).__name__)
+        else:
+            self.decode_fn = decode_fn
+        self.key_fn = key_fn
+
+    def __call__(self, key, data):
+        if self.key_fn is not None:
+            key = self.key_fn(key)
+        return self.decode_fn(key, data)
+
+    def __contains__(self, key):
+        if self.key_fn is not None:
+            key = self.key_fn(key)
+        return key in self.keys
 
 
 ################################################################
 # handle basic datatypes
 ################################################################
+def _text_decode_fn(key, data):
+    return data.decode("utf-8")
+
+_text_handler = Handler("txt text transcript".split(), _text_decode_fn)
 
 
-def basichandlers(extension, data):
+def _int_decode_fn(key, data):
+    return int(data)
 
-    if extension in "txt text transcript":
-        return data.decode("utf-8")
+_int_handler = Handler("cls cls2 class count index inx id".split(), _int_decode_fn)
 
-    if extension in "cls cls2 class count index inx id".split():
-        try:
-            return int(data)
-        except ValueError:
-            return None
 
-    if extension in "json jsn":
-        import json
-        return json.loads(data)
+def _json_decode_fn(key, data):
+    # Lazy import in case `json` is never used for `defaulthandlers`
+    import json
+    return json.loads(data)
 
-    if extension in "pyd pickle".split():
-        return pickle.loads(data)
+_json_handler = Handler("json jsn".split(), _json_decode_fn)
 
-    if extension in "pt".split():
-        stream = io.BytesIO(data)
-        return torch.load(stream)
 
-    # if extension in "ten tb".split():
-    #     from . import tenbin
-    #     return tenbin.decode_buffer(data)
+def _pickle_decode_fn(key, data):
+    return pickle.loads(data)
 
-    # if extension in "mp msgpack msg".split():
-    #     import msgpack
-    #     return msgpack.unpackb(data)
+_pickle_handler = Handler("pyd pickle".split(), _pickle_decode_fn)
 
-    return None
+
+def _torch_decode_fn(key, data):
+    stream = io.BytesIO(data)
+    return torch.load(stream)
+
+_torch_handler = Handler("pt", _torch_decode_fn)
+
+
+basichandlers = (_text_handler, _int_handler, _json_handler, _pickle_handler, _torch_handler)
 
 
 ################################################################
 # handle images
 ################################################################
+
 
 imagespecs = {
     "l8": ("numpy", "uint8", "l"),
@@ -99,7 +135,7 @@ def handle_extension(extensions, f):
     return g
 
 
-class ImageHandler:
+class ImageHandler(Handler):
     """
     Decode image data using the given `imagespec`.
     The `imagespec` specifies whether the image is decoded
@@ -124,14 +160,16 @@ class ImageHandler:
     - pilrgb: pil None rgb
     - pilrgba: pil None rgba
     """
-    def __init__(self, imagespec):
-        assert imagespec in list(imagespecs.keys()), "unknown image specification: {}".format(imagespec)
+    def __init__(self,
+                 imagespec: str,
+                 keys="jpg jpeg png ppm pgm pbm pnm".split(),
+                 key_fn=None) -> None:
+        assert imagespec in list(imagespecs.keys()), \
+            "unknown image specification: {}".format(imagespec)
+        super().__init__(keys, None, key_fn)
         self.imagespec = imagespec.lower()
 
-    def __call__(self, extension, data):
-        if extension.lower() not in "jpg jpeg png ppm pgm pbm pnm".split():
-            return None
-
+    def decode_fn(self, key, data):
         try:
             import numpy as np
         except ImportError as e:
@@ -171,6 +209,7 @@ class ImageHandler:
                     result = np.array(result.transpose(2, 0, 1))
                     return torch.tensor(result) / 255.0
             return None
+
 
 def imagehandler(imagespec):
     return ImageHandler(imagespec)
@@ -225,7 +264,7 @@ def torch_audio(extension, data):
 ################################################################
 # mat
 ################################################################
-class MatHandler:
+class MatHandler(Handler):
     def __init__(self, **loadmat_kwargs) -> None:
         try:
             import scipy.io as sio
@@ -253,16 +292,16 @@ class Decoder:
     handlers until some handler returns something other than None.
     """
 
-    def __init__(self, handlers, key_fn):
-        self.handlers = list(handlers) if len(handlers) > 0 else []
+    def __init__(self, *handler, key_fn):
+        self.handlers = list(handler) if len(handler) > 0 else []
         self.key_fn = key_fn
 
     # Add from the beginning of the handlers to make sure the added
     # handler having highest priority
-    def add_handler(self, handler):
-        if not handler:
+    def add_handler(self, *handler):
+        if len(handler) == 0:
             return
-        self.handlers = [handler] + self.handlers
+        self.handlers = list(handler) + self.handlers
 
     def decode1(self, key, data):
         if not data:
@@ -273,9 +312,8 @@ class Decoder:
             data = data.read()
 
         for f in self.handlers:
-            result = f(key, data)
-            if result is not None:
-                return result
+            if key in f:
+                return f(key, data)
         return data
 
     def decode(self, data):
