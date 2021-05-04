@@ -50,6 +50,32 @@ def _wrap_tensor_for_grad(maybe_tensor, level):
 def _wrap_all_tensors(tensor_or_tuple_of_tensors, level):
     return tree_map(partial(_wrap_tensor_for_grad, level=level), tensor_or_tuple_of_tensors)
 
+def _as_tuple(val):
+    if isinstance(val, tuple):
+        return val
+    return (val,)
+
+# Version of autograd.grad that handles outputs that don't depend on inputs
+def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, create_graph=True):
+    outputs = _as_tuple(outputs)
+    if grad_outputs is None:
+        diff_outputs = tuple(out for out in outputs if out.requires_grad)
+    else:
+        result = tuple((out, go) for out, go in zip(outputs, grad_outputs) if out.requires_grad)
+        if len(result) == 0:
+            diff_outputs, grad_outputs = (), ()
+        else:
+            diff_outputs, grad_outputs = zip(*result)
+    if len(diff_outputs) == 0:
+        return tuple(torch.zeros_like(inp) for inp in inputs)
+    grad_inputs = torch.autograd.grad(diff_outputs, inputs, grad_outputs,
+                                      retain_graph=retain_graph,
+                                      create_graph=create_graph,
+                                      allow_unused=True)
+    grad_inputs = tuple(torch.zeros_like(inp) if gi is None else gi
+                        for gi, inp in zip(grad_inputs, inputs))
+    return grad_inputs
+
 # How do we increment and decrement the nesting? I don't think we can.
 def vjp(f, *primals):
     level = _grad_increment_nesting()
@@ -60,8 +86,13 @@ def vjp(f, *primals):
         results = _undo_create_differentiable(primals_out, level)
 
         def wrapper(*cotangents, retain_graph=True, create_graph=True):
-            result = torch.autograd.grad(primals_out, diff_primals, cotangents,
-                                         retain_graph=retain_graph, create_graph=create_graph)
+            primals_out_tuple = _as_tuple(primals_out)
+            if len(primals_out_tuple) != len(cotangents):
+                raise RuntimeError(
+                    f'Got {len(primals_out_tuple)} outputs but {len(cotangents)} '
+                    f'cotangents. These two quantities should be the same')
+            result = _autograd_grad(primals_out_tuple, diff_primals, cotangents,
+                                    retain_graph=retain_graph, create_graph=create_graph)
             return result
 
     finally:
@@ -120,14 +151,7 @@ def grad_and_value(f, argnums=0, has_aux=False):
             flat_diff_args, spec = tree_flatten(diff_args)
 
             # NB: need create_graph so that backward pass isn't run in no_grad mode
-            flat_grad_input = torch.autograd.grad(
-                output, flat_diff_args, create_graph=True, allow_unused=True)
-
-            def replace_none_with_zeros(grad_arg, orig_arg):
-                if grad_arg is None:
-                    return torch.zeros_like(orig_arg)
-                return grad_arg
-            flat_grad_input = [replace_none_with_zeros(x, flat_diff_args[idx]) for idx, x in enumerate(flat_grad_input)]
+            flat_grad_input = _autograd_grad(output, flat_diff_args, create_graph=True)
             grad_input = tree_unflatten(flat_grad_input, spec)
 
         finally:
