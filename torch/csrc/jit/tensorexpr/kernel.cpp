@@ -227,6 +227,18 @@ bool matmulIsSupported(const torch::jit::Node* node) {
   return true;
 }
 
+void annotateInputShapes(
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<c10::optional<at::Tensor>>& example_inputs) {
+  TORCH_INTERNAL_ASSERT(graph->inputs().size() == example_inputs.size());
+  for (size_t idx = 0; idx < example_inputs.size(); idx++) {
+    if (auto t = example_inputs[idx]) {
+      auto concrete_tensor_type = tensorTypeInCurrentExecutionContext(*t);
+      graph->inputs().at(idx)->setType(concrete_tensor_type);
+    }
+  }
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -2063,8 +2075,9 @@ Tensor* tensorexpr::computeOperandValue(
       return computeCat(inputs, outputShape);
     }
     default: {
-      throw std::runtime_error("Unhandled node kind");
-      return nullptr;
+      std::string msg =
+          std::string("Unhandled node kind: ") + op.toQualString();
+      throw malformed_input(msg);
     }
   }
 }
@@ -2193,7 +2206,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     }
 
     default: {
-      throw std::runtime_error("Unhandled node kind");
+      std::string msg = std::string("Unhandled node kind: ") +
+          v->node()->kind().toQualString();
+      throw malformed_input(msg);
     }
   }
   return nullptr;
@@ -2463,6 +2478,11 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
+      if (!input->isCompleteTensor()) {
+        std::string msg = std::string("Shapes for input '%") +
+            input->debugName() + "' are unknown";
+        throw malformed_input(msg);
+      }
       Placeholder inBuffer(
           "t" + input_name_map_[input],
           ToDtype(static_cast<ScalarType>(*tt->scalarType())),
@@ -2869,6 +2889,13 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   TORCH_INTERNAL_ASSERT(bufs_.count(v));
   const Buf* buf = bufs_.at(v);
 
+  // No shape info is present in the graph
+  if (!tt->sizes().concrete_sizes()) {
+    std::string msg =
+        std::string("Shapes for output '%") + v->debugName() + "' are unknown";
+    throw malformed_input(msg);
+  }
+
   TORCH_INTERNAL_ASSERT(tt->sizes().concrete_sizes());
   const auto sizes = *tt->sizes().concrete_sizes();
   std::vector<int64_t> default_strides = TensorType::contiguousStridesOf(sizes);
@@ -2887,13 +2914,13 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
 
   auto dims = dimsFromSizes(sizesForValue(v));
   // We need to convert the output tensor so that its values are layed
-  // so that whene viewed from the output strides the values are correct.
+  // so that when viewed from the output strides the values are correct.
   // A contiguous Tensor of size(2, 3) with values 0-5 is layed out as:
   // [0] [1] [2] [3] [4] [5]
   // The same valued tensor with strides (2, 1) would be layed out like
   // [0] [3] [1] [4] [2] [5]
   // When we are doing the re-ordering of values into the output tensor,
-  // we are iterating per-element of the input, ad we are fixed
+  // we are iterating per-element of the input, and we are fixed
   // in indexing in to the output tensor at [i, j] = val
   // `val` we want here is equal to the indices for the output
   // tensor that would have given the same position as the output
