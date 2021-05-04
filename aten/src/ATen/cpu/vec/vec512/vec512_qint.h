@@ -133,7 +133,7 @@ inline void __attribute__((always_inline)) QuantizeAvx512(
       0x0c, 0x08, 0x04, 0x00);
   // clang-format on
   __m512i permute_mask_v =
-      _mm512_set_epi32(0x0f, 0x0c, 0x07, 0x03, 0x0e, 0x0a, 0x06, 0x02,
+      _mm512_set_epi32(0x0f, 0x0b, 0x07, 0x03, 0x0e, 0x0a, 0x06, 0x02,
                        0x0d, 0x09, 0x05, 0x01, 0x0c, 0x08, 0x04, 0x00);
   __m512i permute_mask_l8_v =
       _mm512_set_epi32(0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0c, 0x08,
@@ -181,7 +181,7 @@ inline void __attribute__((always_inline)) QuantizeAvx512(
         xy_packed_v, zw_packed_v, min_val, max_val);
 
     xyzw_clamped_v =
-        _mm512_permutexvar_epi32(xyzw_clamped_v, permute_mask_v);
+        _mm512_permutexvar_epi32(permute_mask_v, xyzw_clamped_v);
     _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst + i), xyzw_clamped_v);
   }
 
