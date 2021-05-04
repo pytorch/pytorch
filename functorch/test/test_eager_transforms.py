@@ -9,7 +9,7 @@ import warnings
 import math
 from typing import Callable, Type
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma, onlyOnCPUAndCUDA
+    skipCUDAIfNoMagma, onlyOnCPUAndCUDA, onlyCPU
 import types
 from functools import partial
 
@@ -282,10 +282,62 @@ class TestGradTransform(TestCase):
     def test_zero_grad(self, device):
         def f(x):
             return (x['a']**2.0).sum()
-        inps = ({'a':torch.randn(10) + 3, 'b':torch.randn(10)})
+        inps = ({'a':torch.randn(10, device=device) + 3, 'b':torch.randn(10, device=device)})
         grads = grad(f)(inps)
         self.assertNotEqual(grads['a'].sum(), 0.0)
         self.assertEqual(grads['b'].sum(), 0.0)
+
+    def test_unrelated_grad(self, device):
+        x = torch.tensor(1., device=device)
+        y = torch.tensor(2., device=device)
+
+        def unrelated(x):
+            return y
+
+        result = grad(unrelated)(x)
+        self.assertEqual(result, torch.zeros_like(x))
+
+    def test_unrelated_vjp(self, device):
+        x = torch.tensor(1., device=device)
+        y = torch.tensor(2., device=device)
+        v = torch.tensor(1., device=device)
+
+        def unrelated(x):
+            return y
+
+        out, vjp_fn = vjp(unrelated, x)
+        result = vjp_fn(v)
+        expected = (torch.zeros_like(x),)
+        self.assertEqual(result, expected)
+
+    def test_unrelated_vjp_multiple_inputs_outputs(self, device):
+        w = torch.tensor(3., device=device)
+        x = torch.tensor(4., device=device)
+        y = torch.tensor(2., device=device)
+        v = torch.tensor(1., device=device)
+
+        def unrelated(w, x):
+            return y, y, x
+
+        out, vjp_fn = vjp(unrelated, w, x)
+        result = vjp_fn(v, v, v)
+        expected = (torch.zeros_like(x), torch.ones_like(x))
+        self.assertEqual(result, expected)
+
+    # TODO: https://github.com/zou3519/functorch/issues/12
+    @onlyCPU
+    def test_unrelated_hessian(self, device):
+        N = 5
+        M = 3
+        W = torch.randn(N, M, device=device)
+
+        def f(x):
+            return W @ x
+
+        x = torch.randn(M)
+        result = jacrev(jacrev(f))(x)
+        expected = torch.zeros(N, M, M, device=device)
+        self.assertEqual(result, expected)
 
 
 class TestVmapOfGrad(TestCase):
