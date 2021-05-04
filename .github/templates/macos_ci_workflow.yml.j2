@@ -21,17 +21,49 @@ jobs:
           TEST: hello
         run: |
           printenv | sort
-      - name: Clone pytorch/pytorch
+
+      {# - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
           path: pytorch
-          submodules: recursive
+          submodules: recursive #}
       - name: Download and set up sccache
         run: |
           set -e
           sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
           sudo chmod +x /usr/local/bin/sccache
-      - name: Run build
+      - name: Run test build
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
+        run: |
+          ln -s (which sccache) clang++
+          echo '
+          #include <iostream>
+
+          int main() {
+              std::cout << "hi\n";
+              return 0;
+          }' > test.cpp
+
+          sccache --stop-server || echo server already stopped
+          sccache --start-server
+          sccache -s  # make sure it's hooked up to s3
+
+
+          echo -e "\n COMPILING \n"
+          ./clang++ -c test.cpp -o test.o
+          sccache -s
+
+          echo -e "\n COMPILING AGAIN (should show a hit) \n"
+          ./clang++ -c test.cpp -o test.o
+          sccache -s
+
+          echo -e "\n COMPILING AGAIN AGAIN (should show a hit) \n"
+          ./clang++ -c test.cpp -o test.o
+          sccache -s
+          
+      {# - name: Run build
         working-directory: pytorch/
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
@@ -58,8 +90,8 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           path:
-            artifacts.zip
-  test:
+            artifacts.zip #}
+  {# test:
     runs-on: !{{ runner_type }}
     needs:
       - build
@@ -89,4 +121,4 @@ jobs:
           export IN_CI=1
 
           chmod a+x .jenkins/pytorch/macos-test.sh
-          .jenkins/pytorch/macos-test.sh
+          .jenkins/pytorch/macos-test.sh #}

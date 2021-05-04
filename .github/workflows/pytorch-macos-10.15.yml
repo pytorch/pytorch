@@ -15,77 +15,50 @@ jobs:
     runs-on: macos-10.15
     steps:
       - name: env test build
+        working-directory: pytorch/
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
           TEST: hello
         run: |
           printenv | sort
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
+
+      
       - name: Download and set up sccache
         run: |
           set -e
           sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
           sudo chmod +x /usr/local/bin/sccache
-      - name: Run build
-        working-directory: pytorch/
+      - name: Run test build
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
         run: |
-          sudo xcode-select -r
-          # reload aws creds
+          ln -s (which sccache) clang++
+          echo '
+          #include <iostream>
+
+          int main() {
+              std::cout << "hi\n";
+              return 0;
+          }' > test.cpp
+
           sccache --stop-server || echo server already stopped
           sccache --start-server
-          sccache -s
-          export IN_CI=1
-          sudo xcode-select -s /Applications/Xcode_12.0.1.app
-          chmod a+x .jenkins/pytorch/macos-build.sh
-          .jenkins/pytorch/macos-build.sh
-      - name: Archive artifacts into zip
-        working-directory: pytorch/
-        run: |
-          zip -r artifacts.zip dist/ build/
-      - uses: actions/upload-artifact@v2
-        name: Store PyTorch Build Artifacts
-        with:
-          name: pytorch-macos-10.15
-          retention-days: 30
-          if-no-files-found: error
-          path:
-            pytorch/artifacts.zip
-  test:
-    runs-on: macos-10.15
-    needs:
-      - build
-    steps:
-      - name: Install test dependencies
-        working-directory: pytorch/
-        run: |
-          brew install libomp
-      - name: Checkout PyTorch
-        uses: actions/checkout@v2
-      - uses: actions/download-artifact@v2
-        name: Download PyTorch Build Artifacts
-        with:
-          name: pytorch-macos-10.15
-      - name: Unzip artifacts
-        working-directory: pytorch/
-        run: 
-          unzip -o artifacts.zip
-      - name: Show disk space (TODO remove)
-        working-directory: pytorch/
-        run: 
-          echo wow
-      - name: Run tests
-        working-directory: pytorch/
-        run: 
-          set -e
-          export IN_CI=1
+          sccache -s  # make sure it's hooked up to s3
 
-          chmod a+x .jenkins/pytorch/macos-test.sh
-          .jenkins/pytorch/macos-test.sh
+
+          echo -e "\n COMPILING \n"
+          ./clang++ -c test.cpp -o test.o
+          sccache -s
+
+          echo -e "\n COMPILING AGAIN (should show a hit) \n"
+          ./clang++ -c test.cpp -o test.o
+          sccache -s
+
+          echo -e "\n COMPILING AGAIN AGAIN (should show a hit) \n"
+          ./clang++ -c test.cpp -o test.o
+          sccache -s
+          
+      
+  
