@@ -16,8 +16,6 @@ using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
 using caffe2::serialize::ReadAdapterInterface;
 
-// static const BackportFactory backportFactory;
-
 // Forward declare so that _backport_for_mobile() overloads can
 // call this method directly.
 bool _backport_for_mobile_impl(
