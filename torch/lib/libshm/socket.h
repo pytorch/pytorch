@@ -2,6 +2,7 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <poll.h>
@@ -28,7 +29,7 @@ protected:
 
   virtual ~Socket() {
     if (socket_fd != -1)
-      SYSCHECK_ERR_RETURN_NEG1(close(socket_fd));
+      close(socket_fd);
   }
 
   struct sockaddr_un prepare_address(const char *path) {
@@ -112,8 +113,10 @@ public:
     }
   }
 
-  virtual ~ManagerServerSocket() {
-    SYSCHECK_ERR_RETURN_NEG1(unlink(socket_path.c_str()));
+  void remove() {
+    struct stat st;
+    if (stat(socket_path.c_str(), &st) == 0)
+      SYSCHECK_ERR_RETURN_NEG1(unlink(socket_path.c_str()));
   }
 
   ManagerSocket accept() {

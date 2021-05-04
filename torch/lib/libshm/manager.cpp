@@ -185,7 +185,7 @@ int main(int argc, char *argv[]) {
     unregister_fd(pfd.fd);
   }
   // Clean up manager.sock
-  srv_socket.reset();
+  srv_socket->remove();
   // Clean up directory automatically
 
   DEBUG("manager done");
