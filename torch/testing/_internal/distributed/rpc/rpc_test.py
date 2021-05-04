@@ -4820,11 +4820,13 @@ class MyConvNetForMNIST(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 10),
         ).to(device)
+        self.device = device
 
     def forward(self, x, is_rref=False):
-        if is_rref:
-            return self.net(x.to_here())
-        else:
+        x = x.to_here() if is_rref else x
+        with torch.cuda.stream(torch.cuda.current_stream(self.device)):
+            # intentionally adding delay to current CUDA stream
+            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
             return self.net(x)
 
 
@@ -4932,18 +4934,16 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @staticmethod
-    def _gpu_add_given_gpus(x, y, x_to, y_to, z_to):
-        if all([
-            x.is_cuda,
-            x.device.index == x_to,
-            y.is_cuda,
-            y.device.index == y_to
-        ]):
+    def _gpu_add_given_devices(x, y, x_to, y_to, z_to):
+        x_device = "cpu" if x.device.type == "cpu" else x.device.index
+        y_device = "cpu" if y.device.type == "cpu" else y.device.index
+        if x_device == x_to and y_device == y_to:
             return x.to(z_to) + y.to(z_to)
         else:
             raise ValueError("Wrong device affinity")
 
-    def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map, dst=None):
+    def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map, dst=None, fn=None):
+        fn = TensorPipeAgentCudaRpcTest._gpu_add_given_devices if fn is None else fn
         x_to = device_map[x_from]
         y_to = device_map[y_from]
 
@@ -4962,19 +4962,65 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         x = torch.zeros(2).to(x_from)
         y = torch.ones(2).to(y_from)
 
-        ret = rpc.rpc_sync(
-            dst,
-            TensorPipeAgentCudaRpcTest._gpu_add_given_gpus,
-            args=(x, y, x_to, y_to, z_to)
-        )
+        ret = rpc.rpc_sync(dst, fn, args=(x, y, x_to, y_to, z_to))
 
         reverse_device_map = {device_map[k] : k for k in device_map}
         z_from = reverse_device_map[z_to]
 
-        self.assertEqual(ret.device.index, z_from)
+        ret_device = "cpu" if ret.device.type == "cpu" else ret.device.index
+        self.assertEqual(ret_device, z_from)
         self.assertEqual(ret, torch.ones(2).to(z_from))
 
         rpc.shutdown()
+
+    def test_device_map_cpu(self):
+        self._test_device_maps_gpu(
+            x_from="cpu",
+            y_from="cpu",
+            z_to="cpu",
+            device_map={"cpu" : "cpu"},
+            fn=TensorPipeAgentCudaRpcTest._gpu_add_given_devices,
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_device_map_cpu_to_gpu_default(self):
+        self._test_device_maps_gpu(
+            x_from="cpu",
+            y_from="cpu",
+            z_to=0,
+            device_map={"cpu" : 0},
+            fn=TensorPipeAgentCudaRpcTest._gpu_add_given_devices,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_cpu_to_gpu_non_default(self):
+        self._test_device_maps_gpu(
+            x_from="cpu",
+            y_from="cpu",
+            z_to=1,
+            device_map={"cpu" : 1},
+            fn=TensorPipeAgentCudaRpcTest._gpu_add_given_devices,
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_device_map_gpu_to_cpu_default(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=0,
+            z_to="cpu",
+            device_map={0 : "cpu"},
+            fn=TensorPipeAgentCudaRpcTest._gpu_add_given_devices,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_to_cpu_non_default(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=1,
+            z_to="cpu",
+            device_map={1 : "cpu"},
+            fn=TensorPipeAgentCudaRpcTest._gpu_add_given_devices,
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_default(self):
@@ -5589,8 +5635,8 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             # training of a CNN of MNIST-like data.
             # see https://github.com/pytorch/pytorch/issues/54771
             rref = rpc.remote(dst, MyConvNetForMNIST, args=(remote_device,))
-            for _ in range(20):
-                x = torch.randn(100, 1, 28, 28).to(local_device)
+            for _ in range(10):
+                x = torch.randn(200, 1, 28, 28).to(local_device)
                 actual = rref.remote().forward(x).to_here()
                 expected = rref.rpc_sync().forward(x)
                 self.assertEqual(actual, expected)
@@ -5644,8 +5690,8 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             # training of a CNN of MNIST-like data.
             # see https://github.com/pytorch/pytorch/issues/54771
             rref = rpc.remote(dst, MyConvNetForMNIST, args=(remote_device,))
-            for _ in range(20):
-                rref_x = RRef(torch.randn(100, 1, 28, 28).to(local_device))
+            for _ in range(10):
+                rref_x = RRef(torch.randn(200, 1, 28, 28).to(local_device))
                 actual = rref.remote().forward(rref_x, True).to_here()
                 expected = rref.rpc_sync().forward(rref_x, True)
                 self.assertEqual(actual, expected)
@@ -5719,7 +5765,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             # training of a CNN of MNIST-like data.
             # see https://github.com/pytorch/pytorch/issues/54771
             rref = rpc.remote(model_dst, MyConvNetForMNIST, args=(remote_device,))
-            for _ in range(20):
+            for _ in range(10):
                 rref_input = RRef(torch.randn(200, 1, 28, 28).to(local_device))
                 rref_out = rref.remote().forward(rref_input, True)
                 out = rpc.remote(
@@ -5852,7 +5898,9 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_not_cuda(self):
-        with self.assertRaisesRegex(ValueError, "Expected CUDA devices, got "):
+        with self.assertRaisesRegex(
+            ValueError, "Expected devices to have indices, got cpu"
+        ):
             fut = Future(devices=["cpu"])
 
     def _test_cuda_future_extraction(self, wrapper, unwrapper):
