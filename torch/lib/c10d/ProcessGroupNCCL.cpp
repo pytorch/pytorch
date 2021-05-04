@@ -1,4 +1,5 @@
 #include <c10d/ProcessGroupNCCL.hpp>
+#include <c10/util/Optional.h>
 
 #include <exception>
 #include <map>
@@ -19,6 +20,8 @@ namespace c10d {
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
 namespace {
+
+  constexpr int kBytes = 8;
 
 // RAII helper class to manage NCCL group API and CUDA free mutex.
 // The destructor is allowed to throw since this helper class only
@@ -468,6 +471,32 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "\nUSE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
+}
+
+void ProcessGroupNCCL::setSequenceNumberForGroup() {
+  if (rank_ == 0) {
+    // Create and broadcast sequence number
+    auto seq = 1 + rand();
+    sequenceNum_ = c10d::SequenceNum(seq);
+    std::vector<uint8_t> values = c10d::toVec<uint8_t>(seq, kBytes);
+    store_->set(kSeqNumStoreKey, values);
+  } else {
+    // Read rank 0's sequence number from store.
+   sequenceNum_ = c10d::SequenceNum();
+   store_->wait({kSeqNumStoreKey}, options_->timeout);
+   std::vector<uint8_t> values = store_->get(kSeqNumStoreKey);
+   uint64_t num = c10d::fromVec<uint8_t>(values);
+   sequenceNum_->set(num);
+   }
+}
+
+uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
+  TORCH_CHECK(
+    sequenceNum_ != c10::nullopt,
+    "Sequence number is not set for rank ", rank_
+  );
+  return sequenceNum_->get();
+
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
@@ -1016,10 +1045,8 @@ void ProcessGroupNCCL::workEnqueue(
   }
 }
 
-ProcessGroupNCCL::Options::Options(
-    std::chrono::milliseconds timeout,
-    bool is_high_priority_stream)
-    : ProcessGroup::Options(timeout, NCCL_BACKEND_NAME),
+ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
+    : ProcessGroup::Options(NCCL_BACKEND_NAME),
       is_high_priority_stream(is_high_priority_stream) {}
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -1031,6 +1058,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     PostProcess post,
     OpType opType,
     const char* profilingTitle) {
+
+  // Bump collective counter
+  if (sequenceNum_) {
+    sequenceNum_->increment();
+  }
   const auto devices = getDeviceList(inputs);
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices, opType);
@@ -1085,9 +1117,19 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   }
 
   {
-    at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
-    work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
-        c10::ListType::create(c10::TensorType::get()));
+    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    work->future_ = c10::make_intrusive<at::ivalue::Future>(
+        c10::ListType::create(c10::TensorType::get()),
+        devices);
+
+    // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
+    // future blocks the stream this callback runs on the corresponding
+    // cudaEvents_ ensuring appropriate synchronization.
+    if (work->recordFunctionEndCallback_) {
+      work->future_->addCallback([work]() {
+        work->recordFunctionEndCallback_();
+      });
+    }
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
@@ -1095,17 +1137,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   work->blockingWait_ = blockingWait_;
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
-
-  if (work->recordFunctionEndCallback_) {
-    // recordFunctionEndCallback_ is normally called in fininsh() function by
-    // base class, but since finish is not called by WorkNCCL, we schedule this
-    // function to be run when work is done. Note that addCallback() onto the
-    // Work's CUDAFuture is not useful here, as it would just run the callback
-    // inline.
-    // Note when can_profile is false, profilingTitle is not provided and so,
-    // recordFunctionEndCallback_ is not set.
-    work->recordFunctionEndCallback_();
-  }
 
   if (asyncErrorHandling_) {
     workEnqueue(work);
@@ -1182,9 +1213,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   }
 
   if (opType == OpType::RECV) {
-    at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
-    work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
-        c10::ListType::create(c10::TensorType::get()));
+    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    work->future_ = c10::make_intrusive<at::ivalue::Future>(
+        c10::ListType::create(c10::TensorType::get()),
+        devices);
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
@@ -1754,12 +1786,46 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
   throw std::runtime_error("ProcessGroupNCCL does not support recvAnysource");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_base(
-    at::Tensor& /*unused */,
-    at::Tensor& /*unused */,
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
     const AllgatherOptions& /*unused */) {
-  throw std::runtime_error(
-      "no support for allgather_base in NCCL process group");
+  check_gpu_single_tensor(input_tensor);
+  check_gpu_single_tensor(output_tensor);
+
+  if (input_tensor.dtype() != output_tensor.dtype()) {
+    throw std::runtime_error("output tensor must have the same type as input tensor");
+  }
+
+  if (input_tensor.numel() * size_ != output_tensor.numel()) {
+    throw std::runtime_error("output tensor size must be equal to world_size times input tensor size");
+  }
+
+  // just a wrapper to fit the collective interface
+  auto inputs = std::vector<at::Tensor> {input_tensor};
+  auto outputs = std::vector<at::Tensor> {output_tensor};
+
+  return collective(
+      inputs,
+      outputs,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        c10::cuda::CUDACachingAllocator::recordStream(
+            output.storage().data_ptr(), stream);
+        return ncclAllGather(
+            input.data_ptr(),
+            output.data_ptr(),
+            input.numel(),
+            getNcclDataType(input.scalar_type()),
+            comm,
+            stream.stream());
+      },
+      [&](std::vector<at::cuda::CUDAStream>&) {},
+      [&](std::vector<at::cuda::CUDAStream>&) {},
+      OpType::_ALLGATHER_BASE,
+      "nccl:_all_gather_base");
 }
 
 } // namespace c10d

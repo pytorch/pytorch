@@ -1,6 +1,6 @@
 import unittest
 
-import cpp_extension  # noqa
+import cpp_extension  # noqa: F401
 import torch
 
 

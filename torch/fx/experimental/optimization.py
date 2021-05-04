@@ -176,9 +176,9 @@ def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
         input_nodes = graph.start_nodes
         if fx_model is None:
             fx_model = graph.fx_graph.owning_module
-            old_modules = graph.fx_graph.old_modules  # type: ignore
+            old_modules = graph.fx_graph.old_modules  # type: ignore[attr-defined]
             ShapeProp(fx_model).propagate(example_inputs)
-        sample_inputs = [torch.randn(node.shape) for node in input_nodes]  # type: ignore
+        sample_inputs = [torch.randn(node.shape) for node in input_nodes]  # type: ignore[attr-defined]
         output_args = cast(List[fx.Node], [node.args[0] for node in graph.end_nodes])
         submodule = extract_subgraph(fx_model, graph.nodes, input_nodes, output_args)
 
@@ -297,7 +297,7 @@ def prepare_for_inference(
 
     # Does pre-conversion of all modules into MKLDNN (when possible)
     old_modules = modules_to_mkldnn(list(fx_graph.nodes), modules)
-    fx_graph.old_modules = old_modules  # type: ignore
+    fx_graph.old_modules = old_modules  # type: ignore[attr-defined]
 
     # optimizes all a -> to_dense -> to_mkldnn -> b patterns into a -> b
     for node in fx_graph.nodes:

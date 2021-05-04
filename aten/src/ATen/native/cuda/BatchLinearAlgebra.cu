@@ -1192,7 +1192,41 @@ void magmaGels<c10::complex<double>>(
       reinterpret_cast<magmaDoubleComplex*>(hwork), lwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
-#endif
+
+namespace {
+
+/*
+  MAGMA can return errors both as a return value and in the info argument.
+  The return value and info should always be identical.
+  In general, the meaning is as given in this table.
+  Predefined error codes are large negative numbers. Using the symbolic
+  constants below is preferred, but the numeric values can be found in
+  include/magma_types.h.
+
+  Info                       |  Description
+  -----------                |  -----------
+  info = 0 (MAGMA_SUCCESS)   |  Successful exit
+  info < 0, but small        |  For info = -i, the i-th argument had an illegal value
+  info > 0                   |  Function-specific error such as singular matrix
+  MAGMA_ERR_DEVICE_ALLOC     |  Could not allocate GPU device memory
+  MAGMA_ERR_HOST_ALLOC       |  Could not allocate CPU host memory
+  MAGMA_ERR_ILLEGAL_VALUE    |  An argument had an illegal value (deprecated; instead it should return -i to say the i-th argument was bad)
+  MAGMA_ERR_INVALID_PTR      |  Can't free pointer
+  MAGMA_ERR_NOT_IMPLEMENTED  |  Function or option not implemented
+  MAGMA_ERR_NOT_SUPPORTED    |  Function or option not supported on the current architecture
+*/
+void checkMagmaInternalError(magma_int_t info, const std::string& magma_function_name) {
+  // if info > 0 the error is function-specific, do nothing in this case
+  TORCH_CHECK(info >= 0,
+      "MAGMA error: ",
+      magma_strerror(info),
+      ", info = ", info,
+      ", when calling ", magma_function_name);
+}
+
+} // anonymous namespace
+
+#endif // USE_MAGMA
 
 #define ALLOCATE_ARRAY(name, type, size) \
   auto storage_##name = pin_memory<type>(size); \
@@ -1573,10 +1607,12 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+static void apply_cholesky(const Tensor& self, bool upper, const Tensor& info) {
 #ifndef USE_MAGMA
-AT_ERROR("cholesky: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.cholesky on a CUDA tensor requires compiling ",
+      "PyTorch with MAGMA. Please use PyTorch built with MAGMA support.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
 
@@ -1585,17 +1621,22 @@ AT_ERROR("cholesky: MAGMA library not found in "
   auto lda = std::max<magma_int_t>(1, n);
 
   if (self.dim() == 2) {
-    magma_int_t info = 0;
-    magmaCholesky<scalar_t>(uplo, n, self_data, lda, &info);
-    infos[0] = info;
+    // magmaCholesky requires info to be on CPU
+    magma_int_t info_cpu = 0;
+    magmaCholesky<scalar_t>(uplo, n, self_data, lda, &info_cpu);
+    info.fill_(info_cpu);
   } else {
+    TORCH_INTERNAL_ASSERT(info.is_cuda());
+    auto info_data = info.data_ptr<magma_int_t>();
+
+    // magmaCholeskyBatched supports only upper=false
+    uplo = MagmaLower;
+
     auto self_mat_stride = matrixStride(self);
     magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
 
-    magma_int_t* info_array;
     scalar_t** self_array;
 
-    ALLOCATE_ARRAY(info_array, magma_int_t, batch_size);
     ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
 
     // Set up the created arrays
@@ -1605,84 +1646,75 @@ AT_ERROR("cholesky: MAGMA library not found in "
 
     MAGMAQueue magma_queue(self.get_device());
 
-    int64_t batch_limit = self.is_complex() ? 65535 : 262140;
     // Compute as many batches of 262140 possible
     // 262140 is the size of the largest batch of matrices that can be run with
     // violating maximum kernel configuration
     // For complex input the batch limit is 65535 (determined experimentally, see https://github.com/pytorch/pytorch/pull/47047#discussion_r516086923 for more information)
-    // The number of "mini"-batches are floor(batch_size / batch_limit)
-    // and these cover floor(batch_size / batch_limit) * batch_limit cholesky calls
-    int64_t mini_batches = batch_size / batch_limit, mini_idx;
-    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
+    int64_t batch_limit = self.is_complex() ? 65535 : 262140;
+
+    for (int64_t mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+      int64_t nbatches = std::min(batch_limit, batch_size - mini_idx);
       scalar_t** self_array_cur = &self_array[mini_idx];
-      magma_int_t* info_array_cur = &info_array[mini_idx];
+      magma_int_t* info_array_cur = &info_data[mini_idx];
 
       magmaCholeskyBatched<scalar_t>(
-        uplo, n, self_array_cur, lda, info_array_cur, batch_limit, magma_queue);
-    }
-
-    // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
-    // which concisely is equal to batch_size % batch_limit
-    if (batch_size % batch_limit != 0) {
-      magmaCholeskyBatched<scalar_t>(
-        uplo, n, &self_array[mini_idx], lda, &info_array[mini_idx], batch_size % batch_limit, magma_queue);
-    }
-
-    for (int64_t i = 0; i < batch_size; i++) {
-      infos[i] = info_array[i];
+        uplo, n, self_array_cur, lda, info_array_cur, nbatches, magma_queue);
     }
   }
 #endif
 }
 
-Tensor _cholesky_helper_cuda_magma(const Tensor& self, bool upper) {
-  std::vector<int64_t> infos(batchCount(self), 0);
-
-  Tensor result;
-  if (self.dim() > 2) {
+void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) {
+  Tensor result = input;
+  if (input.dim() > 2) {
     // MAGMA's batched cholesky operator has an off-by-one error causing IMA
     // (see https://github.com/pytorch/pytorch/issues/42666). This code is based
     // on the #cloneBatchedColumnMajor function however it pads the input with
     // one extra element utilizing the fact that the resize_as_ method preserves
     // the storage even if it's larger than the new sizes. This way if MAGMA
     // reads off bounds it will still be valid user memory.
-    const Tensor input = upper ? self : self.transpose(-1, -2);
     result = at::empty(input.numel() + 1, input.options());
-    result.resize_as_(input).copy_(input).transpose_(-1, -2);
-  } else {
-    result = cloneBatchedColumnMajor(upper ? self.transpose(-1, -2) : self);
+    result.resize_as_(input).transpose_(-2, -1);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.transpose(-2, -1).is_contiguous());
+
+    // batched MAGMA doesn't support upper=true
+    // we transpose and conjugate the input as a workaround
+    result.copy_(upper ? input.conj().transpose(-2, -1) : input);
   }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      self.scalar_type(), "cholesky_cuda", [&] {
-        apply_cholesky<scalar_t>(result, false, infos);
-      });
+    input.scalar_type(), "cholesky_cuda", [&] {
+      apply_cholesky<scalar_t>(result, upper, info);
+    });
 
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "cholesky_cuda");
-  } else {
-    singleCheckErrors(infos[0], "cholesky_cuda");
+  if (input.dim() > 2) {
+    // if upper=true we need to tranpose and conjugate the result tensor
+    // because the cholesky decomposition is stored in the lower triangular part
+    if (upper) {
+      input.copy_(result.conj().transpose(-2, -1));
+    } else {
+      input.copy_(result);
+    }
   }
-
-  return upper ? result.transpose_(-1, -2) : result;
 }
 
 // Todo: cusolverDnXpotrfBatched has some numerical issue and is not used
 //     here. Batched cholesky is dispatched to magma.
 //     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
 //     See https://github.com/pytorch/pytorch/issues/53879.
-Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
+static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
 #ifdef USE_CUSOLVER
-  if (batchCount(self) == 1 || !use_magma_) {
-    return _cholesky_helper_cuda_cusolver(self, upper);
-  }
-  else {
-    return _cholesky_helper_cuda_magma(self, upper);
+  if (batchCount(input) == 1 || !use_magma_) {
+    cholesky_helper_cusolver(input, upper, info);
+  } else {
+    cholesky_helper_magma(input, upper, info);
   }
 #else
-  return _cholesky_helper_cuda_magma(self, upper);
-#endif
+  cholesky_helper_magma(input, upper, info);
+#endif // USE_CUSOLVER
 }
+
+REGISTER_DISPATCH(cholesky_stub, &cholesky_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1948,14 +1980,14 @@ REGISTER_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
   // TODO: It is possible to implement efficient batched orgqr for small tau (tau.size(-1) <= 32)
   // using MAGMA, however it fails on Windows because of some illegal memory reads inside MAGMA.
   // See discussions in https://github.com/pytorch/pytorch/pull/51348 for comparison of cuSOLVER-MAGMA
   // and Windows failure.
   // For reference here is the MAGMA-based implementation: https://gist.github.com/IvanYashchuk/2db50002c9d3c1462ff769e6410ad983
   #if defined(USE_CUSOLVER)
-    return orgqr_helper_cuda_lib(result, tau, infos, n_columns); // cusolver
+    return orgqr_helper_cusolver(result, tau); // cusolver
   #else
     TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
       "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
@@ -1967,8 +1999,85 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int6
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
+static void apply_geqrf(const Tensor& input, const Tensor& tau) {
+#ifndef USE_MAGMA
+  TORCH_CHECK(
+    false,
+    "Calling torch.geqrf on a CUDA tensor requires compiling ",
+    "PyTorch with MAGMA. Please use PyTorch built with MAGMA support.");
+#else
+
+  magma_int_t m = magma_int_cast(input.size(-2), "m");
+  magma_int_t n = magma_int_cast(input.size(-1), "n");
+
+  auto input_data = input.data_ptr<scalar_t>();
+  auto input_matrix_stride = matrixStride(input);
+  auto tau_stride = tau.size(-1);
+  auto batch_size = batchCount(input);
+  auto lda = std::max<int>(1, m);
+
+  // magmaGeqrf uses a hybrid CPU-GPU algorithm to compute the elementary reflectors.
+  // The driver routine geqrf2_gpu accepts a tensor on the CPU for elementary reflectors.
+  Tensor tau_cpu = at::empty(tau.sizes(), tau.options().device(at::kCPU).pinned_memory(true));
+  scalar_t* tau_data = tau_cpu.data_ptr<scalar_t>();
+  scalar_t* work_data = nullptr; // workspace is not needed for geqrf2_gpu
+
+  magma_int_t info = 0;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+
+    // now compute the actual QR and tau
+    // MAGMA's geqrf2_gpu function is used, this version has LAPACK-complaint arguments.
+    magmaGeqrf<scalar_t>(m, n, input_working_ptr, lda, tau_working_ptr, work_data, &info, /*is_v2=*/true);
+    checkMagmaInternalError(info, "geqrf");
+  }
+  tau.copy_(tau_cpu, /*non_blocking=*/true);
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_geqrf'
+void geqrf_magma(const Tensor& input, const Tensor& tau) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_magma", [&]{
+    apply_geqrf<scalar_t>(input, tau);
+  });
+}
+
+// This is a backend library dispatching helper function for calling looped batch implementation
+void geqrf_looped(const Tensor& input, const Tensor& tau) {
+#if defined(USE_CUSOLVER)
+  return geqrf_cusolver(input, tau);
+#else
+  return geqrf_magma(input, tau);
+#endif
+}
+
+// This is a backend library dispatching helper function for calling specialized batched implementation
+void geqrf_batched(const Tensor& input, const Tensor& tau) {
+#ifdef CUDART_VERSION
+  // if cuBLAS is available
+  return geqrf_batched_cublas(input, tau);
+#else
+  // TODO: implement MAGMA-based path using magma_zgeqrf_expert_batched
+  return geqrf_looped(input, tau);
+#endif
+}
+
+void geqrf_kernel(const Tensor& input, const Tensor& tau) {
+  // if number of rows is smaller than 32 batched is always faster for batch size > 1
+  // for larger number of rows number of batches condition
+  if (input.size(-2) <= 256 && batchCount(input) >= std::max<int64_t>(2, input.size(-2) / 16)) {
+    return geqrf_batched(input, tau);
+  } else {
+    return geqrf_looped(input, tau);
+  }
+}
+
+REGISTER_DISPATCH(geqrf_stub, &geqrf_kernel);
+
+template <typename scalar_t>
 static void apply_qr(Tensor& Q, Tensor& R, int64_t q_size_minus_2, int64_t r_size_minus_1, int64_t n_columns,
-                     bool compute_q, std::vector<int64_t>& infos) {
+                     bool compute_q) {
 #ifndef USE_MAGMA
 AT_ERROR("qr: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1996,10 +2105,7 @@ AT_ERROR("qr: MAGMA library not found in "
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* r_working_ptr = &r_data[i * r_matrix_stride];
     magmaGeqrf<scalar_t>(m, n, r_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/true);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
+    checkMagmaInternalError(info, "geqrf");
   }
   if (!compute_q) {
     // this is for mode='r'
@@ -2017,23 +2123,17 @@ AT_ERROR("qr: MAGMA library not found in "
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* q_working_ptr = &q_data[i * q_matrix_stride];
     magmaGeqrf<scalar_t>(m, n, q_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/false);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
+    checkMagmaInternalError(info, "geqrf");
+
     magmaOrgqr<scalar_t>(m, n_columns, k, q_working_ptr, m, tau_data, work_data, nb, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
+    checkMagmaInternalError(info, "orgqr");
   }
 #endif
 }
 
-std::tuple<Tensor,Tensor> _linalg_qr_helper_cuda(const Tensor& self, std::string mode) {
+std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, std::string mode) {
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = _parse_qr_mode(mode);
-  std::vector<int64_t> infos(batchCount(self), 0);
 
   // Setup input geometry and inputs for apply_qr
   std::vector<int64_t> q_sizes, q_strides;
@@ -2044,10 +2144,15 @@ std::tuple<Tensor,Tensor> _linalg_qr_helper_cuda(const Tensor& self, std::string
   // If there are no elements, then we simply return a pair of tensors of required dimensions
   if (self.numel() == 0) {
     int64_t n = self.size(-1);
-    r_working_copy = at::empty({n_columns_q, n}, self.options());
+    auto r_shape = self.sizes().vec();
+    r_shape.end()[-2] = n_columns_q;
+    r_shape.end()[-1] = n;
+    r_working_copy = at::empty(r_shape, self.options());
     if (compute_q) {
-        int64_t n_rows_q = q_sizes[self.dim() - 2];
-        q_working_copy = at::eye(n_rows_q, n_columns_q, self.options());
+        auto q_shape = q_sizes;
+        q_shape.end()[-1] = n_columns_q;
+        q_working_copy = at::zeros(q_shape, self.options());
+        q_working_copy.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
     } else {
       q_working_copy = at::empty({0}, self.options());
     }
@@ -2066,19 +2171,24 @@ std::tuple<Tensor,Tensor> _linalg_qr_helper_cuda(const Tensor& self, std::string
   int64_t n = r_working_copy.size(-1);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cuda", [&]{
-    apply_qr<scalar_t>(q_working_copy, r_working_copy, m, n, n_columns_q, compute_q, infos);
+    apply_qr<scalar_t>(q_working_copy, r_working_copy, m, n, n_columns_q, compute_q);
   });
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "qr_cuda");
-  } else {
-    singleCheckErrors(infos[0], "qr_cuda");
-  }
 
   if (compute_q) {
     q_working_copy = q_working_copy.narrow(-1, 0, n_columns_q);
   }
   r_working_copy = r_working_copy.narrow(-2, 0, n_columns_q).triu();
   return std::make_tuple(q_working_copy, r_working_copy);
+}
+
+std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, std::string mode) {
+#if defined(USE_CUSOLVER)
+  // _linalg_qr_helper_default is a generic function that is implemented using
+  // geqrf_stub and orgqr_stub. It dispatches to cuSOLVER for CUDA inputs if USE_CUSOLVER is defined
+  return _linalg_qr_helper_default(input, mode);
+#else
+  return linalg_qr_helper_magma(input, mode);
+#endif
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2637,41 +2747,55 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor& _lstsq_helper_cuda(
-  Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, const Tensor& a, double cond, std::string driver_name) {
+template <typename scalar_t>
+static void apply_gels(const Tensor& a, Tensor& b, Tensor& infos) {
 #ifndef USE_MAGMA
-TORCH_CHECK(false, "torch.linalg.lstsq: MAGMA library not found in "
+  TORCH_CHECK(false, "torch.linalg.lstsq: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "torch.linalg.lstsq_cuda", [&] {
-    auto trans = MagmaNoTrans;
-    auto m = magma_int_cast(a.size(-2), "m");
-    auto n = magma_int_cast(a.size(-1), "n");
-    auto nrhs = magma_int_cast(b.size(-1), "nrhs");
-    auto ldda = std::max<magma_int_t>(1, m);
-    auto lddb = std::max<magma_int_t>(1, std::max(m, n));
-    auto nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
-    auto lwork = (m - n + nb) * (nrhs + nb) + nrhs * nb;
-    Tensor hwork = at::empty({static_cast<int64_t>(lwork)}, a.scalar_type());
-    auto* hwork_ptr = hwork.data_ptr<scalar_t>();
+  auto trans = MagmaNoTrans;
+  auto m = magma_int_cast(a.size(-2), "m");
+  auto n = magma_int_cast(a.size(-1), "n");
 
-    // MAGMA requires infos tensor to live on CPU
-    infos = infos.to(at::kCPU);
-    auto infos_data = infos.data_ptr<magma_int_t>();
+  TORCH_CHECK(
+    m >= n,
+    "torch.linalg.lstsq: only overdetermined systems (input.size(-2) >= input.size(-1)) are allowed on CUDA");
 
-    batch_iterator_with_broadcasting<scalar_t>(a, b,
-      [&](scalar_t* a_working_ptr, scalar_t* b_working_ptr,
-        int64_t a_linear_batch_idx) {
-        magma_int_t* infos_working_ptr = &infos_data[a_linear_batch_idx];
-        magmaGels<scalar_t>(trans, m, n, nrhs,
-          a_working_ptr, ldda, b_working_ptr, lddb,
-          hwork_ptr, lwork, infos_working_ptr);
-      }
-    );
-  });
-  return b;
+  auto nrhs = magma_int_cast(b.size(-1), "nrhs");
+  auto ldda = std::max<magma_int_t>(1, m);
+  auto lddb = std::max<magma_int_t>(1, std::max(m, n));
+  auto nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
+  auto lwork = (m - n + nb) * (nrhs + nb) + nrhs * nb;
+  Tensor hwork = at::empty({static_cast<int64_t>(lwork)}, a.scalar_type());
+  auto* hwork_ptr = hwork.data_ptr<scalar_t>();
+
+  // MAGMA requires infos tensor to live on CPU
+  infos = infos.to(at::kCPU);
+  auto infos_data = infos.data_ptr<magma_int_t>();
+
+  batch_iterator_with_broadcasting<scalar_t>(a, b,
+    [&](scalar_t* a_working_ptr, scalar_t* b_working_ptr,
+      int64_t a_linear_batch_idx) {
+      magma_int_t* infos_working_ptr = &infos_data[a_linear_batch_idx];
+      magmaGels<scalar_t>(trans, m, n, nrhs,
+        a_working_ptr, ldda, b_working_ptr, lddb,
+        hwork_ptr, lwork, infos_working_ptr);
+    }
+  );
 #endif
 }
+
+void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
+  (void)rank;  // unused
+  (void)singular_values;  // unused
+  (void)rcond;  // unused
+  (void)driver_name;  // unused
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "linalg_lstsq_cuda", [&] {
+    apply_gels<scalar_t>(a, b, infos);
+  });
+}
+
+REGISTER_DISPATCH(lstsq_stub, &lstsq_kernel);
 
 }}  // namespace at::native
 

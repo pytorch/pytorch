@@ -94,6 +94,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
       {});
   if (onnx_tensor_type.has_shape()) {
     std::vector<c10::ShapeSymbol> sizes;
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto onnx_shape = onnx_tensor_type.shape();
 
     for (int i = 0; i < onnx_shape.dim_size(); ++i) {
@@ -107,6 +108,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
           // Search if this is already known,
           // and assign the same Symbol.
           GRAPH_UPDATE("Got dim_param:", dim.dim_param());
+          // NOLINTNEXTLINE(performance-for-range-copy)
           for (auto pair : symbol_map) {
             if (pair.second == dim.dim_param()) {
               sym = pair.first;
@@ -144,8 +146,10 @@ ListTypePtr TorchListTypeFromONNX(
     SymbolDimMap& symbol_map) {
   c10::optional<at::ScalarType> scalar_type;
   if (onnx_sequence_type.has_elem_type()) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto onnx_seq_elem_type = onnx_sequence_type.elem_type();
     if (onnx_seq_elem_type.has_tensor_type()) {
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto onnx_tensor_type = onnx_seq_elem_type.tensor_type();
       auto v_tensor_type =
           TorchTensorTypeFromONNX(onnx_tensor_type, symbol_map);
@@ -164,6 +168,7 @@ void UpdateTorchValueByOnnxValueInfo(
     return;
   }
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto p_type = p_info.type();
   if (p_type.has_tensor_type()) {
     auto torch_tensor_type =
@@ -446,6 +451,7 @@ std::vector<int64_t> ComputeShapeFromReshape(
   auto it_minus_one = std::find(reshape.begin(), reshape.end(), -1);
   int minus_one_pos = it_minus_one == reshape.end()
       ? -1
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       : std::distance(reshape.begin(), it_minus_one);
 
   if (!reshape_has_zero && minus_one_pos == -1) {
@@ -453,22 +459,20 @@ std::vector<int64_t> ComputeShapeFromReshape(
   }
   std::vector<int64_t> final_shape;
   // shape_ratio is used to calculate the real value of -1.
-  // it is updated on each dimension to avoid overflow.
+  // One example with reshape 0 and -1:
+  // input_shape = 2 16 5 4
+  // reshape = -1 0 4
+  // final_shape = 10 16 4
   double shape_ratio = 1.0;
   for (auto i = 0; i < input_shape_size; i++) {
-    if (i < minus_one_pos) {
+    shape_ratio *= static_cast<double>(input_shape[i]);
+  }
+  for (auto i = 0; i < reshape_size; i++) {
+    if (i != minus_one_pos) {
       if (reshape[i] != 0) {
-        shape_ratio *= static_cast<double>(input_shape[i]) / reshape[i];
-      }
-    } else if (minus_one_pos > -1) {
-      if (i < input_shape_size - reshape_size + minus_one_pos + 1) {
-        shape_ratio *= static_cast<double>(input_shape[i]);
+        shape_ratio /= static_cast<double>(reshape[i]);
       } else {
-        auto reshape_idx = i - input_shape_size + reshape_size;
-        if (reshape[reshape_idx] != 0) {
-          shape_ratio *=
-              static_cast<double>(input_shape[i]) / reshape[reshape_idx];
-        }
+        shape_ratio /= static_cast<double>(input_shape[i]);
       }
     }
   }
@@ -479,9 +483,7 @@ std::vector<int64_t> ComputeShapeFromReshape(
   }
   final_shape.push_back(static_cast<int64_t>(std::round(shape_ratio)));
   for (auto i = minus_one_pos + 1; i < reshape_size; i++) {
-    int64_t cur_shape = reshape[i] == 0
-        ? input_shape[i + input_shape_size - reshape_size]
-        : reshape[i];
+    int64_t cur_shape = reshape[i] == 0 ? input_shape[i] : reshape[i];
     final_shape.push_back(cur_shape);
   }
   return final_shape;
@@ -490,6 +492,7 @@ std::vector<int64_t> ComputeShapeFromReshape(
 c10::optional<::c10::SymbolicShape> ComputeShapeFromExpand(
     const std::vector<::c10::ShapeSymbol>& input_shape,
     const std::vector<int64_t>& reshape) {
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (auto it = reshape.begin(); it != reshape.end(); ++it) {
     if (*it < 0) {
       return c10::nullopt;
@@ -532,6 +535,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromTile(
   TORCH_INTERNAL_ASSERT(
       input_shape.size() == reshape.size(),
       "ONNX Tile input shapes do not match.");
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (auto it = reshape.begin(); it != reshape.end(); ++it) {
     if (*it < 0) {
       return c10::nullopt;
@@ -717,9 +721,11 @@ void ProcessSliceNode(Node* n, int opset_version) {
     if (shape_size_0.rank().has_value()) {
       auto input0_shape_value = shape_size_0.sizes().value();
       auto valid = true;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (opset_version >= 10) {
         valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
             ConstantValueMap::HasValue(n->input(2)->debugName());
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (auto input_idx = 3; input_idx < 5; ++input_idx) {
           if (n->inputs().size() > input_idx) {
             valid = valid &&
@@ -744,6 +750,7 @@ void ProcessSliceNode(Node* n, int opset_version) {
       }
       std::vector<int64_t> step_vector;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (opset_version < 10) {
         start_vector = n->is(attr::starts);
         end_vector = n->is(attr::ends);
@@ -994,6 +1001,7 @@ void ComputeConstant(Node* n, int opset_version) {
             auto value =
                 input_node->t(attr::value).toType(at::ScalarType::Float);
             auto value_a = value.accessor<float, 1>();
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             if (value_a.size(0) == 1 && std::abs(value_a[0]) > 1e-6) {
               if (ConstantValueMap::HasShape(n->input()->debugName())) {
                 auto shape_size_0 =
@@ -1148,6 +1156,7 @@ void SpecialPostProcess(Node* n) {
       // If the list to insert is empty, we set the elem type by
       // looking at the tensor being inserted.
       auto list_node = n->input(0)->node();
+      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
       auto t_node = n->input(1)->node();
       if (!list_node || list_node->kind() != prim::ListConstruct ||
           list_node->inputs().size() != 0) {
@@ -1169,6 +1178,7 @@ void UpdateOutputTypeByONNXProto(
     Node* clone_node,
     const onnx::ModelProto& model_proto,
     SymbolDimMap& symbol_map) {
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto graph_proto = model_proto.graph();
 
   // get data from value_info and updated original graph.
@@ -1256,7 +1266,8 @@ void ONNXShapeTypeInference(
     n_graph->registerOutput(output);
   }
 
-  ScalarTypeAnalysisForONNX(n_graph);
+  // Use scalar_type_analysis without low precision cast
+  ScalarTypeAnalysisForONNX(n_graph, false, opset_version);
 
   GRAPH_DEBUG("Original torch graph: ", n->owningGraph()->toString());
   GRAPH_DEBUG(
@@ -1284,9 +1295,13 @@ void ONNXShapeTypeInference(
           ex.what(),
           " on graph: ",
           n_graph->toString());
+      // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
       const char shape_err[] = "ShapeInferenceError";
+      // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
       const char type_err[] = "TypeInferenceError";
+      // NOLINTNEXTLINE(modernize-use-nullptr)
       if ((strstr(ex.what(), shape_err) == NULL) &&
+          // NOLINTNEXTLINE(modernize-use-nullptr)
           (strstr(ex.what(), type_err) == NULL))
         throw;
     }
@@ -1333,6 +1348,7 @@ void ONNXSetDynamicInputShape(
           shape_ref.has_value(), "Input tensor shape should have value.");
       auto shape = shape_ref.value();
 
+      // NOLINTNEXTLINE(performance-for-range-copy)
       for (auto pair : axes_names) {
         auto axis = pair.first;
         auto name = pair.second;
@@ -1393,6 +1409,7 @@ size_t ONNXAssignOutputShape(
   index_check();
 
   if (THPVariable_Check(output_obj)) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     at::Tensor var = THPVariable_Unpack(output_obj);
     ONNXUpdateTypeFromTensor(
         graph->outputs().at(outputs_index), var, onnx_shape_inference);

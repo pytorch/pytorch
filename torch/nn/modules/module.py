@@ -624,6 +624,9 @@ class Module:
         it should be called before constructing optimizer if the module will
         live on GPU while being optimized.
 
+        .. note::
+            This method modifies the module in-place.
+
         Args:
             device (int, optional): if specified, all parameters will be
                 copied to that device
@@ -640,6 +643,9 @@ class Module:
         it should be called before constructing optimizer if the module will
         live on XPU while being optimized.
 
+        .. note::
+            This method modifies the module in-place.
+
         Arguments:
             device (int, optional): if specified, all parameters will be
                 copied to that device
@@ -652,6 +658,9 @@ class Module:
     def cpu(self: T) -> T:
         r"""Moves all model parameters and buffers to the CPU.
 
+        .. note::
+            This method modifies the module in-place.
+
         Returns:
             Module: self
         """
@@ -659,6 +668,9 @@ class Module:
 
     def type(self: T, dst_type: Union[dtype, str]) -> T:
         r"""Casts all parameters and buffers to :attr:`dst_type`.
+
+        .. note::
+            This method modifies the module in-place.
 
         Args:
             dst_type (type or string): the desired type
@@ -671,6 +683,9 @@ class Module:
     def float(self: T) -> T:
         r"""Casts all floating point parameters and buffers to float datatype.
 
+        .. note::
+            This method modifies the module in-place.
+
         Returns:
             Module: self
         """
@@ -678,6 +693,9 @@ class Module:
 
     def double(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
+
+        .. note::
+            This method modifies the module in-place.
 
         Returns:
             Module: self
@@ -687,6 +705,9 @@ class Module:
     def half(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
 
+        .. note::
+            This method modifies the module in-place.
+
         Returns:
             Module: self
         """
@@ -695,10 +716,25 @@ class Module:
     def bfloat16(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``bfloat16`` datatype.
 
+        .. note::
+            This method modifies the module in-place.
+
         Returns:
             Module: self
         """
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
+
+    def to_empty(self: T, *, device: Union[str, device]) -> T:
+        r"""Moves the parameters and buffers to the specified device without copying storage.
+
+        Args:
+            device (:class:`torch.device`): The desired device of the parameters
+                and buffers in this module.
+
+        Returns:
+            Module: self
+        """
+        return self._apply(lambda t: torch.empty_like(t, device=device))
 
     @overload
     def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ...,
@@ -994,7 +1030,7 @@ class Module:
         if recording_scopes:
             # type ignore was added because at this point one knows that
             # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
-            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
+            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore[index, operator] # noqa: B950
             if name:
                 tracing_state.push_scope(name)
             else:
