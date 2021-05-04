@@ -45,6 +45,8 @@ jobs:
           sccache --start-server
           sccache -s
 
+          exit 1
+
           export IN_CI=1
           sudo xcode-select -s /Applications/Xcode_12.0.1.app
           chmod a+x .jenkins/pytorch/macos-build.sh
