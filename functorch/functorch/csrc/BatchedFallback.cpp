@@ -13,6 +13,16 @@
 namespace at {
 namespace functorch {
 
+bool kVmapFallbackWarningEnabled = true;
+
+bool isVmapFallbackWarningEnabled() {
+  return kVmapFallbackWarningEnabled;
+}
+
+void setVmapFallbackWarningEnabled(bool enabled) {
+  kVmapFallbackWarningEnabled = enabled;
+}
+
 // Given a linear index, return the actual index.
 // Example: Given linear_idx = 3, sizes = [5, 2], we would return [1, 0]
 static at::SmallVector<indexing::TensorIndex,kVmapStaticDimVecSize>
@@ -71,7 +81,7 @@ static bool isInplaceOp(const FunctionSchema& schema) {
 }
 
 static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
-  if (!globalContext().areVmapFallbackWarningsEnabled()) {
+  if (!isVmapFallbackWarningEnabled()) {
     return;
   }
   auto uses_stack = is_inplace ? "" : " and stack";

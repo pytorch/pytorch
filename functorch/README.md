@@ -196,7 +196,7 @@ batched jacobians:
 
 ## Debugging
 `functorch._C.dump_tensor`: Dumps dispatch keys on stack
-`torch._C._debug_only_display_vmap_fallback_warnings(True)`: Shows vmap fallbacks to loop/stack
+`functorch._C._set_vmap_fallback_warning_enabled(False)` if the vmap warning spam bothers you.
 
 ## Future Plans
 
