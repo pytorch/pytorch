@@ -1467,6 +1467,7 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(record_function_remote_event.node_id, dst_rank)
             # cpu_children only returns direct children, so here we get all
             # children recursively.
+
             def get_cpu_children(event):
                 if not event.cpu_children:
                     return []
