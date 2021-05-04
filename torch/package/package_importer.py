@@ -100,6 +100,9 @@ class PackageImporter(Importer):
         self.modules["torch_package_importer"] = self  # type: ignore[assignment]
 
         self._mangler = PackageMangler()
+
+        # used for reduce deserializaiton
+        self.storage_context: Any = None
         self.last_map_location = None
 
         # used for torch.serialization._load
@@ -170,14 +173,21 @@ class PackageImporter(Importer):
         restore_location = _get_restore_location(map_location)
         loaded_storages = {}
         loaded_reduces = {}
+        storage_context = torch._C.StorageContextTracker()
 
         def load_tensor(data_type, size, key, location, restore_location):
-            name = f".data/{key}.storage"
+            name = f"{key}.storage"
             dtype = data_type(0).dtype
 
-            storage = self.zip_reader.get_storage_from_record(
-                name, size, dtype
-            ).storage()
+            if storage_context.has_tensor_impl(name):
+                storage = storage_context.get_tensor_impl(name).storage()
+            else:
+                tensor = self.zip_reader.get_storage_from_record(
+                    ".data/" + name, size, dtype
+                )
+                if isinstance(self.zip_reader, torch._C.PyTorchFileReader):
+                    storage_context.add_tensor_impl(name, tensor)
+                storage = tensor.storage()
             loaded_storages[key] = restore_location(storage, location)
 
         def persistent_load(saved_id):
@@ -211,15 +221,17 @@ class PackageImporter(Importer):
         unpickler.persistent_load = persistent_load
 
         @contextmanager
-        def set_map_location():
-            # to let TorchScript's reduce_packge read specified map location
+        def set_deserialization_context():
+            # to let reduce_packge access deserializaiton context
+            self.storage_context = storage_context
             self.last_map_location = map_location
             try:
                 yield
             finally:
+                self.storage_context = None
                 self.last_map_location = None
 
-        with set_map_location():
+        with set_deserialization_context():
             result = unpickler.load()
 
         # TODO from zdevito:

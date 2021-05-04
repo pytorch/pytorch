@@ -11,7 +11,8 @@ IValue readArchiveAndTensors(
     c10::optional<TypeResolver> type_resolver,
     c10::optional<ObjLoader> obj_loader,
     c10::optional<at::Device> device,
-    caffe2::serialize::PyTorchStreamReader& stream_reader) {
+    caffe2::serialize::PyTorchStreamReader& stream_reader,
+    std::shared_ptr<StorageContextTracker> storage_tracker) {
   std::string picklename = pickle_prefix + archive_name + ".pkl";
   at::DataPtr pickle_ptr;
   size_t pickle_size = 0;
@@ -42,7 +43,9 @@ IValue readArchiveAndTensors(
       type_resolver ? std::move(*type_resolver) : nullptr,
       obj_loader ? std::move(*obj_loader) : nullptr,
       std::move(read_record),
-      device);
+      device,
+      false,
+      storage_tracker);
   unpickler.set_version(stream_reader.version());
   return unpickler.parse_ivalue();
 }
