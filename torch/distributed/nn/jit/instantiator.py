@@ -110,9 +110,9 @@ def instantiate_scriptable_remote_module_template(
         )
 
     # Generate the template instance name.
-    module_interface_cls_name = torch._jit_internal._qualified_name(module_interface_cls).replace(
-        ".", "_"
-    )
+    module_interface_cls_name = torch._jit_internal._qualified_name(
+        module_interface_cls
+    ).replace(".", "_")
     generated_module_name = f"{_FILE_PREFIX}{module_interface_cls_name}"
 
     # Generate type annotation strs.
