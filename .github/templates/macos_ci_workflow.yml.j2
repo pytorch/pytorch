@@ -36,6 +36,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
         run: |
+          curl https://httpbin.org/anything
           ln -s $(which sccache) clang++
           echo '' > test.cpp
 
@@ -53,12 +54,7 @@ jobs:
 
           echo -e "\n COMPILING AGAIN (should show a hit) \n"
           ./clang++ -c test.cpp -o test.o
-          sccache -s
-
-          echo -e "\n COMPILING AGAIN AGAIN (should show a hit) \n"
-          ./clang++ -c test.cpp -o test.o
-          sccache -s
-          
+          sccache -s          
       {# - name: Run build
         working-directory: pytorch/
         env:
