@@ -25,14 +25,24 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
 }
 using ArgNone = c10::monostate;
 using BufList = std::vector<tensorexpr::BufHandle>;
+using IntList = std::vector<int64_t>;
 using ArgValue = c10::variant<
     tensorexpr::BufHandle,
     tensorexpr::VarHandle,
-    BufList,
     double,
     int64_t,
     bool,
+    BufList,
+    IntList,
     ArgNone>;
+template <class T>
+std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
+  std::vector<T> res;
+  for (const auto& x : v) {
+    res.push_back(c10::get<T>(x));
+  }
+  return res;
+}
 
 enum ElementType {
   kAllTypes = 0,
@@ -75,6 +85,14 @@ class TORCH_API TensorExprKernel {
     return graph_;
   }
 
+  const std::vector<ConstantDescr>& getConstantDescriptors() const {
+    return constants_;
+  }
+
+  const std::vector<CodeGen::BufferArg>& getBufferArgs() const {
+    return bufferArgs_;
+  }
+
  private:
   enum BackendType {
     kUninitialized,
@@ -86,7 +104,6 @@ class TORCH_API TensorExprKernel {
 
   void compile();
   void genInputDebugNames();
-
   void runKernel(Stack& stack);
 
   std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
@@ -206,6 +223,12 @@ TORCH_API bool& getCatWoConditionals();
 
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);
+
+TORCH_API void annotateInputShapes(
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<c10::optional<at::Tensor>>& example_inputs);
+TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
+    const std::shared_ptr<Graph>& graph);
 
 } // namespace tensorexpr
 } // namespace jit

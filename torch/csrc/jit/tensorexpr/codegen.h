@@ -88,30 +88,31 @@ class TORCH_API CodeGen {
 
 class CodeGen::BufferArg {
  public:
-  BufferArg(const Placeholder& buffer)
-      : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
-  BufferArg(Tensor* tensor)
-      : var_(tensor->buf()->base_handle()), dtype_(tensor->buf()->dtype()) {}
-  BufferArg(const VarHandle& var)
-      : var_(var.node()), dtype_(var.dtype()), isVar_(true) {}
-  BufferArg(const BufHandle& buf)
-      : var_(buf.node()->base_handle()), dtype_(buf.node()->dtype()) {}
+  BufferArg(const Placeholder& buffer) : buf_(buffer.data()) {}
+  BufferArg(Tensor* tensor) : buf_(tensor->buf()) {}
+  BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
+  BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
 
   const Var* var() const {
-    return var_;
+    return isVar_ ? var_ : buf_->base_handle();
   }
-  Dtype dtype() const {
-    return dtype_;
+
+  const Buf* buf() const {
+    return buf_;
   }
 
   bool isVar() const {
     return isVar_;
   }
 
+  Dtype dtype() const {
+    return isVar_ ? var_->dtype() : buf_->dtype();
+  }
+
  private:
-  const Var* var_;
-  Dtype dtype_;
-  bool isVar_{false};
+  const Var* var_ = nullptr;
+  const Buf* buf_ = nullptr;
+  bool isVar_ = false;
 };
 
 class CodeGen::CallArg {

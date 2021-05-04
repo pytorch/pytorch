@@ -16,75 +16,87 @@ using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
 using caffe2::serialize::ReadAdapterInterface;
 
+static const BackportFactory backportFactory;
+
 // Forward declare so that _backport_for_mobile() overloads can
 // call this method directly.
 bool _backport_for_mobile_impl(
-    std::shared_ptr<ReadAdapterInterface> rai,
-    PyTorchStreamWriter& writer);
+    std::shared_ptr<IStreamAdapter> istream_adapter,
+    PyTorchStreamWriter& writer,
+    const int64_t to_version);
 
-bool _backport_for_mobile(std::istream& in, std::ostream& out) {
+bool _backport_for_mobile(
+    std::istream& in,
+    std::ostream& out,
+    const int64_t to_version) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
     out.write(static_cast<const char*>(buf), nbytes);
     return !out ? 0 : nbytes;
   };
   PyTorchStreamWriter writer(writer_func);
-  return _backport_for_mobile(std::move(rai), writer);
+  return _backport_for_mobile_impl(std::move(rai), writer, to_version);
 }
 
 bool _backport_for_mobile(
     std::istream& in,
-    const std::string& output_filename) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+    const std::string& output_filename,
+    const int64_t to_version) {
+  std::unique_ptr<IStreamAdapter> istream_adapter =
+      std::make_unique<IStreamAdapter>(&in);
   PyTorchStreamWriter writer(output_filename);
-  return _backport_for_mobile(std::move(rai), writer);
+  return _backport_for_mobile_impl(
+      std::move(istream_adapter), writer, to_version);
 }
 
 bool _backport_for_mobile(
     const std::string& input_filename,
-    std::ostream& out) {
-  std::unique_ptr<FileAdapter> rai =
-      std::make_unique<FileAdapter>(input_filename);
+    std::ostream& out,
+    const int64_t to_version) {
+  std::ifstream file_stream;
+  std::unique_ptr<IStreamAdapter> istream_adapter;
+  file_stream.open(input_filename, std::ifstream::in | std::ifstream::binary);
+  if (!file_stream) {
+    AT_ERROR("open file failed, file path: ", input_filename);
+  }
+  istream_adapter = std::make_unique<IStreamAdapter>(&file_stream);
+
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
     out.write(static_cast<const char*>(buf), nbytes);
     return !out ? 0 : nbytes;
   };
   PyTorchStreamWriter writer(writer_func);
-  return _backport_for_mobile_impl(std::move(rai), writer);
+  return _backport_for_mobile_impl(
+      std::move(istream_adapter), writer, to_version);
 }
 
 bool _backport_for_mobile(
     const std::string& input_filename,
-    const std::string& output_filename) {
-  std::unique_ptr<FileAdapter> rai =
-      std::make_unique<FileAdapter>(input_filename);
-  PyTorchStreamWriter writer(output_filename);
-  return _backport_for_mobile_impl(std::move(rai), writer);
-}
+    const std::string& output_filename,
+    const int64_t to_version) {
+  std::ifstream file_stream;
+  std::unique_ptr<IStreamAdapter> istream_adapter;
+  file_stream.open(input_filename, std::ifstream::in | std::ifstream::binary);
+  if (!file_stream) {
+    AT_ERROR("open file failed, file path: ", input_filename);
+  }
+  istream_adapter = std::make_unique<IStreamAdapter>(&file_stream);
 
-bool _backport_for_mobile(
-    std::shared_ptr<ReadAdapterInterface> rai,
-    PyTorchStreamWriter& writer) {
-  return _backport_for_mobile_impl(std::move(rai), writer);
+  PyTorchStreamWriter writer(output_filename);
+  return _backport_for_mobile_impl(
+      std::move(istream_adapter), writer, to_version);
 }
 
 bool _backport_for_mobile_impl(
-    std::shared_ptr<ReadAdapterInterface> rai,
-    PyTorchStreamWriter& writer) {
-  if (check_zip_file(rai)) {
+    std::shared_ptr<IStreamAdapter> istream_adapter,
+    PyTorchStreamWriter& writer,
+    const int64_t to_version) {
+  if (!backportFactory.hasBytecodeBackportFunction(to_version + 1)) {
     return false;
   }
-
-  PyTorchStreamReader reader(std::move(rai));
-  std::vector<c10::IValue> bytecode_values = get_bytecode_values(reader);
-  int64_t bytecode_version = _get_model_bytecode_version(bytecode_values);
-  auto to_bytecode_version = bytecode_version - 1;
-  if (to_bytecode_version == kBytecodeVersionV4) {
-    return backport_v5_to_v4(reader, writer, bytecode_values);
-  }
-  TORCH_WARN(
-      "Backport doesn't support backport to version ", to_bytecode_version);
-  return false;
+  int64_t from_version = _get_model_bytecode_version(istream_adapter);
+  return backportFactory.backport(
+      istream_adapter, writer, from_version, to_version);
 }
 
 } // namespace jit

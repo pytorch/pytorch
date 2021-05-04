@@ -24,13 +24,34 @@ void copy_non_bytecode(
     PyTorchStreamWriter& writer) {
   auto records = reader.getAllRecords();
   for (const auto& record : records) {
-    if (record.find(kArchiveNameBytecode) == std::string::npos) {
+    // Don't copy archive `version` and archive `bytecode`
+    // Archvie `version` will be written when PyTorchStreamWriter is going to
+    // finalize and run writeEndOfFile()
+    if (record != kArchiveNameVersion &&
+        record.find(kArchiveNameBytecode) == std::string::npos) {
       auto data_ptr = reader.getRecord(record);
       auto data = std::get<0>(data_ptr).get();
       auto size = std::get<1>(data_ptr);
       writer.writeRecord(record, data, size);
     }
   }
+}
+
+bool check_bytecode_version(
+    const std::vector<c10::IValue>& bytecode_values,
+    const int64_t expect_bytecode_version) {
+  if (bytecode_values.empty()) {
+    TORCH_WARN("Empty bytecode archive.");
+    return false;
+  } else if (bytecode_values[0] != expect_bytecode_version) {
+    TORCH_WARN(
+        "Expect bytecode version ",
+        expect_bytecode_version,
+        ", but it gets ",
+        bytecode_values[0]);
+    return false;
+  }
+  return true;
 }
 
 } // namespace jit
