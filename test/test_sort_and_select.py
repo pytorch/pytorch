@@ -845,7 +845,7 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(res[1], ref[1].squeeze())
 
     @dtypes(*all_types())
-    @dtypesIfCUDA(*all_types_and(torch.half, torch.bfloat16))
+    @dtypesIfCUDA(*all_types_and(torch.half))
     def test_isin(self, device, dtype):
         def assert_isin_equal(a, b):
             # Compare to the numpy reference implementation.
@@ -855,28 +855,26 @@ class TestSortAndSelect(TestCase):
             y = np.isin(a, b)
             self.assertEqual(x, y)
 
-        # Skip numpy-compatibility tests for bfloat16 since it is unsupported on CPU.
-        if dtype != torch.bfloat16:
-            # multi-dim tensor, multi-dim tensor
-            a = torch.arange(24, device=device, dtype=dtype).reshape([2, 3, 4])
-            b = torch.tensor([[10, 20, 30], [0, 1, 3], [11, 22, 33]], device=device, dtype=dtype)
-            assert_isin_equal(a, b)
+        # multi-dim tensor, multi-dim tensor
+        a = torch.arange(24, device=device, dtype=dtype).reshape([2, 3, 4])
+        b = torch.tensor([[10, 20, 30], [0, 1, 3], [11, 22, 33]], device=device, dtype=dtype)
+        assert_isin_equal(a, b)
 
-            # zero-dim tensor
-            zero_d = torch.tensor(3, device=device, dtype=dtype)
-            assert_isin_equal(zero_d, b)
-            assert_isin_equal(a, zero_d)
-            assert_isin_equal(zero_d, zero_d)
+        # zero-dim tensor
+        zero_d = torch.tensor(3, device=device, dtype=dtype)
+        assert_isin_equal(zero_d, b)
+        assert_isin_equal(a, zero_d)
+        assert_isin_equal(zero_d, zero_d)
 
-            # empty tensor
-            empty = torch.tensor([], device=device, dtype=dtype)
-            assert_isin_equal(empty, b)
-            assert_isin_equal(a, empty)
-            assert_isin_equal(empty, empty)
+        # empty tensor
+        empty = torch.tensor([], device=device, dtype=dtype)
+        assert_isin_equal(empty, b)
+        assert_isin_equal(a, empty)
+        assert_isin_equal(empty, empty)
 
-            # scalar
-            assert_isin_equal(a, 6)
-            assert_isin_equal(5, b)
+        # scalar
+        assert_isin_equal(a, 6)
+        assert_isin_equal(5, b)
 
         def define_expected(lst, invert=False):
             expected = torch.tensor(lst, device=device)
@@ -943,7 +941,7 @@ class TestSortAndSelect(TestCase):
                     self.assertEqual(c, ec)
 
     def test_isin_different_dtypes(self, device):
-        supported_types = all_types() if device == 'cpu' else all_types_and(torch.half, torch.bfloat16)
+        supported_types = all_types() if device == 'cpu' else all_types_and(torch.half)
         for mult in [1, 10]:
             for assume_unique in [False, True]:
                 for dtype1, dtype2 in product(supported_types, supported_types):

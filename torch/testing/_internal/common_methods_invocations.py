@@ -5345,7 +5345,7 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('isin',
            dtypesIfCPU=all_types(),
-           dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.half),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_isin,
            skips=(
