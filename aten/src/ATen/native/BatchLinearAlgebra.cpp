@@ -1153,6 +1153,13 @@ Tensor& cholesky_solve_out(const Tensor& self, const Tensor& A, bool upper, Tens
 DEFINE_DISPATCH(cholesky_stub);
 
 Tensor cholesky(const Tensor &self, bool upper) {
+  TORCH_WARN_ONCE(
+    "torch.cholesky is deprecated in favor of torch.linalg.cholesky and will be "
+    "removed in a future PyTorch release. If used with upper=False (default), it may "
+    "be replaced with torch.linalg.cholesky. If used with upper=True, torch.cholesky(A, True) "
+    "may be replaced with torch.linalg.cholesky(A.transpose(-2, -1)).transpose(-2, -1)"
+  );
+
   if (self.numel() == 0) {
     return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
@@ -2571,6 +2578,19 @@ Tensor linalg_eigvals(const Tensor& input) {
 DEFINE_DISPATCH(eig_stub);
 
 std::tuple<Tensor&, Tensor&> eig_out(const Tensor& self, bool eigenvectors, Tensor& e, Tensor& v) {
+  TORCH_WARN_ONCE(
+    "torch.eig is deprecated in favor of torch.linalg.eig and will be removed in a future ",
+    "PyTorch release.\n",
+    "torch.linalg.eig returns complex tensors of dtype cfloat and cdouble rather than a pair ",
+    "of real tensors. It is strongly recommended to use complex arithmetic rather ",
+    "than working with pairs of real tensors.\n",
+    "If this is not possible, `L, _ = torch.eig(A, False)` (default) may be replaced by\n",
+    "    L_complex = torch.linalg.eigvals(A)\n",
+    "    L = torch.stack((L_complex.real, L_complex.imag), dim=1)\n",
+    "For the case `L, V = torch.eig(A, True)`, torch.linalg.eig already returns",
+    "the eigenvalues V as complex vectors with separate real and imaginary part."
+  );
+
   TORCH_CHECK(self.dim() == 2, "input should be 2 dimensional");
   TORCH_CHECK(self.size(0) == self.size(1), "input should be square");
   TORCH_CHECK(self.isfinite().all().item<bool>(), "input should not contain infs or NaNs");
@@ -2718,12 +2738,36 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
 }
 
 std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
+  TORCH_WARN_ONCE(
+    "torch.svd is deprecated in favor of torch.linalg.svd and will be ",
+    "removed in a future PyTorch release.\n",
+    "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
+    "should be replaced by\n",
+    "U, S, V = torch.linalg.svd(A, full_matrices=not some)\n",
+    "and\n"
+    "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
+    "should be replaced by\n",
+    "S = torch.svdvals(A)"
+  );
+
   TORCH_CHECK(self.dim() >= 2,
               "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   return at::_svd_helper(self, some, compute_uv);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv, Tensor& U, Tensor& S, Tensor& V) {
+  TORCH_WARN_ONCE(
+    "torch.svd is deprecated in favor of torch.linalg.svd and will be ",
+    "removed in a future PyTorch release.\n",
+    "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
+    "should be replaced by\n",
+    "U, S, V = torch.linalg.svd(A, full_matrices=not some)\n",
+    "and\n"
+    "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
+    "should be replaced by\n",
+    "S = torch.svdvals(A)"
+  );
+
   checkSameDevice("svd", U, self, "U");
   checkSameDevice("svd", S, self, "S");
   checkSameDevice("svd", V, self, "V");

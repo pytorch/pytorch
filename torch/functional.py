@@ -1478,7 +1478,8 @@ def chain_matmul(*matrices, out=None):
     If :math:`N` is 1, then this is a no-op - the original matrix is returned as is.
 
     .. warning::
-        :func:`torch.chain_matmul` is deprecated, use :func:`torch.linalg.multi_dot` instead.
+        :func:`torch.chain_matmul` is deprecated and will be removed in a future PyTorch release.
+        Use :func:`torch.linalg.multi_dot` instead.
 
     Args:
         matrices (Tensors...): a sequence of 2 or more 2-D tensors whose product is to be determined.

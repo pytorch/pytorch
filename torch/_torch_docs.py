@@ -1865,9 +1865,16 @@ of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, 
 tensor will be composed of lower-triangular Cholesky factors of each of the individual
 matrices.
 
-.. note:: :func:`torch.linalg.cholesky` should be used over ``torch.cholesky`` when possible.
-          Note however that :func:`torch.linalg.cholesky` does not yet support the :attr:`upper`
-          parameter and instead always returns the lower triangular matrix.
+.. warning::
+
+    :func:`torch.cholesky` is deprecated in favor of :func:`torch.linalg.cholesky`
+    and will be removed in a future PyTorch release. If used with :attr:`upper`\ `= False`,
+    e(default), the two functions are equivalent. If :attr:`upper`\ `= True`, then
+    `torch.cholesky(A, True)` should be replaced with
+
+    .. code:: python
+
+        torch.linalg.cholesky(A.transpose(-2, -1)).transpose(-2, -1)
 
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
@@ -2993,6 +3000,24 @@ add_docstr(torch.eig,
 eig(input, eigenvectors=False, *, out=None) -> (Tensor, Tensor)
 
 Computes the eigenvalues and eigenvectors of a real square matrix.
+
+.. warning::
+
+    :func:`torch.eig` is deprecated in favor of :func:`torch.linalg.eig`
+    and will be removed in a future PyTorch release.
+    :func:`torch.linalg.eig` returns complex tensors of dtype `cfloat` and `cdouble`
+    rather than a pair of real tensors. It is strongly recommended to move to complex
+    arithmetic rather than working with pairs of real tensors. If this is not possible,
+    `L, _ = torch.eig(A, False)` (default) may be replaced by
+
+    .. code:: python
+
+        L_complex = torch.linalg.eigvals(A)
+        L = torch.stack((L_complex.real, L_complex.imag), dim=1)
+
+    For the case `L, V = torch.eig(A, True)`, :func:`torch.linalg.eig` already returns
+    the eigenvalues `V` as complex vectors with separate real and imaginary part.
+
 
 .. note::
     Since eigenvalues and eigenvectors might be complex, backward pass is supported only
@@ -5086,8 +5111,10 @@ specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is 
 singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
 is the epsilon value for the datatype of :attr:`input`.
 
-.. note:: :func:`torch.matrix_rank` is deprecated. Please use :func:`torch.linalg.matrix_rank` instead.
-          The parameter :attr:`symmetric` was renamed in :func:`torch.linalg.matrix_rank` to ``hermitian``.
+.. warning::
+    :func:`torch.matrix_rank` is deprecated in favor of :func:`torch.linalg.matrix_rank`
+    and will be removed in a future PyTorch release. The parameter :attr:`symmetric` was
+    renamed in :func:`torch.linalg.matrix_rank` to :attr:`hermitian`.
 
 Args:
     input (Tensor): the input 2-D tensor
@@ -8512,9 +8539,21 @@ Supports :attr:`input` of float, double, cfloat and cdouble data types.
 The dtypes of `U` and `V` are the same as :attr:`input`'s. `S` will
 always be real-valued, even if :attr:`input` is complex.
 
-.. warning:: :func:`torch.svd` is deprecated. Please use
-             :func:`torch.linalg.svd` instead, which is similar to NumPy's
-             `numpy.linalg.svd`.
+.. warning::
+
+    :func:`torch.svd` is deprecated in favor of :func:`torch.linalg.svd`
+    and will be removed in a future PyTorch release.
+    `U, S, V = torch.svd(A, some=some, compute_uv=True)` (default) may be replaced by
+
+    .. code:: python
+
+        U, S, V = torch.linalg.svd(A, full_matrices=not some)
+
+    `_, S, _ = torch.svd(A, some=some, compute_uv=False)` may be replaced by
+
+    .. code:: python
+
+        S = torch.svdvals(A)
 
 .. note:: Differences with :func:`torch.linalg.svd`:
 
