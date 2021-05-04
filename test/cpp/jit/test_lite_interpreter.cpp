@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/backport.h>
+#include <torch/csrc/jit/mobile/backport_factory.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -722,7 +723,7 @@ TEST(LiteInterpreterTest, BackPortToVersionByteCodeModelV5ToV4) {
   test_model_file_v5.append("script_module_v5.ptl");
 
   // Run basic check for backport from v5 to v4
-  backportBasicCheck(test_model_file_v5, 5);
+  backportBasicCheck(test_model_file_v5, kBytecodeVersionV5);
 }
 
 TEST(LiteInterpreterTest, LoadAndRunByteCodeModel) {
