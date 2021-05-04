@@ -19,6 +19,10 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
   TORCH_CHECK(false, "mkldnn_relu_backward: ATen not compiled with MKLDNN support");
 }
 
+Tensor mkldnn_gelu(const Tensor& input) {
+  TORCH_CHECK(false, "mkldnn_gelu: ATen not compiled with MKLDNN support");
+}
+
 }}
 
 #else // AT_MKLDNN_EBABLED
