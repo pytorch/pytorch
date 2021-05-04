@@ -25,7 +25,7 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, t
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
-    slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
+    slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1913,7 +1913,7 @@ torch.cuda.synchronize()
                                                              inv_scale)
 
         if TEST_MULTIGPU:
-            with self.assertRaisesRegex(RuntimeError, r"scaled_grads must be on the same device."):
+            with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device"):
                 torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(device="cuda:1")],
                                                                  found_inf,
                                                                  inv_scale)
@@ -3460,6 +3460,33 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    # If this test is the first in the process to try cudnn rnns with dropout, it'll initialize
+    # DropoutState's long-lived internal buffer. Calling code perceives this (correct) behavior
+    # as a memory leak unless we skip the leak check.
+    @skipCUDAMemoryLeakCheckIf(True)
+    def test_graph_cudnn_dropout(self):
+        # Tests the interaction of cuda graph capture with DropoutState's syncs in ATen/native/cudnn/RNN.cpp.
+        # In particular, if user runs a sequence of captured and noncaptured cudnn rnns, DropoutState should
+        # avoid syncing noncapturing streams with captured events or vice versa.
+        model = torch.nn.LSTM(512, 512, 2, dropout=0.5).cuda()
+        x = torch.ones(100, 192, 512, device="cuda")
+
+        y = model(x)
+
+        g = torch.cuda._Graph()
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            g.capture_begin()
+            y = model(x)
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        y = model(x)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_grad_scaling(self):
         scaler = torch.cuda.amp.GradScaler(init_scale=4.)
         g = torch.cuda._Graph()
@@ -3879,16 +3906,16 @@ class TestCudaComm(TestCase):
     def test_matmul_device_mismatch(self):
         cpu = torch.rand((10, 10))
         cuda = cpu.cuda()
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
             cpu @ cuda
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
             cuda @ cpu
 
         for s, m1, m2 in product((cpu, cuda), repeat=3):
             if s.device == m1.device == m2.device:
                 torch.addmm(s, m1, m2)
             else:
-                with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     torch.addmm(s, m1, m2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
