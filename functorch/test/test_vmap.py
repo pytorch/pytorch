@@ -522,7 +522,6 @@ class TestVmapAPI(TestCase):
         vmap(foo, in_dims=(0,))(torch.randn(2, 3))
         vmap(foo, in_dims=(1,))(torch.randn(2, 3))
 
-    @unittest.expectedFailure
     def test_fallback_does_not_warn_by_default(self):
         # NB: One day we will implement a batching rule for torch.atan2.
         # If/when we do, this test should be replaced to test the fallback
