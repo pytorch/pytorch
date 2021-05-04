@@ -46,7 +46,7 @@ declare -a install_packages=(
     "10.1, ${cuda10_packages_template}"
     "11.1, ${cuda11_packages_template}"
     "11.2, ${cuda11_packages_template}"
-    "11.3, ${cuda11_packages_template } thrust_11.3"
+    "11.3, ${cuda11_packages_template} thrust_11.3"
 )
 for elem in "${install_packages[@]}"; do
     IFS="," read -a pair <<< "$elem" # use comma as delimiter because packages includes whitespace
