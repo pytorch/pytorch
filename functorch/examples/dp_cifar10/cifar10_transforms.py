@@ -24,9 +24,9 @@ from opacus.utils.module_modification import convert_batchnorm_modules
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 
-from make_functional import make_functional, load_weights
 from functools import partial
 from functorch import vmap, grad_and_value
+from functorch import make_functional, load_state
 
 def save_checkpoint(state, is_best, filename="checkpoint.tar"):
     torch.save(state, filename)
@@ -116,9 +116,9 @@ def train(args, model, train_loader, optimizer, epoch, device):
             vmap(grads_loss_output, (None, 0, 0))(weights, images, target)
         loss = sample_loss.mean()
 
-        # `load_weights` is the inverse operation of make_functional. We put
+        # `state` is the inverse operation of make_functional. We put
         # things back into a model so that they're easier to manipulate
-        load_weights(model, descriptors, weights)
+        load_state(model, weights, descriptors)
         for grad_sample, weight in zip(sample_grads, model.parameters()):
             weight.grad_sample = grad_sample.detach()
 
