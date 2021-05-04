@@ -179,6 +179,7 @@ class _PeriodicTimer:
         kwargs: Dict[str, Any]
         stop_event: Event
 
+    _name: Optional[str]
     _thread: Optional[Thread]
     _finalizer: Optional[weakref.finalize]
 
@@ -192,6 +193,8 @@ class _PeriodicTimer:
         *args: Any,
         **kwargs: Any,
     ) -> None:
+        self._name = None
+
         self._ctx = self._Context()
         self._ctx.interval = interval.total_seconds()
         self._ctx.function = function  # type: ignore[assignment]
@@ -202,13 +205,29 @@ class _PeriodicTimer:
         self._thread = None
         self._finalizer = None
 
+    @property
+    def name(self) -> Optional[str]:
+        """Gets the name of the timer."""
+        return self._name
+
+    def set_name(self, name: str) -> None:
+        """Sets the name of the timer.
+
+        The specified name will be assigned to the background thread and serves
+        for debugging and troubleshooting purposes.
+        """
+        if self._thread:
+            raise RuntimeError("The timer has already started.")
+
+        self._name = name
+
     def start(self) -> None:
         """Start the timer."""
         if self._thread:
             raise RuntimeError("The timer has already started.")
 
         self._thread = Thread(
-            target=self._run, name="PeriodicTimer", args=(self._ctx,), daemon=True
+            target=self._run, name=self._name or "PeriodicTimer", args=(self._ctx,), daemon=True
         )
 
         # We avoid using a regular finalizer (a.k.a. __del__) for stopping the
